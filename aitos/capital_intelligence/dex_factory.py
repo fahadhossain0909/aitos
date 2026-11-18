@@ -24,6 +24,9 @@ V3_POOL_CREATED_TOPIC = (
 V4_POOL_INITIALIZED_TOPIC = (
     "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
 )
+V4_MODIFY_LIQUIDITY_TOPIC = (
+    "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
+)
 
 
 class EvmDexFactoryDiscoveryAdapter:
@@ -235,6 +238,7 @@ class EvmDexFactoryDiscoveryAdapter:
                         V2_PAIR_CREATED_TOPIC,
                         V3_POOL_CREATED_TOPIC,
                         V4_POOL_INITIALIZED_TOPIC,
+                        V4_MODIFY_LIQUIDITY_TOPIC,
                     ]],
                 }
             ],
@@ -254,22 +258,60 @@ class EvmDexFactoryDiscoveryAdapter:
             is_v2 = protocol.endswith("_v2")
             is_v3 = protocol.endswith("_v3")
             is_v4 = protocol == "uniswap_v4"
+            is_v4_initialize = topic == V4_POOL_INITIALIZED_TOPIC
+            is_v4_liquidity = topic == V4_MODIFY_LIQUIDITY_TOPIC
             if (
                 (topic == V2_PAIR_CREATED_TOPIC and not is_v2)
                 or (topic == V3_POOL_CREATED_TOPIC and not is_v3)
-                or (topic == V4_POOL_INITIALIZED_TOPIC and not is_v4)
+                or ((is_v4_initialize or is_v4_liquidity) and not is_v4)
                 or topic
                 not in {
                     V2_PAIR_CREATED_TOPIC,
                     V3_POOL_CREATED_TOPIC,
                     V4_POOL_INITIALIZED_TOPIC,
+                    V4_MODIFY_LIQUIDITY_TOPIC,
                 }
             ):
                 continue
 
             data = str(log.get("data", "0x"))[2:]
             words = [data[index : index + 64] for index in range(0, len(data), 64)]
-            if is_v4:
+            if is_v4_liquidity:
+                if len(topics) < 3 or len(words) < 4:
+                    continue
+                pool_id = str(topics[1]).lower()
+                if (
+                    len(pool_id) != 66
+                    or not pool_id.startswith("0x")
+                    or any(char not in "0123456789abcdef" for char in pool_id[2:])
+                ):
+                    continue
+                sender = self._address("0x" + str(topics[2])[-40:])
+                tick_lower_raw = int(words[0], 16)
+                tick_upper_raw = int(words[1], 16)
+                tick_lower = (
+                    tick_lower_raw - (1 << 256)
+                    if tick_lower_raw >= (1 << 255)
+                    else tick_lower_raw
+                )
+                tick_upper = (
+                    tick_upper_raw - (1 << 256)
+                    if tick_upper_raw >= (1 << 255)
+                    else tick_upper_raw
+                )
+                liquidity_delta_raw = int(words[2], 16)
+                liquidity_delta = (
+                    liquidity_delta_raw - (1 << 256)
+                    if liquidity_delta_raw >= (1 << 255)
+                    else liquidity_delta_raw
+                )
+                pool = pool_id
+                token0 = None
+                token1 = None
+                fee = None
+                tick_spacing = None
+                hooks = None
+            elif is_v4_initialize:
                 if len(topics) < 4 or len(words) < 5:
                     continue
                 pool_id = str(topics[1]).lower()
@@ -352,7 +394,21 @@ class EvmDexFactoryDiscoveryAdapter:
                     if tick_spacing_raw >= (1 << 255)
                     else tick_spacing_raw
                 )
-            if is_v4:
+            if is_v4_liquidity:
+                metadata.update(
+                    {
+                        "pool_id": pool_id,
+                        "pool_manager": factory,
+                        "sender": sender,
+                        "liquidity_delta": str(liquidity_delta),
+                        "tick_lower": tick_lower,
+                        "tick_upper": tick_upper,
+                        "salt": "0x" + words[3],
+                        "actor_is_pool_caller_not_verified_beneficial_owner": True,
+                        "liquidity_event_not_token_flow": True,
+                    }
+                )
+            if is_v4_initialize:
                 metadata.update(
                     {
                         "pool_id": pool_id,
@@ -372,16 +428,27 @@ class EvmDexFactoryDiscoveryAdapter:
                 CapitalEvent(
                     event_id,
                     f"evm:{self.chain_id}",
-                    "dex_pool_discovery",
+                    (
+                        "dex_liquidity_event"
+                        if is_v4_liquidity
+                        else "dex_pool_discovery"
+                    ),
                     "crypto_spot",
                     protocol,
                     pool,
-                    "dex_pool_initialized" if is_v4 else "dex_pool_created",
+                    (
+                        "dex_liquidity_modified"
+                        if is_v4_liquidity
+                        else "dex_pool_initialized"
+                        if is_v4_initialize
+                        else "dex_pool_created"
+                    ),
                     timestamp,
                     now,
-                    0,
-                    "pool_registry",
+                    abs(liquidity_delta) if is_v4_liquidity else 0,
+                    "liquidity_units" if is_v4_liquidity else "pool_registry",
                     None,
+                    actor_id=sender if is_v4_liquidity else None,
                     transaction_id=tx_hash,
                     block_number=block,
                     block_hash=canonical_hash,
