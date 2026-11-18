@@ -710,26 +710,22 @@ class SecEdgarArchiveBackfillSource:
                 dates = archive.get("filingDate") or []
                 primary_docs = archive.get("primaryDocument") or []
                 report_dates = archive.get("reportDate") or []
-                row_count = min(
+                lengths = {
                     len(accessions),
                     len(forms),
                     len(dates),
                     len(primary_docs),
                     len(report_dates),
-                )
-                if any(
-                    len(values) != row_count
-                    for values in (
-                        accessions,
-                        forms,
-                        dates,
-                        primary_docs,
-                        report_dates,
-                    )
-                ):
+                }
+                if len(lengths) != 1:
                     raise RuntimeError(
                         f"SEC archive arrays have inconsistent lengths: {file_name}"
                     )
+                archive_rows = sorted(
+                    zip(accessions, forms, dates, primary_docs, report_dates),
+                    key=lambda values: (str(values[2]), str(values[0])),
+                )
+                row_count = len(archive_rows)
                 if row_offset > row_count:
                     raise RuntimeError(
                         f"SEC archive cursor offset exceeds file length: {file_name}"
@@ -741,12 +737,15 @@ class SecEdgarArchiveBackfillSource:
                         or processed_filings >= self.max_filings_per_poll
                     ):
                         break
+                    accession_value, form_value, date_value, primary_value, report_value = (
+                        archive_rows[row_offset]
+                    )
                     row = {
-                        "accession": str(accessions[row_offset]),
-                        "form": str(forms[row_offset]),
-                        "filing_date": str(dates[row_offset]),
-                        "primary": str(primary_docs[row_offset]),
-                        "report_date": str(report_dates[row_offset]),
+                        "accession": str(accession_value),
+                        "form": str(form_value),
+                        "filing_date": str(date_value),
+                        "primary": str(primary_value),
+                        "report_date": str(report_value),
                     }
                     if row["form"] in self.adapter.forms:
                         filing_date = self.adapter._day(row["filing_date"])
