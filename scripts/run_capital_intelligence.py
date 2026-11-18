@@ -77,6 +77,73 @@ class _WorldIntelligenceEventSink:
         )
 
 
+def _entity_dashboard_html() -> bytes:
+    """Serve a dependency-free analyst UI; the bearer token stays in memory."""
+    page = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AITOS Capital Flow Explorer</title>
+<style>
+:root{color-scheme:dark;font:14px system-ui,sans-serif;background:#10151d;color:#e7edf5}
+body{max-width:1200px;margin:2rem auto;padding:0 1rem}
+header{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+h1{font-size:1.5rem}p,small{color:#aab7c7}
+input,button{background:#1b2634;color:#e7edf5;border:1px solid #40536b;border-radius:6px;padding:.65rem}
+button{cursor:pointer}button:hover{background:#29394c}
+input{min-width:18rem;max-width:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.8fr);gap:1rem}
+section{background:#17212d;border:1px solid #2c3b4d;border-radius:10px;padding:1rem;min-width:0}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:.6rem .4rem;border-bottom:1px solid #2c3b4d;overflow-wrap:anywhere}
+th{color:#9fb3ca}td button{padding:.25rem .4rem}
+#status{min-height:1.5rem;color:#f0c879}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:65vh;overflow:auto}
+@media(max-width:800px){.layout{grid-template-columns:1fr}body{margin:1rem auto}}
+</style>
+</head>
+<body>
+<header><div><h1>Capital Flow &amp; Entity Explorer</h1>
+<p>Observed address activity only. Identity and beneficial ownership are unverified.</p></div>
+<div><input id="token" type="password" autocomplete="off" placeholder="Operator bearer token">
+<button id="load">Load entities</button></div></header>
+<p id="status" role="status">Enter the configured read-only API token to inspect observed entities.</p>
+<div class="layout"><section><h2>Ranked observed addresses</h2>
+<table><thead><tr><th>Chain</th><th>Address</th><th>Gross USD</th><th>Inflow</th><th>Outflow</th><th>Events</th></tr></thead>
+<tbody id="entities"><tr><td colspan="6">No data loaded</td></tr></tbody></table></section>
+<section><h2>Entity evidence</h2><p id="identity">Select an address to inspect its bounded history.</p>
+<pre id="detail">No entity selected.</pre></section></div>
+<script>
+const token=document.getElementById('token'),status=document.getElementById('status');
+const tbody=document.getElementById('entities'),detail=document.getElementById('detail');
+function cell(row,value){const td=document.createElement('td');td.textContent=String(value??'—');row.appendChild(td);return td}
+async function api(path){const response=await fetch(path,{headers:{Authorization:'Bearer '+token.value},cache:'no-store'});
+if(!response.ok)throw new Error(response.status===401?'Unauthorized token':('API error '+response.status));return response.json()}
+async function inspect(entity){try{status.textContent='Loading entity evidence…';
+const data=await api('/v1/entities/'+encodeURIComponent(entity.chain)+'/'+encodeURIComponent(entity.address));
+document.getElementById('identity').textContent=data.identity_status+' · beneficial owner verified: '+data.beneficial_owner_verified;
+detail.textContent=JSON.stringify({entity_id:data.entity_id,events:data.events,evidence:data.evidence,labels:data.labels},null,2);
+status.textContent='Entity history loaded. All labels remain evidence, not proof of ownership.'}
+catch(error){status.textContent=error.message}}
+async function load(){if(!token.value){status.textContent='Enter the API token first.';return}
+try{status.textContent='Loading observed entities…';const data=await api('/v1/entities?limit=100&offset=0');tbody.replaceChildren();
+for(const entity of data.entities){const tr=document.createElement('tr');cell(tr,entity.chain);
+const address=cell(tr,'');const link=document.createElement('button');link.type='button';link.textContent=entity.address;
+link.addEventListener('click',()=>inspect(entity));address.appendChild(link);
+cell(tr,Number(entity.gross_flow_usd).toLocaleString(undefined,{maximumFractionDigits:2}));
+cell(tr,Number(entity.inflow_usd).toLocaleString(undefined,{maximumFractionDigits:2}));
+cell(tr,Number(entity.outflow_usd).toLocaleString(undefined,{maximumFractionDigits:2}));cell(tr,entity.event_count);tbody.appendChild(tr)}
+if(!data.entities.length){const tr=document.createElement('tr');cell(tr,'No observed entities');tbody.appendChild(tr)}
+status.textContent='Loaded '+data.entities.length+' observed addresses. Rankings are not trading signals.'}
+catch(error){status.textContent=error.message}}
+document.getElementById('load').addEventListener('click',load);
+token.addEventListener('keydown',event=>{if(event.key==='Enter')load()});
+</script></body></html>"""
+    return page.encode("utf-8")
+
+
 def _render_metrics(counters: dict[str, Any]) -> bytes:
     lines = [
         "# HELP aitos_cfei_events_persisted Total normalized events appended.",
@@ -156,6 +223,9 @@ async def _metrics_server(
                 body = b'{"error":"method_not_allowed"}'
             elif parsed.path == "/metrics":
                 body = _render_metrics(counters)
+            elif parsed.path == "/entities":
+                content_type = "text/html; charset=utf-8"
+                body = _entity_dashboard_html()
             elif parsed.path == "/v1/entities" or parsed.path.startswith(
                 "/v1/entities/"
             ):
