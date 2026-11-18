@@ -181,14 +181,14 @@ async def test_recorder_can_be_restarted_without_duplicate_subscriptions():
 
     await recorder.initialize({})
     first_pair = list(bus.subscriptions)
-    assert len(first_pair) == 3
+    assert len(first_pair) == 4
 
     await recorder.shutdown()
     assert all(subscription.cancelled for subscription in first_pair)
     assert (await recorder.health_check()).status.value == "unhealthy"
 
     await recorder.initialize({})
-    assert len(bus.subscriptions) == 6
+    assert len(bus.subscriptions) == 8
     assert all(subscription.cancelled for subscription in first_pair)
     assert (await recorder.health_check()).status.value == "healthy"
 
