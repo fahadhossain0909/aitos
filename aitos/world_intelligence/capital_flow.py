@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from math import log10
+from math import isfinite, log10
 from typing import Any
 from urllib.parse import quote
 
@@ -37,8 +37,8 @@ class CapitalFlowIntelligenceAdapter:
             raise ValueError("initial lookback must be between 1 and 720 hours")
         if not 1 <= max_events <= 5000:
             raise ValueError("max_events must be between 1 and 5000")
-        if severity_reference_usd <= 0:
-            raise ValueError("severity_reference_usd must be positive")
+        if not isfinite(severity_reference_usd) or severity_reference_usd <= 0:
+            raise ValueError("severity_reference_usd must be positive and finite")
         self.clickhouse = clickhouse
         self.database = database
         self.source_id = source_id
