@@ -83,7 +83,10 @@ def test_governance_allows_canary_only_with_mature_good_oos_metrics():
 def test_replay_reports_observed_costs_and_partial_fills():
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
     spec = parse_decision_spec(
-        "DECISION test:\\nSTATE:\\n - x\\nASK side: CHOICE [LONG, SHORT, NO_TRADE]"
+        """DECISION test:
+STATE:
+ - x
+ASK side: CHOICE [LONG, SHORT, NO_TRADE]"""
     )
     observations = [
         ReplayObservation(
