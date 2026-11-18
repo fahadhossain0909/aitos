@@ -1,6 +1,13 @@
 """AITOS World Intelligence: advisory external-event context."""
 
 from aitos.world_intelligence.adapters import ingest_page, ingest_page_durably
+from aitos.world_intelligence.calibration import (
+    CalibrationBin,
+    CalibrationObservation,
+    CalibrationReport,
+    calibration_cohorts,
+    calibration_report,
+)
 from aitos.world_intelligence.capital_flow import CapitalFlowIntelligenceAdapter
 from aitos.world_intelligence.context import (
     AssetSnapshotProvider,
@@ -88,6 +95,9 @@ __all__ = [
     "AssetImpact",
     "AssetIntelligenceSnapshot",
     "AssetSnapshotProvider",
+    "CalibrationBin",
+    "CalibrationObservation",
+    "CalibrationReport",
     "CapitalFlowIntelligenceAdapter",
     "ClickHouseAssetSnapshotProvider",
     "ClickHouseIntelligenceStore",
@@ -127,6 +137,8 @@ __all__ = [
     "analyze_financial_headline",
     "assess_source_batch",
     "build_asset_intelligence_snapshot",
+    "calibration_cohorts",
+    "calibration_report",
     "chronological_walk_forward_splits",
     "cluster_narratives",
     "compare_ablation",
