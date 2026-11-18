@@ -36,13 +36,26 @@ class ReplayReport:
     results: tuple[DecisionResult, ...]
 
 
-def replay_chronologically(runtime: ADLRuntime, spec: DecisionSpec, observations: Iterable[ReplayObservation], calibrator: ProbabilityCalibrator) -> ReplayReport:
+def replay_chronologically(
+    runtime: ADLRuntime,
+    spec: DecisionSpec,
+    observations: Iterable[ReplayObservation],
+    calibrator: ProbabilityCalibrator,
+) -> ReplayReport:
     """Evaluate in event-time order; only mature labels before each later decision."""
-    ordered = sorted(observations, key=lambda item: (item.snapshot.timestamp, item.matured_at, item.snapshot.symbol))
+    ordered = sorted(
+        observations,
+        key=lambda item: (
+            item.snapshot.timestamp,
+            item.matured_at,
+            item.snapshot.symbol,
+        ),
+    )
     results: list[DecisionResult] = []
+    pending: list[tuple[ReplayObservation, dict[str, float]]] = []
     correct = 0
     abstentions = 0
-    pending: list[tuple[ReplayObservation, dict[str, float]]] = []
+
     for item in ordered:
         decision_time = item.snapshot.timestamp
         matured = [row for row in pending if row[0].matured_at <= decision_time]
@@ -50,19 +63,28 @@ def replay_chronologically(runtime: ADLRuntime, spec: DecisionSpec, observations
         for matured_item, raw_probabilities in matured:
             for action in ("LONG", "SHORT", "NO_TRADE"):
                 probability = raw_probabilities.get(action)
-    if probability is not None:
+                if probability is not None:
                     calibrator.update(
                         action,
                         probability,
                         action == matured_item.realized_action,
                     )
+
         result = runtime.evaluate(item.snapshot, spec, now=decision_time)
         results.append(result)
         abstentions += int(result.action == DecisionAction.ABSTAIN)
         correct += int(result.proposed_action.value == item.realized_action)
         pending.append((item, dict(result.raw_probabilities)))
+
     count = len(ordered)
-    return ReplayReport(count, count, abstentions, correct / count if count else None, calibrator.metrics(), tuple(results))
+    return ReplayReport(
+        observations=count,
+        evaluated=count,
+        abstentions=abstentions,
+        proposed_action_accuracy=correct / count if count else None,
+        calibration=calibrator.metrics(),
+        results=tuple(results),
+    )
 
 
 @dataclass(frozen=True)
