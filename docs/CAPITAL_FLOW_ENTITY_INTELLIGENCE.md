@@ -203,13 +203,18 @@ The `replay.py` module provides a deterministic research harness:
   direction from transfers or pool callers;
 - reports sample count, directional hit rate, mean return and median return;
 - offers chronological train/test splitting only; random row splitting is
-  intentionally not provided.
+  intentionally not provided. The splitter purges training rows whose forward
+  label horizon plus quote-age allowance and optional embargo could overlap the
+  test period.
+- reports gross and cost-adjusted returns when per-side fees, round-trip spread,
+  per-side slippage and pro-rata funding assumptions are supplied. Cost inputs
+  are explicit and bounded; they are not inferred from the venue.
 
 This is a label-generation and descriptive evaluation primitive, not a
-strategy, probability calibration, cost model or proof of predictive lift.
-Production research must add venue-specific fees, funding, spread, slippage,
-latency, partial fills, survivorship controls, regime/time-split validation,
-ablation and confidence intervals before any model-governance review.
+strategy, probability calibration or proof of predictive lift. The cost model
+is a conservative research approximation: it does not model signed realized
+funding, market impact curves, queue position, partial fills or latency. Those
+require venue-specific replay and execution telemetry before model governance.
 
 
 ## 13. DEX factory discovery and reorg recovery
@@ -277,3 +282,15 @@ worker = IntelligenceIngestionWorker(
 The first run uses a bounded lookback. Operators requiring older CFEI history
 must perform an explicit backfill and start the bridge with a reviewed cursor;
 do not silently increase the initial lookback on a production worker.
+
+
+## 15. Replay validation controls
+
+`chronological_split` purges training rows whose longest forward label plus
+the configured maximum quote-age allowance and optional embargo reaches the
+test window. The default quote-age allowance is 30 seconds and must be aligned
+with the replay builder's `max_price_age_seconds` when a different value is
+used. The `summarize_replay` helper retains gross metrics and separately
+reports net-of-cost mean return and hit rate using explicit per-side fees,
+round-trip spread, per-side slippage and pro-rata funding cost assumptions.
+These are transparent assumptions, not a substitute for venue-level fill replay.
