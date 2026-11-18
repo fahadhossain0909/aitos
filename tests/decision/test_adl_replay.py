@@ -139,8 +139,6 @@ def test_replay_reports_observed_costs_and_partial_fills():
 
 
 def test_replay_execution_rejects_invalid_costs_and_fill_ratios():
-    import pytest
-
     with pytest.raises(ValueError, match="costs"):
         ReplayExecution(gross_pnl=1.0, fees=-0.1)
     with pytest.raises(ValueError, match="fill ratio"):
