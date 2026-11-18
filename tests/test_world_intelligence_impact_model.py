@@ -12,7 +12,9 @@ from aitos.world_intelligence.impact_model import (
 BASE = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
-def row(index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"):
+def row(
+    index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"
+):
     signal = (index % 10 - 4.5) / 5.0
     positive = signal > 0 if positive is None else positive
     event_time = BASE + timedelta(hours=index)
