@@ -240,10 +240,13 @@ class ClickHouseCapitalStore:
         if not canonical or start < 0 or end < start:
             raise ValueError("invalid EVM reorg reconciliation range")
         query = (
-            f"SELECT payload_json, block_number, block_hash FROM {self.table} FINAL "  # nosec B608 - validated database identifier; all values remain bound parameters.
+            f"SELECT argMax(payload_json, ingested_at), "  # nosec B608 - validated database identifier; all values remain bound parameters.
+            "argMax(block_number, ingested_at), argMax(block_hash, ingested_at) "
+            f"FROM {self.table} "
             "WHERE source_id = %(source_id)s "
             "AND block_number >= %(from_block)s "
-            "AND block_number <= %(to_block)s"
+            "AND block_number <= %(to_block)s "
+            "GROUP BY deduplication_key"
         )
         result = await self.client.query(
             query,
