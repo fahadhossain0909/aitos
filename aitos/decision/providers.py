@@ -136,8 +136,7 @@ class NativeEvidenceProvider:
                     if supplied is not None
                     else (
                         question.minimum
-                        + (float(score) / 100.0)
-                        * (question.maximum - question.minimum)
+                        + (float(score) / 100.0) * (question.maximum - question.minimum)
                     )
                 )
                 scores[question.name] = min(
