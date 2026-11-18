@@ -40,7 +40,8 @@ def test_replay_is_chronological_and_updates_calibration_after_decision():
     report = replay_chronologically(runtime, spec, rows, calibrator)
     assert report.observations == 3
     assert [result.snapshot_id for result in report.results] == ["0", "1", "2"]
-    assert calibrator.metrics("LONG").samples == 1
+    assert report.results[1].calibrated is True
+    assert calibrator.metrics("LONG").samples == 3
 
 
 def test_governance_blocks_insufficient_or_poor_challenger():
