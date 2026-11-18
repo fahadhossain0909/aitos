@@ -60,7 +60,9 @@ def _json_env(name: str, default: Any) -> Any:
 def _configured_entity_labels(raw: Any) -> list[EntityLabel]:
     """Parse explicit operator classifications without inferring wallet identity."""
     if not isinstance(raw, list) or len(raw) > 5000:
-        raise ValueError("AITOS_CFEI_ENTITY_LABELS must be a list of at most 5000 items")
+        raise ValueError(
+            "AITOS_CFEI_ENTITY_LABELS must be a list of at most 5000 items"
+        )
     allowed_categories = {
         "exchange",
         "custodian",
@@ -106,7 +108,9 @@ def _configured_entity_labels(raw: Any) -> list[EntityLabel]:
                 else None
             )
         except (KeyError, TypeError, ValueError):
-            raise ValueError("CFEI entity labels require ISO-8601 validity dates") from None
+            raise ValueError(
+                "CFEI entity labels require ISO-8601 validity dates"
+            ) from None
         if valid_from.tzinfo is None or (
             valid_until is not None and valid_until.tzinfo is None
         ):
@@ -514,7 +518,9 @@ async def main() -> None:
             max_block_range=int(config.get("max_block_range", 250)),
             max_reorg_depth=int(config.get("max_reorg_depth", 64)),
             start_block=(
-                int(config["start_block"]) if config.get("start_block") is not None else None
+                int(config["start_block"])
+                if config.get("start_block") is not None
+                else None
             ),
         )
         workers.append(
@@ -709,9 +715,7 @@ async def main() -> None:
         wi_adapter = CapitalFlowIntelligenceAdapter(
             clickhouse=clickhouse,
             database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
-            source_id=os.getenv(
-                "AITOS_CFEI_WI_BRIDGE_SOURCE_ID", "cfei-capital-flow"
-            ),
+            source_id=os.getenv("AITOS_CFEI_WI_BRIDGE_SOURCE_ID", "cfei-capital-flow"),
             initial_lookback_hours=int(
                 os.getenv("AITOS_CFEI_WI_BRIDGE_INITIAL_LOOKBACK_HOURS", "24")
             ),
@@ -726,9 +730,7 @@ async def main() -> None:
             _WorldIntelligenceEventSink(wi_event_bus),
             poll_interval_seconds=max(
                 1.0,
-                float(
-                    os.getenv("AITOS_CFEI_WI_BRIDGE_POLL_SECONDS", "30")
-                ),
+                float(os.getenv("AITOS_CFEI_WI_BRIDGE_POLL_SECONDS", "30")),
             ),
             lease_manager=wi_lease_manager,
         )
