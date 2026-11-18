@@ -32,33 +32,31 @@ def assess_capital_behavior(
 ) -> BehaviorAssessment:
     if not entity_id.strip():
         raise ValueError("entity_id is required")
+    chain = None
+    address = entity_id
     if ":" in entity_id:
-        venue, address = entity_id.split(":", 1)
-
-        def matches_entity(event):
-            return event.venue == venue and event.actor_id == address
-
-    else:
-        # Backward-compatible raw-address lookup; new callers should use
-        # chain-scoped IDs returned by the entity explorer/ranking API.
-        def matches_entity(event):
-            return event.actor_id == entity_id
-    selected = [
-        event
-        for event in events
-        if matches_entity(event) and event.usd_value is not None
-    ]
+        chain, address = entity_id.split(":", 1)
+    selected: list[tuple[CapitalEvent, int]] = []
+    for event in events:
+        if event.usd_value is None:
+            continue
+        if chain is not None and event.venue != chain:
+            continue
+        base_sign = event.metadata.get("flow_sign", 0)
+        if base_sign not in (-1, 0, 1):
+            raise ValueError("flow_sign must be -1, 0, or 1")
+        if event.actor_id == address:
+            selected.append((event, base_sign))
+        elif chain is not None and event.counterparty_id == address:
+            selected.append((event, -base_sign))
     if not selected:
         raise ValueError("valued events for entity are required")
 
     signed = []
     gross = []
     confidence = []
-    for event in selected:
+    for event, sign in selected:
         value = float(event.usd_value or 0)
-        sign = event.metadata.get("flow_sign", 0)
-        if sign not in (-1, 0, 1):
-            raise ValueError("flow_sign must be -1, 0, or 1")
         gross.append(value)
         signed.append(value * sign)
         confidence.append(event.confidence)
