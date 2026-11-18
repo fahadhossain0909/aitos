@@ -300,8 +300,10 @@ These are transparent assumptions, not a substitute for venue-level fill replay.
 
 The observer exposes aggregate and per-source Prometheus counters/gauges:
 `aitos_cfei_source_events_persisted_total`,
-`aitos_cfei_source_poll_errors_total` and
-`aitos_cfei_source_last_success_unix_seconds`. The
+`aitos_cfei_source_poll_errors_total`,
+`aitos_cfei_source_lease_contention_total` and
+`aitos_cfei_source_last_success_unix_seconds`. A lease-contention no-op is not
+counted as a successful poll and does not refresh source freshness. The
 `AITOSCFEISourcePollErrors` and `AITOSCFEISourceStale` alert rules identify
 the specific source ID, instead of only showing a global observer failure.
 The Grafana dashboard is
