@@ -3,7 +3,7 @@ import json
 import pytest
 
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter, TRANSFER_TOPIC
-from aitos.capital_intelligence.dex import EvmDexSwapAdapter, V3_SWAP_TOPIC
+from aitos.capital_intelligence.dex import EvmDexSwapAdapter, V3_SWAP_TOPIC, V4_SWAP_TOPIC
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 
 
@@ -286,3 +286,92 @@ async def test_dex_reorg_deeper_than_retained_window_fails_closed():
     adapter._rpc = fake_rpc
     with pytest.raises(RuntimeError, match="exceeds retained canonical window"):
         await adapter.poll(cursor=cursor)
+
+
+
+@pytest.mark.asyncio
+async def test_v4_swap_decodes_signed_deltas_by_pool_id_and_manager():
+    manager = "0x" + "1" * 40
+    pool_id = "0x" + "a" * 64
+    token0 = "0x" + "0" * 40
+    token1 = "0x" + "2" * 40
+    actor = "0x" + "3" * 40
+    adapter = EvmDexSwapAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        pools={manager: "uniswap_v4"},
+        v4_pool_tokens={pool_id: {"token0": token0, "token1": token1}},
+        confirmations=2,
+        max_block_range=10,
+    )
+    amount0 = (-125_000) % (1 << 128)
+    amount1 = 250_000
+    words = [
+        amount0,
+        amount1,
+        2**96,
+        5_000_000,
+        (-12) % (1 << 24),
+        3000,
+    ]
+    log = {
+        "address": manager,
+        "topics": [
+            V4_SWAP_TOPIC,
+            pool_id,
+            "0x" + "0" * 24 + actor[2:],
+        ],
+        "data": "0x" + "".join(f"{value:064x}" for value in words),
+        "blockNumber": "0x20",
+        "transactionHash": "0x" + "b" * 64,
+        "logIndex": "0x1",
+        "blockHash": "0x" + f"{0x20:064x}",
+    }
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x22"
+        if method == "eth_getLogs":
+            assert params[0]["address"] == [manager]
+            assert V4_SWAP_TOPIC in params[0]["topics"][0]
+            return [log]
+        if method == "eth_getBlockByNumber":
+            return {
+                "timestamp": hex(1_700_000_000),
+                "hash": "0x" + f"{int(params[0], 16):064x}",
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, cursor = await adapter.poll(cursor="0x1f")
+    assert len(events) == 1
+    event = events[0]
+    assert event.actor_id == actor
+    assert event.instrument == "uniswap_v4"
+    assert event.metadata["pool_id"] == pool_id
+    assert event.metadata["pool_manager"] == manager
+    assert event.metadata["token0_address"] == token0
+    assert event.metadata["token1_address"] == token1
+    assert event.metadata["amount0_delta"] == "-125000"
+    assert event.metadata["amount1_delta"] == "250000"
+    assert event.metadata["post_swap_tick"] == -12
+    assert event.metadata["swap_fee_pips"] == 3000
+    assert event.metadata["actor_is_pool_caller_not_verified_beneficial_owner"] is True
+    assert json.loads(cursor)["head_block"] == 0x20
+
+
+def test_v4_swap_requires_valid_pool_id_and_sorted_currency_mapping():
+    manager = "0x" + "1" * 40
+    pool_id = "0x" + "a" * 64
+    with pytest.raises(ValueError, match="currencies"):
+        EvmDexSwapAdapter(
+            rpc_url="https://rpc.example",
+            chain_id="1",
+            pools={manager: "uniswap_v4"},
+            v4_pool_tokens={
+                pool_id: {
+                    "token0": "0x" + "2" * 40,
+                    "token1": "0x" + "1" * 40,
+                }
+            },
+        )
