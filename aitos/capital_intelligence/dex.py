@@ -136,7 +136,9 @@ class EvmDexSwapAdapter:
             try:
                 legacy_head = int(cursor, 16)
             except ValueError:
-                raise ValueError("DEX cursor must be a hex block or version-2 JSON") from None
+                raise ValueError(
+                    "DEX cursor must be a hex block or version-2 JSON"
+                ) from None
             if legacy_head < 0:
                 raise ValueError("invalid DEX cursor")
             state = {"version": 1, "head_block": legacy_head, "recent_hashes": {}}
