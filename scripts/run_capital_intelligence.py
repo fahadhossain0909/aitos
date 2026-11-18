@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import hmac
 import os
 import signal
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import clickhouse_connect
 import redis.asyncio as redis
@@ -20,6 +22,7 @@ from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.dex_factory import EvmDexFactoryDiscoveryAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
+from aitos.capital_intelligence.explorer import CapitalEntityExplorer
 from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
 from aitos.capital_intelligence.evm_token_metadata import EvmTokenMetadataResolver
@@ -90,15 +93,98 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
-async def _metrics_server(port: int, counters: dict[str, Any]) -> None:
+async def _metrics_server(
+    port: int,
+    counters: dict[str, Any],
+    *,
+    explorer: CapitalEntityExplorer,
+    api_token: str,
+) -> None:
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        await reader.readline()
-        while await reader.readline() not in (b"\r\n", b"\n", b""):
-            pass
-        body = _render_metrics(counters)
+        status = "200 OK"
+        content_type = "text/plain; version=0.0.4"
+        body = b""
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=5)
+            if len(request_line) > 8192:
+                raise ValueError("request line too large")
+            parts = request_line.decode("latin-1").strip().split()
+            if len(parts) != 3:
+                raise ValueError("invalid HTTP request")
+            method, target, _version = parts
+            headers = {}
+            total_header_bytes = 0
+            while True:
+                line = await asyncio.wait_for(reader.readline(), timeout=5)
+                total_header_bytes += len(line)
+                if total_header_bytes > 16_384:
+                    raise ValueError("HTTP headers too large")
+                if line in (b"\\r\\n", b"\\n", b""):
+                    break
+                key, separator, value = line.decode("latin-1").partition(":")
+                if separator:
+                    headers[key.strip().lower()] = value.strip()
+
+            parsed = urlsplit(target)
+            if method != "GET":
+                status = "405 Method Not Allowed"
+                content_type = "application/json"
+                body = b'{"error":"method_not_allowed"}'
+            elif parsed.path == "/metrics":
+                body = _render_metrics(counters)
+            elif parsed.path == "/v1/entities" or parsed.path.startswith(
+                "/v1/entities/"
+            ):
+                content_type = "application/json"
+                supplied = headers.get("authorization", "")
+                expected = f"Bearer {api_token}" if api_token else ""
+                if not api_token:
+                    status = "404 Not Found"
+                    body = b'{"error":"not_found"}'
+                elif not hmac.compare_digest(supplied, expected):
+                    status = "401 Unauthorized"
+                    body = b'{"error":"unauthorized"}'
+                elif parsed.path == "/v1/entities":
+                    params = parse_qs(parsed.query, strict_parsing=False)
+                    limit = int(params.get("limit", ["50"])[0])
+                    offset = int(params.get("offset", ["0"])[0])
+                    result = await explorer.list_entities(limit=limit, offset=offset)
+                    body = json.dumps(
+                        {"entities": result}, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                else:
+                    segments = parsed.path.split("/")
+                    if len(segments) != 5 or segments[1:3] != ["v1", "entities"]:
+                        status = "404 Not Found"
+                        body = b'{"error":"not_found"}'
+                    else:
+                        chain, address = unquote(segments[3]), unquote(segments[4])
+                        result = await explorer.get_entity(chain, address)
+                        if result is None:
+                            status = "404 Not Found"
+                            body = b'{"error":"entity_not_found"}'
+                        else:
+                            body = json.dumps(
+                                result, separators=(",", ":"), allow_nan=False
+                            ).encode()
+            else:
+                status = "404 Not Found"
+                content_type = "application/json"
+                body = b'{"error":"not_found"}'
+        except ValueError:
+            status = "400 Bad Request"
+            content_type = "application/json"
+            body = b'{"error":"invalid_request"}'
+        except Exception:
+            LOG.exception("CFEI read-only API request failed")
+            status = "500 Internal Server Error"
+            content_type = "application/json"
+            body = b'{"error":"internal_error"}'
+
         writer.write(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\n"
-            + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+            f"HTTP/1.1 {status}\\r\\n".encode()
+            + f"Content-Type: {content_type}\\r\\n".encode()
+            + f"Content-Length: {len(body)}\\r\\nConnection: close\\r\\n\\r\\n".encode()
             + body
         )
         await writer.drain()
@@ -408,8 +494,19 @@ async def main() -> None:
         except NotImplementedError:
             pass
 
+    api_token = os.getenv("AITOS_CFEI_API_TOKEN", "")
+    if api_token and len(api_token) < 32:
+        raise SystemExit("AITOS_CFEI_API_TOKEN must contain at least 32 characters.")
+    explorer = CapitalEntityExplorer(
+        clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos")
+    )
     metrics = asyncio.create_task(
-        _metrics_server(int(os.getenv("AITOS_CFEI_METRICS_PORT", "8121")), counters)
+        _metrics_server(
+            int(os.getenv("AITOS_CFEI_METRICS_PORT", "8121")),
+            counters,
+            explorer=explorer,
+            api_token=api_token,
+        )
     )
     tasks = [asyncio.create_task(worker.run_forever()) for worker in workers]
     LOG.info(
