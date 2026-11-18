@@ -75,9 +75,7 @@ def main():
         f"native_available={native_available()}"
     )
     for name, factory in factories.items():
-        elapsed, latencies = run(
-            factory, args.events, args.repeats, args.warmup
-        )
+        elapsed, latencies = run(factory, args.events, args.repeats, args.warmup)
         median_elapsed = statistics.median(elapsed)
         print(
             f"{name}: median_total={median_elapsed:.6f}s "
