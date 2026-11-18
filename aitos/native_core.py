@@ -26,13 +26,20 @@ def _positive_step(value: str | Decimal, name: str) -> Decimal:
     return result
 
 
-def _to_units(value: str | Decimal, step: Decimal, name: str, *, allow_zero: bool) -> int:
+def _to_units(
+    value: str | Decimal, step: Decimal, name: str, *, allow_zero: bool
+) -> int:
     try:
         decimal_value = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
         raise ValueError(f"{name} must be a finite decimal") from exc
-    if not decimal_value.is_finite() or decimal_value < 0 or (not allow_zero and decimal_value == 0):
-        raise ValueError(f"{name} must be {'non-negative' if allow_zero else 'positive'} and finite")
+    if (
+        not decimal_value.is_finite()
+        or decimal_value < 0
+        or (not allow_zero and decimal_value == 0)
+    ):
+        qualifier = "non-negative" if allow_zero else "positive"
+        raise ValueError(f"{name} must be {qualifier} and finite")
     units = decimal_value / step
     integral = units.to_integral_value()
     if units != integral:
@@ -48,8 +55,12 @@ class InstrumentScale:
     quantity_step: Decimal
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "price_tick", _positive_step(self.price_tick, "price_tick"))
-        object.__setattr__(self, "quantity_step", _positive_step(self.quantity_step, "quantity_step"))
+        object.__setattr__(
+            self, "price_tick", _positive_step(self.price_tick, "price_tick")
+        )
+        object.__setattr__(
+            self, "quantity_step", _positive_step(self.quantity_step, "quantity_step")
+        )
 
     @classmethod
     def from_exchange_filters(cls, filters) -> "InstrumentScale":
@@ -103,7 +114,11 @@ class PythonFixedPointOrderBook:
         for price, quantity in rows:
             if isinstance(price, bool) or not isinstance(price, int) or price <= 0:
                 raise ValueError("price units must be positive integers")
-            if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 0:
+            if (
+                isinstance(quantity, bool)
+                or not isinstance(quantity, int)
+                or quantity < 0
+            ):
                 raise ValueError("quantity units must be non-negative integers")
 
     def _load(self, target: dict[int, int], rows: Iterable[tuple[int, int]]) -> None:
@@ -184,7 +199,6 @@ class PythonFixedPointOrderBook:
         return (ask * bid_qty + bid * ask_qty) / total
 
 
-
 class NativeOrderBookSession:
     """Instrument-aware bridge for exchange snapshots and depth deltas.
 
@@ -250,11 +264,17 @@ class NativeOrderBookSession:
         return (
             update_id,
             [
-                (self.scale.price_from_ticks(price), self.scale.quantity_from_lots(quantity))
+                (
+                    self.scale.price_from_ticks(price),
+                    self.scale.quantity_from_lots(quantity),
+                )
                 for price, quantity in bids
             ],
             [
-                (self.scale.price_from_ticks(price), self.scale.quantity_from_lots(quantity))
+                (
+                    self.scale.price_from_ticks(price),
+                    self.scale.quantity_from_lots(quantity),
+                )
                 for price, quantity in asks
             ],
         )
