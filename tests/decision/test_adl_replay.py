@@ -2,7 +2,12 @@ from datetime import datetime, timedelta, timezone
 
 from aitos.decision.calibration import CalibrationMetrics, ProbabilityCalibrator
 from aitos.decision.dsl import parse_decision_spec
-from aitos.decision.replay import GovernanceThresholds, ReplayObservation, assess_challenger, replay_chronologically
+from aitos.decision.replay import (
+    GovernanceThresholds,
+    ReplayObservation,
+    assess_challenger,
+    replay_chronologically,
+)
 from aitos.decision.runtime import ADLRuntime
 from aitos.decision.types import DecisionPolicy, MarketSnapshot, ModelResponse
 
@@ -14,15 +19,28 @@ class _Provider:
 
 def test_replay_is_chronological_and_updates_calibration_after_decision():
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
-    spec = parse_decision_spec("DECISION test:\\nSTATE:\\n - x\\nASK side: CHOICE [LONG, SHORT, NO_TRADE]")
-    snapshots = [MarketSnapshot("BTCUSDT", now + timedelta(minutes=i), {"x": i}, snapshot_id=str(i)) for i in (2, 0, 1)]
-    rows = [ReplayObservation(snapshot, "LONG", snapshot.timestamp + timedelta(minutes=5)) for snapshot in snapshots]
+    spec = parse_decision_spec("DECISION test:\nSTATE:\n - x\nASK side: CHOICE [LONG, SHORT, NO_TRADE]")
+    snapshots = [
+        MarketSnapshot("BTCUSDT", now + timedelta(minutes=i), {"x": i}, snapshot_id=str(i))
+        for i in (2, 0, 1)
+    ]
+    rows = [
+        ReplayObservation(snapshot, "LONG", snapshot.timestamp + timedelta(seconds=30))
+        if snapshot.snapshot_id == "0"
+        else ReplayObservation(snapshot, "LONG", snapshot.timestamp + timedelta(minutes=5))
+        for snapshot in snapshots
+    ]
     calibrator = ProbabilityCalibrator(minimum_samples=1)
-    runtime = ADLRuntime(_Provider(), policy=DecisionPolicy(require_calibration=False, require_positive_expected_value=False))
+    runtime = ADLRuntime(
+        _Provider(),
+        policy=DecisionPolicy(
+            require_calibration=False, require_positive_expected_value=False
+        ),
+    )
     report = replay_chronologically(runtime, spec, rows, calibrator)
     assert report.observations == 3
     assert [result.snapshot_id for result in report.results] == ["0", "1", "2"]
-    assert calibrator.metrics("LONG").samples == 3
+    assert calibrator.metrics("LONG").samples == 1
 
 
 def test_governance_blocks_insufficient_or_poor_challenger():

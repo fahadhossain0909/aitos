@@ -10,7 +10,14 @@ from .calibration import CalibrationMetrics, ProbabilityCalibrator
 from .dsl import DecisionLanguageError, DecisionLanguageParser, parse_decision_spec
 from .providers import DecisionProvider, JevDecisionProvider
 from .runtime import ADLRuntime
-from .scanner_bridge import candidate_to_snapshot, decision_event_payload
+from .replay import (
+    GovernanceAssessment,
+    GovernanceThresholds,
+    ReplayObservation,
+    ReplayReport,
+    assess_challenger,
+    replay_chronologically,
+)
 from .types import (
     AgentAssessment,
     ChoiceQuestion,
@@ -42,14 +49,18 @@ __all__ = [
     "DecisionSpec",
     "InMemoryDecisionAttributionStore",
     "JevDecisionProvider",
+    "GovernanceAssessment",
+    "GovernanceThresholds",
     "MarketSnapshot",
     "ModelResponse",
     "NoulQuestion",
     "ProbabilityCalibrator",
+    "ReplayObservation",
+    "ReplayReport",
     "ScoreQuestion",
     "TradeEconomics",
     "aggregate_assessments",
-    "candidate_to_snapshot",
-    "decision_event_payload",
+    "assess_challenger",
+    "replay_chronologically",
     "parse_decision_spec",
 ]

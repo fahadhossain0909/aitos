@@ -37,20 +37,33 @@ class ReplayReport:
 
 
 def replay_chronologically(runtime: ADLRuntime, spec: DecisionSpec, observations: Iterable[ReplayObservation], calibrator: ProbabilityCalibrator) -> ReplayReport:
-    """Evaluate in event-time order; ingest each label only after its decision."""
+    """Evaluate in event-time order; only mature labels before each later decision."""
     ordered = sorted(observations, key=lambda item: (item.snapshot.timestamp, item.matured_at, item.snapshot.symbol))
     results: list[DecisionResult] = []
     correct = 0
     abstentions = 0
+    pending: list[ReplayObservation] = []
     for item in ordered:
-        result = runtime.evaluate(item.snapshot, spec, now=item.snapshot.timestamp)
+        decision_time = item.snapshot.timestamp
+        matured, pending = (
+            [row for row in pending if row.matured_at <= decision_time],
+            [row for row in pending if row.matured_at > decision_time],
+        )
+        for matured_item in matured:
+            for action in ("LONG", "SHORT", "NO_TRADE"):
+                probability = matured_item._raw_probabilities.get(action)
+                if probability is not None:
+                    calibrator.update(
+                        action,
+                        probability,
+                        action == matured_item.realized_action,
+                    )
+        result = runtime.evaluate(item.snapshot, spec, now=decision_time)
         results.append(result)
         abstentions += int(result.action == DecisionAction.ABSTAIN)
         correct += int(result.proposed_action.value == item.realized_action)
-        for action in ("LONG", "SHORT", "NO_TRADE"):
-            probability = result.raw_probabilities.get(action)
-            if probability is not None:
-                calibrator.update(action, probability, action == item.realized_action)
+        object.__setattr__(item, "_raw_probabilities", dict(result.raw_probabilities))
+        pending.append(item)
     count = len(ordered)
     return ReplayReport(count, count, abstentions, correct / count if count else None, calibrator.metrics(), tuple(results))
 
