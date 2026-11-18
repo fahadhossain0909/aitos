@@ -1,4 +1,5 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 from aitos.capital_intelligence.contracts import CapitalEvent
 from aitos.capital_intelligence.intelligence import (
     assess_entity_behavior,

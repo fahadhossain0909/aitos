@@ -10,12 +10,12 @@ import asyncio
 import hashlib
 import json
 import time
-from defusedxml import ElementTree as ET
 from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
 import aiohttp
+from defusedxml import ElementTree as ET
 
 from .contracts import CapitalEvent
 

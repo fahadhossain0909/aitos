@@ -3,11 +3,11 @@ import json
 import pytest
 
 from aitos.capital_intelligence.dex_factory import (
-    EvmDexFactoryDiscoveryAdapter,
     V2_PAIR_CREATED_TOPIC,
     V3_POOL_CREATED_TOPIC,
-    V4_POOL_INITIALIZED_TOPIC,
     V4_MODIFY_LIQUIDITY_TOPIC,
+    V4_POOL_INITIALIZED_TOPIC,
+    EvmDexFactoryDiscoveryAdapter,
 )
 
 

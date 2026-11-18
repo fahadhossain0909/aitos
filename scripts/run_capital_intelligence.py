@@ -16,34 +16,33 @@ import clickhouse_connect
 import redis.asyncio as redis
 from neo4j import AsyncGraphDatabase
 
-from aitos.core.contracts import Event, EventPriority
-from aitos.eventbus.redis_bus import EventBus
-
 from aitos.capital_intelligence.alerts import CapitalFlowWebhookAlerter
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
 from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdapter
-from aitos.capital_intelligence.cftc import CftcCotAdapter
 from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
+from aitos.capital_intelligence.cftc import CftcCotAdapter
+from aitos.capital_intelligence.contracts import EntityLabel
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.dex_factory import EvmDexFactoryDiscoveryAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
-from aitos.capital_intelligence.contracts import EntityLabel
-from aitos.capital_intelligence.explorer import CapitalEntityExplorer
-from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
 from aitos.capital_intelligence.evm_token_metadata import EvmTokenMetadataResolver
+from aitos.capital_intelligence.explorer import CapitalEntityExplorer
+from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.runtime import (
     CapitalIngestionWorker,
     RedisCheckpointStore,
 )
-from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 from aitos.capital_intelligence.sec_edgar import (
     SecEdgarArchiveBackfillSource,
     SecEdgarFilingsAdapter,
 )
+from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
-from aitos.capital_intelligence.watchlist import RedisEntityWatchlist
 from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
+from aitos.capital_intelligence.watchlist import RedisEntityWatchlist
+from aitos.core.contracts import Event, EventPriority
+from aitos.eventbus.redis_bus import EventBus
 from aitos.world_intelligence.capital_flow import CapitalFlowIntelligenceAdapter
 from aitos.world_intelligence.lease import RedisSourceLeaseManager
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore

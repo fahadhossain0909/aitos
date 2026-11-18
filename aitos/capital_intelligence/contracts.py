@@ -1,10 +1,14 @@
 """Provider-neutral, versioned capital-flow contracts."""
 
 from __future__ import annotations
-import hashlib, json, math
+
+import hashlib
+import json
+import math
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 SCHEMA_VERSION = 1
 

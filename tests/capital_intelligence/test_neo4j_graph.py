@@ -1,5 +1,6 @@
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 
 from aitos.capital_intelligence.contracts import CapitalEvent
 from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore

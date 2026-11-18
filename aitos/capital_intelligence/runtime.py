@@ -5,13 +5,15 @@ Consumers must deduplicate by CapitalEvent.deduplication_key.
 """
 
 from __future__ import annotations
+
 import asyncio
-import json
 import logging
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Protocol
+
 from .contracts import CapitalEvent
 
 log = logging.getLogger(__name__)

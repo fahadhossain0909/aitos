@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+
 import pytest
+
 from aitos.capital_intelligence.contracts import CapitalEvent, EntityEvidence
 
 

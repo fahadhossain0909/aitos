@@ -1,11 +1,14 @@
 """Read-only Binance USD-M market microstructure observations for CFEI."""
 
 from __future__ import annotations
+
 import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
+
 import aiohttp
+
 from .contracts import CapitalEvent
 
 

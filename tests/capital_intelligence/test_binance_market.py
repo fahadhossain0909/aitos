@@ -1,4 +1,5 @@
 import pytest
+
 from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdapter
 
 

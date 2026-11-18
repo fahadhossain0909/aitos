@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+
 import pytest
 
 from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook

@@ -6,10 +6,10 @@ investment advice, or trading signals. Aggregate exchange cohorts are excluded.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import isfinite, log1p
 from statistics import mean
-from typing import Iterable, Mapping
 
 from .contracts import CapitalEvent
 

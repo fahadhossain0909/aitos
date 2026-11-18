@@ -4,11 +4,13 @@ Scores are ranking heuristics, never calibrated probabilities or trading signals
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 from statistics import mean
-from typing import Iterable
+
 from .contracts import CapitalEvent, EntityEvidence
 
 

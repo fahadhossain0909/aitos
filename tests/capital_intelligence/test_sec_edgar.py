@@ -1,4 +1,5 @@
 import json
+
 import pytest
 
 from aitos.capital_intelligence.sec_edgar import SecEdgarFilingsAdapter

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+
 from aitos.capital_intelligence.behavior import assess_capital_behavior
 from aitos.capital_intelligence.contracts import CapitalEvent
 

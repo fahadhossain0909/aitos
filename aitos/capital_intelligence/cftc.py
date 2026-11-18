@@ -13,7 +13,6 @@ import aiohttp
 
 from .contracts import CapitalEvent
 
-
 _FIELD = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
 _DATASET = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
 

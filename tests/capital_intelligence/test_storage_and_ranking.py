@@ -1,7 +1,8 @@
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-import json
+
 import pytest
 
 from aitos.capital_intelligence.contracts import (

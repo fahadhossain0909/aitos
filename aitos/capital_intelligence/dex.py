@@ -1,11 +1,14 @@
 """Read-only Uniswap V2/V3 pool swap log observer for configured pools."""
 
 from __future__ import annotations
+
 import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
+
 import aiohttp
+
 from .contracts import CapitalEvent
 
 V2_SWAP_TOPIC = "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"

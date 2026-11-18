@@ -1,10 +1,13 @@
 """Read-only Binance USD-M Futures aggregate positioning collector."""
 
 from __future__ import annotations
+
 import hashlib
 from datetime import datetime, timezone
 from typing import Any
+
 import aiohttp
+
 from .contracts import CapitalEvent
 
 

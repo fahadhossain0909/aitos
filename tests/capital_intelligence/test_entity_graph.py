@@ -1,5 +1,7 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 import pytest
+
 from aitos.capital_intelligence.contracts import EntityEvidence, EntityLabel
 from aitos.capital_intelligence.entity_graph import EntityEvidenceGraph
 

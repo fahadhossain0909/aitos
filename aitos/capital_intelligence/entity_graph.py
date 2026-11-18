@@ -1,9 +1,10 @@
 """Evidence-first entity graph; candidate links never silently become identity."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable
+
 from .contracts import EntityEvidence, EntityLabel
 
 

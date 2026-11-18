@@ -2,7 +2,6 @@ import pytest
 
 from aitos.capital_intelligence.cftc import CftcCotAdapter
 
-
 FIELD_MAP = {
     "report_date": "report_date_as_yyyy_mm_dd",
     "market_code": "cftc_contract_market_code",
