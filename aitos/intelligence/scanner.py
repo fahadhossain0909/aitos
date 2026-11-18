@@ -1920,11 +1920,13 @@ class OpportunityScanner(AITOSModule):
         except Exception as exc:
             logger.warning(
                 "ADL shadow evaluation failed; scanner candidate remains unchanged",
-                extra={"aitos_extra": {
-                    "symbol": candidate.symbol,
-                    "candidate_id": candidate.candidate_id,
-                    "error": type(exc).__name__,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "candidate_id": candidate.candidate_id,
+                        "error": type(exc).__name__,
+                    }
+                },
             )
 
     async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:

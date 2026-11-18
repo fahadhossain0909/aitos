@@ -122,10 +122,18 @@ def assess_challenger(metrics: CalibrationMetrics, *, abstention_rate: float, th
     reasons: list[str] = []
     if metrics.samples < limits.minimum_samples:
         reasons.append("insufficient matured out-of-sample observations")
-    if metrics.brier_score is None or metrics.brier_score > limits.maximum_brier_score:
+    if (
+        metrics.brier_score is None
+        or metrics.brier_score > limits.maximum_brier_score
+    ):
         reasons.append("Brier score is unavailable or exceeds governance threshold")
-    if metrics.expected_calibration_error is None or metrics.expected_calibration_error > limits.maximum_ece:
+    if (
+        metrics.expected_calibration_error is None
+        or metrics.expected_calibration_error > limits.maximum_ece
+    ):
         reasons.append("calibration error is unavailable or exceeds threshold")
     if abstention_rate > limits.maximum_abstention_rate:
         reasons.append("abstention rate exceeds governance threshold")
-    return GovernanceAssessment(metrics.samples >= limits.minimum_samples, not reasons, tuple(reasons))
+    return GovernanceAssessment(
+        metrics.samples >= limits.minimum_samples, not reasons, tuple(reasons)
+    )
