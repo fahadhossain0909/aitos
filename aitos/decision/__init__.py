@@ -10,6 +10,7 @@ from .calibration import CalibrationMetrics, ProbabilityCalibrator
 from .dsl import DecisionLanguageError, DecisionLanguageParser, parse_decision_spec
 from .providers import DecisionProvider, JevDecisionProvider
 from .runtime import ADLRuntime
+from .scanner_bridge import candidate_to_snapshot, decision_event_payload
 from .types import (
     AgentAssessment,
     ChoiceQuestion,
@@ -48,5 +49,7 @@ __all__ = [
     "ScoreQuestion",
     "TradeEconomics",
     "aggregate_assessments",
+    "candidate_to_snapshot",
+    "decision_event_payload",
     "parse_decision_spec",
 ]

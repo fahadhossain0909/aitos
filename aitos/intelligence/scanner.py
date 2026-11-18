@@ -371,10 +371,16 @@ class OpportunityScanner(AITOSModule):
         tuning: TuningSettings | None = None,
         world_intelligence_provider: Any | None = None,
         world_intelligence_timeout_seconds: float = 0.05,
+        adl_runtime: Any | None = None,
+        adl_spec: Any | None = None,
     ) -> None:
         if not 0.005 <= world_intelligence_timeout_seconds <= 1.0:
             raise ValueError("world intelligence timeout must be between 5ms and 1s")
         self._world_intelligence_provider = world_intelligence_provider
+        if (adl_runtime is None) != (adl_spec is None):
+            raise ValueError("adl_runtime and adl_spec must be configured together")
+        self._adl_runtime = adl_runtime
+        self._adl_spec = adl_spec
         self._world_intelligence_timeout_seconds = float(
             world_intelligence_timeout_seconds
         )
@@ -1844,7 +1850,82 @@ class OpportunityScanner(AITOSModule):
                 "candidate_id": candidate.candidate_id,
             },
         )
+        await self._evaluate_adl_shadow(candidate)
         return candidate
+
+    async def _evaluate_adl_shadow(self, candidate: ScanCandidate) -> None:
+        """Attach ADL as an observational sidecar; never mutate scanner decisions."""
+        if self._adl_runtime is None or self._adl_spec is None:
+            return
+        try:
+            from aitos.decision.types import MarketSnapshot
+
+            timestamp = datetime.fromisoformat(
+                candidate.scanned_at.replace("Z", "+00:00")
+            )
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            features = {
+                "composite_score": float(candidate.composite_score),
+                "component_scores": dict(candidate.component_scores),
+                "component_availability": dict(candidate.component_availability),
+                "regime": str(candidate.regime),
+                "entry_price": float(candidate.entry_price),
+                "atr": float(candidate.atr),
+                "direction": candidate.direction.value,
+                "htf_adx": float(candidate.htf_adx),
+                "financial_ml_features": dict(candidate.financial_ml_features),
+                "statistical_forecast": dict(candidate.statistical_forecast or {}),
+                "world_intelligence_shadow": dict(candidate.world_intelligence_shadow),
+                "risk_veto": False,
+                "execution_veto": False,
+                "data_integrity_veto": False,
+            }
+            snapshot = MarketSnapshot(
+                symbol=candidate.symbol,
+                timestamp=timestamp,
+                features=features,
+                source_versions={"scanner": self.version},
+                snapshot_id=candidate.candidate_id,
+            )
+            result = await asyncio.to_thread(
+                self._adl_runtime.evaluate, snapshot, self._adl_spec
+            )
+            await self._event_bus.publish(
+                Event(
+                    topic="decision.adl_shadow_evaluated",
+                    payload={
+                        "decision_id": result.decision_id,
+                        "candidate_id": candidate.candidate_id,
+                        "symbol": candidate.symbol,
+                        "scanner_direction": candidate.direction.value,
+                        "adl_action": result.action.value,
+                        "adl_proposed_action": result.proposed_action.value,
+                        "probabilities": dict(result.probabilities),
+                        "raw_probabilities": dict(result.raw_probabilities),
+                        "calibrated": result.calibrated,
+                        "expected_value": result.expected_value,
+                        "evidence_disagreement": result.evidence_disagreement,
+                        "reasons": list(result.reasons),
+                        "model_id": result.model_id,
+                        "model_version": result.model_version,
+                        "snapshot_id": candidate.candidate_id,
+                        "trace_id": candidate.trace_id,
+                        "shadow_mode": True,
+                        "execution_eligible": False,
+                    },
+                    source_module=self.module_id,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "ADL shadow evaluation failed; scanner candidate remains unchanged",
+                extra={"aitos_extra": {
+                    "symbol": candidate.symbol,
+                    "candidate_id": candidate.candidate_id,
+                    "error": type(exc).__name__,
+                }},
+            )
 
     async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:
         """Rank the configured universe cheaply before invoking full intelligence.
