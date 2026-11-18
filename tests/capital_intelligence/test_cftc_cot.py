@@ -83,9 +83,7 @@ async def test_cftc_cot_ingests_aggregate_positions_and_advances_offset_cursor()
     assert event.metadata["positioning"]["noncommercial"]["net_contracts"] == 1_000
     assert event.metadata["positioning"]["commercial"]["net_contracts"] == -1_000
     assert event.metadata["publication_timestamp_not_supplied"] is True
-    assert cursor == (
-        '{"incremental_offset":1,"refresh_offset":0,"version":2}'
-    )
+    assert cursor == ('{"incremental_offset":1,"refresh_offset":0,"version":2}')
 
     empty_events, same_cursor = await adapter.poll(cursor=cursor)
     assert empty_events == []
@@ -99,7 +97,6 @@ def test_cftc_cot_rejects_untrusted_dataset_and_field_identifiers():
     unsafe = {**FIELD_MAP, "report_date": "date;DROP_TABLE"}
     with pytest.raises(ValueError, match="field mapping"):
         CftcCotAdapter(dataset_id="6dca-aqww", field_map=unsafe)
-
 
 
 @pytest.mark.asyncio
@@ -149,7 +146,12 @@ async def test_cftc_revision_refresh_replays_historical_rows_idempotently():
     assert revised_long == 3500
     assert next_cursor == cursor
     assert [params["$offset"] for _, params in session.requests] == [
-        "0", "0", "1", "1", "0", "1"
+        "0",
+        "0",
+        "1",
+        "1",
+        "0",
+        "1",
     ]
 
 
@@ -163,9 +165,7 @@ async def test_cftc_cursor_migrates_legacy_offset_and_validates_revision_cursor(
     )
     events, cursor = await adapter.poll(cursor='{"offset":7}')
     assert events == []
-    assert cursor == (
-        '{"incremental_offset":7,"refresh_offset":0,"version":2}'
-    )
+    assert cursor == ('{"incremental_offset":7,"refresh_offset":0,"version":2}')
     with pytest.raises(ValueError, match="version-2 cursor"):
         await adapter.poll(
             cursor='{"version":2,"incremental_offset":-1,"refresh_offset":0}'
