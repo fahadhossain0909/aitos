@@ -178,16 +178,15 @@ class CapitalEntityExplorer:
         for (payload_json,) in events_result.result_rows:
             try:
                 event = json.loads(payload_json)
+                base_sign = event.get("metadata", {}).get("flow_sign", 0)
+                if base_sign not in (-1, 0, 1):
+                    base_sign = 0
                 if event.get("actor_id") == address:
                     event["entity_role"] = "actor"
-                    event["entity_flow_sign"] = event.get("metadata", {}).get(
-                        "flow_sign", 0
-                    )
+                    event["entity_flow_sign"] = base_sign
                 elif event.get("counterparty_id") == address:
                     event["entity_role"] = "counterparty"
-                    event["entity_flow_sign"] = -event.get("metadata", {}).get(
-                        "flow_sign", 0
-                    )
+                    event["entity_flow_sign"] = -base_sign
                 events.append(event)
             except (TypeError, ValueError):
                 raise RuntimeError("stored CFEI event payload is invalid") from None
