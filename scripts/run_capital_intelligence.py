@@ -50,26 +50,52 @@ class _NoPriceBook:
         return None
 
 
-async def _metrics_server(port: int, counters: dict[str, int]) -> None:
+def _render_metrics(counters: dict[str, Any]) -> bytes:
+    lines = [
+        "# HELP aitos_cfei_events_persisted Total normalized events appended.",
+        "# TYPE aitos_cfei_events_persisted counter",
+        f"aitos_cfei_events_persisted {counters['events']}",
+        "# HELP aitos_cfei_poll_errors Total source poll errors.",
+        "# TYPE aitos_cfei_poll_errors counter",
+        f"aitos_cfei_poll_errors {counters['errors']}",
+        "# HELP aitos_cfei_last_poll_unix_seconds Last successful poll timestamp.",
+        "# TYPE aitos_cfei_last_poll_unix_seconds gauge",
+        f"aitos_cfei_last_poll_unix_seconds {counters['last_poll']}",
+        "# HELP aitos_cfei_source_events_persisted_total Events persisted by source.",
+        "# TYPE aitos_cfei_source_events_persisted_total counter",
+        "# HELP aitos_cfei_source_poll_errors_total Poll failures by source.",
+        "# TYPE aitos_cfei_source_poll_errors_total counter",
+        "# HELP aitos_cfei_source_last_success_unix_seconds Last successful poll by source.",
+        "# TYPE aitos_cfei_source_last_success_unix_seconds gauge",
+    ]
+    for source_id, values in sorted(counters.get("sources", {}).items()):
+        # Prometheus label escaping: source IDs come from operator config.
+        label = (
+            str(source_id)
+            .replace("\\\\", "\\\\\\\\")
+            .replace('"', '\\\\"')
+            .replace("\\n", "")
+        )
+        labels = f'source_id="{label}"'
+        lines.extend(
+            [
+                f"aitos_cfei_source_events_persisted_total{{{labels}}} {values['events']}",
+                f"aitos_cfei_source_poll_errors_total{{{labels}}} {values['errors']}",
+                f"aitos_cfei_source_last_success_unix_seconds{{{labels}}} {values['last_success']}",
+            ]
+        )
+    return ("\\n".join(lines) + "\\n").encode()
+
+
+async def _metrics_server(port: int, counters: dict[str, Any]) -> None:
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         await reader.readline()
-        while await reader.readline() not in (b"\r\n", b"\n", b""):
+        while await reader.readline() not in (b"\\r\\n", b"\\n", b""):
             pass
-        lines = [
-            "# HELP aitos_cfei_events_persisted Total normalized events appended.",
-            "# TYPE aitos_cfei_events_persisted counter",
-            f"aitos_cfei_events_persisted {counters['events']}",
-            "# HELP aitos_cfei_poll_errors Total source poll errors.",
-            "# TYPE aitos_cfei_poll_errors counter",
-            f"aitos_cfei_poll_errors {counters['errors']}",
-            "# HELP aitos_cfei_last_poll_unix_seconds Last successful poll timestamp.",
-            "# TYPE aitos_cfei_last_poll_unix_seconds gauge",
-            f"aitos_cfei_last_poll_unix_seconds {counters['last_poll']}",
-        ]
-        body = ("\n".join(lines) + "\n").encode()
+        body = _render_metrics(counters)
         writer.write(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\n"
-            + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+            b"HTTP/1.1 200 OK\\r\\nContent-Type: text/plain; version=0.0.4\\r\\n"
+            + f"Content-Length: {len(body)}\\r\\nConnection: close\\r\\n\\r\\n".encode()
             + body
         )
         await writer.drain()
@@ -343,17 +369,24 @@ async def main() -> None:
             "CFEI enabled but no observer sources configured; refusing an idle service."
         )
 
-    counters = {"events": 0, "errors": 0, "last_poll": 0}
+    counters = {"events": 0, "errors": 0, "last_poll": 0, "sources": {}}
     original_run_once = CapitalIngestionWorker.run_once
 
     async def measured_run_once(worker):
+        source_metrics = counters["sources"].setdefault(
+            worker.source_id, {"events": 0, "errors": 0, "last_success": 0}
+        )
         try:
             count = await original_run_once(worker)
+            now = int(__import__("time").time())
             counters["events"] += count
-            counters["last_poll"] = int(__import__("time").time())
+            counters["last_poll"] = now
+            source_metrics["events"] += count
+            source_metrics["last_success"] = now
             return count
         except Exception:
             counters["errors"] += 1
+            source_metrics["errors"] += 1
             raise
 
     for worker in workers:
