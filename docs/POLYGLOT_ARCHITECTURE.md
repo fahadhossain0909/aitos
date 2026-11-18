@@ -34,11 +34,11 @@ The aitos.native_core module exposes PythonFixedPointOrderBook, InstrumentScale,
 
 ## Build and test
 
-Python fallback: PYTHONPATH=. pytest -q tests/test_native_core.py
+Python fallback: PYTHONPATH=. pytest -q native/python_tests/test_native_core.py
 
 Rust tests: cargo test --manifest-path native/rust/Cargo.toml
 
-Build extension: python -m pip install maturin; maturin develop --manifest-path native/rust/Cargo.toml; PYTHONPATH=. pytest -q tests/test_native_core.py
+Build extension: python -m pip install maturin; maturin develop --manifest-path native/rust/Cargo.toml; PYTHONPATH=. pytest -q native/python_tests/test_native_core.py
 
 ## Migration gates
 
