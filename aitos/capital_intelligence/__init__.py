@@ -18,6 +18,7 @@ from .cftc import CftcCotAdapter
 from .dex import EvmDexSwapAdapter
 from .dex_factory import EvmDexFactoryDiscoveryAdapter
 from .enrichment import enrich_capital_event
+from .explorer import CapitalEntityExplorer
 from .entity_graph import EntityEvidenceGraph, EntityProfile
 from .evm import EVMLogCapitalAdapter
 from .evm_token_metadata import EvmTokenMetadataResolver
@@ -26,6 +27,10 @@ from .replay import (
     PriceObservation,
     ReplayRow,
     ReplaySummary,
+    ProbabilityEvaluation,
+    evaluate_probabilistic_predictions,
+    summarize_replay_by_event_type,
+    walk_forward_splits,
     build_point_in_time_replay,
     chronological_split,
     summarize_replay,
@@ -47,6 +52,7 @@ __all__ = [
     "Neo4jEntityGraphStore",
     "BinanceHistoricalPriceBook",
     "CapitalCandidateRank",
+    "CapitalEntityExplorer",
     "CapitalEvent",
     "CftcCotAdapter",
     "CapitalIngestionWorker",
@@ -63,6 +69,7 @@ __all__ = [
     "PriceObservation",
     "ReplayRow",
     "ReplaySummary",
+    "ProbabilityEvaluation",
     "PriceQuote",
     "RedisCheckpointStore",
     "SecEdgarFilingsAdapter",
@@ -78,5 +85,8 @@ __all__ = [
     "enrich_capital_event",
     "rank_capital_candidates",
     "summarize_replay",
+    "summarize_replay_by_event_type",
+    "evaluate_probabilistic_predictions",
+    "walk_forward_splits",
     "value_quantity",
 ]
