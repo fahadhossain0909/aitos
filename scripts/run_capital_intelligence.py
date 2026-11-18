@@ -539,6 +539,9 @@ async def main() -> None:
             max_filings_per_poll=int(
                 os.getenv("AITOS_CFEI_SEC_MAX_FILINGS_PER_POLL", "25")
             ),
+            revision_rescan_filings_per_poll=int(
+                os.getenv("AITOS_CFEI_SEC_REVISION_RESCAN_FILINGS", "5")
+            ),
         )
         workers.append(
             CapitalIngestionWorker(
