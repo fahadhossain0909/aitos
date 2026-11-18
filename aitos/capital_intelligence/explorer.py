@@ -168,7 +168,7 @@ class CapitalEntityExplorer:
               AND JSONExtractBool(
                     payload_json, 'metadata', 'aggregate_only'
                   ) = 0
-              AND lower({address:String}) NOT IN (
+              AND lower({{address:String}}) NOT IN (
                     '0x0000000000000000000000000000000000000000',
                     '0x000000000000000000000000000000000000dead'
                   )
