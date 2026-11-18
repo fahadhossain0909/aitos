@@ -90,7 +90,9 @@ class CapitalFlowIntelligenceAdapter:
            OR (observed_time = parseDateTime64BestEffort(%(observed_after)s)
                AND event_id > %(event_after)s)
         ORDER BY observed_time ASC, event_id ASC
-        LIMIT %(limit)s""".replace("__DATABASE__", self.database)
+        LIMIT %(limit)s""".replace(
+            "__DATABASE__", self.database
+        )
         result = await self.clickhouse.query(
             query,
             parameters={
