@@ -163,9 +163,7 @@ def test_batch_updates_match_sequential_contract():
         (12, 12, [(101, 0)], [(103, 0), (104, 7)], 11),
     ]
     batch = PythonFixedPointOrderBook(10, [(100, 5), (101, 3)], [(103, 4)])
-    sequential = PythonFixedPointOrderBook(
-        10, [(100, 5), (101, 3)], [(103, 4)]
-    )
+    sequential = PythonFixedPointOrderBook(10, [(100, 5), (101, 3)], [(103, 4)])
     assert batch.apply_deltas(updates) == 2
     assert sequential.apply_delta(10, 11, [(102, 2)], [], None)
     assert sequential.apply_delta(
@@ -182,9 +180,7 @@ def test_native_batch_matches_python_reference():
         (12, 12, [(101, 0)], [(103, 0), (104, 7)], 11),
     ]
     native = create_order_book(10, [(100, 5), (101, 3)], [(103, 4)])
-    reference = PythonFixedPointOrderBook(
-        10, [(100, 5), (101, 3)], [(103, 4)]
-    )
+    reference = PythonFixedPointOrderBook(10, [(100, 5), (101, 3)], [(103, 4)])
     assert native.apply_deltas(updates) == reference.apply_deltas(updates) == 2
     assert native.snapshot(5) == reference.snapshot(5)
 
