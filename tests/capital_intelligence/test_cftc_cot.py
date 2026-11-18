@@ -135,12 +135,14 @@ async def test_cftc_revision_refresh_replays_historical_rows_idempotently():
 
     first_events, cursor = await adapter.poll()
     assert len(first_events) == 1
-    assert first_events[0].metadata["positioning"]["noncommercial"]["long_contracts"] == 3000
+    first_long = first_events[0].metadata["positioning"]["noncommercial"]["long_contracts"]
+    assert first_long == 3000
 
     revised_events, next_cursor = await adapter.poll(cursor=cursor)
     assert len(revised_events) == 1
     assert revised_events[0].event_id == first_events[0].event_id
-    assert revised_events[0].metadata["positioning"]["noncommercial"]["long_contracts"] == 3500
+    revised_long = revised_events[0].metadata["positioning"]["noncommercial"]["long_contracts"]
+    assert revised_long == 3500
     assert next_cursor == cursor
     assert [params["$offset"] for _, params in session.requests] == [
         "0", "0", "1", "1", "0", "1"
