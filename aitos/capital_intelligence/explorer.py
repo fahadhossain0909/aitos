@@ -38,7 +38,7 @@ class CapitalEntityExplorer:
             raise ValueError("limit must be between 1 and 100")
         if isinstance(offset, bool) or not 0 <= offset <= 10_000:
             raise ValueError("offset must be between 0 and 10000")
-        query = f"""
+        query = """
             WITH address_flows AS (
                 SELECT
                     venue,
@@ -48,7 +48,7 @@ class CapitalEntityExplorer:
                     source_id,
                     counterparty_id AS counterparty,
                     observed_time
-                FROM {self.events_table} FINAL
+                FROM __EVENTS_TABLE__ FINAL
                 WHERE actor_id != ''
                   AND lower(actor_id) NOT IN (
                       '0x0000000000000000000000000000000000000000',
@@ -75,7 +75,7 @@ class CapitalEntityExplorer:
                     source_id,
                     actor_id AS counterparty,
                     observed_time
-                FROM {self.events_table} FINAL
+                FROM __EVENTS_TABLE__ FINAL
                 WHERE counterparty_id != ''
                   AND counterparty_id != actor_id
                   AND lower(counterparty_id) NOT IN (
@@ -117,7 +117,7 @@ class CapitalEntityExplorer:
             GROUP BY venue, address
             ORDER BY gross_flow_usd DESC, venue ASC, address ASC
             LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
-        """
+        """.replace("__EVENTS_TABLE__", self.events_table)
         result = await self.clickhouse.query(
             query, parameters={"limit": limit, "offset": offset}
         )
@@ -152,9 +152,9 @@ class CapitalEntityExplorer:
 
         entity_key = f"{chain}:{address}"
         events_result = await self.clickhouse.query(
-            f"""
+            """
             SELECT payload_json
-            FROM {self.events_table} FINAL
+            FROM __EVENTS_TABLE__ FINAL
             WHERE venue = {{chain:String}}
               AND (actor_id = {{address:String}} OR counterparty_id = {{address:String}})
               AND finality != 'reverted'
@@ -174,7 +174,7 @@ class CapitalEntityExplorer:
                   )
             ORDER BY event_time DESC, observed_time DESC
             LIMIT {{limit:UInt32}}
-            """,
+            """.replace("__EVENTS_TABLE__", self.events_table),
             parameters={"chain": chain, "address": address, "limit": event_limit},
         )
         if not events_result.result_rows:
@@ -184,21 +184,21 @@ class CapitalEntityExplorer:
             f"""
             SELECT subject_id, object_id, relation, evidence_type, evidence_ref,
                    observed_at, confidence, status
-            FROM {self.evidence_table} FINAL
+            FROM __EVIDENCE_TABLE__ FINAL
             WHERE subject_id = {{entity_id:String}} OR object_id = {{entity_id:String}}
             ORDER BY observed_at DESC
             LIMIT 200
-            """,
+            """.replace("__EVIDENCE_TABLE__", self.evidence_table),
             parameters={"entity_id": entity_key},
         )
         labels_result = await self.clickhouse.query(
             f"""
             SELECT label, category, source, verified, valid_from, valid_until
-            FROM {self.labels_table} FINAL
+            FROM __LABELS_TABLE__ FINAL
             WHERE entity_id = {{entity_id:String}}
             ORDER BY valid_from DESC
             LIMIT 100
-            """,
+            """.replace("__LABELS_TABLE__", self.labels_table),
             parameters={"entity_id": entity_key},
         )
 
