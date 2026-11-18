@@ -242,7 +242,9 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
     ]
     for source_id, values in sorted(counters.get("sources", {}).items()):
         # Prometheus label escaping: source IDs come from operator config.
-        label = str(source_id).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "")
+        label = (
+            str(source_id).replace("\\", "\\\\").replace('"', '\\\"').replace("\n", "")
+        )
         labels = f'source_id="{label}"'
         lines.extend(
             [
