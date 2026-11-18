@@ -89,7 +89,9 @@ class EventImpactFeatures:
             isinstance(value, str) and value.strip()
             for value in (self.asset, self.horizon, self.regime, self.event_type)
         ):
-            raise ValueError("asset, horizon, regime and event_type are required")
+            raise ValueError(
+                "asset, horizon, regime and event_type are required"
+            )
         bounds = {
             "sentiment": (-1.0, 1.0),
             "severity": (0.0, 1.0),
@@ -102,7 +104,9 @@ class EventImpactFeatures:
         for name, (lower, upper) in bounds.items():
             number = float(getattr(self, name))
             if not isfinite(number) or not lower <= number <= upper:
-                raise ValueError(f"{name} must be finite and within [{lower}, {upper}]")
+                raise ValueError(
+                    f"{name} must be finite and within [{lower}, {upper}]"
+                )
             object.__setattr__(self, name, number)
 
 
@@ -129,6 +133,8 @@ class EventImpactProbabilityModel:
             raise ValueError(
                 "features do not match the model asset/horizon/regime cohort"
             )
+        if features.event_type not in self.event_types:
+            raise ValueError("event_type was not present in the training cohort")
         vector = _raw_features(features, self.event_types)
         standardized = [
             (value - mean) / scale
