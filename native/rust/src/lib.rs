@@ -124,7 +124,7 @@ impl Book {
     fn microprice_ticks(&self) -> Option<f64> {
         let (bid, bid_quantity) = self.bids.iter().next_back()?;
         let (ask, ask_quantity) = self.asks.iter().next()?;
-        let total = *bid_quantity + *ask_quantity;
+        let total = i128::from(*bid_quantity) + i128::from(*ask_quantity);
         if total <= 0 {
             return None;
         }
