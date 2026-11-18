@@ -129,6 +129,22 @@ def test_runtime_abstains_on_invalid_noul_probability(spec):
     assert "noul" in " ".join(result.reasons)
 
 
+def test_provider_exception_details_are_sanitized(spec):
+    class RaisingProvider:
+        def evaluate(self, snapshot, spec):
+            raise RuntimeError("vendor response contained secret-token")
+
+    runtime = ADLRuntime(
+        RaisingProvider(), policy=DecisionPolicy(require_calibration=False)
+    )
+    now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    result = runtime.evaluate(snapshot(), spec, now=now)
+    reason = " ".join(result.reasons)
+    assert result.action == DecisionAction.ABSTAIN
+    assert "RuntimeError" in reason
+    assert "secret-token" not in reason
+
+
 def test_runtime_abstains_when_calibration_is_cold(spec):
     runtime = ADLRuntime(StaticProvider(response()))
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
