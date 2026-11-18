@@ -21,6 +21,9 @@ V2_PAIR_CREATED_TOPIC = (
 V3_POOL_CREATED_TOPIC = (
     "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 )
+V4_POOL_INITIALIZED_TOPIC = (
+    "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
+)
 
 
 class EvmDexFactoryDiscoveryAdapter:
@@ -36,6 +39,7 @@ class EvmDexFactoryDiscoveryAdapter:
         "uniswap_v3",
         "pancakeswap_v2",
         "pancakeswap_v3",
+        "uniswap_v4",
     }
 
     def __init__(
@@ -227,7 +231,11 @@ class EvmDexFactoryDiscoveryAdapter:
                     "fromBlock": hex(start),
                     "toBlock": hex(end),
                     "address": list(self.factories),
-                    "topics": [[V2_PAIR_CREATED_TOPIC, V3_POOL_CREATED_TOPIC]],
+                    "topics": [[
+                        V2_PAIR_CREATED_TOPIC,
+                        V3_POOL_CREATED_TOPIC,
+                        V4_POOL_INITIALIZED_TOPIC,
+                    ]],
                 }
             ],
         )
@@ -241,27 +249,57 @@ class EvmDexFactoryDiscoveryAdapter:
             factory = self._address(log.get("address", ""))
             protocol = self.factories.get(factory)
             topic = str(topics[0]).lower()
-            is_v2 = protocol is not None and protocol.endswith("_v2")
-            is_v3 = protocol is not None and protocol.endswith("_v3")
-            if protocol is None or topic not in {
-                V2_PAIR_CREATED_TOPIC,
-                V3_POOL_CREATED_TOPIC,
-            }:
+            if protocol is None:
                 continue
-            if (topic == V2_PAIR_CREATED_TOPIC and not is_v2) or (
-                topic == V3_POOL_CREATED_TOPIC and not is_v3
+            is_v2 = protocol.endswith("_v2")
+            is_v3 = protocol.endswith("_v3")
+            is_v4 = protocol == "uniswap_v4"
+            if (
+                (topic == V2_PAIR_CREATED_TOPIC and not is_v2)
+                or (topic == V3_POOL_CREATED_TOPIC and not is_v3)
+                or (topic == V4_POOL_INITIALIZED_TOPIC and not is_v4)
+                or topic
+                not in {
+                    V2_PAIR_CREATED_TOPIC,
+                    V3_POOL_CREATED_TOPIC,
+                    V4_POOL_INITIALIZED_TOPIC,
+                }
             ):
                 continue
-            token0 = self._address("0x" + str(topics[1])[-40:])
-            token1 = self._address("0x" + str(topics[2])[-40:])
-            if token0 == token1:
-                continue
+
             data = str(log.get("data", "0x"))[2:]
             words = [data[index : index + 64] for index in range(0, len(data), 64)]
-            if len(words) < 2:
-                continue
-            pool_word = words[0] if is_v2 else words[1]
-            pool = self._address("0x" + pool_word[-40:])
+            if is_v4:
+                if len(topics) < 4 or len(words) < 5:
+                    continue
+                pool_id = str(topics[1]).lower()
+                token0 = self._address("0x" + str(topics[2])[-40:])
+                token1 = self._address("0x" + str(topics[3])[-40:])
+                if token0 >= token1:
+                    continue
+                fee = int(words[0], 16)
+                tick_spacing_raw = int(words[1], 16)
+                tick_spacing = (
+                    tick_spacing_raw - (1 << 256)
+                    if tick_spacing_raw >= (1 << 255)
+                    else tick_spacing_raw
+                )
+                hooks = self._address("0x" + words[2][-40:])
+                pool = pool_id
+            else:
+                if len(topics) < 3:
+                    continue
+                token0 = self._address("0x" + str(topics[1])[-40:])
+                token1 = self._address("0x" + str(topics[2])[-40:])
+                if token0 == token1:
+                    continue
+                if len(words) < 2:
+                    continue
+                pool_word = words[0] if is_v2 else words[1]
+                pool = self._address("0x" + pool_word[-40:])
+                fee = None
+                tick_spacing = None
+                hooks = None
             block = int(log["blockNumber"], 16)
             if block not in block_headers:
                 block_headers[block] = await self._header(block)
@@ -283,18 +321,34 @@ class EvmDexFactoryDiscoveryAdapter:
                 "protocol": protocol,
                 "token0_address": token0,
                 "token1_address": token1,
-                "factory_event": "PairCreated" if is_v2 else "PoolCreated",
+                "factory_event": (
+                    "Initialize" if is_v4 else "PairCreated" if is_v2 else "PoolCreated"
+                ),
                 "log_index": log_index,
                 "operator_review_required": True,
                 "pool_not_auto_activated": True,
             }
             if is_v3 and len(topics) > 3:
                 metadata["fee_tier"] = int(topics[3], 16)
-                tick_spacing = int(words[0], 16)
+                tick_spacing_raw = int(words[0], 16)
                 metadata["tick_spacing"] = (
-                    tick_spacing - (1 << 256)
-                    if tick_spacing >= (1 << 255)
-                    else tick_spacing
+                    tick_spacing_raw - (1 << 256)
+                    if tick_spacing_raw >= (1 << 255)
+                    else tick_spacing_raw
+                )
+            if is_v4:
+                metadata.update(
+                    {
+                        "pool_id": pool_id,
+                        "pool_manager": factory,
+                        "fee_tier": fee,
+                        "tick_spacing": tick_spacing,
+                        "hooks_address": hooks,
+                        "singleton_pool": True,
+                        "native_currency_supported": token0
+                        == "0x" + "0" * 40
+                        or token1 == "0x" + "0" * 40,
+                    }
                 )
             events.append(
                 CapitalEvent(
@@ -304,7 +358,7 @@ class EvmDexFactoryDiscoveryAdapter:
                     "crypto_spot",
                     protocol,
                     pool,
-                    "dex_pool_created",
+                    "dex_pool_initialized" if is_v4 else "dex_pool_created",
                     timestamp,
                     now,
                     0,
