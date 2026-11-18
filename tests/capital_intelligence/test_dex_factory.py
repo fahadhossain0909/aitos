@@ -189,3 +189,49 @@ async def test_factory_discovery_fails_closed_when_reorg_exceeds_window():
     adapter._rpc = fake_rpc
     with pytest.raises(RuntimeError, match="exceeds retained canonical window"):
         await adapter.poll(cursor=cursor)
+
+
+
+@pytest.mark.asyncio
+async def test_factory_discovery_can_resume_bounded_historical_backfill():
+    factory = "0x" + "1" * 40
+    adapter = EvmDexFactoryDiscoveryAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        factories={factory: "uniswap_v2"},
+        confirmations=2,
+        max_block_range=10,
+        max_reorg_depth=2,
+        start_block=100,
+    )
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x70"
+        if method == "eth_getLogs":
+            assert params[0]["fromBlock"] == "0x64"
+            assert params[0]["toBlock"] == "0x6d"
+            return []
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000 + number),
+                "hash": "0x" + f"{number:064x}",
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, cursor = await adapter.poll()
+    assert events == []
+    assert json.loads(cursor)["head_block"] == 109
+    assert json.loads(cursor)["recent_hashes"]["109"] == "0x" + f"{109:064x}"
+
+
+def test_factory_discovery_validates_historical_start_block():
+    with pytest.raises(ValueError, match="start_block"):
+        EvmDexFactoryDiscoveryAdapter(
+            rpc_url="https://rpc.example",
+            chain_id="1",
+            factories={"0x" + "1" * 40: "uniswap_v2"},
+            start_block=-1,
+        )
