@@ -3,7 +3,11 @@ import json
 import pytest
 
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter, TRANSFER_TOPIC
-from aitos.capital_intelligence.dex import EvmDexSwapAdapter, V3_SWAP_TOPIC, V4_SWAP_TOPIC
+from aitos.capital_intelligence.dex import (
+    EvmDexSwapAdapter,
+    V3_SWAP_TOPIC,
+    V4_SWAP_TOPIC,
+)
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 
 
