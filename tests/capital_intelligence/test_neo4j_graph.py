@@ -70,3 +70,38 @@ async def test_graph_store_persists_event_observations_without_identity_claims()
     assert "beneficial_owner" not in query
     assert parameters["rows"][0]["actor_entity_id"] == "1:0xsender"
     assert parameters["rows"][0]["counterparty_entity_id"] == "1:0xreceiver"
+
+
+
+@pytest.mark.asyncio
+async def test_graph_store_reverts_orphaned_event_versions_by_canonical_hash():
+    class Result:
+        async def single(self):
+            return {"updated": 2}
+
+    class ReorgSession(FakeSession):
+        async def run(self, query, **kwargs):
+            self.calls.append((query, kwargs))
+            return Result()
+
+    class ReorgDriver(FakeDriver):
+        def session(self, **kwargs):
+            session = ReorgSession()
+            self.sessions.append(session)
+            return session
+
+    driver = ReorgDriver()
+    store = Neo4jEntityGraphStore(driver)
+    count = await store.reconcile_evm_reorg(
+        {
+            "source_id": "evm:1",
+            "from_block": 10,
+            "to_block": 11,
+            "canonical_hashes": {10: "0xcanonical10", 11: "0xcanonical11"},
+            "detected_at": "2026-11-18T00:00:00+00:00",
+        }
+    )
+    assert count == 2
+    query, params = driver.sessions[0].calls[0]
+    assert "v.finality = 'reverted'" in query
+    assert params["canonical_hashes"]["10"] == "0xcanonical10"
