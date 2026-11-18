@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
+_UINT64_MAX = (1 << 64) - 1
+_INT64_MAX = (1 << 63) - 1
+
 try:
     from aitos_native import FixedPointOrderBook as _RustOrderBook
 except ImportError:
@@ -105,21 +108,32 @@ class PythonFixedPointOrderBook:
 
     @staticmethod
     def _uint(value: int, name: str) -> int:
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise ValueError(f"{name} must be a non-negative integer")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            or value > _UINT64_MAX
+        ):
+            raise ValueError(f"{name} must be a uint64 integer")
         return value
 
     @staticmethod
     def _validate(rows) -> None:
         for price, quantity in rows:
-            if isinstance(price, bool) or not isinstance(price, int) or price <= 0:
-                raise ValueError("price units must be positive integers")
+            if (
+                isinstance(price, bool)
+                or not isinstance(price, int)
+                or price <= 0
+                or price > _INT64_MAX
+            ):
+                raise ValueError("price units must be positive int64 values")
             if (
                 isinstance(quantity, bool)
                 or not isinstance(quantity, int)
                 or quantity < 0
+                or quantity > _INT64_MAX
             ):
-                raise ValueError("quantity units must be non-negative integers")
+                raise ValueError("quantity units must be non-negative int64 values")
 
     def _load(self, target: dict[int, int], rows: Iterable[tuple[int, int]]) -> None:
         rows = list(rows)
@@ -138,6 +152,11 @@ class PythonFixedPointOrderBook:
     ) -> bool:
         first = self._uint(first_update_id, "first_update_id")
         final = self._uint(final_update_id, "final_update_id")
+        previous = (
+            self._uint(previous_update_id, "previous_update_id")
+            if previous_update_id is not None
+            else None
+        )
         bid_rows = list(bids)
         ask_rows = list(asks)
         self._validate(bid_rows)
@@ -150,7 +169,7 @@ class PythonFixedPointOrderBook:
             bridge = self.last_update_id + 1
             if not first <= bridge <= final:
                 raise ValueError("first delta does not bridge snapshot")
-        elif previous_update_id != self.last_update_id:
+        elif previous != self.last_update_id:
             raise ValueError("order-book sequence gap")
         for price, quantity in bid_rows:
             if quantity == 0:
