@@ -13,6 +13,8 @@ from .runtime import ADLRuntime
 from .replay import (
     GovernanceAssessment,
     GovernanceThresholds,
+    ReplayExecution,
+    ReplayExecutionSummary,
     ReplayObservation,
     ReplayReport,
     assess_challenger,
