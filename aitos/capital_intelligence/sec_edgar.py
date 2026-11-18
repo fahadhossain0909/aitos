@@ -602,7 +602,6 @@ class SecEdgarFilingsAdapter:
         return events, serialized
 
 
-
 class SecEdgarArchiveBackfillSource:
     """Resumable, bounded traversal of SEC historical submissions archive files.
 
