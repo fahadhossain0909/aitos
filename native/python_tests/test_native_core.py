@@ -155,3 +155,64 @@ def test_python_reference_enforces_native_integer_widths():
     book = PythonFixedPointOrderBook(10, [(100, 1)], [(102, 1)])
     with pytest.raises(ValueError, match="previous_update_id"):
         book.apply_delta(11, 11, previous_update_id=-1)
+
+
+def test_batch_updates_match_sequential_contract():
+    updates = [
+        (10, 11, [(102, 2)], [], None),
+        (12, 12, [(101, 0)], [(103, 0), (104, 7)], 11),
+    ]
+    batch = PythonFixedPointOrderBook(10, [(100, 5), (101, 3)], [(103, 4)])
+    sequential = PythonFixedPointOrderBook(
+        10, [(100, 5), (101, 3)], [(103, 4)]
+    )
+    assert batch.apply_deltas(updates) == 2
+    assert sequential.apply_delta(10, 11, [(102, 2)], [], None)
+    assert sequential.apply_delta(
+        12, 12, [(101, 0)], [(103, 0), (104, 7)], 11
+    )
+    assert batch.snapshot(5) == sequential.snapshot(5)
+
+
+def test_native_batch_matches_python_reference():
+    if not native_available():
+        pytest.skip("optional Rust extension not installed")
+    updates = [
+        (10, 11, [(102, 2)], [], None),
+        (12, 12, [(101, 0)], [(103, 0), (104, 7)], 11),
+    ]
+    native = create_order_book(10, [(100, 5), (101, 3)], [(103, 4)])
+    reference = PythonFixedPointOrderBook(
+        10, [(100, 5), (101, 3)], [(103, 4)]
+    )
+    assert native.apply_deltas(updates) == reference.apply_deltas(updates) == 2
+    assert native.snapshot(5) == reference.snapshot(5)
+
+
+def test_session_batch_converts_all_events_before_mutation():
+    session = NativeOrderBookSession(
+        InstrumentScale(Decimal("0.01"), Decimal("0.001")),
+        100,
+        [("65000.12", "0.125")],
+        [("65000.14", "0.250")],
+        prefer_native=False,
+    )
+    updates = [
+        SimpleNamespace(
+            first_update_id=100,
+            final_update_id=101,
+            previous_update_id=0,
+            bids=(("65000.12", "0.200"),),
+            asks=(),
+        ),
+        SimpleNamespace(
+            first_update_id=102,
+            final_update_id=102,
+            previous_update_id=101,
+            bids=(("65000.123", "0.100"),),
+            asks=(),
+        ),
+    ]
+    with pytest.raises(ValueError, match="not aligned"):
+        session.apply_depth_updates(updates)
+    assert session.snapshot(5)[0] == 100
