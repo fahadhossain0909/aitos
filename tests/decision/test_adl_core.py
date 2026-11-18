@@ -56,6 +56,8 @@ def snapshot(**features):
 def response(**overrides):
     values = dict(
         probabilities={"LONG": 0.75, "SHORT": 0.10, "NO_TRADE": 0.15},
+        scores={"quality": 4},
+        nouls={"reversal": 0.7},
         economics=TradeEconomics(0.65, 100.0, 100.0, 5.0),
         model_id="native-test",
         model_version="1",
@@ -103,6 +105,28 @@ def test_runtime_is_advisory_only_in_shadow_mode(spec):
     assert result.proposed_action == DecisionAction.LONG
     assert result.execution_eligible is False
     assert result.expected_value == pytest.approx(25.0)
+
+
+def test_runtime_abstains_on_out_of_range_score(spec):
+    runtime = ADLRuntime(
+        StaticProvider(response(scores={"quality": 6})),
+        policy=DecisionPolicy(require_calibration=False),
+    )
+    now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    result = runtime.evaluate(snapshot(), spec, now=now)
+    assert result.action == DecisionAction.ABSTAIN
+    assert "score" in " ".join(result.reasons)
+
+
+def test_runtime_abstains_on_invalid_noul_probability(spec):
+    runtime = ADLRuntime(
+        StaticProvider(response(nouls={"reversal": 1.2})),
+        policy=DecisionPolicy(require_calibration=False),
+    )
+    now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    result = runtime.evaluate(snapshot(), spec, now=now)
+    assert result.action == DecisionAction.ABSTAIN
+    assert "noul" in " ".join(result.reasons)
 
 
 def test_runtime_abstains_when_calibration_is_cold(spec):
