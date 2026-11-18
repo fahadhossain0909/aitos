@@ -19,6 +19,7 @@ from neo4j import AsyncGraphDatabase
 from aitos.core.contracts import Event, EventPriority
 from aitos.eventbus.redis_bus import EventBus
 
+from aitos.capital_intelligence.alerts import CapitalFlowWebhookAlerter
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
 from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdapter
 from aitos.capital_intelligence.cftc import CftcCotAdapter
@@ -749,6 +750,29 @@ async def main() -> None:
         redis_client,
         max_entries=int(os.getenv("AITOS_CFEI_WATCHLIST_MAX_ENTRIES", "5000")),
     )
+    alert_webhook_url = os.getenv("AITOS_CFEI_ALERT_WEBHOOK_URL", "").strip()
+    alerter = (
+        CapitalFlowWebhookAlerter(
+            redis_client=redis_client,
+            watchlist=watchlist,
+            webhook_url=alert_webhook_url,
+            timeout_seconds=float(
+                os.getenv("AITOS_CFEI_ALERT_TIMEOUT_SECONDS", "8")
+            ),
+        )
+        if alert_webhook_url
+        else None
+    )
+    if alerter is not None:
+        original_store_append = store.append
+
+        async def append_with_watchlist_alerts(events):
+            await original_store_append(events)
+            for event in events:
+                await alerter.notify_event(event)
+
+        store.append = append_with_watchlist_alerts
+        LOG.info("CFEI watchlist webhook alert delivery enabled")
     metrics = asyncio.create_task(
         _metrics_server(
             int(os.getenv("AITOS_CFEI_METRICS_PORT", "8121")),
@@ -826,6 +850,8 @@ async def main() -> None:
     await asyncio.gather(metrics, return_exceptions=True)
     for worker in workers:
         await worker.close()
+    if alerter is not None:
+        await alerter.close()
     if hasattr(price_book, "close"):
         await price_book.close()
     for resolver in metadata_resolvers:
