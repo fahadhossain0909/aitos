@@ -244,11 +244,17 @@ class NativeOrderBookSession:
     def apply_depth_update(self, update) -> bool:
         """Apply a DepthUpdate only after both sides convert successfully."""
         bids = [
-            (self.scale.price_to_ticks(price), self.scale.quantity_to_lots(quantity))
+            (
+                self.scale.price_to_ticks(price),
+                self.scale.quantity_to_lots(quantity),
+            )
             for price, quantity in update.bids
         ]
         asks = [
-            (self.scale.price_to_ticks(price), self.scale.quantity_to_lots(quantity))
+            (
+                self.scale.price_to_ticks(price),
+                self.scale.quantity_to_lots(quantity),
+            )
             for price, quantity in update.asks
         ]
         return self.book.apply_delta(
