@@ -74,8 +74,13 @@ def rank_capital_candidates(
 
         if is_candidate_address(event.actor_id):
             actor_id = f"{event.venue}:{event.actor_id}"
+            actor_counterparty = (
+                event.counterparty_id
+                if is_candidate_address(event.counterparty_id)
+                else None
+            )
             grouped.setdefault(actor_id, []).append(
-                (event, sign, event.counterparty_id)
+                (event, sign, actor_counterparty)
             )
         # A transfer has two address-level perspectives. The recipient's
         # direction is the inverse of the sender's; this is flow accounting,
@@ -85,8 +90,11 @@ def rank_capital_candidates(
             and event.counterparty_id != event.actor_id
         ):
             counterparty_id = f"{event.venue}:{event.counterparty_id}"
+            recipient_counterparty = (
+                event.actor_id if is_candidate_address(event.actor_id) else None
+            )
             grouped.setdefault(counterparty_id, []).append(
-                (event, -sign, event.actor_id)
+                (event, -sign, recipient_counterparty)
             )
 
     ranked: list[CapitalCandidateRank] = []
