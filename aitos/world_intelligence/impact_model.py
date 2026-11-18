@@ -34,10 +34,16 @@ class EventImpactTrainingRow:
         if not all(
             isinstance(value, str) and value.strip()
             for value in (
-                self.event_id, self.asset, self.horizon, self.regime, self.event_type
+                self.event_id,
+                self.asset,
+                self.horizon,
+                self.regime,
+                self.event_type,
             )
         ):
-            raise ValueError("event identity, asset, horizon, regime and type are required")
+            raise ValueError(
+                "event identity, asset, horizon, regime and type are required"
+            )
         for name in ("event_time", "outcome_available_at"):
             value = getattr(self, name)
             if not isinstance(value, datetime) or value.tzinfo is None:
@@ -58,7 +64,9 @@ class EventImpactTrainingRow:
         for name, (lower, upper) in bounds.items():
             number = float(getattr(self, name))
             if not isfinite(number) or not lower <= number <= upper:
-                raise ValueError(f"{name} must be finite and within [{lower}, {upper}]")
+                raise ValueError(
+                    f"{name} must be finite and within [{lower}, {upper}]"
+                )
             object.__setattr__(self, name, number)
 
 
@@ -118,7 +126,9 @@ class EventImpactProbabilityModel:
             or features.horizon != self.horizon
             or features.regime != self.regime
         ):
-            raise ValueError("features do not match the model asset/horizon/regime cohort")
+            raise ValueError(
+                "features do not match the model asset/horizon/regime cohort"
+            )
         vector = _raw_features(features, self.event_types)
         standardized = [
             (value - mean) / scale
@@ -188,12 +198,16 @@ def fit_event_impact_model(
     labels = [1.0 if row.forward_return > 0.0 else 0.0 for row in cohort]
     positives = sum(labels)
     if positives == 0 or positives == len(labels):
-        raise ValueError("training cohort must contain both positive and negative outcomes")
+        raise ValueError(
+            "training cohort must contain both positive and negative outcomes"
+        )
 
     event_types = tuple(sorted({row.event_type for row in cohort}))
     matrix = [_raw_features(row, event_types) for row in cohort]
     width = len(matrix[0])
-    means = [sum(row[index] for row in matrix) / len(matrix) for index in range(width)]
+    means = [
+        sum(row[index] for row in matrix) / len(matrix) for index in range(width)
+    ]
     scales = []
     for index, mean in enumerate(means):
         variance = sum((row[index] - mean) ** 2 for row in matrix) / len(matrix)
@@ -210,14 +224,19 @@ def fit_event_impact_model(
         gradient = [0.0] * width
         intercept_gradient = 0.0
         for row, label in zip(matrix, labels):
-            score = max(-35.0, min(35.0, intercept + sum(w * x for w, x in zip(weights, row))))
+            score = max(
+                -35.0,
+                min(35.0, intercept + sum(w * x for w, x in zip(weights, row))),
+            )
             error = 1.0 / (1.0 + exp(-score)) - label
             intercept_gradient += error
             for index, value in enumerate(row):
                 gradient[index] += error * value
         intercept -= learning_rate * intercept_gradient / count
         for index in range(width):
-            gradient[index] = gradient[index] / count + regularization * weights[index]
+            gradient[index] = (
+                gradient[index] / count + regularization * weights[index]
+            )
             weights[index] -= learning_rate * gradient[index]
 
     return EventImpactProbabilityModel(
