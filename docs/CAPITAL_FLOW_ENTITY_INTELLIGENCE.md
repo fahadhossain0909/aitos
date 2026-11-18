@@ -116,7 +116,8 @@ These are not claimed as implemented or validated by this PR:
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.
 - Full DEX coverage across every protocol, pool factory and chain. Only explicitly configured Uniswap V2/V3-compatible pools are decoded.
 - Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, historical refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
-- Dashboard/API integration, alert routing and integration into World Intelligence context.
+- Per-entity explorer/API and entity-level dashboard remain open. Observer-level Grafana metrics dashboard and Prometheus alerts are implemented; alert delivery to external operator channels remains deployment-specific.
+- The World Intelligence adapter bridge and tests are implemented, but it is not yet wired into a production WI runtime/consumer. Scanner/AI Kernel feature integration remains deliberately disabled.
 - Historical data backfill, replay, walk-forward evaluation, false-positive analysis, model calibration and measured predictive lift.
 - Production runtime deployment, provider-specific rate-budget tests, ClickHouse/Redis integration tests and operator runbooks for disaster recovery.
 
