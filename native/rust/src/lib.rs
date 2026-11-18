@@ -2,6 +2,9 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::BTreeMap;
 
+type PriceQuantity = (i64, i64);
+type BookSnapshot = (u64, Vec<PriceQuantity>, Vec<PriceQuantity>);
+
 struct Book {
     last: u64,
     bids: BTreeMap<i64, i64>,
@@ -164,7 +167,7 @@ impl FixedPointOrderBook {
         )
     }
 
-    fn snapshot(&self, depth: usize) -> PyResult<(u64, Vec<(i64, i64)>, Vec<(i64, i64)>)> {
+    fn snapshot(&self, depth: usize) -> PyResult<BookSnapshot> {
         if depth == 0 {
             return Err(PyValueError::new_err("depth must be positive"));
         }
