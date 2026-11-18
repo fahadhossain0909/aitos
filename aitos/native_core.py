@@ -118,21 +118,30 @@ class PythonFixedPointOrderBook:
         return value
 
     @staticmethod
-    def _validate(rows) -> None:
+    def _validate_abi_levels(rows) -> None:
         for price, quantity in rows:
             if (
                 isinstance(price, bool)
                 or not isinstance(price, int)
-                or price <= 0
+                or price < -_INT64_MAX - 1
                 or price > _INT64_MAX
             ):
-                raise ValueError("price units must be positive int64 values")
+                raise ValueError("price units must fit int64")
             if (
                 isinstance(quantity, bool)
                 or not isinstance(quantity, int)
-                or quantity < 0
+                or quantity < -_INT64_MAX - 1
                 or quantity > _INT64_MAX
             ):
+                raise ValueError("quantity units must fit int64")
+
+    @classmethod
+    def _validate(cls, rows) -> None:
+        cls._validate_abi_levels(rows)
+        for price, quantity in rows:
+            if price <= 0:
+                raise ValueError("price units must be positive int64 values")
+            if quantity < 0:
                 raise ValueError("quantity units must be non-negative int64 values")
 
     def _load(self, target: dict[int, int], rows: Iterable[tuple[int, int]]) -> None:
@@ -199,8 +208,8 @@ class PythonFixedPointOrderBook:
             )
             bid_rows = list(bids)
             ask_rows = list(asks)
-            self._validate(bid_rows)
-            self._validate(ask_rows)
+            self._validate_abi_levels(bid_rows)
+            self._validate_abi_levels(ask_rows)
             prepared.append((first, final, bid_rows, ask_rows, previous))
 
         applied = 0
