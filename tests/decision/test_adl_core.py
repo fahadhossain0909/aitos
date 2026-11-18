@@ -150,9 +150,7 @@ def test_hard_risk_veto_cannot_be_overridden(spec):
 
 
 def test_invalid_probabilities_abstain(spec):
-    bad = response(
-        probabilities={"LONG": float("nan"), "SHORT": 0.1, "NO_TRADE": 0.9}
-    )
+    bad = response(probabilities={"LONG": float("nan"), "SHORT": 0.1, "NO_TRADE": 0.9})
     runtime = ADLRuntime(
         StaticProvider(bad), policy=DecisionPolicy(require_calibration=False)
     )

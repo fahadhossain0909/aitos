@@ -84,8 +84,7 @@ class ProbabilityCalibrator:
             )
             bins[self._bucket(probability)].append(target - probability)
         ece = sum(
-            len(errors) * abs(sum(errors) / len(errors))
-            for errors in bins.values()
+            len(errors) * abs(sum(errors) / len(errors)) for errors in bins.values()
         ) / len(rows)
         return CalibrationMetrics(
             len(rows), brier / len(rows), log_loss / len(rows), ece
