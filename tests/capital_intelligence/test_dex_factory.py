@@ -9,11 +9,10 @@ from aitos.capital_intelligence.dex_factory import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "protocol,pool_word,topics",
+    "protocol,topics",
     [
         (
             "uniswap_v2",
-            0,
             lambda token0, token1: [
                 V2_PAIR_CREATED_TOPIC,
                 "0x" + "0" * 24 + token0[2:],
@@ -22,7 +21,6 @@ from aitos.capital_intelligence.dex_factory import (
         ),
         (
             "uniswap_v3",
-            1,
             lambda token0, token1: [
                 V3_POOL_CREATED_TOPIC,
                 "0x" + "0" * 24 + token0[2:],
@@ -33,7 +31,7 @@ from aitos.capital_intelligence.dex_factory import (
     ],
 )
 async def test_factory_discovery_decodes_pool_and_token_addresses(
-    protocol, pool_word, topics
+    protocol, topics
 ):
     factory = "0x" + "1" * 40
     token0 = "0x" + "2" * 40
