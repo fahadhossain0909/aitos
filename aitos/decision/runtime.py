@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Mapping
 
 from .aggregation import aggregate_assessments
 from .calibration import ProbabilityCalibrator

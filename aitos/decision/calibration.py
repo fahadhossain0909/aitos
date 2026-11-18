@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque
 
 
 @dataclass(frozen=True)
@@ -38,7 +37,7 @@ class ProbabilityCalibrator:
         self.prior_strength = prior_strength
         self._counts: dict[str, list[int]] = defaultdict(lambda: [0] * bins)
         self._successes: dict[str, list[int]] = defaultdict(lambda: [0] * bins)
-        self._history: Deque[tuple[str, float, bool]] = deque(maxlen=max_history)
+        self._history: deque[tuple[str, float, bool]] = deque(maxlen=max_history)
 
     def _bucket(self, probability: float) -> int:
         return min(self.bins - 1, int(probability * self.bins))
