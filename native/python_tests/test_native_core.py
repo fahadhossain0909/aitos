@@ -166,9 +166,7 @@ def test_batch_updates_match_sequential_contract():
     sequential = PythonFixedPointOrderBook(10, [(100, 5), (101, 3)], [(103, 4)])
     assert batch.apply_deltas(updates) == 2
     assert sequential.apply_delta(10, 11, [(102, 2)], [], None)
-    assert sequential.apply_delta(
-        12, 12, [(101, 0)], [(103, 0), (104, 7)], 11
-    )
+    assert sequential.apply_delta(12, 12, [(101, 0)], [(103, 0), (104, 7)], 11)
     assert batch.snapshot(5) == sequential.snapshot(5)
 
 
