@@ -18,6 +18,7 @@ from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdap
 from aitos.capital_intelligence.cftc import CftcCotAdapter
 from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
+from aitos.capital_intelligence.dex_factory import EvmDexFactoryDiscoveryAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
 from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
@@ -244,6 +245,7 @@ async def main() -> None:
             chain_id=str(config["chain_id"]),
             pools=config["pools"],
             confirmations=int(config.get("confirmations", 12)),
+            max_reorg_depth=int(config.get("max_reorg_depth", 64)),
         )
         workers.append(
             CapitalIngestionWorker(
@@ -253,6 +255,25 @@ async def main() -> None:
                 store=store,
                 poll_interval_seconds=interval,
                 event_enricher=enricher,
+            )
+        )
+
+    dex_factory_cfg = _json_env("AITOS_CFEI_DEX_FACTORIES", [])
+    for index, config in enumerate(dex_factory_cfg):
+        adapter = EvmDexFactoryDiscoveryAdapter(
+            rpc_url=config["rpc_url"],
+            chain_id=str(config["chain_id"]),
+            factories=config["factories"],
+            confirmations=int(config.get("confirmations", 12)),
+            max_block_range=int(config.get("max_block_range", 500)),
+        )
+        workers.append(
+            CapitalIngestionWorker(
+                source_id=f"dex-factory-{config['chain_id']}-{index}",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=max(interval, 30.0),
             )
         )
 
