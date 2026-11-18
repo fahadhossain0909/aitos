@@ -70,9 +70,7 @@ def test_duplicate_observation_ids_are_rejected():
 def test_calibration_is_reported_separately_by_asset_horizon_and_regime():
     rows = [
         observation(0, 0.8, True),
-        observation(
-            1, 0.2, False, asset="ETHUSDT", horizon="4h", regime="range"
-        ),
+        observation(1, 0.2, False, asset="ETHUSDT", horizon="4h", regime="range"),
     ]
     reports = calibration_cohorts(rows, as_of=BASE + timedelta(days=1))
     assert set(reports) == {
