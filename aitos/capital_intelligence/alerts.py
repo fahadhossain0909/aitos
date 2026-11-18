@@ -100,7 +100,9 @@ class CapitalFlowWebhookAlerter:
                 )
             }
             try:
-                async with self.session.post(self.webhook_url, json=payload) as response:
+                async with self.session.post(
+                    self.webhook_url, json=payload
+                ) as response:
                     response.raise_for_status()
                 await self.redis.set(key, "sent", ex=self.dedupe_ttl_seconds)
                 sent += 1
