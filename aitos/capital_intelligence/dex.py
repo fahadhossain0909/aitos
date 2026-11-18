@@ -319,7 +319,7 @@ class EvmDexSwapAdapter:
                     "dex_swap",
                     "crypto_spot",
                     self.pools[pool],
-                    pool,
+                    ("uniswap_v4" if topic == V4_SWAP_TOPIC else pool),
                     "pool_swap",
                     block_times[block],
                     now,
