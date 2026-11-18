@@ -184,9 +184,7 @@ class SecEdgarFilingsAdapter:
             )
             if quantity < 0 or (reported_value is not None and reported_value < 0):
                 raise RuntimeError("13F filing contains a negative holding")
-            event_id = self._event_id(
-                "13f", cik, period.isoformat(), cusip, str(index)
-            )
+            event_id = self._event_id("13f", cik, period.isoformat(), cusip, str(index))
             events.append(
                 CapitalEvent(
                     event_id,
