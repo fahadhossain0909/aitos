@@ -305,14 +305,16 @@ async def test_sec_amended_13f_payload_reuses_stable_row_identity():
     args = (
         "0000320193",
         "0000320193-26-000001",
-        "13F-HR/A",
+        "13F-HR",
         adapter._day("2026-05-15"),
         "2026-03-31",
         "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/infotable.xml",
     )
     first = await adapter._parse_13f(*args)
-    second = await adapter._parse_13f(*args)
+    amended_args = (*args[:1], "0000320193-26-000002", *args[2:])
+    second = await adapter._parse_13f(*amended_args)
     assert first[0].event_id == second[0].event_id
+    assert first[0].metadata["accession_number"] != second[0].metadata["accession_number"]
     assert first[0].quantity == 10000
     assert second[0].quantity == 11000
     assert first[0].usd_value == 2_500_000
