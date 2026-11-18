@@ -292,7 +292,6 @@ async def test_dex_reorg_deeper_than_retained_window_fails_closed():
         await adapter.poll(cursor=cursor)
 
 
-
 @pytest.mark.asyncio
 async def test_v4_swap_decodes_signed_deltas_by_pool_id_and_manager():
     manager = "0x" + "1" * 40
