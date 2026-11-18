@@ -42,6 +42,7 @@ class SecEdgarFilingsAdapter:
         timeout_seconds: float = 12.0,
         max_filings_per_poll: int = 25,
         initial_filings_per_cik: int = 10,
+        revision_rescan_filings_per_poll: int = 5,
         session: aiohttp.ClientSession | None = None,
     ):
         normalized = sorted({str(int(cik)).zfill(10) for cik in ciks})
@@ -56,6 +57,8 @@ class SecEdgarFilingsAdapter:
         if (
             not 1 <= max_filings_per_poll <= 100
             or not 1 <= initial_filings_per_cik <= 100
+            or isinstance(revision_rescan_filings_per_poll, bool)
+            or not 0 <= revision_rescan_filings_per_poll <= 25
         ):
             raise ValueError("invalid filing bounds")
         self.ciks = normalized
@@ -64,6 +67,7 @@ class SecEdgarFilingsAdapter:
         self.timeout_seconds = timeout_seconds
         self.max_filings_per_poll = max_filings_per_poll
         self.initial_filings_per_cik = initial_filings_per_cik
+        self.revision_rescan_filings_per_poll = revision_rescan_filings_per_poll
         self.session = session
         self.owns_session = session is None
         self._request_lock = asyncio.Lock()
@@ -424,10 +428,22 @@ class SecEdgarFilingsAdapter:
                     selected = rows[: positions[0]]
             else:
                 selected = rows[: self.initial_filings_per_cik]
+            work = [(row, True) for row in reversed(selected)]
+            seen_accessions = {row["accession"] for row, _ in work}
+            # Re-read a small recent window every poll so corrected/updated
+            # filing documents are observed even when their accession is known.
+            for row in reversed(
+                rows[: self.revision_rescan_filings_per_poll]
+            ):
+                if row["accession"] not in seen_accessions:
+                    work.append((row, False))
+                    seen_accessions.add(row["accession"])
+
             stop_batch = False
-            for row in reversed(selected):
+            for row, advances_cursor in work:
                 if row["form"] not in self.forms:
-                    next_cursor[cik] = row["accession"]
+                    if advances_cursor:
+                        next_cursor[cik] = row["accession"]
                     continue
                 if processed_filings >= self.max_filings_per_poll:
                     stop_batch = True
@@ -461,7 +477,8 @@ class SecEdgarFilingsAdapter:
                             cik, accession, filing_date, row["form"], document_url
                         )
                     )
-                next_cursor[cik] = accession
+                if advances_cursor:
+                    next_cursor[cik] = accession
             if stop_batch:
                 break
         serialized = json.dumps(next_cursor, sort_keys=True, separators=(",", ":"))
