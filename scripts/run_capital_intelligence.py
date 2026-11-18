@@ -456,6 +456,7 @@ async def main() -> None:
             rpc_url=config["rpc_url"],
             chain_id=str(config["chain_id"]),
             pools=config["pools"],
+            v4_pool_tokens=config.get("v4_pool_tokens", {}),
             confirmations=int(config.get("confirmations", 12)),
             max_reorg_depth=int(config.get("max_reorg_depth", 64)),
         )
