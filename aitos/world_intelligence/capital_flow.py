@@ -99,7 +99,7 @@ class CapitalFlowIntelligenceAdapter:
         )
         events: list[IntelligenceEvent] = []
         next_cursor = cursor
-        for payload_json, observed_at, _ in result.result_rows:
+        for payload_json, _observed_at, _ in result.result_rows:
             event = self._event(payload_json)
             if event.finality == "reverted":
                 # Reverted events are retained in CFEI's source of truth, but are
