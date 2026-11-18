@@ -164,13 +164,34 @@ def summarize_replay(
 
 
 def chronological_split(
-    rows: Iterable[ReplayRow], *, test_fraction: float = 0.2
+    rows: Iterable[ReplayRow],
+    *,
+    test_fraction: float = 0.2,
+    embargo_seconds: int = 0,
 ) -> tuple[list[ReplayRow], list[ReplayRow]]:
-    """Split strictly by time; random row splitting is intentionally unavailable."""
+    """Chronological split with label-horizon purging and optional embargo.
+
+    A training event is removed when its longest forward label can reach the
+    first test event. This prevents overlapping outcome windows from leaking
+    test-period price information into the training labels.
+    """
     if not 0.05 <= test_fraction <= 0.5:
         raise ValueError("test_fraction must be in [0.05, 0.5]")
+    if not isinstance(embargo_seconds, int) or embargo_seconds < 0:
+        raise ValueError("embargo_seconds must be a non-negative integer")
     ordered = sorted(rows, key=lambda row: (row.event_time, row.event_id))
     if len(ordered) < 2:
         return ordered, []
     split_at = max(1, min(len(ordered) - 1, int(len(ordered) * (1 - test_fraction))))
-    return ordered[:split_at], ordered[split_at:]
+    test = ordered[split_at:]
+    test_start = test[0].event_time
+    train = [
+        row
+        for row in ordered[:split_at]
+        if row.forward_returns
+        and row.event_time
+        + timedelta(seconds=max(row.forward_returns))
+        + timedelta(seconds=embargo_seconds)
+        < test_start
+    ]
+    return train, test
