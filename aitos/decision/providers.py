@@ -72,3 +72,57 @@ class JevDecisionProvider:
             model_version=str(result.get("model_version", self.model_version)),
             rationale=tuple(result.get("rationale", ())),
         )
+
+
+
+class NativeEvidenceProvider:
+    """Transparent scanner-evidence baseline, not a trained/calibrated model.
+
+    It converts directional evidence into a conservative prior distribution.
+    Production policy must keep calibration enabled until matured outcomes
+    establish empirical reliability. It intentionally supplies no trade EV.
+    """
+
+    def __init__(self, *, maximum_directional_mass: float = 0.80) -> None:
+        if not 0.0 < maximum_directional_mass <= 0.95:
+            raise ValueError("maximum directional mass must be in (0, 0.95]")
+        self.maximum_directional_mass = maximum_directional_mass
+
+    def evaluate(self, snapshot: MarketSnapshot, spec: DecisionSpec) -> ModelResponse:
+        direction = str(snapshot.features.get("direction", "")).upper()
+        if direction not in {"LONG", "SHORT"}:
+            raise ValueError("native evidence provider requires LONG or SHORT direction")
+        score = snapshot.features.get("composite_score")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            raise ValueError("scanner composite score must be numeric")
+        if not 0.0 <= float(score) <= 100.0:
+            raise ValueError("scanner composite score must be between zero and 100")
+        directional_mass = min(
+            self.maximum_directional_mass,
+            max(0.0, (float(score) - 50.0) / 50.0 * self.maximum_directional_mass),
+        )
+        opposite_mass = directional_mass * 0.25
+        selected_mass = directional_mass - opposite_mass
+        no_trade_mass = 1.0 - directional_mass
+        if direction == "LONG":
+            probabilities = {
+                "LONG": selected_mass,
+                "SHORT": opposite_mass,
+                "NO_TRADE": no_trade_mass,
+            }
+        else:
+            probabilities = {
+                "LONG": opposite_mass,
+                "SHORT": selected_mass,
+                "NO_TRADE": no_trade_mass,
+            }
+        return ModelResponse(
+            probabilities=probabilities,
+            scores={"scanner_composite_score": float(score)},
+            model_id="aitos-native-evidence",
+            model_version="heuristic-prior-v1",
+            rationale=(
+                "heuristic prior derived from scanner score; not empirically calibrated",
+                "calibration and expected-value gates remain mandatory",
+            ),
+        )

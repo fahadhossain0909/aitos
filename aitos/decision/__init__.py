@@ -8,7 +8,7 @@ from .attribution import (
 )
 from .calibration import CalibrationMetrics, ProbabilityCalibrator
 from .dsl import DecisionLanguageError, DecisionLanguageParser, parse_decision_spec
-from .providers import DecisionProvider, JevDecisionProvider
+from .providers import DecisionProvider, JevDecisionProvider, NativeEvidenceProvider
 from .runtime import ADLRuntime
 from .replay import (
     GovernanceAssessment,
@@ -54,6 +54,7 @@ __all__ = [
     "MarketSnapshot",
     "ModelResponse",
     "NoulQuestion",
+    "NativeEvidenceProvider",
     "ProbabilityCalibrator",
     "ReplayObservation",
     "ReplayReport",
