@@ -84,3 +84,46 @@ def test_chronological_split_keeps_future_rows_out_of_train():
     train, test = chronological_split(rows, test_fraction=0.2)
     assert train and test
     assert max(row.event_time for row in train) < min(row.event_time for row in test)
+
+
+
+def test_chronological_split_purges_training_labels_that_overlap_test_period():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = []
+    for index in range(10):
+        at = start + timedelta(minutes=index)
+        rows.append(
+            type("Row", (), {
+                "event_id": str(index),
+                "event_time": at,
+                "forward_returns": {300: 0.01},
+            })()
+        )
+    train, test = chronological_split(rows, test_fraction=0.2)
+    test_start = min(row.event_time for row in test)
+    assert train and test
+    assert all(
+        row.event_time + timedelta(seconds=max(row.forward_returns)) < test_start
+        for row in train
+    )
+
+
+def test_chronological_split_supports_explicit_embargo_and_validates_it():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        type("Row", (), {
+            "event_id": str(index),
+            "event_time": start + timedelta(minutes=index),
+            "forward_returns": {60: 0.01},
+        })()
+        for index in range(10)
+    ]
+    train, test = chronological_split(
+        rows, test_fraction=0.2, embargo_seconds=120
+    )
+    test_start = min(row.event_time for row in test)
+    assert all(
+        row.event_time + timedelta(seconds=180) < test_start for row in train
+    )
+    with pytest.raises(ValueError):
+        chronological_split(rows, embargo_seconds=-1)
