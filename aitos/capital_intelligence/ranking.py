@@ -44,11 +44,14 @@ def rank_capital_candidates(
         raise ValueError("minimum_events must be positive")
 
     grouped: dict[str, list[tuple[CapitalEvent, int, str | None]]] = {}
+    null_evm_addresses = {
+        "0x" + "0" * 40,
+        "0x000000000000000000000000000000000000dead",
+    }
     for event in events:
         identity_kind = event.metadata.get("actor_identity_kind")
         if (
-            not event.actor_id
-            or identity_kind not in {"evm_address", "solana_address"}
+            identity_kind not in {"evm_address", "solana_address"}
             or event.metadata.get("actor_is_pool_caller_not_verified_beneficial_owner")
             is True
             or event.metadata.get("aggregate_only") is True
@@ -60,14 +63,27 @@ def rank_capital_candidates(
         sign = event.metadata.get("flow_sign", 0)
         if sign not in (-1, 0, 1):
             raise ValueError("flow_sign must be -1, 0, or 1")
-        actor_id = f"{event.venue}:{event.actor_id}"
-        grouped.setdefault(actor_id, []).append(
-            (event, sign, event.counterparty_id)
-        )
+
+        def is_candidate_address(address: str | None) -> bool:
+            if not address:
+                return False
+            return not (
+                identity_kind == "evm_address"
+                and address.lower() in null_evm_addresses
+            )
+
+        if is_candidate_address(event.actor_id):
+            actor_id = f"{event.venue}:{event.actor_id}"
+            grouped.setdefault(actor_id, []).append(
+                (event, sign, event.counterparty_id)
+            )
         # A transfer has two address-level perspectives. The recipient's
         # direction is the inverse of the sender's; this is flow accounting,
         # not an inference about trade intent or beneficial ownership.
-        if event.counterparty_id and event.counterparty_id != event.actor_id:
+        if (
+            is_candidate_address(event.counterparty_id)
+            and event.counterparty_id != event.actor_id
+        ):
             counterparty_id = f"{event.venue}:{event.counterparty_id}"
             grouped.setdefault(counterparty_id, []).append(
                 (event, -sign, event.actor_id)
