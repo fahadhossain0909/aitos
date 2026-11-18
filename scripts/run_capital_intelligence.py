@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
-import hmac
 import os
 import signal
-from typing import Any
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import clickhouse_connect
@@ -26,8 +26,8 @@ from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.dex_factory import EvmDexFactoryDiscoveryAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
-from aitos.capital_intelligence.explorer import CapitalEntityExplorer
 from aitos.capital_intelligence.contracts import EntityLabel
+from aitos.capital_intelligence.explorer import CapitalEntityExplorer
 from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
 from aitos.capital_intelligence.evm_token_metadata import EvmTokenMetadataResolver
