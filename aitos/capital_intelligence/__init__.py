@@ -1,5 +1,6 @@
 """AITOS Capital Flow & Entity Intelligence."""
 
+from .alerts import CapitalFlowWebhookAlerter
 from .behavior import BehaviorAssessment, assess_capital_behavior
 from .binance import BinanceFuturesCapitalAdapter
 from .binance_market import BinanceMarketStructureAdapter
@@ -37,7 +38,8 @@ from .replay import (
 )
 from .runtime import CapitalIngestionWorker, RedisCheckpointStore
 from .solana import SolanaAddressActivityAdapter
-from .sec_edgar import SecEdgarFilingsAdapter
+from .sec_edgar import SecEdgarArchiveBackfillSource, SecEdgarFilingsAdapter
+from .watchlist import RedisEntityWatchlist
 from .storage import ClickHouseCapitalStore
 from .token_registry import TokenMetadata, TokenRegistry
 from .valuation import PointInTimePriceBook, PriceQuote, value_quantity
@@ -52,6 +54,7 @@ __all__ = [
     "Neo4jEntityGraphStore",
     "BinanceHistoricalPriceBook",
     "CapitalCandidateRank",
+    "CapitalFlowWebhookAlerter",
     "CapitalEntityExplorer",
     "CapitalEvent",
     "CftcCotAdapter",
@@ -72,6 +75,8 @@ __all__ = [
     "ProbabilityEvaluation",
     "PriceQuote",
     "RedisCheckpointStore",
+    "RedisEntityWatchlist",
+    "SecEdgarArchiveBackfillSource",
     "SecEdgarFilingsAdapter",
     "SolanaAddressActivityAdapter",
     "TokenMetadata",
