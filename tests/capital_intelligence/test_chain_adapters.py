@@ -162,12 +162,12 @@ async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
                 + (token0 if params[0]["data"] == "0x0dfe1681" else token1)[2:]
             )
         if method == "eth_getBlockByNumber":
-            return {"timestamp": hex(1_700_000_000)}
+            return {"timestamp": hex(1_700_000_000), "hash": "0x" + f"{int(params[0], 16):064x}"}
         raise AssertionError(method)
 
     adapter._rpc = fake_rpc
     events, cursor = await adapter.poll(cursor="0x1f")
-    assert cursor == "0x20"
+    assert json.loads(cursor)["head_block"] == 0x20
     assert len(events) == 1
     assert events[0].metadata["token0_address"] == token0
     assert events[0].metadata["token1_address"] == token1
@@ -215,3 +215,78 @@ async def test_evm_reorg_rewinds_to_common_ancestor_and_exposes_tombstone_range(
     assert adapter.last_reorg["to_block"] == 100
     assert adapter.last_reorg["canonical_hashes"] == {100: new_hash}
     assert json.loads(next_cursor)["head_block"] == 100
+
+
+
+@pytest.mark.asyncio
+async def test_dex_reorg_uses_common_ancestor_and_emits_reconciliation_range():
+    pool = "0x" + "1" * 40
+    adapter = EvmDexSwapAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        pools={pool: "uniswap_v3"},
+        confirmations=2,
+        max_block_range=10,
+        max_reorg_depth=2,
+    )
+    old_hashes = {
+        str(number): "0x" + f"{number:064x}" for number in (98, 99, 100)
+    }
+    cursor = json.dumps(
+        {"version": 2, "head_block": 100, "recent_hashes": old_hashes}
+    )
+    replacement_hash = "0x" + "f" * 64
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x66"
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000 + number),
+                "hash": replacement_hash if number == 100 else old_hashes[str(number)],
+            }
+        if method == "eth_getLogs":
+            assert params[0]["fromBlock"] == "0x64"
+            assert params[0]["toBlock"] == "0x64"
+            return []
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, next_cursor = await adapter.poll(cursor=cursor)
+    assert events == []
+    assert adapter.last_reorg["from_block"] == 100
+    assert adapter.last_reorg["to_block"] == 100
+    assert adapter.last_reorg["canonical_hashes"] == {100: replacement_hash}
+    assert json.loads(next_cursor)["head_block"] == 100
+
+
+@pytest.mark.asyncio
+async def test_dex_reorg_deeper_than_retained_window_fails_closed():
+    pool = "0x" + "1" * 40
+    adapter = EvmDexSwapAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        pools={pool: "uniswap_v3"},
+        confirmations=2,
+        max_block_range=10,
+        max_reorg_depth=2,
+    )
+    old_hashes = {
+        str(number): "0x" + f"{number:064x}" for number in (98, 99, 100)
+    }
+    cursor = json.dumps(
+        {"version": 2, "head_block": 100, "recent_hashes": old_hashes}
+    )
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x66"
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {"timestamp": hex(1_700_000_000), "hash": "0x" + "f" * 64}
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    with pytest.raises(RuntimeError, match="exceeds retained canonical window"):
+        await adapter.poll(cursor=cursor)
