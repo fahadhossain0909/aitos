@@ -212,7 +212,7 @@ cell(tr,Number(entity.gross_flow_usd).toLocaleString(undefined,{maximumFractionD
 cell(tr,Number(entity.inflow_usd).toLocaleString(undefined,{maximumFractionDigits:2}));
 cell(tr,Number(entity.outflow_usd).toLocaleString(undefined,{maximumFractionDigits:2}));cell(tr,entity.event_count);tbody.appendChild(tr)}
 if(!data.entities.length){const tr=document.createElement('tr');cell(tr,'No observed entities');tbody.appendChild(tr)}
-status.textContent='Loaded '+data.entities.length+' observed addresses. Rankings are not trading signals.'}
+status.textContent='Loaded '+data.entities.length+' observed addresses. Rankings are not a trading signal.'}
 catch(error){status.textContent=error.message}}
 document.getElementById('load').addEventListener('click',load);
 token.addEventListener('keydown',event=>{if(event.key==='Enter')load()});
