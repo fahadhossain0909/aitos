@@ -434,4 +434,7 @@ async def test_solana_stake_instruction_is_persisted_without_balance_delta():
     assert event.unit == "instruction_evidence"
     assert event.usd_value is None
     assert event.metadata["evidence_only"] is True
-    assert event.metadata["stake_instruction_evidence"][0]["instruction_type"] == "delegate"
+    assert (
+        event.metadata["stake_instruction_evidence"][0]["instruction_type"]
+        == "delegate"
+    )
