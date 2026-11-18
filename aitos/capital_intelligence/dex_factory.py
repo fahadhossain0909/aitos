@@ -1,4 +1,4 @@
-"""Bounded EVM DEX factory discovery for V2/V3-compatible deployments.
+"""Bounded EVM DEX factory discovery with canonical reorg recovery.
 
 Pool creation logs are observations only. Discovered pools are not automatically
 activated for swap ingestion; operators must review protocol/factory allowlists.
@@ -7,6 +7,7 @@ activated for swap ingestion; operators must review protocol/factory allowlists.
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,7 +24,12 @@ V3_POOL_CREATED_TOPIC = (
 
 
 class EvmDexFactoryDiscoveryAdapter:
-    """Read-only PairCreated/PoolCreated discovery for configured factories."""
+    """Read-only PairCreated/PoolCreated discovery for configured factories.
+
+    The cursor retains a contiguous canonical block-hash window. A head change
+    searches for a common ancestor and replays the orphaned range. Deep or
+    incomplete reorganizations fail closed before the worker can checkpoint.
+    """
 
     SUPPORTED = {
         "uniswap_v2",
@@ -40,6 +46,8 @@ class EvmDexFactoryDiscoveryAdapter:
         factories: dict[str, str],
         confirmations: int = 12,
         max_block_range: int = 500,
+        max_reorg_depth: int = 64,
+        timeout_seconds: float = 10.0,
         session: aiohttp.ClientSession | None = None,
     ):
         if not rpc_url.startswith("https://") or not factories or len(factories) > 100:
@@ -48,6 +56,10 @@ class EvmDexFactoryDiscoveryAdapter:
             raise ValueError("invalid chain or confirmation depth")
         if not 1 <= max_block_range <= 2_000:
             raise ValueError("invalid factory scan range")
+        if not 1 <= max_reorg_depth <= 256:
+            raise ValueError("invalid factory reorg depth")
+        if not 0.2 <= timeout_seconds <= 30:
+            raise ValueError("invalid timeout")
         self.rpc_url = rpc_url
         self.chain_id = chain_id
         self.factories = {
@@ -57,9 +69,12 @@ class EvmDexFactoryDiscoveryAdapter:
             raise ValueError("unsupported DEX factory protocol")
         self.confirmations = confirmations
         self.max_block_range = max_block_range
+        self.max_reorg_depth = max_reorg_depth
+        self.timeout_seconds = timeout_seconds
         self.session = session
         self.owns_session = session is None
         self.request_id = 0
+        self.last_reorg: dict[str, Any] | None = None
 
     @staticmethod
     def _address(value: str) -> str:
@@ -72,6 +87,39 @@ class EvmDexFactoryDiscoveryAdapter:
             raise ValueError("invalid EVM address")
         return value
 
+    @staticmethod
+    def _decode_cursor(cursor: str | None) -> dict[str, Any] | None:
+        if cursor is None:
+            return None
+        if cursor.startswith("{"):
+            try:
+                value = json.loads(cursor)
+            except ValueError:
+                raise ValueError("invalid DEX factory cursor JSON") from None
+            if (
+                not isinstance(value, dict)
+                or value.get("version") != 2
+                or not isinstance(value.get("head_block"), int)
+                or not isinstance(value.get("recent_hashes"), dict)
+            ):
+                raise ValueError("invalid DEX factory cursor schema")
+            hashes = value["recent_hashes"]
+            if any(
+                not str(number).isdigit()
+                or not isinstance(block_hash, str)
+                or not block_hash.startswith("0x")
+                for number, block_hash in hashes.items()
+            ):
+                raise ValueError("invalid DEX factory cursor hash map")
+            return value
+        try:
+            head = int(cursor, 16)
+        except (TypeError, ValueError):
+            raise ValueError("factory cursor must be a hex block or version-2 JSON") from None
+        if head < 0:
+            raise ValueError("invalid factory cursor")
+        return {"version": 1, "head_block": head, "recent_hashes": {}}
+
     async def close(self) -> None:
         if self.owns_session and self.session and not self.session.closed:
             await self.session.close()
@@ -79,7 +127,7 @@ class EvmDexFactoryDiscoveryAdapter:
     async def _rpc(self, method: str, params: list[Any]) -> Any:
         if self.session is None:
             self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
             )
         self.request_id += 1
         async with self.session.post(
@@ -97,19 +145,67 @@ class EvmDexFactoryDiscoveryAdapter:
             raise RuntimeError(f"EVM RPC {method} failed")
         return payload.get("result")
 
+    async def _header(self, number: int) -> dict[str, Any]:
+        header = await self._rpc("eth_getBlockByNumber", [hex(number), False])
+        if not header or not header.get("hash") or not header.get("timestamp"):
+            raise RuntimeError("factory event canonical block unavailable")
+        return header
+
     async def poll(self, *, cursor: str | None = None):
+        self.last_reorg = None
         latest = int(await self._rpc("eth_blockNumber", []), 16)
         safe = latest - self.confirmations
-        if cursor:
-            try:
-                start = int(cursor, 16) + 1
-            except ValueError:
-                raise ValueError("factory cursor must be a hex block") from None
+        state = self._decode_cursor(cursor)
+        previous_hashes = dict(state.get("recent_hashes", {})) if state else {}
+        reorg_start = None
+
+        if state is not None:
+            old_head = state["head_block"]
+            if old_head > safe:
+                raise RuntimeError(
+                    "DEX factory safe head regressed below persisted cursor"
+                )
+            if state.get("version") == 2:
+                old_head_hash = previous_hashes.get(str(old_head))
+                if not old_head_hash:
+                    raise RuntimeError("DEX factory cursor is missing its head hash")
+                current_head = await self._header(old_head)
+                if current_head["hash"].lower() != old_head_hash.lower():
+                    ancestor = None
+                    lower_bound = max(0, old_head - self.max_reorg_depth)
+                    for number in range(old_head - 1, lower_bound - 1, -1):
+                        known_hash = previous_hashes.get(str(number))
+                        if not known_hash:
+                            continue
+                        header = await self._header(number)
+                        if header["hash"].lower() == known_hash.lower():
+                            ancestor = number
+                            break
+                    if ancestor is None:
+                        raise RuntimeError(
+                            "DEX factory reorg exceeds retained canonical window; "
+                            "controlled backfill required"
+                        )
+                    reorg_start = ancestor + 1
+                    start = reorg_start
+                else:
+                    start = old_head + 1
+            else:
+                # Legacy hex cursors are upgraded to hash-aware version 2 after
+                # one successful poll; they cannot prove whether older blocks reorged.
+                start = old_head + 1
         else:
             start = max(0, safe - self.max_block_range + 1)
+
         if safe < start:
             return [], cursor
         end = min(safe, start + self.max_block_range - 1)
+        if reorg_start is not None and end < state["head_block"]:
+            raise RuntimeError(
+                "DEX factory reorg recovery exceeds one bounded scan; "
+                "increase max_block_range or perform controlled backfill"
+            )
+
         logs = await self._rpc(
             "eth_getLogs",
             [
@@ -121,9 +217,9 @@ class EvmDexFactoryDiscoveryAdapter:
                 }
             ],
         )
-        events = []
         now = datetime.now(timezone.utc)
         block_headers: dict[int, dict[str, Any]] = {}
+        events = []
         for log in logs or []:
             topics = log.get("topics") or []
             if len(topics) < 3:
@@ -133,11 +229,14 @@ class EvmDexFactoryDiscoveryAdapter:
             topic = str(topics[0]).lower()
             is_v2 = protocol is not None and protocol.endswith("_v2")
             is_v3 = protocol is not None and protocol.endswith("_v3")
-            if protocol is None or (topic == V2_PAIR_CREATED_TOPIC and not is_v2):
+            if protocol is None or topic not in {
+                V2_PAIR_CREATED_TOPIC,
+                V3_POOL_CREATED_TOPIC,
+            }:
                 continue
-            if topic == V3_POOL_CREATED_TOPIC and not is_v3:
-                continue
-            if topic not in {V2_PAIR_CREATED_TOPIC, V3_POOL_CREATED_TOPIC}:
+            if (topic == V2_PAIR_CREATED_TOPIC and not is_v2) or (
+                topic == V3_POOL_CREATED_TOPIC and not is_v3
+            ):
                 continue
             token0 = self._address("0x" + str(topics[1])[-40:])
             token1 = self._address("0x" + str(topics[2])[-40:])
@@ -151,10 +250,7 @@ class EvmDexFactoryDiscoveryAdapter:
             pool = self._address("0x" + pool_word[-40:])
             block = int(log["blockNumber"], 16)
             if block not in block_headers:
-                header = await self._rpc("eth_getBlockByNumber", [hex(block), False])
-                if not header or not header.get("hash") or not header.get("timestamp"):
-                    raise RuntimeError("factory event canonical block unavailable")
-                block_headers[block] = header
+                block_headers[block] = await self._header(block)
             canonical_hash = str(block_headers[block]["hash"]).lower()
             supplied_hash = str(log.get("blockHash") or "").lower()
             if supplied_hash and supplied_hash != canonical_hash:
@@ -180,8 +276,11 @@ class EvmDexFactoryDiscoveryAdapter:
             }
             if is_v3 and len(topics) > 3:
                 metadata["fee_tier"] = int(topics[3], 16)
-                metadata["tick_spacing"] = int(words[0], 16) - (
-                    1 << 256 if int(words[0], 16) >= (1 << 255) else 0
+                tick_spacing = int(words[0], 16)
+                metadata["tick_spacing"] = (
+                    tick_spacing - (1 << 256)
+                    if tick_spacing >= (1 << 255)
+                    else tick_spacing
                 )
             events.append(
                 CapitalEvent(
@@ -204,4 +303,34 @@ class EvmDexFactoryDiscoveryAdapter:
                     metadata=metadata,
                 )
             )
-        return events, hex(end)
+
+        # Retain a contiguous window of max_reorg_depth + 1 canonical headers.
+        # The extra ancestor hash allows recovery at the configured depth boundary.
+        window_start = max(0, end - self.max_reorg_depth)
+        recent_hashes = {}
+        for number in range(window_start, end + 1):
+            header = block_headers.get(number) or await self._header(number)
+            recent_hashes[str(number)] = str(header["hash"]).lower()
+
+        if reorg_start is not None:
+            self.last_reorg = {
+                "source_id": f"evm:{self.chain_id}",
+                "from_block": reorg_start,
+                "to_block": end,
+                "canonical_hashes": {
+                    number: recent_hashes[str(number)]
+                    for number in range(reorg_start, end + 1)
+                },
+                "detected_at": now.isoformat(),
+            }
+
+        next_cursor = json.dumps(
+            {
+                "version": 2,
+                "head_block": end,
+                "recent_hashes": recent_hashes,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return events, next_cursor
