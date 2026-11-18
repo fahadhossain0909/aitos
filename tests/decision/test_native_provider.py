@@ -9,7 +9,8 @@ from aitos.decision.types import MarketSnapshot
 
 def test_native_provider_returns_conservative_uncalibrated_prior():
     spec = parse_decision_spec(
-        "DECISION pretrade:\nSTATE:\n - direction\n - composite_score\nASK side: CHOICE [LONG, SHORT, NO_TRADE]"
+        "DECISION pretrade:\nSTATE:\n - direction\n - composite_score\n"
+        "ASK side: CHOICE [LONG, SHORT, NO_TRADE]"
     )
     snapshot = MarketSnapshot(
         "BTCUSDT",
