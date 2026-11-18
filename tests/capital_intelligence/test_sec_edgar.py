@@ -280,7 +280,6 @@ async def test_sec_recent_revision_rescan_does_not_regress_cursor():
     assert session.requests.count(directory + "index.json") == 2
 
 
-
 @pytest.mark.asyncio
 async def test_sec_amended_13f_payload_reuses_stable_row_identity():
     adapter = SecEdgarFilingsAdapter(
@@ -314,7 +313,10 @@ async def test_sec_amended_13f_payload_reuses_stable_row_identity():
     amended_args = (*args[:1], "0000320193-26-000002", *args[2:])
     second = await adapter._parse_13f(*amended_args)
     assert first[0].event_id == second[0].event_id
-    assert first[0].metadata["accession_number"] != second[0].metadata["accession_number"]
+    assert (
+        first[0].metadata["accession_number"]
+        != second[0].metadata["accession_number"]
+    )
     assert first[0].quantity == 10000
     assert second[0].quantity == 11000
     assert first[0].usd_value == 2_500_000
