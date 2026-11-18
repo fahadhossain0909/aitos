@@ -10,7 +10,7 @@ JevDecisionProvider accepts an injected callable. No vendor endpoint, authentica
 
 ## Replay and governance
 
-replay_chronologically sorts observations by snapshot time and updates calibration only after evaluating each observation. Use point-in-time features and matured labels. Challenger assessment requires out-of-sample Brier/ECE and sample sufficiency. Eligibility is a report only: it never promotes a model or enables order execution.
+replay_chronologically sorts observations by snapshot time and updates calibration only after evaluating each observation. Use point-in-time features and matured labels. Replay observations can carry measured execution economics (gross PnL, fees, signed funding, slippage, latency cost, and observed fill ratio); the report aggregates gross-to-net results and partial-fill coverage without inventing fills or costs. Challenger assessment requires out-of-sample Brier/ECE and sample sufficiency. Eligibility is a report only: it never promotes a model or enables order execution.
 
 ## Operational rollout
 
