@@ -205,8 +205,6 @@ class SolanaAddressActivityAdapter:
                     "source": str(source),
                     "destination": str(destination),
                     "counterparty": (
-                        str(destination)
-                        if source == monitored_address
                         else str(source)
                     ),
                     "raw_lamports": str(lamports),
