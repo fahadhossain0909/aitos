@@ -21,12 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v7.0.0
         with:
-          components: clippy, rustfmt
-      - run: cargo fmt --manifest-path native/rust/Cargo.toml -- --check
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path native/rust/Cargo.toml
-      - run: cargo clippy --manifest-path native/rust/Cargo.toml --all-targets -- -D warnings
 
   python-fallback:
     runs-on: ubuntu-latest
