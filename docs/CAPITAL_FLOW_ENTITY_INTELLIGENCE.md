@@ -314,3 +314,29 @@ Source IDs are operator configuration values and appear as Prometheus labels.
 Keep their cardinality bounded; do not include transaction IDs, wallet IDs or
 other per-event identifiers in metric labels. Detailed event/entity analysis
 belongs in ClickHouse/Neo4j, not Prometheus.
+
+
+## 17. Read-only entity explorer API
+
+The optional observer exposes a bounded entity read model on the same internal
+HTTP listener as `/metrics`. Entity endpoints are disabled unless
+`AITOS_CFEI_API_TOKEN` is configured with at least 32 characters. Requests
+must include `Authorization: Bearer <token>`; use a secret manager in
+production and do not expose the observer port publicly without network
+controls.
+
+- `GET /v1/entities?limit=50&offset=0` lists observed EVM/Solana addresses,
+  gross valued flow, known inflow/outflow, source and counterparty breadth, and
+  last observation time. Bounds are 1-100 rows and offset 0-10,000.
+- `GET /v1/entities/{chain}/{address}` returns a bounded recent event history,
+  persisted relationship evidence and temporal labels for one chain-scoped
+  address. Event history is capped at 500 rows; evidence and labels are capped
+  independently.
+
+The explorer reads ClickHouse with `FINAL`, excludes reverted events and
+filters aggregate cohorts and DEX pool-caller-only observations. Entity IDs
+are chain-scoped (`chain:address`) to avoid silently merging identical
+address strings across networks. The API always marks identity as
+`unverified_address` and `beneficial_owner_verified=false`; a verified
+operator label is not proof of beneficial ownership. The API is read-only:
+watchlist mutation, label editing and evidence promotion are not exposed.
