@@ -8,3 +8,4 @@ requires-python=">=3.10"
 [tool.maturin]
 manifest-path="Cargo.toml"
 module-name="aitos_native"
+features=["pyo3/extension-module"]
