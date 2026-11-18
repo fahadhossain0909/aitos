@@ -34,11 +34,15 @@ def assess_capital_behavior(
         raise ValueError("entity_id is required")
     if ":" in entity_id:
         venue, address = entity_id.split(":", 1)
-        matches_entity = lambda event: event.venue == venue and event.actor_id == address
+
+        def matches_entity(event):
+            return event.venue == venue and event.actor_id == address
+
     else:
         # Backward-compatible raw-address lookup; new callers should use
         # chain-scoped IDs returned by the entity explorer/ranking API.
-        matches_entity = lambda event: event.actor_id == entity_id
+        def matches_entity(event):
+            return event.actor_id == entity_id
     selected = [
         event
         for event in events
