@@ -76,9 +76,7 @@ def test_solana_native_inner_transfer_is_attached_as_evidence_only():
             }
         ],
     }
-    evidence = SolanaAddressActivityAdapter._system_transfer_evidence(
-        message, wallet
-    )
+    evidence = SolanaAddressActivityAdapter._system_transfer_evidence(message, wallet)
     assert len(evidence) == 1
     assert evidence[0]["counterparty"] == counterparty
     assert evidence[0]["raw_lamports"] == "250000000"
@@ -89,19 +87,34 @@ def test_solana_native_inner_transfer_is_attached_as_evidence_only():
 def test_solana_native_transfer_evidence_ignores_unrelated_or_unparsed_instructions():
     message = {
         "instructions": [
-            {"program": "system", "parsed": {"type": "transfer", "info": {
-                "source": "other", "destination": "elsewhere", "lamports": 10
-            }}},
-            {"program": "system", "parsed": {"type": "transfer", "info": {
-                "source": "wallet", "destination": "other", "lamports": "bad"
-            }}},
+            {
+                "program": "system",
+                "parsed": {
+                    "type": "transfer",
+                    "info": {
+                        "source": "other",
+                        "destination": "elsewhere",
+                        "lamports": 10,
+                    },
+                },
+            },
+            {
+                "program": "system",
+                "parsed": {
+                    "type": "transfer",
+                    "info": {
+                        "source": "wallet",
+                        "destination": "other",
+                        "lamports": "bad",
+                    },
+                },
+            },
             {"program": "system", "data": "opaque"},
         ]
     }
-    assert SolanaAddressActivityAdapter._system_transfer_evidence(
-        message, "wallet"
-    ) == []
-
+    assert (
+        SolanaAddressActivityAdapter._system_transfer_evidence(message, "wallet") == []
+    )
 
 
 def test_solana_stake_delegate_and_withdraw_are_evidence_not_extra_flow():
@@ -142,9 +155,7 @@ def test_solana_stake_delegate_and_withdraw_are_evidence_not_extra_flow():
             }
         ],
     }
-    evidence = SolanaAddressActivityAdapter._stake_instruction_evidence(
-        message, wallet
-    )
+    evidence = SolanaAddressActivityAdapter._stake_instruction_evidence(message, wallet)
     assert len(evidence) == 2
     assert evidence[0]["instruction_type"] == "delegate"
     assert evidence[1]["instruction_type"] == "withdraw"
@@ -178,6 +189,7 @@ def test_solana_stake_evidence_ignores_unrelated_wallets_and_unparsed_instructio
             },
         ]
     }
-    assert SolanaAddressActivityAdapter._stake_instruction_evidence(
-        message, "wallet"
-    ) == []
+    assert (
+        SolanaAddressActivityAdapter._stake_instruction_evidence(message, "wallet")
+        == []
+    )
