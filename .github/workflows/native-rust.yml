@@ -3,10 +3,10 @@ name: Native Rust Core
 on:
   pull_request:
     branches: [main, master, develop]
-    paths: ["native/rust/**", "aitos/native_core.py", "tests/test_native_core.py", ".github/workflows/native-rust.yml"]
+    paths: ["native/rust/**", "aitos/native_core.py", "tests/test_native_core.py", "benchmarks/native_core_benchmark.py", ".github/workflows/native-rust.yml"]
   push:
     branches: [main]
-    paths: ["native/rust/**", "aitos/native_core.py", "tests/test_native_core.py", ".github/workflows/native-rust.yml"]
+    paths: ["native/rust/**", "aitos/native_core.py", "tests/test_native_core.py", "benchmarks/native_core_benchmark.py", ".github/workflows/native-rust.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,11 @@ jobs:
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --manifest-path native/rust/Cargo.toml -- --check
       - run: cargo test --manifest-path native/rust/Cargo.toml
+      - run: cargo clippy --manifest-path native/rust/Cargo.toml --all-targets -- -D warnings
 
   python-fallback:
     runs-on: ubuntu-latest
