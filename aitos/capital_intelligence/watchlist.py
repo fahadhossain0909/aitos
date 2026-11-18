@@ -30,8 +30,10 @@ class RedisEntityWatchlist:
 
     @staticmethod
     def _identity(chain: str, address: str) -> tuple[str, str, str]:
-        chain = str(chain).strip().lower()
-        address = str(address).strip()
+        if not isinstance(chain, str) or not isinstance(address, str):
+            raise ValueError("chain and address must be strings")
+        chain = chain.strip().lower()
+        address = address.strip()
         if (
             not chain
             or len(chain) > 64
@@ -48,7 +50,9 @@ class RedisEntityWatchlist:
 
     async def add(self, chain: str, address: str, note: str = "") -> dict[str, Any]:
         chain, address, entity_id = self._identity(chain, address)
-        note = str(note).strip()
+        if not isinstance(note, str):
+            raise ValueError("watchlist note must be a string")
+        note = note.strip()
         if len(note) > 280:
             raise ValueError("watchlist note must be at most 280 characters")
         record = {
