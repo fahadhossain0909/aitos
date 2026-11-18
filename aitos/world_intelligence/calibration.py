@@ -75,9 +75,10 @@ def _wilson_interval(successes: int, total: int, z: float = 1.959963984540054):
     z2 = z * z
     denominator = 1.0 + z2 / total
     centre = (rate + z2 / (2.0 * total)) / denominator
-    margin = z * sqrt(
-        rate * (1.0 - rate) / total + z2 / (4.0 * total * total)
-    ) / denominator
+    margin = (
+        z * sqrt(rate * (1.0 - rate) / total + z2 / (4.0 * total * total))
+        / denominator
+    )
     return max(0.0, centre - margin), min(1.0, centre + margin)
 
 
@@ -99,9 +100,7 @@ def calibration_report(
         seen.add(item.observation_id)
 
     cutoff = as_of.astimezone(timezone.utc)
-    eligible = [
-        item for item in observations if item.outcome_available_at <= cutoff
-    ]
+    eligible = [item for item in observations if item.outcome_available_at <= cutoff]
     excluded = len(observations) - len(eligible)
     if not eligible:
         empty = tuple(
@@ -141,16 +140,12 @@ def calibration_report(
             continue
         mean_probability = sum(x.probability_up for x in bucket) / count
         observed = sum(x.outcome_up for x in bucket) / count
-        low, high = _wilson_interval(
-            sum(x.outcome_up for x in bucket), count
-        )
+        low, high = _wilson_interval(sum(x.outcome_up for x in bucket), count)
         error = abs(mean_probability - observed)
         weighted_error += count / len(eligible) * error
         maximum_error = max(maximum_error, error)
         bins.append(
-            CalibrationBin(
-                lower, upper, count, mean_probability, observed, low, high
-            )
+            CalibrationBin(lower, upper, count, mean_probability, observed, low, high)
         )
 
     total = len(eligible)
@@ -172,9 +167,7 @@ def calibration_cohorts(
     bin_count: int = 10,
 ) -> dict[tuple[str, str, str], CalibrationReport]:
     """Produce independent asset/horizon/regime reports; no cross-cohort pooling."""
-    groups: dict[
-        tuple[str, str, str], list[CalibrationObservation]
-    ] = defaultdict(list)
+    groups: dict[tuple[str, str, str], list[CalibrationObservation]] = defaultdict(list)
     for item in observations:
         key = (item.asset.upper(), item.horizon, item.regime)
         groups[key].append(item)
