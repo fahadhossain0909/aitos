@@ -1,4 +1,3 @@
-
 import pytest
 
 from aitos.capital_intelligence.watchlist import RedisEntityWatchlist
