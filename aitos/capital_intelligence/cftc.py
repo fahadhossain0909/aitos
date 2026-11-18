@@ -22,8 +22,8 @@ class CftcCotAdapter:
     """Read CFTC Socrata COT rows with an explicit schema map.
 
     COT categories are aggregate trader classifications, not individual entities.
-    Offset cursors assume the source's report-date/market-code ordering is stable;
-    periodic controlled refresh is needed to capture historical corrections.
+    Incremental offset cursors assume stable report-date/market-code ordering;
+    bounded overlapping refresh pages detect recent historical corrections.
     """
 
     BASE_URL = "https://publicreporting.cftc.gov/resource"
