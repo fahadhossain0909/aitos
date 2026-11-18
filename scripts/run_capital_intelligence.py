@@ -593,7 +593,14 @@ async def main() -> None:
     if wi_bridge_worker is not None:
         wi_bridge_worker.stop()
     if wi_bridge_task is not None:
-        await asyncio.gather(wi_bridge_task, return_exceptions=True)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(wi_bridge_task, return_exceptions=True),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            wi_bridge_task.cancel()
+            await asyncio.gather(wi_bridge_task, return_exceptions=True)
     if wi_event_bus is not None:
         await wi_event_bus.shutdown()
     metrics.cancel()
