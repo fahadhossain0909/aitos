@@ -320,3 +320,91 @@ async def test_sec_amended_13f_payload_reuses_stable_row_identity():
     assert second[0].quantity == 11000
     assert first[0].usd_value == 2_500_000
     assert second[0].usd_value == 2_750_000
+
+
+@pytest.mark.asyncio
+async def test_sec_form4_derivative_transaction_preserves_underlying_and_terms():
+    cik = "0000789019"
+    accession = "0000789019-26-000004"
+    submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    document_url = (
+        "https://www.sec.gov/Archives/edgar/data/789019/"
+        "000078901926000004/ownership.xml"
+    )
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": [accession],
+                "form": ["4"],
+                "filingDate": ["2026-10-04"],
+                "primaryDocument": ["ownership.xml"],
+                "reportDate": ["2026-10-02"],
+            }
+        }
+    }
+    xml = """<ownershipDocument>
+      <issuer><issuerCik>789019</issuerCik><issuerTradingSymbol>MSFT</issuerTradingSymbol></issuer>
+      <reportingOwner><reportingOwnerId><rptOwnerCik>1234567</rptOwnerCik></reportingOwnerId></reportingOwner>
+      <derivativeTable><derivativeTransaction>
+        <securityTitle><value>Employee Stock Option</value></securityTitle>
+        <conversionOrExercisePrice><value>250</value></conversionOrExercisePrice>
+        <transactionDate><value>2026-10-02</value></transactionDate>
+        <transactionCode><value>M</value></transactionCode>
+        <transactionShares><value>20</value></transactionShares>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+        <exerciseDate><value>2026-10-02</value></exerciseDate>
+        <expirationDate><value>2030-10-02</value></expirationDate>
+        <underlyingSecurity><underlyingSecurityTitle><value>MSFT</value></underlyingSecurityTitle>
+          <underlyingSecurityShares><value>2000</value></underlyingSecurityShares></underlyingSecurity>
+      </derivativeTransaction></derivativeTable>
+    </ownershipDocument>"""
+    session = FakeSession({submissions_url: submissions, document_url: xml})
+    adapter = SecEdgarFilingsAdapter(
+        ciks=[cik], user_agent="AITOS research contact@example.org", session=session
+    )
+    events, _ = await adapter.poll()
+    derivative = next(event for event in events if "derivative" in event.event_type)
+    assert derivative.quantity == 20
+    assert derivative.quantity_unit == "derivative_units"
+    assert derivative.usd_value is None
+    assert derivative.metadata["underlying_security"] == "MSFT"
+    assert derivative.metadata["underlying_shares"] == "2000"
+    assert derivative.metadata["exercise_price"] == 250
+    assert derivative.metadata["flow_sign"] == 1
+    assert derivative.event_time.date().isoformat() == "2026-10-02"
+
+
+@pytest.mark.asyncio
+async def test_sec_form3_derivative_holding_is_snapshot_not_trade():
+    adapter = SecEdgarFilingsAdapter(
+        ciks=["0000789019"],
+        user_agent="AITOS research contact@example.org",
+    )
+    xml = """<ownershipDocument>
+      <periodOfReport>2026-08-31</periodOfReport>
+      <issuer><issuerCik>789019</issuerCik><issuerTradingSymbol>MSFT</issuerTradingSymbol></issuer>
+      <reportingOwner><reportingOwnerId><rptOwnerCik>1234567</rptOwnerCik></reportingOwnerId></reportingOwner>
+      <derivativeTable><derivativeHolding>
+        <securityTitle><value>Employee Stock Option</value></securityTitle>
+        <sharesOwnedFollowingTransaction><value>50</value></sharesOwnedFollowingTransaction>
+        <conversionOrExercisePrice><value>250</value></conversionOrExercisePrice>
+        <underlyingSecurity><underlyingSecurityTitle><value>MSFT</value></underlyingSecurityTitle>
+          <underlyingSecurityShares><value>5000</value></underlyingSecurityShares></underlyingSecurity>
+      </derivativeHolding></derivativeTable>
+    </ownershipDocument>"""
+    async def get_text(_url):
+        return xml
+
+    adapter._get_text = get_text
+    events = await adapter._parse_form4(
+        "0000789019",
+        "0000789019-26-000005",
+        adapter._day("2026-09-02"),
+        "3",
+        "https://www.sec.gov/Archives/edgar/data/789019/form3.xml",
+    )
+    derivative = next(event for event in events if "derivative" in event.event_type)
+    assert derivative.event_type == "insider_derivative_holding_disclosure"
+    assert derivative.quantity == 50
+    assert derivative.metadata["flow_sign"] == 0
+    assert derivative.metadata["underlying_shares"] == "5000"
