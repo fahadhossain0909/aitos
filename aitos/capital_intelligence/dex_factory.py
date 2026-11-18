@@ -234,12 +234,14 @@ class EvmDexFactoryDiscoveryAdapter:
                     "fromBlock": hex(start),
                     "toBlock": hex(end),
                     "address": list(self.factories),
-                    "topics": [[
-                        V2_PAIR_CREATED_TOPIC,
-                        V3_POOL_CREATED_TOPIC,
-                        V4_POOL_INITIALIZED_TOPIC,
-                        V4_MODIFY_LIQUIDITY_TOPIC,
-                    ]],
+                    "topics": [
+                        [
+                            V2_PAIR_CREATED_TOPIC,
+                            V3_POOL_CREATED_TOPIC,
+                            V4_POOL_INITIALIZED_TOPIC,
+                            V4_MODIFY_LIQUIDITY_TOPIC,
+                        ]
+                    ],
                 }
             ],
         )
@@ -318,10 +320,7 @@ class EvmDexFactoryDiscoveryAdapter:
                 if (
                     len(pool_id) != 66
                     or not pool_id.startswith("0x")
-                    or any(
-                        char not in "0123456789abcdef"
-                        for char in pool_id[2:]
-                    )
+                    or any(char not in "0123456789abcdef" for char in pool_id[2:])
                 ):
                     continue
                 token0 = self._address("0x" + str(topics[2])[-40:])
@@ -382,11 +381,11 @@ class EvmDexFactoryDiscoveryAdapter:
                 "factory_event": (
                     "ModifyLiquidity"
                     if is_v4_liquidity
-                    else "Initialize"
-                    if is_v4_initialize
-                    else "PairCreated"
-                    if is_v2
-                    else "PoolCreated"
+                    else (
+                        "Initialize"
+                        if is_v4_initialize
+                        else "PairCreated" if is_v2 else "PoolCreated"
+                    )
                 ),
                 "log_index": log_index,
                 "operator_review_required": True,
@@ -425,8 +424,7 @@ class EvmDexFactoryDiscoveryAdapter:
                         "initial_sqrt_price_x96": initial_sqrt_price_x96,
                         "initial_tick": initial_tick,
                         "singleton_pool": True,
-                        "native_currency_supported": token0
-                        == "0x" + "0" * 40
+                        "native_currency_supported": token0 == "0x" + "0" * 40
                         or token1 == "0x" + "0" * 40,
                     }
                 )
@@ -445,9 +443,11 @@ class EvmDexFactoryDiscoveryAdapter:
                     (
                         "dex_liquidity_modified"
                         if is_v4_liquidity
-                        else "dex_pool_initialized"
-                        if is_v4_initialize
-                        else "dex_pool_created"
+                        else (
+                            "dex_pool_initialized"
+                            if is_v4_initialize
+                            else "dex_pool_created"
+                        )
                     ),
                     timestamp,
                     now,
