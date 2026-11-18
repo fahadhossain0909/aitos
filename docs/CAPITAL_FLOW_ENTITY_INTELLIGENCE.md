@@ -230,7 +230,7 @@ reuse the same event ABI.
 Example:
 
 ```dotenv
-AITOS_CFEI_DEX_FACTORIES=[{"rpc_url":"https://YOUR_PUBLIC_RPC","chain_id":"1","factories":{"0xYOUR_V2_FACTORY":"uniswap_v2","0xYOUR_V3_FACTORY":"uniswap_v3"},"confirmations":20,"max_block_range":500}]
+AITOS_CFEI_DEX_FACTORIES=[{"rpc_url":"https://YOUR_PUBLIC_RPC","chain_id":"1","factories":{"0xYOUR_V2_FACTORY":"uniswap_v2","0xYOUR_V3_FACTORY":"uniswap_v3"},"confirmations":20,"max_block_range":500,"max_reorg_depth":64,"start_block":18000000}]
 ```
 
 Discovered pools are not automatically activated for swap ingestion. Review
@@ -244,7 +244,9 @@ block-hash cursor, search for a common ancestor when the prior head changes,
 rescan the affected range, and publish reorg instructions. ClickHouse and
 optional Neo4j event nodes are both marked `finality=reverted` before the Redis
 cursor can advance. Factory discovery now has the same bounded reorg protection
-as swap ingestion. Reorganizations deeper than the retained window, incomplete
+as swap ingestion. Set an optional per-factory `start_block` to begin a bounded,
+resumable historical discovery scan from the factory deployment block; the
+Redis cursor resumes subsequent pages. Reorganizations deeper than the retained window, incomplete
 RPC headers, or a recovery range larger than one configured scan fail closed
 and require controlled backfill; the adapter never advances its cursor over an
 unreconciled fork. Configure `max_reorg_depth` (1-256, default 64) and ensure
