@@ -62,3 +62,4 @@ jobs:
           maturin develop --manifest-path native/rust/Cargo.toml
           PYTHONPATH=. python -c "from aitos.native_core import native_available; assert native_available()"
           PYTHONPATH=. pytest -q native/python_tests/test_native_core.py native/python_tests/test_native_orderbook_parity.py
+          PYTHONPATH=. python benchmarks/native_core_benchmark.py --events 50000 --repeats 3 --warmup 2000
