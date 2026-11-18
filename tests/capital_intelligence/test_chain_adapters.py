@@ -517,8 +517,6 @@ async def test_solana_cpi_system_and_stake_instructions_are_retained_as_evidence
         == "delegate"
     )
     assert (
-        stake.metadata["stake_instruction_evidence"][0][
-            "is_cpi_or_inner_instruction"
-        ]
+        stake.metadata["stake_instruction_evidence"][0]["is_cpi_or_inner_instruction"]
         is True
     )
