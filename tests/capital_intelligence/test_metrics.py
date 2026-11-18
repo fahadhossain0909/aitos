@@ -17,7 +17,10 @@ def test_cfei_metrics_include_source_health_and_valid_prometheus_lines():
         }
     ).decode()
     assert "aitos_cfei_events_persisted 12\n" in rendered
-    assert 'aitos_cfei_source_events_persisted_total{source_id="evm:1\\"main"} 10' in rendered
+    assert (
+        'aitos_cfei_source_events_persisted_total{source_id="evm:1\\"main"} 10'
+        in rendered
+    )
     assert "aitos_cfei_source_poll_errors_total" in rendered
     assert rendered.endswith("\n")
     assert "\\n" not in rendered
