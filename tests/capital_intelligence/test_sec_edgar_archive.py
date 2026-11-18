@@ -15,10 +15,10 @@ class FakeAdapter:
         self.calls = []
         self.archive = {
             "old.json": {
-                "accessionNumber": ["a-1", "a-2", "a-3"],
-                "form": ["8-K", "4", "3"],
-                "filingDate": ["2020-01-01", "2020-02-01", "2020-03-01"],
-                "primaryDocument": ["", "form4.xml", "form3.xml"],
+                "accessionNumber": ["a-3", "a-2", "a-1"],
+                "form": ["3", "4", "8-K"],
+                "filingDate": ["2020-03-01", "2020-02-01", "2020-01-01"],
+                "primaryDocument": ["form3.xml", "form4.xml", ""],
                 "reportDate": ["", "", ""],
             }
         }
