@@ -78,3 +78,11 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - Every observation carries an immutable ID, asset, horizon, regime, prediction timestamp and outcome-availability timestamp. Evaluation excludes outcomes not available at the requested `as_of` time and rejects duplicate IDs.
 - `calibration_cohorts` keeps asset/horizon/regime cohorts separate so strong performance in one market cannot hide poor calibration in another.
 - These are evaluation-only diagnostics. They do not fit probabilities, change thresholds, activate a strategy, or promote a model. Production acceptance still requires representative point-in-time historical labels and chronological OOS evidence.
+
+
+## Offline event-impact probability model
+
+- `aitos.world_intelligence.impact_model` adds a dependency-free, regularized logistic baseline for event-direction research, with numeric event evidence and event-type one-hot features.
+- Training is scoped to one asset/horizon/regime cohort and filters by both event time and outcome-availability time at the supplied `as_of` cutoff. Duplicate event IDs, insufficient matured history, and single-class cohorts fail closed.
+- The model stores its training cutoff and cohort identity. Prediction rejects cross-asset, cross-horizon, or cross-regime feature rows.
+- This is an offline research baseline, not a production return forecast. It has no scanner, strategy, risk, model-promotion, or order-execution integration. A real historical point-in-time dataset, chronological purged OOS evaluation, calibration, ablation, and cost-aware replay remain required before any canary.
