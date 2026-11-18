@@ -210,3 +210,33 @@ strategy, probability calibration, cost model or proof of predictive lift.
 Production research must add venue-specific fees, funding, spread, slippage,
 latency, partial fills, survivorship controls, regime/time-split validation,
 ablation and confidence intervals before any model-governance review.
+
+
+## 13. DEX factory discovery and reorg recovery
+
+The optional `EvmDexFactoryDiscoveryAdapter` scans explicitly configured V2/V3
+factory contracts for canonical `PairCreated` and `PoolCreated` events. It
+records the factory, pool address, token0/token1, protocol, block and log
+provenance as a `dex_pool_created` observation. Factory addresses are operator
+allowlisted; event topics alone do not authenticate a protocol because forks
+reuse the same event ABI.
+
+Example:
+
+```dotenv
+AITOS_CFEI_DEX_FACTORIES=[{"rpc_url":"https://YOUR_PUBLIC_RPC","chain_id":"1","factories":{"0xYOUR_V2_FACTORY":"uniswap_v2","0xYOUR_V3_FACTORY":"uniswap_v3"},"confirmations":20,"max_block_range":500}]
+```
+
+Discovered pools are not automatically activated for swap ingestion. Review
+factory provenance, token contracts, liquidity, honeypot/transfer restrictions,
+and protocol deployment before explicitly adding a pool to
+`AITOS_CFEI_DEX_POOLS`. This avoids turning arbitrary contracts with matching
+event signatures into trusted data sources.
+
+The swap adapter now stores a bounded canonical block-hash cursor, searches for
+a common ancestor when its prior head changes, rescans the affected range, and
+publishes reorg instructions. ClickHouse and optional Neo4j event nodes are both
+marked `finality=reverted` before the Redis cursor can advance. Reorgs beyond
+the retained window fail closed and require controlled backfill. Factory
+discovery currently uses a bounded confirmed-block cursor; operators should
+re-scan its configured factory deployment range after a deep reorganization.
