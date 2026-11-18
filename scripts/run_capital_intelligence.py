@@ -119,7 +119,7 @@ async def _metrics_server(
                 total_header_bytes += len(line)
                 if total_header_bytes > 16_384:
                     raise ValueError("HTTP headers too large")
-                if line in (b"\\r\\n", b"\\n", b""):
+                if line in (b"\r\n", b"\n", b""):
                     break
                 key, separator, value = line.decode("latin-1").partition(":")
                 if separator:
@@ -182,9 +182,9 @@ async def _metrics_server(
             body = b'{"error":"internal_error"}'
 
         writer.write(
-            f"HTTP/1.1 {status}\\r\\n".encode()
-            + f"Content-Type: {content_type}\\r\\n".encode()
-            + f"Content-Length: {len(body)}\\r\\nConnection: close\\r\\n\\r\\n".encode()
+            f"HTTP/1.1 {status}\r\n".encode()
+            + f"Content-Type: {content_type}\r\n".encode()
+            + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
             + body
         )
         await writer.drain()
