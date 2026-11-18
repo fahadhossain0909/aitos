@@ -342,7 +342,9 @@ controls.
 The explorer reads ClickHouse with `FINAL`, excludes reverted events and
 filters aggregate cohorts and DEX pool-caller-only observations. Entity IDs
 are chain-scoped (`chain:address`) to avoid silently merging identical
-address strings across networks. The API always marks identity as
+address strings across networks. The API scopes evidence and labels to the same `chain:address` key to prevent
+cross-chain label leakage. Operator-supplied evidence/labels intended for this
+explorer must use that chain-scoped key. The API always marks identity as
 `unverified_address` and `beneficial_owner_verified=false`; a verified
 operator label is not proof of beneficial ownership. The API is read-only:
 watchlist mutation, label editing and evidence promotion are not exposed.
