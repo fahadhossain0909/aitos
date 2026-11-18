@@ -389,3 +389,25 @@ change strategy, risk, sizing or execution. Forwarded sentiment is neutral;
 transfer direction is retained as metadata and is never promoted to news
 sentiment or buy/sell intent. It is safe to disable without affecting CFEI
 collection.
+
+### Uniswap V4 operator configuration
+
+V4 is a singleton manager, not a collection of pair contracts. Configure the
+PoolManager address as the uniswap_v4 protocol in both the discovery and swap
+observer allowlists. The discovery worker records Initialize events as
+pool-registry evidence; the swap observer only decodes pool IDs explicitly
+listed in the reviewed token map.
+
+```dotenv
+AITOS_CFEI_DEX_FACTORIES=[{"rpc_url":"https://YOUR_PUBLIC_RPC","chain_id":"1","factories":{"0x000000000004444c5dc75cb358380d2e3de08a90":"uniswap_v4"},"confirmations":20}]
+AITOS_CFEI_DEX_POOLS=[{"rpc_url":"https://YOUR_PUBLIC_RPC","chain_id":"1","pools":{"0x000000000004444c5dc75cb358380d2e3de08a90":"uniswap_v4"},"v4_pool_tokens":{"0xPOOL_ID_32_BYTES":{"token0":"0x0000000000000000000000000000000000000000","token1":"0xTOKEN_ADDRESS"}},"confirmations":20}]
+```
+
+Replace the example manager with the canonical deployment for the selected
+chain and use the exact bytes32 PoolId emitted by Initialize. token0 and token1
+must be strictly address-sorted as in the PoolKey; the zero address represents
+the native currency. A pool missing from v4_pool_tokens is intentionally
+ignored by swap decoding. PoolManager sender is a caller or router identity,
+not proof of the ultimate trader. Dynamic hooks, hook-adjusted deltas and
+protocol-specific accounting require separate validation; the observer
+records the PoolManager emitted BalanceDelta and fee as evidence.
