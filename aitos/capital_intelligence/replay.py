@@ -205,6 +205,7 @@ def chronological_split(
     *,
     test_fraction: float = 0.2,
     embargo_seconds: int = 0,
+    max_quote_age_seconds: int = 30,
 ) -> tuple[list[ReplayRow], list[ReplayRow]]:
     """Chronological split with label-horizon purging and optional embargo.
 
@@ -216,6 +217,8 @@ def chronological_split(
         raise ValueError("test_fraction must be in [0.05, 0.5]")
     if not isinstance(embargo_seconds, int) or embargo_seconds < 0:
         raise ValueError("embargo_seconds must be a non-negative integer")
+    if not isinstance(max_quote_age_seconds, int) or max_quote_age_seconds < 0:
+        raise ValueError("max_quote_age_seconds must be a non-negative integer")
     ordered = sorted(rows, key=lambda row: (row.event_time, row.event_id))
     if len(ordered) < 2:
         return ordered, []
@@ -228,7 +231,7 @@ def chronological_split(
         if row.forward_returns
         and row.event_time
         + timedelta(seconds=max(row.forward_returns))
-        + timedelta(seconds=embargo_seconds)
+        + timedelta(seconds=max_quote_age_seconds + embargo_seconds)
         < test_start
     ]
     return train, test
