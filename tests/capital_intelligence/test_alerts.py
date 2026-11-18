@@ -75,9 +75,7 @@ def make_event(**kwargs):
 @pytest.mark.asyncio
 async def test_webhook_alerts_only_watched_entities_and_deduplicates():
     actor = "0x" + "a" * 40
-    watchlist = FakeWatchlist(
-        {"evm:1:" + actor: {"entity_id": "evm:1:" + actor}}
-    )
+    watchlist = FakeWatchlist({"evm:1:" + actor: {"entity_id": "evm:1:" + actor}})
     session = FakeSession()
     alerter = CapitalFlowWebhookAlerter(
         redis_client=FakeRedis(),
@@ -102,9 +100,10 @@ async def test_webhook_skips_reverted_and_aggregate_events():
         session=session,
     )
     assert await alerter.notify_event(make_event(finality="reverted")) == 0
-    assert await alerter.notify_event(
-        make_event(metadata={"aggregate_only": True})
-    ) == 0
+    assert (
+        await alerter.notify_event(make_event(metadata={"aggregate_only": True}))
+        == 0
+    )
     assert not session.posts
 
 
