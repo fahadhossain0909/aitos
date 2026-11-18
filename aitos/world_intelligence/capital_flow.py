@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+import re
 from math import isfinite, log10
 from typing import Any
 from urllib.parse import quote
@@ -29,7 +30,9 @@ class CapitalFlowIntelligenceAdapter:
         max_events: int = 500,
         severity_reference_usd: float = 1_000_000.0,
     ):
-        if not database or not database.replace("_", "").isalnum():
+        if not isinstance(database, str) or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]{0,63}", database
+        ):
             raise ValueError("invalid ClickHouse database")
         if not source_id.strip():
             raise ValueError("source_id is required")
@@ -90,7 +93,7 @@ class CapitalFlowIntelligenceAdapter:
            OR (observed_time = parseDateTime64BestEffort(%(observed_after)s)
                AND event_id > %(event_after)s)
         ORDER BY observed_time ASC, event_id ASC
-        LIMIT %(limit)s""".replace(
+        LIMIT %(limit)s""".replace(  # nosec B608 - database is validated as a SQL identifier.
             "__DATABASE__", self.database
         )
         result = await self.clickhouse.query(
