@@ -185,6 +185,14 @@ class PythonFixedPointOrderBook:
         self._first_delta = False
         return True
 
+    def apply_deltas(self, updates: Iterable[tuple]) -> int:
+        """Apply a batch in order; each event is atomic and gaps fail closed."""
+        applied = 0
+        for first, final, bids, asks, previous in updates:
+            if self.apply_delta(first, final, bids, asks, previous):
+                applied += 1
+        return applied
+
     def snapshot(
         self, depth: int
     ) -> tuple[int, list[tuple[int, int]], list[tuple[int, int]]]:
@@ -261,28 +269,37 @@ class NativeOrderBookSession:
         )
 
     def apply_depth_update(self, update) -> bool:
-        """Apply a DepthUpdate only after both sides convert successfully."""
-        bids = [
+        """Apply one DepthUpdate through the batch boundary."""
+        return self.apply_depth_updates([update]) == 1
+
+    def apply_depth_updates(self, updates: Iterable) -> int:
+        """Convert a batch fully before applying it to the selected book."""
+        native_updates = []
+        for update in updates:
+            bids = [
             (
                 self.scale.price_to_ticks(price),
                 self.scale.quantity_to_lots(quantity),
             )
             for price, quantity in update.bids
         ]
-        asks = [
-            (
-                self.scale.price_to_ticks(price),
-                self.scale.quantity_to_lots(quantity),
+            asks = [
+                (
+                    self.scale.price_to_ticks(price),
+                    self.scale.quantity_to_lots(quantity),
+                )
+                for price, quantity in update.asks
+            ]
+            native_updates.append(
+                (
+                    update.first_update_id,
+                    update.final_update_id,
+                    bids,
+                    asks,
+                    update.previous_update_id,
+                )
             )
-            for price, quantity in update.asks
-        ]
-        return self.book.apply_delta(
-            update.first_update_id,
-            update.final_update_id,
-            bids=bids,
-            asks=asks,
-            previous_update_id=update.previous_update_id,
-        )
+        return self.book.apply_deltas(native_updates)
 
     def snapshot(self, depth: int):
         update_id, bids, asks = self.book.snapshot(depth)
