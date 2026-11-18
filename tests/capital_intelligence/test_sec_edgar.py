@@ -278,3 +278,42 @@ async def test_sec_recent_revision_rescan_does_not_regress_cursor():
     assert first_events[0].event_id == second_events[0].event_id
     assert json.loads(next_cursor)[cik] == accession
     assert session.requests.count(directory + "index.json") == 2
+
+
+
+@pytest.mark.asyncio
+async def test_sec_amended_13f_payload_reuses_stable_row_identity():
+    adapter = SecEdgarFilingsAdapter(
+        ciks=["0000320193"],
+        user_agent="AITOS research contact@example.org",
+    )
+    original = """<informationTable><infoTable>
+      <nameOfIssuer>Example Corp</nameOfIssuer><titleOfClass>COM</titleOfClass>
+      <cusip>123456789</cusip><value>2500</value>
+      <sshPrnamt>10000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType>
+      <investmentDiscretion>SOLE</investmentDiscretion>
+    </infoTable></informationTable>"""
+    amended = original.replace("<value>2500</value>", "<value>2750</value>").replace(
+        "<sshPrnamt>10000</sshPrnamt>", "<sshPrnamt>11000</sshPrnamt>"
+    )
+    payloads = iter([original, amended])
+
+    async def get_text(_url):
+        return next(payloads)
+
+    adapter._get_text = get_text
+    args = (
+        "0000320193",
+        "0000320193-26-000001",
+        "13F-HR/A",
+        adapter._day("2026-05-15"),
+        "2026-03-31",
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/infotable.xml",
+    )
+    first = await adapter._parse_13f(*args)
+    second = await adapter._parse_13f(*args)
+    assert first[0].event_id == second[0].event_id
+    assert first[0].quantity == 10000
+    assert second[0].quantity == 11000
+    assert first[0].usd_value == 2_500_000
+    assert second[0].usd_value == 2_750_000
