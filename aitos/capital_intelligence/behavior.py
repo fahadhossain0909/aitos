@@ -32,12 +32,16 @@ def assess_capital_behavior(
 ) -> BehaviorAssessment:
     if not entity_id.strip():
         raise ValueError("entity_id is required")
+    # Only interpret a prefix as a chain when it matches an observed venue.
+    event_rows = list(events)
     chain = None
     address = entity_id
     if ":" in entity_id:
-        chain, address = entity_id.split(":", 1)
+        candidate_chain, candidate_address = entity_id.split(":", 1)
+        if any(event.venue == candidate_chain for event in event_rows):
+            chain, address = candidate_chain, candidate_address
     selected: list[tuple[CapitalEvent, int]] = []
-    for event in events:
+    for event in event_rows:
         if event.usd_value is None:
             continue
         if chain is not None and event.venue != chain:
