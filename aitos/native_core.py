@@ -1,13 +1,79 @@
-"""Optional Rust native boundary and behaviorally equivalent Python reference."""
+"""Optional Rust native boundary and behaviorally equivalent Python reference.
+
+Prices and quantities crossing the native boundary are integer ticks/lots.
+Use InstrumentScale to convert exchange decimal strings without float drift.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 try:
     from aitos_native import FixedPointOrderBook as _RustOrderBook
 except ImportError:
     _RustOrderBook = None
+
+
+def _positive_step(value: str | Decimal, name: str) -> Decimal:
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite positive decimal") from exc
+    if not result.is_finite() or result <= 0:
+        raise ValueError(f"{name} must be a finite positive decimal")
+    return result
+
+
+def _to_units(value: str | Decimal, step: Decimal, name: str, *, allow_zero: bool) -> int:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite decimal") from exc
+    if not decimal_value.is_finite() or decimal_value < 0 or (not allow_zero and decimal_value == 0):
+        raise ValueError(f"{name} must be {'non-negative' if allow_zero else 'positive'} and finite")
+    units = decimal_value / step
+    integral = units.to_integral_value()
+    if units != integral:
+        raise ValueError(f"{name} is not aligned to instrument step {step}")
+    return int(integral)
+
+
+@dataclass(frozen=True, slots=True)
+class InstrumentScale:
+    """Exact exchange tick/lot conversion; never routes binary floats to Rust."""
+
+    price_tick: Decimal
+    quantity_step: Decimal
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "price_tick", _positive_step(self.price_tick, "price_tick"))
+        object.__setattr__(self, "quantity_step", _positive_step(self.quantity_step, "quantity_step"))
+
+    @classmethod
+    def from_exchange_filters(cls, filters) -> "InstrumentScale":
+        """Build from AITOS SymbolFilters or a compatible object."""
+        return cls(
+            price_tick=Decimal(str(filters.tick_size)),
+            quantity_step=Decimal(str(filters.step_size)),
+        )
+
+    def price_to_ticks(self, price: str | Decimal) -> int:
+        return _to_units(price, self.price_tick, "price", allow_zero=False)
+
+    def quantity_to_lots(self, quantity: str | Decimal) -> int:
+        return _to_units(quantity, self.quantity_step, "quantity", allow_zero=True)
+
+    def price_from_ticks(self, ticks: int) -> Decimal:
+        if isinstance(ticks, bool) or not isinstance(ticks, int) or ticks <= 0:
+            raise ValueError("price ticks must be a positive integer")
+        return self.price_tick * ticks
+
+    def quantity_from_lots(self, lots: int) -> Decimal:
+        if isinstance(lots, bool) or not isinstance(lots, int) or lots < 0:
+            raise ValueError("quantity lots must be a non-negative integer")
+        return self.quantity_step * lots
 
 
 class PythonFixedPointOrderBook:
@@ -37,11 +103,7 @@ class PythonFixedPointOrderBook:
         for price, quantity in rows:
             if isinstance(price, bool) or not isinstance(price, int) or price <= 0:
                 raise ValueError("price units must be positive integers")
-            if (
-                isinstance(quantity, bool)
-                or not isinstance(quantity, int)
-                or quantity < 0
-            ):
+            if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 0:
                 raise ValueError("quantity units must be non-negative integers")
 
     def _load(self, target: dict[int, int], rows: Iterable[tuple[int, int]]) -> None:
@@ -103,6 +165,23 @@ class PythonFixedPointOrderBook:
             max(self.bids) if self.bids else None,
             min(self.asks) if self.asks else None,
         )
+
+    def depth_imbalance(self, depth: int) -> float:
+        _, bids, asks = self.snapshot(depth)
+        bid_qty = sum(quantity for _, quantity in bids)
+        ask_qty = sum(quantity for _, quantity in asks)
+        total = bid_qty + ask_qty
+        return (bid_qty - ask_qty) / total if total else 0.0
+
+    def microprice_ticks(self) -> float | None:
+        bid, ask = self.best_bid_ask()
+        if bid is None or ask is None:
+            return None
+        bid_qty, ask_qty = self.bids[bid], self.asks[ask]
+        total = bid_qty + ask_qty
+        if total == 0:
+            return None
+        return (ask * bid_qty + bid * ask_qty) / total
 
 
 def native_available() -> bool:
