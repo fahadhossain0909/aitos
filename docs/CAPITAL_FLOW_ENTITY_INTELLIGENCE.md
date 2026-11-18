@@ -472,13 +472,15 @@ Enable it explicitly with:
 
 ```dotenv
 AITOS_CFEI_SEC_ARCHIVE_BACKFILL_ENABLED=true
-AITOS_CFEI_SEC_ARCHIVE_MAX_FILINGS_PER_POLL=10
+AITOS_CFEI_SEC_ARCHIVE_MAX_FILINGS_PER_POLL=1
 AITOS_CFEI_SEC_ARCHIVE_MAX_ROWS_PER_POLL=500
 ```
 
 The archive cursor records the current archive file and row offset per CIK.
 Each poll is bounded by both relevant filing count and scanned row count;
-restart resumes at the exact next row. If the SEC archive file referenced by a
+restart resumes at the exact next row. SEC workers use a 50,000-event batch ceiling,
+and the archive worker defaults to one filing per poll so a large 13F does not
+silently overflow the generic ingestion batch limit. If the SEC archive file referenced by a
 stored cursor disappears, the worker fails closed and requires operator cursor
 reconciliation rather than silently skipping history. The worker is disabled by
 default and does not imply that a full backfill has completed. Monitor the
