@@ -237,7 +237,6 @@ def chronological_split(
     return train, test
 
 
-
 @dataclass(frozen=True, slots=True)
 class ProbabilityEvaluation:
     sample_count: int
@@ -273,11 +272,13 @@ def evaluate_probabilistic_predictions(
     epsilon = 1e-12
     count = len(labels)
     brier = sum((prob - label) ** 2 for label, prob in zip(labels, values)) / count
-    log_loss = -sum(
-        label * log(max(prob, epsilon))
-        + (1 - label) * log(max(1 - prob, epsilon))
-        for label, prob in zip(labels, values)
-    ) / count
+    log_loss = (
+        -sum(
+            label * log(max(prob, epsilon)) + (1 - label) * log(max(1 - prob, epsilon))
+            for label, prob in zip(labels, values)
+        )
+        / count
+    )
 
     calibration_error = 0.0
     for index in range(calibration_bins):
@@ -316,11 +317,7 @@ def evaluate_probabilistic_predictions(
         if true_positive + false_negative
         else 0.0
     )
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return ProbabilityEvaluation(
         count,
         brier,
@@ -348,10 +345,7 @@ def walk_forward_splits(
         raise ValueError("initial_train_fraction must be in [0.2, 0.8]")
     if not isinstance(embargo_seconds, int) or embargo_seconds < 0:
         raise ValueError("embargo_seconds must be a non-negative integer")
-    if (
-        not isinstance(max_quote_age_seconds, int)
-        or max_quote_age_seconds < 0
-    ):
+    if not isinstance(max_quote_age_seconds, int) or max_quote_age_seconds < 0:
         raise ValueError("max_quote_age_seconds must be a non-negative integer")
     ordered = sorted(rows, key=lambda row: (row.event_time, row.event_id))
     initial_size = int(len(ordered) * initial_train_fraction)
