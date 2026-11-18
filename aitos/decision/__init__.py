@@ -58,6 +58,8 @@ __all__ = [
     "NoulQuestion",
     "NativeEvidenceProvider",
     "ProbabilityCalibrator",
+    "ReplayExecution",
+    "ReplayExecutionSummary",
     "ReplayObservation",
     "ReplayReport",
     "ScoreQuestion",
