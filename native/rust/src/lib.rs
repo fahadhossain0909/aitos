@@ -4,7 +4,13 @@ use std::collections::BTreeMap;
 
 // Prices are integer ticks and quantities are integer lots at this boundary.
 type PriceQuantity = (i64, i64);
-type DepthDelta = (u64, u64, Vec<PriceQuantity>, Vec<PriceQuantity>, Option<u64>);
+type DepthDelta = (
+    u64,
+    u64,
+    Vec<PriceQuantity>,
+    Vec<PriceQuantity>,
+    Option<u64>,
+);
 type BookSnapshot = (u64, Vec<PriceQuantity>, Vec<PriceQuantity>);
 
 struct Book {
