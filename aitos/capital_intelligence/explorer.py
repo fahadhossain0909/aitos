@@ -116,7 +116,7 @@ class CapitalEntityExplorer:
             FROM address_flows
             GROUP BY venue, address
             ORDER BY gross_flow_usd DESC, venue ASC, address ASC
-            LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
+            LIMIT {limit:UInt32} OFFSET {offset:UInt32}
         """.replace("__EVENTS_TABLE__", self.events_table)
         result = await self.clickhouse.query(
             query, parameters={"limit": limit, "offset": offset}
@@ -155,8 +155,8 @@ class CapitalEntityExplorer:
             """
             SELECT payload_json
             FROM __EVENTS_TABLE__ FINAL
-            WHERE venue = {{chain:String}}
-              AND (actor_id = {{address:String}} OR counterparty_id = {{address:String}})
+            WHERE venue = {chain:String}
+              AND (actor_id = {address:String} OR counterparty_id = {address:String})
               AND finality != 'reverted'
               AND JSONExtractString(
                     payload_json, 'metadata', 'actor_identity_kind'
@@ -168,12 +168,12 @@ class CapitalEntityExplorer:
               AND JSONExtractBool(
                     payload_json, 'metadata', 'aggregate_only'
                   ) = 0
-              AND lower({{address:String}}) NOT IN (
+              AND lower({address:String}) NOT IN (
                     '0x0000000000000000000000000000000000000000',
                     '0x000000000000000000000000000000000000dead'
                   )
             ORDER BY event_time DESC, observed_time DESC
-            LIMIT {{limit:UInt32}}
+            LIMIT {limit:UInt32}
             """.replace("__EVENTS_TABLE__", self.events_table),
             parameters={"chain": chain, "address": address, "limit": event_limit},
         )
@@ -185,7 +185,7 @@ class CapitalEntityExplorer:
             SELECT subject_id, object_id, relation, evidence_type, evidence_ref,
                    observed_at, confidence, status
             FROM __EVIDENCE_TABLE__ FINAL
-            WHERE subject_id = {{entity_id:String}} OR object_id = {{entity_id:String}}
+            WHERE subject_id = {entity_id:String} OR object_id = {entity_id:String}
             ORDER BY observed_at DESC
             LIMIT 200
             """.replace("__EVIDENCE_TABLE__", self.evidence_table),
@@ -195,7 +195,7 @@ class CapitalEntityExplorer:
             """
             SELECT label, category, source, verified, valid_from, valid_until
             FROM __LABELS_TABLE__ FINAL
-            WHERE entity_id = {{entity_id:String}}
+            WHERE entity_id = {entity_id:String}
             ORDER BY valid_from DESC
             LIMIT 100
             """.replace("__LABELS_TABLE__", self.labels_table),
