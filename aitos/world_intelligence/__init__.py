@@ -1,6 +1,7 @@
 """AITOS World Intelligence: advisory external-event context."""
 
 from aitos.world_intelligence.adapters import ingest_page, ingest_page_durably
+from aitos.world_intelligence.capital_flow import CapitalFlowIntelligenceAdapter
 from aitos.world_intelligence.context import (
     AssetSnapshotProvider,
     ClickHouseAssetSnapshotProvider,
@@ -89,6 +90,7 @@ __all__ = [
     "AssetSnapshotProvider",
     "ClickHouseAssetSnapshotProvider",
     "ClickHouseIntelligenceStore",
+    "CapitalFlowIntelligenceAdapter",
     "CoordinatedAmplificationCluster",
     "CoordinationEdge",
     "CursorReplayConflict",
