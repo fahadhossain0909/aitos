@@ -27,6 +27,8 @@ def test_candidate_snapshot_preserves_identity_and_marks_vetoes_false():
     assert snapshot.symbol == "BTCUSDT"
     assert snapshot.snapshot_id == "candidate-1"
     assert snapshot.features["composite_score"] == 82.0
+    assert snapshot.features["trend"] == 0.0
+    assert snapshot.features["order_flow"] == 0.8
     assert snapshot.features["risk_veto"] is False
     assert snapshot.features["execution_veto"] is False
     assert snapshot.features["data_integrity_veto"] is False

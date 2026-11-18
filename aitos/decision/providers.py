@@ -5,7 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
-from .types import DecisionSpec, MarketSnapshot, ModelResponse, TradeEconomics
+from .types import (
+    ChoiceQuestion,
+    DecisionSpec,
+    MarketSnapshot,
+    ModelResponse,
+    NoulQuestion,
+    ScoreQuestion,
+    TradeEconomics,
+)
 
 
 class DecisionProvider(Protocol):
@@ -116,9 +124,35 @@ class NativeEvidenceProvider:
                 "SHORT": selected_mass,
                 "NO_TRADE": no_trade_mass,
             }
+        scores = {"scanner_composite_score": float(score)}
+        nouls = {}
+        choices = {}
+        for question in spec.questions:
+            if isinstance(question, ScoreQuestion):
+                supplied = snapshot.features.get(f"score:{question.name}")
+                value = supplied if supplied is not None else (
+                    question.minimum + (float(score) / 100.0)
+                    * (question.maximum - question.minimum)
+                )
+                scores[question.name] = min(
+                    question.maximum, max(question.minimum, float(value))
+                )
+            elif isinstance(question, NoulQuestion):
+                supplied = snapshot.features.get(f"noul:{question.name}")
+                if supplied is None and question.name == "reversal":
+                    supplied = snapshot.features.get("reversal_probability", 0.5)
+                if supplied is not None:
+                    nouls[question.name] = float(supplied)
+            elif isinstance(question, ChoiceQuestion):
+                if set(question.options) != {"LONG", "SHORT", "NO_TRADE"}:
+                    selected = snapshot.features.get(f"choice:{question.name}")
+                    if selected in question.options:
+                        choices[question.name] = selected
         return ModelResponse(
             probabilities=probabilities,
-            scores={"scanner_composite_score": float(score)},
+            scores=scores,
+            nouls=nouls,
+            choices=choices,
             model_id="aitos-native-evidence",
             model_version="heuristic-prior-v1",
             rationale=(

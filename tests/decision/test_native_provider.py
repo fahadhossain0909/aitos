@@ -15,7 +15,7 @@ def test_native_provider_returns_conservative_uncalibrated_prior():
     snapshot = MarketSnapshot(
         "BTCUSDT",
         datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc),
-        {"direction": "LONG", "composite_score": 80.0},
+        {"direction": "LONG", "composite_score": 80.0, "reversal_probability": 0.4},
         snapshot_id="candidate-1",
     )
     response = NativeEvidenceProvider().evaluate(snapshot, spec)
