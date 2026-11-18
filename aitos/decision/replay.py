@@ -42,17 +42,15 @@ def replay_chronologically(runtime: ADLRuntime, spec: DecisionSpec, observations
     results: list[DecisionResult] = []
     correct = 0
     abstentions = 0
-    pending: list[ReplayObservation] = []
+    pending: list[tuple[ReplayObservation, dict[str, float]]] = []
     for item in ordered:
         decision_time = item.snapshot.timestamp
-        matured, pending = (
-            [row for row in pending if row.matured_at <= decision_time],
-            [row for row in pending if row.matured_at > decision_time],
-        )
-        for matured_item in matured:
+        matured = [row for row in pending if row[0].matured_at <= decision_time]
+        pending = [row for row in pending if row[0].matured_at > decision_time]
+        for matured_item, raw_probabilities in matured:
             for action in ("LONG", "SHORT", "NO_TRADE"):
-                probability = matured_item._raw_probabilities.get(action)
-                if probability is not None:
+                probability = raw_probabilities.get(action)
+    if probability is not None:
                     calibrator.update(
                         action,
                         probability,
@@ -62,8 +60,7 @@ def replay_chronologically(runtime: ADLRuntime, spec: DecisionSpec, observations
         results.append(result)
         abstentions += int(result.action == DecisionAction.ABSTAIN)
         correct += int(result.proposed_action.value == item.realized_action)
-        object.__setattr__(item, "_raw_probabilities", dict(result.raw_probabilities))
-        pending.append(item)
+        pending.append((item, dict(result.raw_probabilities)))
     count = len(ordered)
     return ReplayReport(count, count, abstentions, correct / count if count else None, calibrator.metrics(), tuple(results))
 
