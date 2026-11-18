@@ -427,3 +427,33 @@ values and retain the provenance ticket/source):
 ```dotenv
 AITOS_CFEI_ENTITY_LABELS=[{"chain":"1","address":"0xYOUR_REVIEWED_ADDRESS","label":"Exchange hot wallet","category":"exchange","source":"internal-review-ticket-123","verified":true,"valid_from":"2026-11-18T00:00:00Z","valid_until":"2027-11-18T00:00:00Z"}]
 ```
+
+
+## 15. Operator watchlist and optional webhook alerts
+
+The read-only explorer now has an authenticated, Redis-backed operator watchlist.
+Entries are chain-scoped bookmarks, not identity assertions. EVM hex addresses
+are normalized to lowercase; case-sensitive base58 addresses are preserved.
+The watchlist is bounded by `AITOS_CFEI_WATCHLIST_MAX_ENTRIES` (default 5,000).
+
+With `AITOS_CFEI_API_TOKEN` configured, the following endpoints are available:
+
+- `GET /v1/watchlist?limit=500` lists saved entries.
+- `POST /v1/watchlist` adds or updates an entry using JSON
+  `{"chain":"evm:1","address":"0x...","note":"reviewed treasury candidate"}`.
+- `DELETE /v1/watchlist` removes an entry using the same JSON identity fields.
+
+All mutations require the same 32-character-minimum bearer token as the entity
+explorer. Request bodies are capped at 8 KiB. The Redis write enforces the
+watchlist capacity atomically. Keep the API behind a private network or
+authenticated reverse proxy; do not expose the bearer token to browser logs.
+
+Optional external webhook delivery is enabled only when
+`AITOS_CFEI_ALERT_WEBHOOK_URL` is set to an HTTPS endpoint. New persisted
+events that involve a watched address can produce a neutral observation notice.
+Reverted events and aggregate-only cohort observations are excluded. A Redis
+idempotency key suppresses duplicate notices on ingestion replay; a failed
+delivery releases its short lease so a later replay can retry. Configure
+`AITOS_CFEI_ALERT_TIMEOUT_SECONDS` to bound network waits. The message explicitly
+states that a watchlist match is not a trading signal. No order, strategy or
+risk path consumes watchlist alerts.
