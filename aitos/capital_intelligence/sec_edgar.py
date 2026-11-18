@@ -185,7 +185,7 @@ class SecEdgarFilingsAdapter:
             if quantity < 0 or (reported_value is not None and reported_value < 0):
                 raise RuntimeError("13F filing contains a negative holding")
             event_id = self._event_id(
-                "13f", cik, accession, cusip, str(index), shares, value_thousands or ""
+                "13f", cik, accession, cusip, str(index)
             )
             events.append(
                 CapitalEvent(
@@ -256,8 +256,6 @@ class SecEdgarFilingsAdapter:
                     cik,
                     accession,
                     str(index),
-                    shares_raw,
-                    security_title or "",
                 )
                 events.append(
                     CapitalEvent(
@@ -322,11 +320,6 @@ class SecEdgarFilingsAdapter:
                 cik,
                 accession,
                 str(index),
-                transaction_date.isoformat(),
-                shares_raw,
-                price_raw or "",
-                acquired_disposed or "",
-                code or "",
             )
             events.append(
                 CapitalEvent(
