@@ -73,7 +73,6 @@ async def test_graph_store_persists_event_observations_without_identity_claims()
     assert parameters["rows"][0]["block_hash"] is None
 
 
-
 @pytest.mark.asyncio
 async def test_graph_store_reverts_orphaned_event_versions_by_canonical_hash():
     class Result:
