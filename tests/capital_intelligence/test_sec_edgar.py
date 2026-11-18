@@ -365,7 +365,7 @@ async def test_sec_form4_derivative_transaction_preserves_underlying_and_terms()
     events, _ = await adapter.poll()
     derivative = next(event for event in events if "derivative" in event.event_type)
     assert derivative.quantity == 20
-    assert derivative.quantity_unit == "derivative_units"
+    assert derivative.unit == "derivative_units"
     assert derivative.usd_value is None
     assert derivative.metadata["underlying_security"] == "MSFT"
     assert derivative.metadata["underlying_shares"] == "2000"
