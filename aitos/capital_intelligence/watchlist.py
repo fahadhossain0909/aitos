@@ -74,6 +74,15 @@ class RedisEntityWatchlist:
             raise ValueError("watchlist capacity reached")
         return record
 
+    async def get(self, chain: str, address: str) -> dict[str, Any] | None:
+        _, _, entity_id = self._identity(chain, address)
+        raw = await self.redis.hget(self.key, entity_id)
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        return json.loads(raw)
+
     async def remove(self, chain: str, address: str) -> bool:
         _, _, entity_id = self._identity(chain, address)
         return bool(await self.redis.hdel(self.key, entity_id))
