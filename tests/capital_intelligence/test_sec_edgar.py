@@ -234,16 +234,12 @@ async def test_sec_filing_batch_limit_advances_cursor_without_skipping_filings()
     assert json.loads(second_cursor)[cik] == newer
 
 
-
 @pytest.mark.asyncio
-async def test_sec_recent_revision_rescan_does_not_regress_cursor(
-):
+async def test_sec_recent_revision_rescan_does_not_regress_cursor():
     cik = "0000320193"
     accession = "0000320193-26-000001"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    directory = (
-        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/"
-    )
+    directory = "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/"
     submissions = {
         "filings": {
             "recent": {
