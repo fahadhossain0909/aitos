@@ -12,7 +12,9 @@ from aitos.world_intelligence.impact_model import (
 BASE = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
-def row(index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"):
+def row(
+    index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"
+):
     signal = (index % 10 - 4.5) / 5.0
     positive = signal > 0 if positive is None else positive
     event_time = BASE + timedelta(hours=index)
@@ -23,7 +25,8 @@ def row(index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"
         regime=regime,
         event_type="macro" if index % 2 else "exchange",
         event_time=event_time,
-        outcome_available_at=event_time + timedelta(hours=1 if available else 100),
+        outcome_available_at=event_time
+        + timedelta(hours=1 if available else 100),
         sentiment=signal,
         severity=0.7,
         novelty=0.6,
@@ -106,7 +109,6 @@ def test_model_rejects_duplicate_events_and_future_outcomes():
 
 
 def test_training_row_rejects_invalid_numeric_inputs():
-    bad = row(0)
     with pytest.raises(ValueError, match="sentiment"):
         EventImpactTrainingRow(
             event_id="bad",
