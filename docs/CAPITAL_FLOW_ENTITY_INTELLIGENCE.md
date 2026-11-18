@@ -68,7 +68,7 @@ The field names vary by CFTC report family; validate them against the selected o
 - The optional SEC adapter reads official EDGAR submissions, 13F-HR information tables and Forms 3/4/5 ownership XML for an explicit CIK allowlist.
 - 13F holdings retain both the report-period date and the later filing-publication date. The reported value is converted from the filing's USD-thousands unit. A 13F record is a delayed quarterly disclosure, not a current portfolio position.
 - Form 4 records preserve transaction date, filing date, reporting-owner CIK, issuer CIK, transaction code, acquired/disposed code and reported price/shares where available. Amendments remain separately identifiable by form and accession.
-- The adapter requires a contactable SEC User-Agent (including an email address), bounds the number of filings per poll, respects a conservative request interval, rejects oversized/DTD-bearing XML and fails closed if its cursor falls outside the SEC recent-submissions window.
+- The adapter requires a contactable SEC User-Agent (including an email address), bounds the number of filings per poll, respects a conservative request interval, rejects oversized/DTD-bearing XML and fails closed if its cursor falls outside the SEC recent-submissions window. It also re-fetches a configurable small number of latest known accessions each poll (default 5) to detect corrected/revised source documents without moving the durable new-filing cursor backwards. New `/A` amendments remain distinct accessions and are ingested normally. This is not a substitute for traversing the SEC historical submissions archive.
 - No owner is inferred beyond the CIK explicitly present in the filing. Insider transactions and institutional holdings are disclosures, not standalone directional signals.
 
 Configure it with:
@@ -77,6 +77,7 @@ Configure it with:
 AITOS_CFEI_SEC_CIKS=["0000320193","0000789019"]
 AITOS_CFEI_SEC_USER_AGENT="AITOS research team contact@your-domain.example"
 AITOS_CFEI_SEC_MAX_FILINGS_PER_POLL=25
+AITOS_CFEI_SEC_REVISION_RESCAN_FILINGS=5
 ```
 
 The CIKs above are examples only; replace them with an intentionally selected monitoring list and a real contact address. The SEC adapter is optional and uses the same append-before-checkpoint worker.
