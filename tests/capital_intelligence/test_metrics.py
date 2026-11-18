@@ -12,6 +12,7 @@ def test_cfei_metrics_include_source_health_and_valid_prometheus_lines():
                     "events": 10,
                     "errors": 1,
                     "last_success": 1_800_000_000,
+                    "lease_contention": 3,
                 }
             },
         }
@@ -22,5 +23,6 @@ def test_cfei_metrics_include_source_health_and_valid_prometheus_lines():
         in rendered
     )
     assert "aitos_cfei_source_poll_errors_total" in rendered
+    assert "aitos_cfei_source_lease_contention_total" in rendered
     assert rendered.endswith("\n")
     assert "\\n" not in rendered
