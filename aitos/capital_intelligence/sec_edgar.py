@@ -289,6 +289,60 @@ class SecEdgarFilingsAdapter:
                         },
                     )
                 )
+            derivative_holdings = [
+                node
+                for node in root.iter()
+                if self._local(node.tag) == "derivativeHolding"
+            ]
+            for index, item in enumerate(derivative_holdings):
+                units_raw = self._value(item, "sharesOwnedFollowingTransaction")
+                if units_raw is None:
+                    continue
+                units = float(units_raw)
+                if units < 0:
+                    raise RuntimeError("Form 3 contains a negative derivative holding")
+                underlying = self._value(item, "underlyingSecurityTitle")
+                underlying_shares = self._value(item, "underlyingSecurityShares")
+                event_id = self._event_id(
+                    "form3-derivative", cik, accession, str(index)
+                )
+                events.append(
+                    CapitalEvent(
+                        event_id,
+                        "sec-edgar",
+                        "sec_edgar_form3_derivative",
+                        "equities",
+                        "sec_edgar",
+                        issuer_symbol or f"CIK{int(issuer_id):010d}",
+                        "insider_derivative_holding_disclosure",
+                        period,
+                        filing_date,
+                        units,
+                        "derivative_units",
+                        None,
+                        actor_id=f"sec-cik:{int(owner_cik)}" if owner_cik else None,
+                        counterparty_id=f"sec-cik:{int(issuer_id)}",
+                        transaction_id=accession,
+                        finality="confirmed",
+                        metadata={
+                            "filing_form": form,
+                            "accession_number": accession,
+                            "filing_url": url,
+                            "filing_date": filing_date.isoformat(),
+                            "period_of_report": period.isoformat(),
+                            "underlying_security": underlying,
+                            "underlying_shares": underlying_shares,
+                            "exercise_price": self._value(item, "conversionOrExercisePrice"),
+                            "expiration_date": self._value(item, "expirationDate"),
+                            "direct_or_indirect": self._value(
+                                item, "directOrIndirectOwnership"
+                            ),
+                            "flow_sign": 0,
+                            "actor_identity_kind": "sec_insider",
+                            "source_semantics": "derivative_holding_snapshot_not_trade_or_directional_signal",
+                        },
+                    )
+                )
             return events
 
         transaction_nodes = [
@@ -352,6 +406,78 @@ class SecEdgarFilingsAdapter:
                         "actor_identity_kind": "sec_insider",
                         "issuer_cik": issuer_id,
                         "source_semantics": "reported_insider_transaction_not_a_standalone_signal",
+                    },
+                )
+            )
+
+        derivative_nodes = [
+            node
+            for node in root.iter()
+            if self._local(node.tag) == "derivativeTransaction"
+        ]
+        for index, item in enumerate(derivative_nodes):
+            transaction_date = self._day(self._value(item, "transactionDate"))
+            units_raw = self._value(item, "transactionShares")
+            if transaction_date is None or units_raw is None:
+                continue
+            units = float(units_raw)
+            exercise_price_raw = self._value(item, "conversionOrExercisePrice")
+            exercise_price = (
+                float(exercise_price_raw)
+                if exercise_price_raw not in (None, "")
+                else None
+            )
+            if units < 0 or (exercise_price is not None and exercise_price < 0):
+                raise RuntimeError("Form 4 contains a negative derivative value")
+            acquired_disposed = self._value(item, "transactionAcquiredDisposedCode")
+            sign = (
+                1
+                if acquired_disposed == "A"
+                else (-1 if acquired_disposed == "D" else 0)
+            )
+            event_id = self._event_id(
+                "form4-derivative", cik, accession, str(index)
+            )
+            events.append(
+                CapitalEvent(
+                    event_id,
+                    "sec-edgar",
+                    "sec_edgar_form4_derivative",
+                    "equities",
+                    "sec_edgar",
+                    issuer_symbol or f"CIK{int(issuer_id):010d}",
+                    "insider_derivative_transaction",
+                    transaction_date,
+                    filing_date,
+                    units,
+                    "derivative_units",
+                    None,
+                    actor_id=f"sec-cik:{int(owner_cik)}" if owner_cik else None,
+                    counterparty_id=f"sec-cik:{int(issuer_id)}",
+                    transaction_id=accession,
+                    finality="confirmed",
+                    metadata={
+                        "filing_form": form,
+                        "accession_number": accession,
+                        "filing_url": url,
+                        "filing_date": filing_date.isoformat(),
+                        "transaction_date": transaction_date.isoformat(),
+                        "transaction_code": self._value(item, "transactionCode"),
+                        "acquired_disposed_code": acquired_disposed,
+                        "flow_sign": sign,
+                        "exercise_price": exercise_price,
+                        "exercise_date": self._value(item, "exerciseDate"),
+                        "expiration_date": self._value(item, "expirationDate"),
+                        "underlying_security": self._value(
+                            item, "underlyingSecurityTitle"
+                        ),
+                        "underlying_shares": self._value(
+                            item, "underlyingSecurityShares"
+                        ),
+                        "reporting_owner_cik": owner_cik,
+                        "actor_identity_kind": "sec_insider",
+                        "issuer_cik": issuer_id,
+                        "source_semantics": "reported_derivative_transaction_not_a_standalone_signal",
                     },
                 )
             )
