@@ -426,6 +426,36 @@ class SolanaAddressActivityAdapter:
             stake_instruction_evidence = self._stake_instruction_evidence(
                 message, address
             )
+            if stake_instruction_evidence:
+                evidence_event_id = hashlib.sha256(
+                    f"solana|{address}|{signature}|stake-evidence".encode()
+                ).hexdigest()
+                events.append(
+                    CapitalEvent(
+                        evidence_event_id,
+                        "solana-rpc",
+                        "solana_stake_instruction_evidence",
+                        "crypto_spot",
+                        "solana",
+                        "SOL_STAKE",
+                        "stake_instruction_observed",
+                        stamp,
+                        observed_at,
+                        0,
+                        "instruction_evidence",
+                        None,
+                        address,
+                        transaction_id=signature,
+                        block_number=int(slot) if slot is not None else None,
+                        finality="finalized",
+                        metadata={
+                            "actor_identity_kind": "solana_address",
+                            "evidence_only": True,
+                            "stake_instruction_evidence": stake_instruction_evidence,
+                            "instruction_evidence_is_not_additional_flow": True,
+                        },
+                    )
+                )
             pre = meta.get("preBalances") or []
             post = meta.get("postBalances") or []
             try:
