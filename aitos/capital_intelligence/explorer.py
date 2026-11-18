@@ -161,6 +161,17 @@ class CapitalEntityExplorer:
               AND JSONExtractString(
                     payload_json, 'metadata', 'actor_identity_kind'
                   ) IN ('evm_address', 'solana_address')
+              AND JSONExtractBool(
+                    payload_json, 'metadata',
+                    'actor_is_pool_caller_not_verified_beneficial_owner'
+                  ) = 0
+              AND JSONExtractBool(
+                    payload_json, 'metadata', 'aggregate_only'
+                  ) = 0
+              AND lower({address:String}) NOT IN (
+                    '0x0000000000000000000000000000000000000000',
+                    '0x000000000000000000000000000000000000dead'
+                  )
             ORDER BY event_time DESC, observed_time DESC
             LIMIT {{limit:UInt32}}
             """,
