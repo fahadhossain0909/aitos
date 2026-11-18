@@ -44,9 +44,7 @@ def make_event(event_id, *, finality="confirmed", flow_sign=-1):
 @pytest.mark.asyncio
 async def test_capital_flow_bridge_preserves_provenance_without_inventing_sentiment():
     event = make_event("event-1")
-    client = FakeClickHouse(
-        [(event.to_json(), event.observed_time, event.event_id)]
-    )
+    client = FakeClickHouse([(event.to_json(), event.observed_time, event.event_id)])
     adapter = CapitalFlowIntelligenceAdapter(
         clickhouse=client,
         initial_lookback_hours=6,
