@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from aitos.capital_intelligence.dex_factory import (
@@ -75,7 +77,7 @@ async def test_factory_discovery_decodes_pool_and_token_addresses(protocol, topi
 
     adapter._rpc = fake_rpc
     events, cursor = await adapter.poll(cursor="0x1f")
-    assert cursor == "0x20"
+    assert json.loads(cursor)["head_block"] == 0x20
     assert len(events) == 1
     event = events[0]
     assert event.instrument == pool
@@ -101,3 +103,89 @@ def test_factory_discovery_requires_allowlisted_factories_and_supported_protocol
             chain_id="1",
             factories={"0x" + "1" * 40: "uniswap_v2"},
         )
+
+
+
+@pytest.mark.asyncio
+async def test_factory_discovery_recovers_reorg_within_retained_window():
+    factory = "0x" + "1" * 40
+    adapter = EvmDexFactoryDiscoveryAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        factories={factory: "uniswap_v2"},
+        confirmations=2,
+        max_block_range=10,
+        max_reorg_depth=2,
+    )
+    cursor = json.dumps(
+        {
+            "version": 2,
+            "head_block": 10,
+            "recent_hashes": {
+                "8": "0x" + "8" * 64,
+                "9": "0x" + "9" * 64,
+                "10": "0x" + "a" * 64,
+            },
+        }
+    )
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0xd"
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000 + number),
+                "hash": "0x" + ("9" * 64 if number == 9 else "b" * 64),
+            }
+        if method == "eth_getLogs":
+            assert params[0]["fromBlock"] == "0xa"
+            assert params[0]["toBlock"] == "0xb"
+            return []
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, next_cursor = await adapter.poll(cursor=cursor)
+    assert events == []
+    assert json.loads(next_cursor)["head_block"] == 11
+    assert adapter.last_reorg["source_id"] == "evm:1"
+    assert adapter.last_reorg["from_block"] == 10
+    assert adapter.last_reorg["to_block"] == 11
+    assert set(adapter.last_reorg["canonical_hashes"]) == {10, 11}
+
+
+@pytest.mark.asyncio
+async def test_factory_discovery_fails_closed_when_reorg_exceeds_window():
+    factory = "0x" + "1" * 40
+    adapter = EvmDexFactoryDiscoveryAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        factories={factory: "uniswap_v2"},
+        confirmations=2,
+        max_reorg_depth=1,
+    )
+    cursor = json.dumps(
+        {
+            "version": 2,
+            "head_block": 10,
+            "recent_hashes": {
+                "9": "0x" + "9" * 64,
+                "10": "0x" + "a" * 64,
+            },
+        }
+    )
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0xd"
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000),
+                "hash": "0x" + "c" * 64,
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    with pytest.raises(RuntimeError, match="exceeds retained canonical window"):
+        await adapter.poll(cursor=cursor)
