@@ -179,7 +179,9 @@ class SolanaAddressActivityAdapter:
             meta = {}
         outer = list(message.get("instructions") or [])
         instructions = list(outer)
-        inner_groups = meta.get("innerInstructions") or message.get("innerInstructions") or []
+        inner_groups = (
+            meta.get("innerInstructions") or message.get("innerInstructions") or []
+        )
         for group in inner_groups:
             instructions.extend(group.get("instructions") or [])
 
