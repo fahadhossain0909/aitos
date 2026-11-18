@@ -1,0 +1,10 @@
+[build-system]
+requires=["maturin>=1.7,<2"]
+build-backend="maturin"
+[project]
+name="aitos-native"
+version="0.1.0"
+requires-python=">=3.10"
+[tool.maturin]
+manifest-path="Cargo.toml"
+module-name="aitos_native"
