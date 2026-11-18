@@ -67,6 +67,8 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
         "# TYPE aitos_cfei_source_poll_errors_total counter",
         "# HELP aitos_cfei_source_last_success_unix_seconds Last successful poll by source.",
         "# TYPE aitos_cfei_source_last_success_unix_seconds gauge",
+        "# HELP aitos_cfei_source_lease_contention_total Source poll lease contention.",
+        "# TYPE aitos_cfei_source_lease_contention_total counter",
     ]
     for source_id, values in sorted(counters.get("sources", {}).items()):
         # Prometheus label escaping: source IDs come from operator config.
@@ -82,6 +84,7 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
                 f"aitos_cfei_source_events_persisted_total{{{labels}}} {values['events']}",
                 f"aitos_cfei_source_poll_errors_total{{{labels}}} {values['errors']}",
                 f"aitos_cfei_source_last_success_unix_seconds{{{labels}}} {values['last_success']}",
+                f"aitos_cfei_source_lease_contention_total{{{labels}}} {values['lease_contention']}",
             ]
         )
     return ("\n".join(lines) + "\n").encode()
@@ -374,10 +377,14 @@ async def main() -> None:
 
     async def measured_run_once(worker):
         source_metrics = counters["sources"].setdefault(
-            worker.source_id, {"events": 0, "errors": 0, "last_success": 0}
+            worker.source_id,
+            {"events": 0, "errors": 0, "last_success": 0, "lease_contention": 0},
         )
         try:
             count = await original_run_once(worker)
+            if not worker.last_run_acquired_lease:
+                source_metrics["lease_contention"] += 1
+                return count
             now = int(__import__("time").time())
             counters["events"] += count
             counters["last_poll"] = now
