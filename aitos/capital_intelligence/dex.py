@@ -346,18 +346,18 @@ class EvmDexSwapAdapter:
                         "pool": pool,
                         "pool_id": pool_id,
                         "pool_manager": pool if topic == V4_SWAP_TOPIC else None,
-                        "sqrt_price_x96": int(words[2], 16)
-                        if topic == V4_SWAP_TOPIC
-                        else None,
-                        "post_swap_liquidity": int(words[3], 16)
-                        if topic == V4_SWAP_TOPIC
-                        else None,
-                        "post_swap_tick": signed(words[4], 24)
-                        if topic == V4_SWAP_TOPIC
-                        else None,
-                        "swap_fee_pips": int(words[5], 16)
-                        if topic == V4_SWAP_TOPIC
-                        else None,
+                        "sqrt_price_x96": (
+                            int(words[2], 16) if topic == V4_SWAP_TOPIC else None
+                        ),
+                        "post_swap_liquidity": (
+                            int(words[3], 16) if topic == V4_SWAP_TOPIC else None
+                        ),
+                        "post_swap_tick": (
+                            signed(words[4], 24) if topic == V4_SWAP_TOPIC else None
+                        ),
+                        "swap_fee_pips": (
+                            int(words[5], 16) if topic == V4_SWAP_TOPIC else None
+                        ),
                     },
                 )
             )
