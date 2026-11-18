@@ -1,13 +1,10 @@
 """Contract tests for the optional native core and Python reference fallback."""
 
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
-
-from aitos.exchange.orderbook import DepthUpdate
-from aitos.exchange.symbol_filters import SymbolFilters
-from aitos.models.market import OrderBookSnapshot
 
 from aitos.native_core import (
     InstrumentScale,
@@ -54,7 +51,9 @@ def test_gap_and_invalid_level_fail_without_mutation():
 
 
 def test_factory_can_force_reference():
-    assert isinstance(create_order_book(10, prefer_native=False), PythonFixedPointOrderBook)
+    assert isinstance(
+        create_order_book(10, prefer_native=False), PythonFixedPointOrderBook
+    )
 
 
 def test_decimal_tick_and_lot_conversion_is_exact():
@@ -86,7 +85,9 @@ def test_book_microprice_and_depth_imbalance():
     assert book.depth_imbalance(1) == pytest.approx(0.5)
 
 
-@pytest.mark.skipif(not native_available(), reason="optional Rust extension not installed")
+@pytest.mark.skipif(
+    not native_available(), reason="optional Rust extension not installed"
+)
 def test_native_reference_parity():
     native = create_order_book(10, [(100, 5), (101, 3)], [(103, 4)])
     reference = PythonFixedPointOrderBook(10, [(100, 5), (101, 3)], [(103, 4)])
@@ -95,17 +96,9 @@ def test_native_reference_parity():
     assert native.microprice_ticks() == pytest.approx(reference.microprice_ticks())
 
 
-
 def test_instrument_aware_session_converts_snapshot_and_depth_updates():
-    filters = SymbolFilters(
-        symbol="BTCUSDT",
-        step_size=0.001,
-        tick_size=0.01,
-        min_notional=5.0,
-        quantity_precision=3,
-        price_precision=2,
-    )
-    snapshot = OrderBookSnapshot(
+    filters = SimpleNamespace(step_size=0.001, tick_size=0.01)
+    snapshot = SimpleNamespace(
         symbol="BTCUSDT",
         bids=((65000.12, 0.125),),
         asks=((65000.14, 0.250),),
@@ -115,13 +108,12 @@ def test_instrument_aware_session_converts_snapshot_and_depth_updates():
     session = NativeOrderBookSession.from_snapshot(
         snapshot, filters, prefer_native=False
     )
-    update = DepthUpdate(
+    update = SimpleNamespace(
         first_update_id=100,
         final_update_id=101,
         previous_update_id=0,
         bids=((65000.12, 0.200),),
         asks=(),
-        event_time_ms=1,
     )
     assert session.apply_depth_update(update)
     update_id, bids, asks = session.snapshot(5)
@@ -141,13 +133,12 @@ def test_instrument_aware_session_rejects_off_tick_without_mutation():
         [("65000.14", "0.250")],
         prefer_native=False,
     )
-    bad_update = DepthUpdate(
+    bad_update = SimpleNamespace(
         first_update_id=100,
         final_update_id=101,
         previous_update_id=0,
         bids=((65000.123, 0.200),),
         asks=(),
-        event_time_ms=1,
     )
     with pytest.raises(ValueError, match="not aligned"):
         session.apply_depth_update(bad_update)
