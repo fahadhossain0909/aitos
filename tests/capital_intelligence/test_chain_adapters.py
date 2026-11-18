@@ -378,3 +378,60 @@ def test_v4_swap_requires_valid_pool_id_and_sorted_currency_mapping():
                 }
             },
         )
+
+
+
+@pytest.mark.asyncio
+async def test_solana_stake_instruction_is_persisted_without_balance_delta():
+    address = "stake-account"
+    adapter = SolanaAddressActivityAdapter(
+        rpc_url="https://solana.example",
+        addresses=[address],
+    )
+
+    async def fake_rpc(method, params):
+        if method == "getSignaturesForAddress":
+            return [{"signature": "stake-signature"}]
+        if method == "getTransaction":
+            return {
+                "slot": 99,
+                "blockTime": 1_700_000_000,
+                "transaction": {
+                    "message": {
+                        "accountKeys": [{"pubkey": address}],
+                        "instructions": [
+                            {
+                                "program": "stake",
+                                "parsed": {
+                                    "type": "delegate",
+                                    "info": {
+                                        "stakeAccount": address,
+                                        "voteAccount": "vote-account",
+                                        "stakeAuthority": "wallet-authority",
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                },
+                "meta": {
+                    "err": None,
+                    "preBalances": [100],
+                    "postBalances": [100],
+                    "preTokenBalances": [],
+                    "postTokenBalances": [],
+                },
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, _ = await adapter.poll()
+    assert len(events) == 1
+    event = events[0]
+    assert event.source_kind == "solana_stake_instruction_evidence"
+    assert event.event_type == "stake_instruction_observed"
+    assert event.quantity == 0
+    assert event.unit == "instruction_evidence"
+    assert event.usd_value is None
+    assert event.metadata["evidence_only"] is True
+    assert event.metadata["stake_instruction_evidence"][0]["instruction_type"] == "delegate"
