@@ -316,6 +316,15 @@ class SolanaAddressActivityAdapter:
                 event_id = hashlib.sha256(
                     f"solana|{address}|{signature}|{mint}".encode()
                 ).hexdigest()
+                mint_evidence = transfer_evidence.get(mint, [])
+                counterparties = {
+                    item["counterparty_owner"]
+                    for item in mint_evidence
+                    if item.get("counterparty_owner")
+                }
+                counterparty_id = (
+                    next(iter(counterparties)) if len(counterparties) == 1 else None
+                )
                 events.append(
                     CapitalEvent(
                         event_id,
@@ -331,17 +340,19 @@ class SolanaAddressActivityAdapter:
                         "token_base_units",
                         None,
                         address,
+                        counterparty_id=counterparty_id,
                         transaction_id=signature,
                         block_number=int(slot) if slot is not None else None,
                         finality="finalized",
                         metadata={
                             "flow_sign": 1 if delta > 0 else -1,
                             "actor_identity_kind": "solana_address",
+                            "counterparty_identity_kind": (
+                                "solana_address" if counterparty_id else None
+                            ),
                             "raw_delta": str(delta),
                             "decimals_required": True,
-                            "transfer_instruction_evidence": transfer_evidence.get(
-                                mint, []
-                            ),
+                            "transfer_instruction_evidence": mint_evidence,
                             "instruction_evidence_is_not_additional_flow": True,
                         },
                     )
