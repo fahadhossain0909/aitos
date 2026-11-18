@@ -28,12 +28,16 @@ async def test_high_volume_market_streams_are_bounded() -> None:
     await bus.publish(Event(topic="market.orderbook.BTCUSDT", payload={"bid": 1}))
     await bus.publish(Event(topic="market.liquidity.BTCUSDT", payload={"depth": 1}))
     await bus.publish(Event(topic="market.live_state.BTCUSDT", payload={"mid": 1}))
+    await bus.publish(
+        Event(topic="intelligence.events.normalized", payload={"event_id": "evt"})
+    )
 
     calls = RecordingRedis.xadd.await_args_list
     assert calls[0].kwargs["maxlen"] == 25_000
     assert calls[0].kwargs["approximate"] is True
     assert calls[1].kwargs["maxlen"] == 100_000
     assert calls[2].kwargs["maxlen"] == 25_000
+    assert calls[3].kwargs["maxlen"] == 25_000
 
 
 @pytest.mark.asyncio
@@ -65,3 +69,11 @@ def test_retention_can_be_overridden_per_stream_family(
     assert _stream_maxlen("market.liquidity.BTCUSDT") == 20000
     assert _stream_maxlen("market.live_state.BTCUSDT") == 5000
     assert _stream_maxlen("trade.position_opened") is None
+
+
+
+def test_normalized_intelligence_stream_retention_can_be_overridden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REDIS_STREAM_MAXLEN_INTELLIGENCE_EVENTS_NORMALIZED", "5000")
+    assert _stream_maxlen("intelligence.events.normalized") == 5000
