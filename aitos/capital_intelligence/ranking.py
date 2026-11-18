@@ -68,8 +68,7 @@ def rank_capital_candidates(
             if not address:
                 return False
             return not (
-                identity_kind == "evm_address"
-                and address.lower() in null_evm_addresses
+                identity_kind == "evm_address" and address.lower() in null_evm_addresses
             )
 
         if is_candidate_address(event.actor_id):
@@ -79,9 +78,7 @@ def rank_capital_candidates(
                 if is_candidate_address(event.counterparty_id)
                 else None
             )
-            grouped.setdefault(actor_id, []).append(
-                (event, sign, actor_counterparty)
-            )
+            grouped.setdefault(actor_id, []).append((event, sign, actor_counterparty))
         # A transfer has two address-level perspectives. The recipient's
         # direction is the inverse of the sender's; this is flow accounting,
         # not an inference about trade intent or beneficial ownership.
