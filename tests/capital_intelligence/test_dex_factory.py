@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import pytest
 
 from aitos.capital_intelligence.dex_factory import (
@@ -11,11 +9,10 @@ from aitos.capital_intelligence.dex_factory import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "protocol,topic,pool_word,topics",
+    "protocol,pool_word,topics",
     [
         (
             "uniswap_v2",
-            V2_PAIR_CREATED_TOPIC,
             0,
             lambda token0, token1: [
                 V2_PAIR_CREATED_TOPIC,
@@ -25,7 +22,6 @@ from aitos.capital_intelligence.dex_factory import (
         ),
         (
             "uniswap_v3",
-            V3_POOL_CREATED_TOPIC,
             1,
             lambda token0, token1: [
                 V3_POOL_CREATED_TOPIC,
@@ -37,7 +33,7 @@ from aitos.capital_intelligence.dex_factory import (
     ],
 )
 async def test_factory_discovery_decodes_pool_and_token_addresses(
-    protocol, topic, pool_word, topics
+    protocol, pool_word, topics
 ):
     factory = "0x" + "1" * 40
     token0 = "0x" + "2" * 40
