@@ -92,7 +92,11 @@ def main():
     )
     for name, factory in factories.items():
         elapsed, latencies = run(
-            factory, args.events, args.repeats, args.warmup, args.batch_size
+            factory,
+            args.events,
+            args.repeats,
+            args.warmup,
+            args.batch_size,
         )
         median_elapsed = statistics.median(elapsed)
         print(
