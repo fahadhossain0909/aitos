@@ -30,9 +30,7 @@ from aitos.capital_intelligence.dex_factory import (
         ),
     ],
 )
-async def test_factory_discovery_decodes_pool_and_token_addresses(
-    protocol, topics
-):
+async def test_factory_discovery_decodes_pool_and_token_addresses(protocol, topics):
     factory = "0x" + "1" * 40
     token0 = "0x" + "2" * 40
     token1 = "0x" + "3" * 40
