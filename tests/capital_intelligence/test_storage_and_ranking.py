@@ -253,3 +253,17 @@ def test_transfer_ranking_accounts_for_sender_and_recipient_flow():
     assert by_entity["1:wallet:sender"].net_flow_usd == -5000
     assert by_entity["1:wallet:receiver"].net_flow_usd == 5000
     assert by_entity["1:wallet:receiver"].direction_coverage == 1.0
+
+
+
+def test_ranking_excludes_zero_and_burn_addresses_but_keeps_real_counterparty():
+    zero = "0x" + "0" * 40
+    burn = "0x000000000000000000000000000000000000dead"
+    minted = event("mint", zero, 1000, -1, counterparty="wallet:recipient")
+    burned = event("burn", "wallet:sender", 2000, -1, counterparty=burn)
+    ranked = rank_capital_candidates([minted, burned], minimum_events=1)
+    ids = {item.entity_id for item in ranked}
+    assert "1:" + zero not in ids
+    assert "1:" + burn not in ids
+    assert "1:wallet:recipient" in ids
+    assert "1:wallet:sender" in ids
