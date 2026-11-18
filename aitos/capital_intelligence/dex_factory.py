@@ -380,7 +380,13 @@ class EvmDexFactoryDiscoveryAdapter:
                 "token0_address": token0,
                 "token1_address": token1,
                 "factory_event": (
-                    "Initialize" if is_v4 else "PairCreated" if is_v2 else "PoolCreated"
+                    "ModifyLiquidity"
+                    if is_v4_liquidity
+                    else "Initialize"
+                    if is_v4_initialize
+                    else "PairCreated"
+                    if is_v2
+                    else "PoolCreated"
                 ),
                 "log_index": log_index,
                 "operator_review_required": True,
