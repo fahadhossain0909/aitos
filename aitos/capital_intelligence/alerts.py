@@ -54,7 +54,8 @@ class CapitalFlowWebhookAlerter:
         if (
             identity_kind not in {"evm_address", "solana_address"}
             or metadata.get("aggregate_only") is True
-            or metadata.get("actor_is_pool_caller_not_verified_beneficial_owner") is True
+            or metadata.get("actor_is_pool_caller_not_verified_beneficial_owner")
+            is True
             or getattr(event, "finality", "") == "reverted"
         ):
             return 0
