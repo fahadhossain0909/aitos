@@ -550,6 +550,7 @@ async def main() -> None:
         wi_store = ClickHouseIntelligenceStore(
             clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos")
         )
+        await wi_store.ensure_schema()
         wi_adapter = CapitalFlowIntelligenceAdapter(
             clickhouse=clickhouse,
             database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
