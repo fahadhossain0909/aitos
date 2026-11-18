@@ -202,7 +202,9 @@ class CftcCotAdapter:
                         "positioning": positioning,
                         "publication_timestamp_not_supplied": True,
                         "source_semantics": (
-                            "weekly_aggregate_positioning_not_individual_trader_activity"
+                            (
+                                "weekly_aggregate_positioning_not_individual_trader_activity"
+                            )
                         ),
                     },
                 )
