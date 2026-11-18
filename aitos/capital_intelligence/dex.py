@@ -257,7 +257,7 @@ class EvmDexSwapAdapter:
             words = [data[i : i + 64] for i in range(0, len(data), 64)]
 
             def signed(word: str, bits: int = 256) -> int:
-                value = int(word, 16)
+                value = int(word, 16) & ((1 << bits) - 1)
                 return value - (1 << bits) if value >= (1 << (bits - 1)) else value
 
             pool_id = None
