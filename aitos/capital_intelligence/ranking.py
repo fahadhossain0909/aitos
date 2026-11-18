@@ -57,7 +57,8 @@ def rank_capital_candidates(
             or event.usd_value <= 0
         ):
             continue
-        grouped.setdefault(event.actor_id, []).append(event)
+        entity_id = f"{event.venue}:{event.actor_id}"
+        grouped.setdefault(entity_id, []).append(event)
 
     ranked: list[CapitalCandidateRank] = []
     for entity_id, selected in grouped.items():
