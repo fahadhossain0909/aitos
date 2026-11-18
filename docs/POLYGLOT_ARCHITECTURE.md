@@ -30,7 +30,7 @@ C++/CUDA and Go are deferred until profiling demonstrates a workload that cannot
 
 ## Current scope
 
-The aitos.native_core module exposes PythonFixedPointOrderBook, create_order_book and native_available. The Rust crate provides a fixed-point book with snapshot initialization, first-delta bridging, linked subsequent updates, stale-event suppression, atomic level validation and top-N snapshots. It is deliberately not wired into any production trading path yet.
+The aitos.native_core module exposes PythonFixedPointOrderBook, InstrumentScale, NativeOrderBookSession, create_order_book and native_available. InstrumentScale converts exchange decimal strings to integer ticks/lots with exact Decimal arithmetic and rejects off-tick/off-lot values. NativeOrderBookSession adapts the existing AITOS SymbolFilters, OrderBookSnapshot and DepthUpdate contracts into the native/reference core and returns decimal snapshots plus depth imbalance and microprice. The Rust crate provides snapshot initialization, first-delta bridging, linked subsequent updates, stale-event suppression, atomic level validation, top-N snapshots, depth imbalance and microprice. It remains opt-in and is deliberately not wired into the existing live LocalOrderBook/runtime path.
 
 ## Build and test
 
@@ -57,4 +57,4 @@ The extension is optional. Uninstall the wheel or call create_order_book(..., pr
 
 ## Deferred work
 
-Profile ingestion/order-flow hot paths; add instrument-filter-aware decimal-to-tick conversion and golden Binance depth replay; evaluate Numba for numerical research kernels; add Arrow Flight/gRPC only for genuine cross-process boundaries; add Go/C++/CUDA only when measured evidence justifies them.
+Profile ingestion/order-flow hot paths; add golden Binance depth replay and differential parity against LocalOrderBook; evaluate Numba for numerical research kernels; add Arrow Flight/gRPC only for genuine cross-process boundaries; add Go/C++/CUDA only when measured evidence justifies them.
