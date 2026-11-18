@@ -146,7 +146,7 @@ async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
         "blockNumber": "0x20",
         "transactionHash": "0x" + "a" * 64,
         "logIndex": "0x0",
-        "blockHash": "0x" + "b" * 64,
+        "blockHash": "0x" + f"{0x20:064x}",
         "address": pool,
     }
 
