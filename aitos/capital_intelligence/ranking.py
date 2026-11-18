@@ -43,12 +43,12 @@ def rank_capital_candidates(
     if minimum_events < 1:
         raise ValueError("minimum_events must be positive")
 
-    grouped: dict[str, list[CapitalEvent]] = {}
+    grouped: dict[str, list[tuple[CapitalEvent, int, str | None]]] = {}
     for event in events:
+        identity_kind = event.metadata.get("actor_identity_kind")
         if (
             not event.actor_id
-            or event.metadata.get("actor_identity_kind")
-            not in {"evm_address", "solana_address"}
+            or identity_kind not in {"evm_address", "solana_address"}
             or event.metadata.get("actor_is_pool_caller_not_verified_beneficial_owner")
             is True
             or event.metadata.get("aggregate_only") is True
@@ -57,34 +57,44 @@ def rank_capital_candidates(
             or event.usd_value <= 0
         ):
             continue
-        entity_id = f"{event.venue}:{event.actor_id}"
-        grouped.setdefault(entity_id, []).append(event)
+        sign = event.metadata.get("flow_sign", 0)
+        if sign not in (-1, 0, 1):
+            raise ValueError("flow_sign must be -1, 0, or 1")
+        actor_id = f"{event.venue}:{event.actor_id}"
+        grouped.setdefault(actor_id, []).append(
+            (event, sign, event.counterparty_id)
+        )
+        # A transfer has two address-level perspectives. The recipient's
+        # direction is the inverse of the sender's; this is flow accounting,
+        # not an inference about trade intent or beneficial ownership.
+        if event.counterparty_id and event.counterparty_id != event.actor_id:
+            counterparty_id = f"{event.venue}:{event.counterparty_id}"
+            grouped.setdefault(counterparty_id, []).append(
+                (event, -sign, event.actor_id)
+            )
 
     ranked: list[CapitalCandidateRank] = []
     for entity_id, selected in grouped.items():
         if len(selected) < minimum_events:
             continue
-        gross = sum(float(event.usd_value or 0) for event in selected)
+        gross = sum(float(event.usd_value or 0) for event, _, _ in selected)
         net = 0.0
         directed = 0
         counterparties = set()
         sources = set()
         confidences = []
-        for event in selected:
-            sign = event.metadata.get("flow_sign", 0)
-            if sign not in (-1, 0, 1):
-                raise ValueError("flow_sign must be -1, 0, or 1")
+        for event, sign, counterparty_id in selected:
             if sign:
                 directed += 1
                 net += float(event.usd_value or 0) * sign
-            if event.counterparty_id:
-                counterparties.add(event.counterparty_id)
+            if counterparty_id:
+                counterparties.add(counterparty_id)
             sources.add(event.source_id)
             confidences.append(event.confidence)
 
         liquidity_values = [
             market_liquidity_usd[event.instrument]
-            for event in selected
+            for event, _, _ in selected
             if market_liquidity_usd and event.instrument in market_liquidity_usd
         ]
         liquidity = min(liquidity_values) if liquidity_values else None
@@ -132,7 +142,7 @@ def rank_capital_candidates(
             )
         if any(
             "USDT proxy" in str(event.metadata.get("usd_valuation_basis", ""))
-            for event in selected
+            for event, _, _ in selected
         ):
             caveats.append("Some USD values use an explicitly enabled USDT proxy.")
         ranked.append(
