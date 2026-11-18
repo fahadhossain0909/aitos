@@ -4,6 +4,7 @@ The model is deliberately dependency-free and cohort-specific. It must be
 trained on matured historical labels and evaluated on later, purged observations.
 It has no runtime trading or model-promotion integration.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -64,9 +65,7 @@ class EventImpactTrainingRow:
         for name, (lower, upper) in bounds.items():
             number = float(getattr(self, name))
             if not isfinite(number) or not lower <= number <= upper:
-                raise ValueError(
-                    f"{name} must be finite and within [{lower}, {upper}]"
-                )
+                raise ValueError(f"{name} must be finite and within [{lower}, {upper}]")
             object.__setattr__(self, name, number)
 
 
@@ -89,9 +88,7 @@ class EventImpactFeatures:
             isinstance(value, str) and value.strip()
             for value in (self.asset, self.horizon, self.regime, self.event_type)
         ):
-            raise ValueError(
-                "asset, horizon, regime and event_type are required"
-            )
+            raise ValueError("asset, horizon, regime and event_type are required")
         bounds = {
             "sentiment": (-1.0, 1.0),
             "severity": (0.0, 1.0),
@@ -211,9 +208,7 @@ def fit_event_impact_model(
     event_types = tuple(sorted({row.event_type for row in cohort}))
     matrix = [_raw_features(row, event_types) for row in cohort]
     width = len(matrix[0])
-    means = [
-        sum(row[index] for row in matrix) / len(matrix) for index in range(width)
-    ]
+    means = [sum(row[index] for row in matrix) / len(matrix) for index in range(width)]
     scales = []
     for index, mean in enumerate(means):
         variance = sum((row[index] - mean) ** 2 for row in matrix) / len(matrix)
@@ -240,9 +235,7 @@ def fit_event_impact_model(
                 gradient[index] += error * value
         intercept -= learning_rate * intercept_gradient / count
         for index in range(width):
-            gradient[index] = (
-                gradient[index] / count + regularization * weights[index]
-            )
+            gradient[index] = gradient[index] / count + regularization * weights[index]
             weights[index] -= learning_rate * gradient[index]
 
     return EventImpactProbabilityModel(
@@ -321,9 +314,7 @@ def evaluate_event_impact_model(
         label = float(outcome)
         clipped = min(1.0 - 1e-12, max(1e-12, probability))
         errors.append((probability - label) ** 2)
-        losses.append(
-            -(label * log(clipped) + (1.0 - label) * log(1.0 - clipped))
-        )
+        losses.append(-(label * log(clipped) + (1.0 - label) * log(1.0 - clipped)))
         correct.append((probability >= 0.5) == outcome)
         probabilities.append(probability)
     count = len(matured)
