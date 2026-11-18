@@ -112,11 +112,11 @@ The optional observer has a conservative default CPU limit of 0.10 cores and mem
 These are not claimed as implemented or validated by this PR:
 - EVM observers retain a contiguous recent block-hash window, detect head reorgs, search for a common ancestor and rescan the affected range. ClickHouse appends `finality=reverted` versions for orphaned logs before the cursor advances. Reorgs deeper than the configured window (default 64 blocks), RPC inconsistencies or incomplete canonical headers fail closed and still require controlled backfill/rebuild.
 - On-chain token metadata discovery and broad token registry population. The current registry is explicit/operator-configured; unsupported tokens remain unvalued.
-- Complete Solana attribution across all token-account ownership edge cases, compressed assets, stake accounts, program-specific transfer semantics and historical transaction versions. Current parsed CPI/inner-instruction evidence is limited to SPL transfer instructions where token-account owner metadata is present.
+- Complete Solana attribution across all token-account ownership edge cases, compressed assets, stake accounts, program-specific transfer semantics and historical transaction versions. Parsed outer/CPI SPL transfer evidence and parsed System Program SOL transfer evidence are attached as supporting evidence only; balance deltas remain separate and can include fees, rent, mint/burn, swaps or program effects.
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.
-- Full DEX coverage across every protocol, pool factory and chain. Only explicitly configured Uniswap V2/V3-compatible pools are decoded.
+- Full DEX coverage across every protocol, pool factory and chain. V2/V3-compatible factory discovery and configured-pool swaps are implemented; V4 and protocol-specific variants remain unsupported. Discovered pools are never auto-activated.
 - Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, historical refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
-- Per-entity explorer/API and entity-level dashboard remain open. Observer-level Grafana metrics dashboard and Prometheus alerts are implemented; alert delivery to external operator channels remains deployment-specific.
+- A bounded, read-only, bearer-token-protected per-entity explorer API is implemented alongside the metrics listener. A dedicated entity dashboard, watchlist mutation workflow and external alert delivery remain open.
 - The World Intelligence adapter bridge and tests are implemented, but it is not yet wired into a production WI runtime/consumer. Scanner/AI Kernel feature integration remains deliberately disabled.
 - Historical data backfill, replay, walk-forward evaluation, false-positive analysis, model calibration and measured predictive lift.
 - Production runtime deployment, provider-specific rate-budget tests, ClickHouse/Redis integration tests and operator runbooks for disaster recovery.
@@ -239,13 +239,16 @@ and protocol deployment before explicitly adding a pool to
 `AITOS_CFEI_DEX_POOLS`. This avoids turning arbitrary contracts with matching
 event signatures into trusted data sources.
 
-The swap adapter now stores a bounded canonical block-hash cursor, searches for
-a common ancestor when its prior head changes, rescans the affected range, and
-publishes reorg instructions. ClickHouse and optional Neo4j event nodes are both
-marked `finality=reverted` before the Redis cursor can advance. Reorgs beyond
-the retained window fail closed and require controlled backfill. Factory
-discovery currently uses a bounded confirmed-block cursor; operators should
-re-scan its configured factory deployment range after a deep reorganization.
+Both the swap adapter and factory-discovery adapter store a bounded canonical
+block-hash cursor, search for a common ancestor when the prior head changes,
+rescan the affected range, and publish reorg instructions. ClickHouse and
+optional Neo4j event nodes are both marked `finality=reverted` before the Redis
+cursor can advance. Factory discovery now has the same bounded reorg protection
+as swap ingestion. Reorganizations deeper than the retained window, incomplete
+RPC headers, or a recovery range larger than one configured scan fail closed
+and require controlled backfill; the adapter never advances its cursor over an
+unreconciled fork. Configure `max_reorg_depth` (1-256, default 64) and ensure
+`max_block_range` can cover the maximum expected recovery range.
 
 
 ## 14. World Intelligence context bridge
