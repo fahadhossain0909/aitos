@@ -1,4 +1,5 @@
 """Provider adapters; vendor transport is injected and never assumed."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -21,8 +22,11 @@ class JevDecisionProvider:
     """
 
     def __init__(
-        self, invoke: Callable[[Mapping[str, Any]], Mapping[str, Any]], *,
-        model_id: str = "jev", model_version: str = "operator-configured",
+        self,
+        invoke: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+        *,
+        model_id: str = "jev",
+        model_version: str = "operator-configured",
     ) -> None:
         if not callable(invoke):
             raise ValueError("Jev invoke callable is required")

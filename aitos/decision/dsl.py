@@ -1,4 +1,5 @@
 """Small, deliberately non-executable parser for ADL decision specifications."""
+
 from __future__ import annotations
 
 import re
@@ -13,9 +14,7 @@ class DecisionLanguageError(ValueError):
 
 class DecisionLanguageParser:
     _DECISION = re.compile(r"^DECISION\s+([A-Za-z_][A-Za-z0-9_]*)\s*:$")
-    _CHOICE = re.compile(
-        r"^ASK\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*CHOICE\s*\[(.*)\]$"
-    )
+    _CHOICE = re.compile(r"^ASK\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*CHOICE\s*\[(.*)\]$")
     _SCORE = re.compile(
         r"^ASK\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*SCORE\s+(-?\d+)\.\.(-?\d+)$"
     )
@@ -68,7 +67,9 @@ class DecisionLanguageParser:
             match = self._SCORE.match(line)
             if match:
                 questions.append(
-                    ScoreQuestion(match.group(1), int(match.group(2)), int(match.group(3)))
+                    ScoreQuestion(
+                        match.group(1), int(match.group(2)), int(match.group(3))
+                    )
                 )
                 section = None
                 continue

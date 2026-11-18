@@ -1,4 +1,5 @@
 """Online, bucketed probability calibration and proper scoring metrics."""
+
 from __future__ import annotations
 
 import math
@@ -23,8 +24,12 @@ class ProbabilityCalibrator:
     """
 
     def __init__(
-        self, *, bins: int = 10, minimum_samples: int = 30,
-        prior_strength: float = 2.0, max_history: int = 10000,
+        self,
+        *,
+        bins: int = 10,
+        minimum_samples: int = 30,
+        prior_strength: float = 2.0,
+        max_history: int = 10000,
     ) -> None:
         if bins < 2 or minimum_samples < 1 or prior_strength <= 0 or max_history < 1:
             raise ValueError("invalid calibration configuration")
