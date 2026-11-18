@@ -28,7 +28,9 @@ class CalibrationObservation:
             isinstance(value, str) and value.strip()
             for value in (self.observation_id, self.asset, self.horizon, self.regime)
         ):
-            raise ValueError("observation identity, asset, horizon and regime are required")
+            raise ValueError(
+                "observation identity, asset, horizon and regime are required"
+            )
         for name in ("predicted_at", "outcome_available_at"):
             value = getattr(self, name)
             if not isinstance(value, datetime) or value.tzinfo is None:
@@ -116,9 +118,7 @@ def calibration_report(
         )
         return CalibrationReport(0, excluded, None, None, None, None, empty)
 
-    buckets: list[list[CalibrationObservation]] = [
-        [] for _ in range(bin_count)
-    ]
+    buckets: list[list[CalibrationObservation]] = [[] for _ in range(bin_count)]
     eps = 1e-12
     brier_sum = 0.0
     log_loss_sum = 0.0
@@ -141,12 +141,16 @@ def calibration_report(
             continue
         mean_probability = sum(x.probability_up for x in bucket) / count
         observed = sum(x.outcome_up for x in bucket) / count
-        low, high = _wilson_interval(sum(x.outcome_up for x in bucket), count)
+        low, high = _wilson_interval(
+            sum(x.outcome_up for x in bucket), count
+        )
         error = abs(mean_probability - observed)
         weighted_error += count / len(eligible) * error
         maximum_error = max(maximum_error, error)
         bins.append(
-            CalibrationBin(lower, upper, count, mean_probability, observed, low, high)
+            CalibrationBin(
+                lower, upper, count, mean_probability, observed, low, high
+            )
         )
 
     total = len(eligible)
@@ -168,7 +172,9 @@ def calibration_cohorts(
     bin_count: int = 10,
 ) -> dict[tuple[str, str, str], CalibrationReport]:
     """Produce independent asset/horizon/regime reports; no cross-cohort pooling."""
-    groups: dict[tuple[str, str, str], list[CalibrationObservation]] = defaultdict(list)
+    groups: dict[
+        tuple[str, str, str], list[CalibrationObservation]
+    ] = defaultdict(list)
     for item in observations:
         key = (item.asset.upper(), item.horizon, item.regime)
         groups[key].append(item)
