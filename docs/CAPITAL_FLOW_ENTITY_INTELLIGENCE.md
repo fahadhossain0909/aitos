@@ -240,3 +240,40 @@ marked `finality=reverted` before the Redis cursor can advance. Reorgs beyond
 the retained window fail closed and require controlled backfill. Factory
 discovery currently uses a bounded confirmed-block cursor; operators should
 re-scan its configured factory deployment range after a deep reorganization.
+
+
+## 14. World Intelligence context bridge
+
+`CapitalFlowIntelligenceAdapter` exposes persisted CFEI observations as
+normalized World Intelligence events. It reads the ClickHouse CFEI event table
+using a bounded observed-time/event-id cursor and `FINAL`, so replacing versions
+and EVM reorg tombstones supersede older confirmed observations. Reverted rows
+advance the cursor but are not republished as positive context.
+
+The bridge deliberately sets sentiment to neutral and preserves source
+provenance, event/observation times, venue, instrument, value, flow direction,
+finality and identity caveats in metadata. It does not convert transfers into
+buy/sell intent, does not claim wallet ownership, and marks
+`strategy_use_approved=false`. It can be supplied as an adapter to the existing
+`IntelligenceIngestionWorker`; no execution, scanner or risk integration is
+enabled by this PR.
+
+Example construction in a World Intelligence runtime:
+
+```python
+adapter = CapitalFlowIntelligenceAdapter(
+    clickhouse=clickhouse_client,
+    database="aitos",
+    initial_lookback_hours=24,
+    max_events=500,
+)
+worker = IntelligenceIngestionWorker(
+    adapters=[adapter, *other_adapters],
+    store=world_intelligence_store,
+    sink=event_bus_sink,
+)
+```
+
+The first run uses a bounded lookback. Operators requiring older CFEI history
+must perform an explicit backfill and start the bridge with a reviewed cursor;
+do not silently increase the initial lookback on a production worker.
