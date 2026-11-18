@@ -241,7 +241,9 @@ def test_ranking_keeps_same_address_separate_across_chains():
 
 
 def test_transfer_ranking_accounts_for_sender_and_recipient_flow():
-    sender = event("transfer-1", "wallet:sender", 5000, -1, counterparty="wallet:receiver")
+    sender = event(
+        "transfer-1", "wallet:sender", 5000, -1, counterparty="wallet:receiver"
+    )
     receiver = rank_capital_candidates([sender], minimum_events=1)
     assert {item.entity_id for item in receiver} == {
         "1:wallet:sender",
