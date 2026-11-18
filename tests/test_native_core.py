@@ -145,3 +145,15 @@ def test_instrument_aware_session_rejects_off_tick_without_mutation():
     with pytest.raises(ValueError, match="not aligned"):
         session.apply_depth_update(bad_update)
     assert session.snapshot(5)[0] == 100
+
+
+def test_python_reference_enforces_native_integer_widths():
+    with pytest.raises(ValueError, match="uint64"):
+        PythonFixedPointOrderBook(1 << 64)
+    with pytest.raises(ValueError, match="int64"):
+        PythonFixedPointOrderBook(10, [(1 << 63, 1)])
+    with pytest.raises(ValueError, match="int64"):
+        PythonFixedPointOrderBook(10, [(100, 1 << 63)])
+    book = PythonFixedPointOrderBook(10, [(100, 1)], [(102, 1)])
+    with pytest.raises(ValueError, match="previous_update_id"):
+        book.apply_delta(11, 11, previous_update_id=-1)
