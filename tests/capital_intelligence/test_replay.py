@@ -103,7 +103,7 @@ def test_chronological_split_purges_training_labels_that_overlap_test_period():
     test_start = min(row.event_time for row in test)
     assert train and test
     assert all(
-        row.event_time + timedelta(seconds=max(row.forward_returns)) < test_start
+        row.event_time + timedelta(seconds=max(row.forward_returns) + 30) < test_start
         for row in train
     )
 
@@ -123,7 +123,7 @@ def test_chronological_split_supports_explicit_embargo_and_validates_it():
     )
     test_start = min(row.event_time for row in test)
     assert all(
-        row.event_time + timedelta(seconds=180) < test_start for row in train
+        row.event_time + timedelta(seconds=210) < test_start for row in train
     )
     with pytest.raises(ValueError):
         chronological_split(rows, embargo_seconds=-1)
