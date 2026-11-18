@@ -212,3 +212,25 @@ def test_session_batch_converts_all_events_before_mutation():
     with pytest.raises(ValueError, match="not aligned"):
         session.apply_depth_updates(updates)
     assert session.snapshot(5)[0] == 100
+
+
+def test_batch_rejects_abi_conversion_before_any_mutation():
+    book = PythonFixedPointOrderBook(10, [(100, 1)], [(102, 1)])
+    updates = [
+        (10, 11, [(101, 2)], [], None),
+        (12, 12, [(100, "not-an-integer")], [], 11),
+    ]
+    with pytest.raises(ValueError, match="int64"):
+        book.apply_deltas(updates)
+    assert book.snapshot(5) == (10, [(100, 1)], [(102, 1)])
+
+
+def test_batch_keeps_prior_valid_events_when_later_delta_is_semantically_invalid():
+    book = PythonFixedPointOrderBook(10, [(100, 1)], [(102, 1)])
+    updates = [
+        (10, 11, [(101, 2)], [], None),
+        (12, 12, [(100, -1)], [], 11),
+    ]
+    with pytest.raises(ValueError, match="quantity units"):
+        book.apply_deltas(updates)
+    assert book.snapshot(5) == (11, [(101, 2), (100, 1)], [(102, 1)])
