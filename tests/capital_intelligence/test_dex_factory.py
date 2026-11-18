@@ -207,7 +207,7 @@ async def test_factory_discovery_can_resume_bounded_historical_backfill():
 
     async def fake_rpc(method, params):
         if method == "eth_blockNumber":
-            return "0x70"
+            return "0x6f"
         if method == "eth_getLogs":
             assert params[0]["fromBlock"] == "0x64"
             assert params[0]["toBlock"] == "0x6d"
