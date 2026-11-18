@@ -46,10 +46,9 @@ class CapitalFlowIntelligenceAdapter:
         self.max_events = max_events
         self.severity_reference_usd = float(severity_reference_usd)
 
-    @staticmethod
-    def _parse_cursor(cursor: str | None) -> tuple[str, str]:
+    def _parse_cursor(self, cursor: str | None) -> tuple[str, str]:
         if cursor is None:
-            start = datetime.now(timezone.utc) - timedelta(hours=24)
+            start = datetime.now(timezone.utc) - timedelta(hours=self.initial_lookback_hours)
             return start.isoformat(), ""
         try:
             value = json.loads(cursor)
@@ -107,11 +106,7 @@ class CapitalFlowIntelligenceAdapter:
                 # not forwarded as positive market context.
                 next_cursor = json.dumps(
                     {
-                        "observed_time": (
-                            observed_at.isoformat()
-                            if hasattr(observed_at, "isoformat")
-                            else str(observed_at)
-                        ),
+                        "observed_time": event.observed_time.isoformat(),
                         "event_id": event.event_id,
                     },
                     sort_keys=True,
