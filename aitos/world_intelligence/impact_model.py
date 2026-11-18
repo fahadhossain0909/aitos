@@ -235,9 +235,104 @@ def fit_event_impact_model(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class EventImpactEvaluation:
+    sample_count: int
+    excluded_pre_training: int
+    excluded_unmatured: int
+    brier_score: float | None
+    log_loss: float | None
+    directional_accuracy: float | None
+    mean_probability_up: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class EventImpactForecast:
+    event_id: str
+    asset: str
+    horizon: str
+    regime: str
+    event_time: datetime
+    outcome_available_at: datetime
+    probability_up: float
+    outcome_up: bool
+
+
+def evaluate_event_impact_model(
+    model: EventImpactProbabilityModel,
+    observations: Sequence[EventImpactTrainingRow],
+    *,
+    as_of: datetime,
+) -> EventImpactEvaluation:
+    """Evaluate strictly later, matured labels; training observations are purged."""
+    if not isinstance(as_of, datetime) or as_of.tzinfo is None:
+        raise ValueError("as_of must be timezone-aware")
+    cutoff = as_of.astimezone(timezone.utc)
+    if cutoff < model.training_as_of:
+        raise ValueError("evaluation cutoff cannot precede model training cutoff")
+    cohort = [
+        row
+        for row in observations
+        if row.asset.upper() == model.asset
+        and row.horizon == model.horizon
+        and row.regime == model.regime
+    ]
+    if len({row.event_id for row in cohort}) != len(cohort):
+        raise ValueError("duplicate event_id in evaluation cohort")
+    later = [row for row in cohort if row.event_time > model.training_as_of]
+    matured = [row for row in later if row.outcome_available_at <= cutoff]
+    if not matured:
+        return EventImpactEvaluation(
+            0, len(cohort) - len(later), len(later), None, None, None, None
+        )
+    errors = []
+    losses = []
+    correct = []
+    probabilities = []
+    for row in matured:
+        features = EventImpactFeatures(
+            asset=row.asset,
+            horizon=row.horizon,
+            regime=row.regime,
+            event_type=row.event_type,
+            sentiment=row.sentiment,
+            severity=row.severity,
+            novelty=row.novelty,
+            confidence=row.confidence,
+            source_reliability=row.source_reliability,
+            age_hours=row.age_hours,
+            beta=row.beta,
+        )
+        probability = model.predict_probability_up(features)
+        outcome = row.forward_return > 0.0
+        label = float(outcome)
+        clipped = min(1.0 - 1e-12, max(1e-12, probability))
+        errors.append((probability - label) ** 2)
+        from math import log as _log
+
+        losses.append(
+            -(label * _log(clipped) + (1.0 - label) * _log(1.0 - clipped))
+        )
+        correct.append((probability >= 0.5) == outcome)
+        probabilities.append(probability)
+    count = len(matured)
+    return EventImpactEvaluation(
+        sample_count=count,
+        excluded_pre_training=len(cohort) - len(later),
+        excluded_unmatured=len(later) - count,
+        brier_score=sum(errors) / count,
+        log_loss=sum(losses) / count,
+        directional_accuracy=sum(correct) / count,
+        mean_probability_up=sum(probabilities) / count,
+    )
+
+
 __all__ = [
+    "EventImpactEvaluation",
     "EventImpactFeatures",
+    "EventImpactForecast",
     "EventImpactProbabilityModel",
     "EventImpactTrainingRow",
+    "evaluate_event_impact_model",
     "fit_event_impact_model",
 ]
