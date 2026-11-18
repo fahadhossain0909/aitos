@@ -68,12 +68,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=5_000)
     parser.add_argument("--batch-size", type=int, default=64)
     args = parser.parse_args()
-    if (
-        args.events <= 0
-        or args.repeats <= 0
-        or args.warmup < 0
-        or args.batch_size <= 0
-    ):
+    if args.events <= 0 or args.repeats <= 0 or args.warmup < 0 or args.batch_size <= 0:
         parser.error("events/repeats/batch-size must be positive; warmup non-negative")
 
     factories = {
