@@ -737,9 +737,13 @@ class SecEdgarArchiveBackfillSource:
                         or processed_filings >= self.max_filings_per_poll
                     ):
                         break
-                    accession_value, form_value, date_value, primary_value, report_value = (
-                        archive_rows[row_offset]
-                    )
+                    (
+                        accession_value,
+                        form_value,
+                        date_value,
+                        primary_value,
+                        report_value,
+                    ) = archive_rows[row_offset]
                     row = {
                         "accession": str(accession_value),
                         "form": str(form_value),
