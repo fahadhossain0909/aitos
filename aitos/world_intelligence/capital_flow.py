@@ -48,7 +48,9 @@ class CapitalFlowIntelligenceAdapter:
 
     def _parse_cursor(self, cursor: str | None) -> tuple[str, str]:
         if cursor is None:
-            start = datetime.now(timezone.utc) - timedelta(hours=self.initial_lookback_hours)
+            start = datetime.now(timezone.utc) - timedelta(
+                hours=self.initial_lookback_hours
+            )
             return start.isoformat(), ""
         try:
             value = json.loads(cursor)
@@ -155,9 +157,7 @@ class CapitalFlowIntelligenceAdapter:
                     novelty=0.1,
                     confidence=event.confidence,
                     verification=(
-                        "primary_source"
-                        if source.is_primary
-                        else "unverified"
+                        "primary_source" if source.is_primary else "unverified"
                     ),
                     impact_horizon="unknown",
                     metadata={
