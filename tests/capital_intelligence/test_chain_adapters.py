@@ -439,7 +439,6 @@ async def test_solana_stake_instruction_is_persisted_without_balance_delta():
     )
 
 
-
 @pytest.mark.asyncio
 async def test_solana_cpi_system_and_stake_instructions_are_retained_as_evidence():
     address = "monitored-wallet"
