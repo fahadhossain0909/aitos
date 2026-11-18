@@ -131,7 +131,7 @@ def test_oos_evaluation_excludes_training_rows_and_unmatured_labels():
     training = [row(i) for i in range(40)]
     model = fit(training)
     oos = [row(800 + i) for i in range(10)]
-    oos.append(row(820, available=False))
+    oos.append(row(900, available=False))
     report = evaluate_event_impact_model(
         model, training + oos, as_of=BASE + timedelta(days=40)
     )
