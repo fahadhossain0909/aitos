@@ -278,7 +278,7 @@ async def _metrics_server(
         writer.write(
             f"HTTP/1.1 {status}\r\n".encode()
             + f"Content-Type: {content_type}\r\n".encode()
-            + f"Content-Length: {len(body)}\r\nX-Content-Type-Options: nosniff\\r\\nCache-Control: no-store\\r\\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'\\r\\nConnection: close\r\n\r\n".encode()
+            + f"Content-Length: {len(body)}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n".encode()
             + body
         )
         await writer.drain()
