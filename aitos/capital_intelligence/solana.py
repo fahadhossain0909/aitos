@@ -205,6 +205,8 @@ class SolanaAddressActivityAdapter:
                     "source": str(source),
                     "destination": str(destination),
                     "counterparty": (
+                        str(destination)
+                        if source == monitored_address
                         else str(source)
                     ),
                     "raw_lamports": str(lamports),
@@ -247,7 +249,8 @@ class SolanaAddressActivityAdapter:
             addresses = {
                 str(value)
                 for key, value in info.items()
-                if key.lower() in {
+                if key.lower()
+                in {
                     "stakeaccount",
                     "stakeaccountaddress",
                     "voteaccount",
@@ -421,9 +424,7 @@ class SolanaAddressActivityAdapter:
                         },
                     )
                 )
-            system_transfer_evidence = self._system_transfer_evidence(
-                message, address
-            )
+            system_transfer_evidence = self._system_transfer_evidence(message, address)
             stake_instruction_evidence = self._stake_instruction_evidence(
                 message, address
             )
