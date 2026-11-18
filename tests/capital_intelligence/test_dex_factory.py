@@ -235,3 +235,50 @@ def test_factory_discovery_validates_historical_start_block():
             factories={"0x" + "1" * 40: "uniswap_v2"},
             start_block=-1,
         )
+
+
+
+@pytest.mark.asyncio
+async def test_factory_reorg_reconciliation_covers_full_rescan_not_only_hash_window():
+    factory = "0x" + "1" * 40
+    adapter = EvmDexFactoryDiscoveryAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        factories={factory: "uniswap_v2"},
+        confirmations=2,
+        max_block_range=10,
+        max_reorg_depth=2,
+    )
+    cursor = json.dumps(
+        {
+            "version": 2,
+            "head_block": 10,
+            "recent_hashes": {
+                "8": "0x" + "8" * 64,
+                "9": "0x" + "9" * 64,
+                "10": "0x" + "a" * 64,
+            },
+        }
+    )
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x20"
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000 + number),
+                "hash": "0x" + ("9" * 64 if number == 9 else "b" * 64),
+            }
+        if method == "eth_getLogs":
+            assert params[0]["fromBlock"] == "0xa"
+            assert params[0]["toBlock"] == "0x13"
+            return []
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    _, next_cursor = await adapter.poll(cursor=cursor)
+    assert adapter.last_reorg["from_block"] == 10
+    assert adapter.last_reorg["to_block"] == 19
+    assert set(adapter.last_reorg["canonical_hashes"]) == set(range(10, 20))
+    assert set(json.loads(next_cursor)["recent_hashes"]) == {"17", "18", "19"}
