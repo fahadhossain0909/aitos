@@ -314,8 +314,7 @@ async def test_sec_amended_13f_payload_reuses_stable_row_identity():
     second = await adapter._parse_13f(*amended_args)
     assert first[0].event_id == second[0].event_id
     assert (
-        first[0].metadata["accession_number"]
-        != second[0].metadata["accession_number"]
+        first[0].metadata["accession_number"] != second[0].metadata["accession_number"]
     )
     assert first[0].quantity == 10000
     assert second[0].quantity == 11000
