@@ -49,6 +49,9 @@ class ReplaySummary:
     hit_rate: float | None
     mean_return: float | None
     median_return: float | None
+    net_hit_rate: float | None = None
+    net_mean_return: float | None = None
+    total_cost_bps: float = 0.0
 
 
 def _median(values: Sequence[float]) -> float | None:
@@ -144,22 +147,56 @@ def build_point_in_time_replay(
 
 
 def summarize_replay(
-    rows: Iterable[ReplayRow], *, horizon_seconds: int
+    rows: Iterable[ReplayRow],
+    *,
+    horizon_seconds: int,
+    fee_bps_per_side: float = 0.0,
+    spread_bps_round_trip: float = 0.0,
+    slippage_bps_per_side: float = 0.0,
+    funding_bps_per_8h: float = 0.0,
 ) -> ReplaySummary:
-    """Summarize directional outcome labels; no statistical significance claim."""
+    """Report gross and cost-adjusted outcomes without significance claims.
+
+    Fees and slippage are charged on entry and exit. Spread is a round-trip
+    crossing cost. Funding is a non-negative cost accrued pro-rata by horizon;
+    use a richer venue-specific ledger for realized signed funding.
+    """
+    if horizon_seconds <= 0:
+        raise ValueError("horizon_seconds must be positive")
+    costs = (
+        fee_bps_per_side,
+        spread_bps_round_trip,
+        slippage_bps_per_side,
+        funding_bps_per_8h,
+    )
+    if any(not isfinite(value) or value < 0 or value > 1000 for value in costs):
+        raise ValueError("replay costs must be finite and in [0, 1000] bps")
+    total_cost_bps = (
+        2.0 * fee_bps_per_side
+        + spread_bps_round_trip
+        + 2.0 * slippage_bps_per_side
+        + funding_bps_per_8h * horizon_seconds / 28_800.0
+    )
     returns = [
         row.forward_returns[horizon_seconds]
         for row in rows
         if horizon_seconds in row.forward_returns
     ]
     if not returns:
-        return ReplaySummary(horizon_seconds, 0, None, None, None)
+        return ReplaySummary(
+            horizon_seconds, 0, None, None, None, None, None, total_cost_bps
+        )
+    cost_return = total_cost_bps / 10_000.0
+    net_returns = [value - cost_return for value in returns]
     return ReplaySummary(
         horizon_seconds=horizon_seconds,
         sample_count=len(returns),
         hit_rate=sum(value > 0 for value in returns) / len(returns),
         mean_return=sum(returns) / len(returns),
         median_return=_median(returns),
+        net_hit_rate=sum(value > 0 for value in net_returns) / len(net_returns),
+        net_mean_return=sum(net_returns) / len(net_returns),
+        total_cost_bps=total_cost_bps,
     )
 
 
