@@ -70,6 +70,7 @@ async def test_graph_store_persists_event_observations_without_identity_claims()
     assert "beneficial_owner" not in query
     assert parameters["rows"][0]["actor_entity_id"] == "1:0xsender"
     assert parameters["rows"][0]["counterparty_entity_id"] == "1:0xreceiver"
+    assert parameters["rows"][0]["block_hash"] is None
 
 
 
