@@ -1,0 +1,16 @@
+# AITOS pre-trade decision specification
+DECISION pretrade:
+STATE:
+  - trend
+  - order_flow
+  - liquidity
+  - volatility
+  - market_regime
+  - risk_veto
+ASK direction: CHOICE [LONG, SHORT, NO_TRADE]
+ASK entry_quality: SCORE 1..5
+ASK reversal: NOUL "a liquidity sweep is a genuine reversal"
+OUTPUT:
+  - decision
+  - probabilities
+  - reasons
