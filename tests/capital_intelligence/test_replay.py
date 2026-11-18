@@ -166,7 +166,6 @@ def test_replay_summary_rejects_invalid_cost_assumptions():
         summarize_replay([], horizon_seconds=300, fee_bps_per_side=-1)
 
 
-
 def test_walk_forward_splits_are_expanding_and_purged():
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     rows = [
@@ -187,9 +186,7 @@ def test_walk_forward_splits_are_expanding_and_purged():
     assert len(folds[1][0]) > len(folds[0][0])
     for train, test in folds:
         test_start = min(row.event_time for row in test)
-        assert all(
-            row.event_time + timedelta(seconds=90) < test_start for row in train
-        )
+        assert all(row.event_time + timedelta(seconds=90) < test_start for row in train)
 
 
 def test_probability_evaluation_reports_calibration_and_classification_metrics():
