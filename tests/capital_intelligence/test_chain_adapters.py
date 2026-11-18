@@ -162,7 +162,10 @@ async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
                 + (token0 if params[0]["data"] == "0x0dfe1681" else token1)[2:]
             )
         if method == "eth_getBlockByNumber":
-            return {"timestamp": hex(1_700_000_000), "hash": "0x" + f"{int(params[0], 16):064x}"}
+            return {
+                "timestamp": hex(1_700_000_000),
+                "hash": "0x" + f"{int(params[0], 16):064x}",
+            }
         raise AssertionError(method)
 
     adapter._rpc = fake_rpc
@@ -217,7 +220,6 @@ async def test_evm_reorg_rewinds_to_common_ancestor_and_exposes_tombstone_range(
     assert json.loads(next_cursor)["head_block"] == 100
 
 
-
 @pytest.mark.asyncio
 async def test_dex_reorg_uses_common_ancestor_and_emits_reconciliation_range():
     pool = "0x" + "1" * 40
@@ -229,12 +231,8 @@ async def test_dex_reorg_uses_common_ancestor_and_emits_reconciliation_range():
         max_block_range=10,
         max_reorg_depth=2,
     )
-    old_hashes = {
-        str(number): "0x" + f"{number:064x}" for number in (98, 99, 100)
-    }
-    cursor = json.dumps(
-        {"version": 2, "head_block": 100, "recent_hashes": old_hashes}
-    )
+    old_hashes = {str(number): "0x" + f"{number:064x}" for number in (98, 99, 100)}
+    cursor = json.dumps({"version": 2, "head_block": 100, "recent_hashes": old_hashes})
     replacement_hash = "0x" + "f" * 64
 
     async def fake_rpc(method, params):
@@ -272,12 +270,8 @@ async def test_dex_reorg_deeper_than_retained_window_fails_closed():
         max_block_range=10,
         max_reorg_depth=2,
     )
-    old_hashes = {
-        str(number): "0x" + f"{number:064x}" for number in (98, 99, 100)
-    }
-    cursor = json.dumps(
-        {"version": 2, "head_block": 100, "recent_hashes": old_hashes}
-    )
+    old_hashes = {str(number): "0x" + f"{number:064x}" for number in (98, 99, 100)}
+    cursor = json.dumps({"version": 2, "head_block": 100, "recent_hashes": old_hashes})
 
     async def fake_rpc(method, params):
         if method == "eth_blockNumber":
