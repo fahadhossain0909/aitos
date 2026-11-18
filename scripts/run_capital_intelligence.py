@@ -446,6 +446,9 @@ async def main() -> None:
             report_type=config.get("report_type", "configured_cot_report"),
             market=config.get("market", "futures"),
             page_limit=int(config.get("page_limit", 1000)),
+            revision_refresh_pages_per_poll=int(
+                config.get("revision_refresh_pages_per_poll", 5)
+            ),
         )
         workers.append(
             CapitalIngestionWorker(
