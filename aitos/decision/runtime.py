@@ -105,6 +105,7 @@ class ADLRuntime:
 
         if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
             reasons.append("evaluation clock is not timezone-aware")
+            evaluated_at = datetime.now(timezone.utc)
             return finish(DecisionAction.ABSTAIN)
         age = snapshot.age_seconds(evaluated_at)
         if age < 0:

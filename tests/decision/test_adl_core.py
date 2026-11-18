@@ -113,6 +113,16 @@ def test_runtime_abstains_when_calibration_is_cold(spec):
     assert "calibration" in " ".join(result.reasons)
 
 
+def test_runtime_abstains_on_naive_evaluation_clock(spec):
+    runtime = ADLRuntime(
+        StaticProvider(response()), policy=DecisionPolicy(require_calibration=False)
+    )
+    naive_now = datetime(2026, 11, 18, 12, 0)
+    result = runtime.evaluate(snapshot(), spec, now=naive_now)
+    assert result.action == DecisionAction.ABSTAIN
+    assert result.evaluated_at.tzinfo is not None
+
+
 def test_runtime_fails_closed_on_stale_or_missing_state(spec):
     runtime = ADLRuntime(
         StaticProvider(response()), policy=DecisionPolicy(require_calibration=False)
