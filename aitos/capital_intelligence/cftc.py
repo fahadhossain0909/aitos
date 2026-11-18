@@ -36,6 +36,7 @@ class CftcCotAdapter:
         report_type: str = "configured_cot_report",
         market: str = "futures",
         page_limit: int = 1000,
+        revision_refresh_pages_per_poll: int = 5,
         timeout_seconds: float = 12.0,
         session: aiohttp.ClientSession | None = None,
     ):
@@ -43,6 +44,11 @@ class CftcCotAdapter:
             raise ValueError("CFTC dataset id must be a Socrata dataset identifier")
         if not 1 <= page_limit <= 5000:
             raise ValueError("CFTC page limit must be in [1, 5000]")
+        if (
+            isinstance(revision_refresh_pages_per_poll, bool)
+            or not 0 <= revision_refresh_pages_per_poll <= 20
+        ):
+            raise ValueError("CFTC revision refresh pages must be in [0, 20]")
         if not 0.2 <= timeout_seconds <= 30:
             raise ValueError("invalid timeout")
         required = {
@@ -89,6 +95,7 @@ class CftcCotAdapter:
         self.report_type = report_type
         self.market = market
         self.page_limit = page_limit
+        self.revision_refresh_pages_per_poll = revision_refresh_pages_per_poll
         self.timeout_seconds = timeout_seconds
         self.session = session
         self.owns_session = session is None
@@ -130,26 +137,9 @@ class CftcCotAdapter:
             raise RuntimeError(f"CFTC field {field} is not a non-negative integer")
         return int(number)
 
-    async def poll(
-        self, *, cursor: str | None = None
-    ) -> tuple[list[CapitalEvent], str | None]:
-        offset = 0
-        if cursor is not None:
-            try:
-                state = json.loads(cursor)
-            except (TypeError, ValueError):
-                raise ValueError("CFTC cursor must be a JSON offset object") from None
-            if (
-                not isinstance(state, dict)
-                or not isinstance(state.get("offset"), int)
-                or state["offset"] < 0
-                or state["offset"] > 1_000_000
-            ):
-                raise ValueError("invalid CFTC offset cursor")
-            offset = state["offset"]
-
-        rows = await self._get_rows(offset)
-        now = datetime.now(timezone.utc)
+    def _events_from_rows(
+        self, rows: list[dict[str, Any]], observed_at: datetime
+    ) -> list[CapitalEvent]:
         fields = self.field_map
         events = []
         for row in rows:
@@ -195,7 +185,7 @@ class CftcCotAdapter:
                     market_code,
                     "cot_positioning_report",
                     datetime.combine(report_day, time.min, timezone.utc),
-                    now,
+                    observed_at,
                     float(open_interest),
                     "contracts",
                     None,
@@ -217,7 +207,66 @@ class CftcCotAdapter:
                     },
                 )
             )
-        next_cursor = json.dumps(
-            {"offset": offset + len(rows)}, sort_keys=True, separators=(",", ":")
-        )
-        return events, next_cursor
+        return events
+
+    async def poll(
+        self, *, cursor: str | None = None
+    ) -> tuple[list[CapitalEvent], str | None]:
+        state = {
+            "version": 2,
+            "incremental_offset": 0,
+            "refresh_offset": 0,
+        }
+        if cursor is not None:
+            try:
+                supplied = json.loads(cursor)
+            except (TypeError, ValueError):
+                raise ValueError("CFTC cursor must be a JSON offset object") from None
+            if not isinstance(supplied, dict):
+                raise ValueError("invalid CFTC cursor")
+            if "offset" in supplied and "incremental_offset" not in supplied:
+                supplied = {
+                    "version": 2,
+                    "incremental_offset": supplied.get("offset"),
+                    "refresh_offset": 0,
+                }
+            if (
+                supplied.get("version") != 2
+                or any(
+                    isinstance(supplied.get(key), bool)
+                    or not isinstance(supplied.get(key), int)
+                    or not 0 <= supplied[key] <= 10_000_000
+                    for key in ("incremental_offset", "refresh_offset")
+                )
+            ):
+                raise ValueError("invalid CFTC version-2 cursor")
+            state.update(supplied)
+
+        now = datetime.now(timezone.utc)
+        incremental_rows = await self._get_rows(state["incremental_offset"])
+        state["incremental_offset"] += len(incremental_rows)
+
+        refreshed_rows: list[dict[str, Any]] = []
+        refresh_offset = state["refresh_offset"]
+        for _ in range(self.revision_refresh_pages_per_poll):
+            page = await self._get_rows(refresh_offset)
+            if not page:
+                refresh_offset = 0
+                break
+            refreshed_rows.extend(page)
+            refresh_offset += len(page)
+            if len(page) < self.page_limit:
+                refresh_offset = 0
+                break
+        state["refresh_offset"] = refresh_offset
+
+        rows_by_key = {}
+        for row in [*incremental_rows, *refreshed_rows]:
+            key = (
+                str(row.get(self.field_map["report_date"], ""))[:10],
+                str(row.get(self.field_map["market_code"], "")).strip(),
+            )
+            rows_by_key[key] = row
+        events = self._events_from_rows(list(rows_by_key.values()), now)
+        serialized = json.dumps(state, sort_keys=True, separators=(",", ":"))
+        return events, serialized
