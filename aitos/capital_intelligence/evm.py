@@ -269,6 +269,9 @@ class EVMLogCapitalAdapter:
                     {
                         "log_index": log_index,
                         "actor_identity_kind": "evm_address",
+                        "counterparty_identity_kind": "evm_address",
+                        "flow_sign": -1,
+                        "flow_direction": "outflow",
                         "raw_amount": str(amount),
                         "decimals_required": True,
                         "direction_semantics": "transfer_only_not_trade_intent",
