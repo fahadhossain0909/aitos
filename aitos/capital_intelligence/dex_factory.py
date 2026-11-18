@@ -13,15 +13,6 @@ import aiohttp
 
 from .contracts import CapitalEvent
 
-V2_PAIR_CREATED_TOPIC = "0x" + __import__("hashlib").sha3_256(
-    b"PairCreated(address,address,address,uint256)"
-).hexdigest()
-V3_POOL_CREATED_TOPIC = "0x" + __import__("hashlib").sha3_256(
-    b"PoolCreated(address,address,uint24,int24,address)"
-).hexdigest()
-
-# Ethereum event topic hashes use Keccak-256, not standardized SHA3-256.
-# Constants below are the canonical Keccak values.
 V2_PAIR_CREATED_TOPIC = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 V3_POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 
