@@ -211,24 +211,45 @@ def test_address_ranking_excludes_pool_callers_and_non_address_entities():
     assert rank_capital_candidates(events) == []
 
 
-
 def test_ranking_keeps_same_address_separate_across_chains():
     first = event("chain-1-a", "0x" + "a" * 40, 1000, 1, counterparty="")
     second = event("chain-1-b", "0x" + "a" * 40, 2000, 1, counterparty="")
     third = event("chain-137-a", "0x" + "a" * 40, 3000, 1, counterparty="")
     fourth = event("chain-137-b", "0x" + "a" * 40, 4000, 1, counterparty="")
     third = CapitalEvent(
-        third.event_id, third.source_id, third.source_kind, third.market, "137",
-        third.instrument, third.event_type, third.event_time, third.observed_time,
-        third.quantity, third.unit, third.usd_value, actor_id=third.actor_id,
-        counterparty_id=third.counterparty_id, confidence=third.confidence,
+        third.event_id,
+        third.source_id,
+        third.source_kind,
+        third.market,
+        "137",
+        third.instrument,
+        third.event_type,
+        third.event_time,
+        third.observed_time,
+        third.quantity,
+        third.unit,
+        third.usd_value,
+        actor_id=third.actor_id,
+        counterparty_id=third.counterparty_id,
+        confidence=third.confidence,
         metadata=third.metadata,
     )
     fourth = CapitalEvent(
-        fourth.event_id, fourth.source_id, fourth.source_kind, fourth.market, "137",
-        fourth.instrument, fourth.event_type, fourth.event_time, fourth.observed_time,
-        fourth.quantity, fourth.unit, fourth.usd_value, actor_id=fourth.actor_id,
-        counterparty_id=fourth.counterparty_id, confidence=fourth.confidence,
+        fourth.event_id,
+        fourth.source_id,
+        fourth.source_kind,
+        fourth.market,
+        "137",
+        fourth.instrument,
+        fourth.event_type,
+        fourth.event_time,
+        fourth.observed_time,
+        fourth.quantity,
+        fourth.unit,
+        fourth.usd_value,
+        actor_id=fourth.actor_id,
+        counterparty_id=fourth.counterparty_id,
+        confidence=fourth.confidence,
         metadata=fourth.metadata,
     )
     ranked = rank_capital_candidates([first, second, third, fourth], minimum_events=2)
@@ -237,7 +258,6 @@ def test_ranking_keeps_same_address_separate_across_chains():
         "137:" + "0x" + "a" * 40,
     }
     assert sorted(item.gross_flow_usd for item in ranked) == [3000, 7000]
-
 
 
 def test_transfer_ranking_accounts_for_sender_and_recipient_flow():
@@ -253,7 +273,6 @@ def test_transfer_ranking_accounts_for_sender_and_recipient_flow():
     assert by_entity["1:wallet:sender"].net_flow_usd == -5000
     assert by_entity["1:wallet:receiver"].net_flow_usd == 5000
     assert by_entity["1:wallet:receiver"].direction_coverage == 1.0
-
 
 
 def test_ranking_excludes_zero_and_burn_addresses_but_keeps_real_counterparty():
