@@ -1,6 +1,7 @@
 """Contract tests for the optional native core and Python reference fallback."""
 
 from decimal import Decimal
+from datetime import datetime, timezone
 
 import pytest
 
@@ -109,7 +110,7 @@ def test_instrument_aware_session_converts_snapshot_and_depth_updates():
         bids=((65000.12, 0.125),),
         asks=((65000.14, 0.250),),
         last_update_id=100,
-        timestamp=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        timestamp=datetime.now(timezone.utc),
     )
     session = NativeOrderBookSession.from_snapshot(
         snapshot, filters, prefer_native=False
@@ -133,14 +134,6 @@ def test_instrument_aware_session_converts_snapshot_and_depth_updates():
 
 
 def test_instrument_aware_session_rejects_off_tick_without_mutation():
-    filters = SymbolFilters(
-        symbol="BTCUSDT",
-        step_size=0.001,
-        tick_size=0.01,
-        min_notional=5.0,
-        quantity_precision=3,
-        price_precision=2,
-    )
     session = NativeOrderBookSession(
         InstrumentScale(Decimal("0.01"), Decimal("0.001")),
         100,
