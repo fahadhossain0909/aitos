@@ -181,7 +181,7 @@ class CapitalEntityExplorer:
             return None
 
         evidence_result = await self.clickhouse.query(
-            f"""
+            """
             SELECT subject_id, object_id, relation, evidence_type, evidence_ref,
                    observed_at, confidence, status
             FROM __EVIDENCE_TABLE__ FINAL
@@ -192,7 +192,7 @@ class CapitalEntityExplorer:
             parameters={"entity_id": entity_key},
         )
         labels_result = await self.clickhouse.query(
-            f"""
+            """
             SELECT label, category, source, verified, valid_from, valid_until
             FROM __LABELS_TABLE__ FINAL
             WHERE entity_id = {{entity_id:String}}
