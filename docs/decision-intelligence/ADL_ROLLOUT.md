@@ -6,7 +6,7 @@ OpportunityScanner accepts optional adl_runtime and adl_spec dependencies. Confi
 
 ## Provider boundary
 
-JevDecisionProvider accepts an injected callable. No vendor endpoint, authentication format, SDK package, or model identifier is guessed. Verify the private provider's official contract, timeouts, retries, data retention, and output schema before enabling a Jev transport. Scanner composite scores are evidence, not calibrated probabilities.
+JevDecisionProvider accepts an injected callable. No vendor endpoint, authentication format, SDK package, or model identifier is guessed. Verify the private provider's official contract, timeouts, retries, data retention, and output schema before enabling a Jev transport. NativeEvidenceProvider supplies a transparent heuristic prior from scanner direction and composite score; it is not a trained model and must not be treated as calibrated. Scanner composite scores are evidence, not calibrated probabilities.
 
 ## Replay and governance
 
