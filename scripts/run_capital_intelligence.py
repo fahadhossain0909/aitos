@@ -695,6 +695,7 @@ async def main() -> None:
                 checkpoints=checkpoints,
                 store=store,
                 poll_interval_seconds=max(interval, 60.0),
+                batch_limit=50_000,
             )
         )
         if os.getenv("AITOS_CFEI_SEC_ARCHIVE_BACKFILL_ENABLED", "false").lower() in {
@@ -705,7 +706,7 @@ async def main() -> None:
             archive_source = SecEdgarArchiveBackfillSource(
                 adapter,
                 max_filings_per_poll=int(
-                    os.getenv("AITOS_CFEI_SEC_ARCHIVE_MAX_FILINGS_PER_POLL", "10")
+                    os.getenv("AITOS_CFEI_SEC_ARCHIVE_MAX_FILINGS_PER_POLL", "1")
                 ),
                 max_rows_per_poll=int(
                     os.getenv("AITOS_CFEI_SEC_ARCHIVE_MAX_ROWS_PER_POLL", "500")
@@ -718,6 +719,7 @@ async def main() -> None:
                     checkpoints=checkpoints,
                     store=store,
                     poll_interval_seconds=max(interval, 60.0),
+                    batch_limit=50_000,
                 )
             )
 
