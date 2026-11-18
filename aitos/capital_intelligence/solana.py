@@ -167,6 +167,55 @@ class SolanaAddressActivityAdapter:
             )
         return evidence
 
+    @staticmethod
+    def _system_transfer_evidence(
+        message: dict[str, Any],
+        monitored_address: str,
+    ) -> list[dict[str, Any]]:
+        """Extract parsed System Program transfers as evidence, not extra flow."""
+        outer = list(message.get("instructions") or [])
+        instructions = list(outer)
+        for group in message.get("innerInstructions") or []:
+            instructions.extend(group.get("instructions") or [])
+
+        evidence = []
+        for index, instruction in enumerate(instructions):
+            parsed = instruction.get("parsed")
+            if not isinstance(parsed, dict) or parsed.get("type") not in {
+                "transfer",
+                "transferWithSeed",
+            }:
+                continue
+            info = parsed.get("info") or {}
+            source = info.get("source")
+            destination = info.get("destination")
+            lamports = info.get("lamports")
+            if (
+                not source
+                or not destination
+                or monitored_address not in {source, destination}
+                or lamports is None
+                or not str(lamports).isdigit()
+            ):
+                continue
+            evidence.append(
+                {
+                    "instruction_index": index,
+                    "instruction_type": parsed.get("type"),
+                    "source": str(source),
+                    "destination": str(destination),
+                    "counterparty": (
+                        str(destination)
+                        if source == monitored_address
+                        else str(source)
+                    ),
+                    "raw_lamports": str(lamports),
+                    "is_cpi_or_inner_instruction": index >= len(outer),
+                    "evidence_only": True,
+                }
+            )
+        return evidence
+
     async def _address_events(
         self, address: str, previous: str | None, observed_at: datetime
     ) -> tuple[list[CapitalEvent], str | None]:
@@ -297,6 +346,9 @@ class SolanaAddressActivityAdapter:
                         },
                     )
                 )
+            system_transfer_evidence = self._system_transfer_evidence(
+                message, address
+            )
             pre = meta.get("preBalances") or []
             post = meta.get("postBalances") or []
             try:
@@ -333,6 +385,8 @@ class SolanaAddressActivityAdapter:
                                 "raw_delta": str(lamport_delta),
                                 "decimals": 9,
                                 "native_delta_includes_network_fee_and_rent": True,
+                                "system_transfer_evidence": system_transfer_evidence,
+                                "instruction_evidence_is_not_additional_flow": True,
                             },
                         )
                     )
