@@ -10,6 +10,7 @@ from .contracts import CapitalEvent
 
 V2_SWAP_TOPIC = "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"
 V3_SWAP_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+V4_SWAP_TOPIC = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
 
 
 class EvmDexSwapAdapter:
@@ -21,6 +22,7 @@ class EvmDexSwapAdapter:
         rpc_url: str,
         chain_id: str,
         pools: dict[str, str],
+        v4_pool_tokens: dict[str, dict[str, str]] | None = None,
         confirmations: int = 12,
         max_block_range: int = 250,
         max_reorg_depth: int = 64,
@@ -36,10 +38,37 @@ class EvmDexSwapAdapter:
         self.chain_id = chain_id
         self.pools = {self._address(k): v.lower() for k, v in pools.items()}
         if any(
-            v not in {"uniswap_v2", "uniswap_v3", "pancakeswap_v2", "pancakeswap_v3"}
+            v
+            not in {
+                "uniswap_v2",
+                "uniswap_v3",
+                "pancakeswap_v2",
+                "pancakeswap_v3",
+                "uniswap_v4",
+            }
             for v in self.pools.values()
         ):
             raise ValueError("unsupported pool protocol")
+        self.v4_pool_tokens: dict[str, tuple[str, str]] = {}
+        for pool_id, tokens in (v4_pool_tokens or {}).items():
+            normalized_id = str(pool_id).lower()
+            if (
+                len(normalized_id) != 66
+                or not normalized_id.startswith("0x")
+                or any(char not in "0123456789abcdef" for char in normalized_id[2:])
+                or not isinstance(tokens, dict)
+                or not {"token0", "token1"}.issubset(tokens)
+            ):
+                raise ValueError("invalid Uniswap V4 pool ID/token mapping")
+            token0 = self._address(tokens["token0"])
+            token1 = self._address(tokens["token1"])
+            if token0 >= token1:
+                raise ValueError("V4 currencies must be strictly sorted")
+            self.v4_pool_tokens[normalized_id] = (token0, token1)
+        if self.v4_pool_tokens and not any(
+            protocol == "uniswap_v4" for protocol in self.pools.values()
+        ):
+            raise ValueError("V4 pool tokens require an allowlisted PoolManager")
         self.confirmations = confirmations
         self.max_block_range = max_block_range
         self.max_reorg_depth = max_reorg_depth
@@ -205,7 +234,7 @@ class EvmDexSwapAdapter:
                     "fromBlock": hex(start_block),
                     "toBlock": hex(end),
                     "address": list(self.pools),
-                    "topics": [[V2_SWAP_TOPIC, V3_SWAP_TOPIC]],
+                    "topics": [[V2_SWAP_TOPIC, V3_SWAP_TOPIC, V4_SWAP_TOPIC]],
                 }
             ],
         )
@@ -223,12 +252,15 @@ class EvmDexSwapAdapter:
                 continue
             if topic == V3_SWAP_TOPIC and not protocol.endswith("_v3"):
                 continue
+            if topic == V4_SWAP_TOPIC and protocol != "uniswap_v4":
+                continue
             words = [data[i : i + 64] for i in range(0, len(data), 64)]
-            signed = lambda word: (
-                int(word, 16) - (1 << 256)
-                if int(word, 16) >= (1 << 255)
-                else int(word, 16)
-            )
+
+            def signed(word: str, bits: int = 256) -> int:
+                value = int(word, 16)
+                return value - (1 << bits) if value >= (1 << (bits - 1)) else value
+
+            pool_id = None
             if topic == V2_SWAP_TOPIC:
                 if len(words) < 4:
                     continue
@@ -237,13 +269,24 @@ class EvmDexSwapAdapter:
                 ]
                 delta0 = amount0_in - amount0_out
                 delta1 = amount1_in - amount1_out
+                token0_address, token1_address = await self._token_addresses(pool)
             elif topic == V3_SWAP_TOPIC:
                 if len(words) < 5:
                     continue
                 delta0, delta1 = signed(words[0]), signed(words[1])
+                token0_address, token1_address = await self._token_addresses(pool)
+            elif topic == V4_SWAP_TOPIC:
+                topics = log.get("topics", [])
+                if len(topics) < 3 or len(words) < 6:
+                    continue
+                pool_id = str(topics[1]).lower()
+                token_pair = self.v4_pool_tokens.get(pool_id)
+                if token_pair is None:
+                    continue
+                token0_address, token1_address = token_pair
+                delta0, delta1 = signed(words[0], 128), signed(words[1], 128)
             else:
                 continue
-            token0_address, token1_address = await self._token_addresses(pool)
             block = int(log["blockNumber"], 16)
             tx = log["transactionHash"]
             index = int(log["logIndex"], 16)
@@ -263,9 +306,10 @@ class EvmDexSwapAdapter:
             event_id = hashlib.sha256(
                 f"{self.chain_id}|{tx}|{index}".encode()
             ).hexdigest()
+            actor_topic_index = 2 if topic == V4_SWAP_TOPIC else 1
             actor = (
-                "0x" + log["topics"][1][-40:]
-                if len(log.get("topics", [])) > 1
+                "0x" + log["topics"][actor_topic_index][-40:]
+                if len(log.get("topics", [])) > actor_topic_index
                 else None
             )
             events.append(
@@ -300,6 +344,20 @@ class EvmDexSwapAdapter:
                         "log_index": index,
                         "token0_and_token1_decimals_required": True,
                         "pool": pool,
+                        "pool_id": pool_id,
+                        "pool_manager": pool if topic == V4_SWAP_TOPIC else None,
+                        "sqrt_price_x96": int(words[2], 16)
+                        if topic == V4_SWAP_TOPIC
+                        else None,
+                        "post_swap_liquidity": int(words[3], 16)
+                        if topic == V4_SWAP_TOPIC
+                        else None,
+                        "post_swap_tick": signed(words[4], 24)
+                        if topic == V4_SWAP_TOPIC
+                        else None,
+                        "swap_fee_pips": int(words[5], 16)
+                        if topic == V4_SWAP_TOPIC
+                        else None,
                     },
                 )
             )
