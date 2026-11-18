@@ -1,4 +1,5 @@
 """Correlation-aware aggregation of independent decision assessments."""
+
 from __future__ import annotations
 
 import math
@@ -38,7 +39,8 @@ def aggregate_assessments(
         raise ValueError("at least one assessment is required")
     distributions = [
         (item, _validated_distribution(item.probabilities))
-        for item in assessments if item.reliability > 0
+        for item in assessments
+        if item.reliability > 0
     ]
     if not distributions:
         raise ValueError("no assessments have positive reliability")
@@ -62,7 +64,8 @@ def aggregate_assessments(
 
     total_weight = sum(weight for _, weight in weighted)
     probabilities = {
-        action: sum(values[action] * weight for values, weight in weighted) / total_weight
+        action: sum(values[action] * weight for values, weight in weighted)
+        / total_weight
         for action in actions
     }
     disagreement = max(
@@ -72,6 +75,8 @@ def aggregate_assessments(
     )
     squared_weights = sum((weight / total_weight) ** 2 for _, weight in weighted)
     return AggregationResult(
-        probabilities, disagreement, 1.0 / squared_weights,
+        probabilities,
+        disagreement,
+        1.0 / squared_weights,
         tuple(item.agent for item, _ in distributions),
     )

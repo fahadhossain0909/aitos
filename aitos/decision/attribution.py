@@ -1,4 +1,5 @@
 """Idempotent in-memory decision/outcome attribution contracts."""
+
 from __future__ import annotations
 
 import hashlib
@@ -74,7 +75,9 @@ class InMemoryDecisionAttributionStore:
         with self._lock:
             return self._outcomes.get(decision_id)
 
-    def snapshot(self) -> tuple[tuple[DecisionResult, ...], tuple[DecisionOutcome, ...]]:
+    def snapshot(
+        self,
+    ) -> tuple[tuple[DecisionResult, ...], tuple[DecisionOutcome, ...]]:
         with self._lock:
             return tuple(self._decisions.values()), tuple(self._outcomes.values())
 
