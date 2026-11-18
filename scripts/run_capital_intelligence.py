@@ -245,7 +245,7 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
         label = (
             str(source_id)
             .replace("\\", "\\\\")
-            .replace('"', '\\\\"')
+            .replace('"', '\\"')
             .replace("\n", "")
         )
         labels = f'source_id="{label}"'
