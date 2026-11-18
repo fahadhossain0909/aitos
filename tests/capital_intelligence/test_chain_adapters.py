@@ -437,3 +437,78 @@ async def test_solana_stake_instruction_is_persisted_without_balance_delta():
         event.metadata["stake_instruction_evidence"][0]["instruction_type"]
         == "delegate"
     )
+
+
+
+@pytest.mark.asyncio
+async def test_solana_cpi_system_and_stake_instructions_are_retained_as_evidence():
+    address = "monitored-wallet"
+    adapter = SolanaAddressActivityAdapter(
+        rpc_url="https://solana.example",
+        addresses=[address],
+    )
+
+    async def fake_rpc(method, params):
+        if method == "getSignaturesForAddress":
+            return [{"signature": "cpi-signature"}]
+        if method == "getTransaction":
+            return {
+                "slot": 123,
+                "blockTime": 1_700_000_000,
+                "transaction": {
+                    "message": {
+                        "accountKeys": [{"pubkey": address}],
+                        "instructions": [],
+                    }
+                },
+                "meta": {
+                    "err": None,
+                    "preBalances": [100],
+                    "postBalances": [95],
+                    "preTokenBalances": [],
+                    "postTokenBalances": [],
+                    "innerInstructions": [
+                        {
+                            "index": 0,
+                            "instructions": [
+                                {
+                                    "program": "system",
+                                    "parsed": {
+                                        "type": "transfer",
+                                        "info": {
+                                            "source": address,
+                                            "destination": "counterparty-wallet",
+                                            "lamports": 5,
+                                        },
+                                    },
+                                },
+                                {
+                                    "program": "stake",
+                                    "parsed": {
+                                        "type": "delegate",
+                                        "info": {
+                                            "stakeAccount": address,
+                                            "voteAccount": "vote-account",
+                                            "stakeAuthority": "wallet-authority",
+                                        },
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                },
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, _ = await adapter.poll()
+    native = next(event for event in events if event.event_type == "sol_balance_change")
+    assert len(native.metadata["system_transfer_evidence"]) == 1
+    transfer = native.metadata["system_transfer_evidence"][0]
+    assert transfer["counterparty"] == "counterparty-wallet"
+    assert transfer["raw_lamports"] == "5"
+    assert transfer["is_cpi_or_inner_instruction"] is True
+
+    stake = next(event for event in events if event.event_type == "stake_instruction_observed")
+    assert stake.metadata["stake_instruction_evidence"][0]["instruction_type"] == "delegate"
+    assert stake.metadata["stake_instruction_evidence"][0]["is_cpi_or_inner_instruction"] is True
