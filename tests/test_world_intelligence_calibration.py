@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from math import log
 
 import pytest
 
@@ -11,7 +12,16 @@ from aitos.world_intelligence.calibration import (
 BASE = datetime(2026, 11, 1, tzinfo=timezone.utc)
 
 
-def observation(index, probability, outcome, *, asset="BTCUSDT", horizon="1h", regime="trend", mature=True):
+def observation(
+    index,
+    probability,
+    outcome,
+    *,
+    asset="BTCUSDT",
+    horizon="1h",
+    regime="trend",
+    mature=True,
+):
     predicted = BASE + timedelta(hours=index)
     return CalibrationObservation(
         observation_id=str(index),
@@ -34,9 +44,11 @@ def test_report_excludes_outcomes_not_yet_available():
 
 
 def test_probability_one_is_in_last_bin_and_log_loss_is_finite():
-    report = calibration_report([observation(0, 1.0, True)], as_of=BASE + timedelta(hours=2))
+    report = calibration_report(
+        [observation(0, 1.0, True)], as_of=BASE + timedelta(hours=2)
+    )
     assert report.bins[-1].sample_count == 1
-    assert report.log_loss == pytest.approx(-__import__("math").log(1.0 - 1e-12))
+    assert report.log_loss == pytest.approx(-log(1.0 - 1e-12))
 
 
 def test_empty_report_has_explicit_empty_bins():
@@ -58,7 +70,9 @@ def test_duplicate_observation_ids_are_rejected():
 def test_calibration_is_reported_separately_by_asset_horizon_and_regime():
     rows = [
         observation(0, 0.8, True),
-        observation(1, 0.2, False, asset="ETHUSDT", horizon="4h", regime="range"),
+        observation(
+            1, 0.2, False, asset="ETHUSDT", horizon="4h", regime="range"
+        ),
     ]
     reports = calibration_cohorts(rows, as_of=BASE + timedelta(days=1))
     assert set(reports) == {
@@ -76,7 +90,7 @@ def test_invalid_bin_count_is_rejected(bin_count):
 
 def test_observation_rejects_naive_timestamps_and_invalid_probability():
     with pytest.raises(ValueError, match="timezone-aware"):
-        observation(0, 0.5, True).__class__(
+        CalibrationObservation(
             observation_id="x",
             asset="BTC",
             horizon="1h",
