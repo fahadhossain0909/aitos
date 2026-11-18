@@ -407,11 +407,11 @@ async def test_v4_modify_liquidity_is_persisted_as_evidence_not_token_flow():
     events, _ = await adapter.poll(cursor="0x1f")
     assert len(events) == 1
     event = events[0]
-    assert event.event_type == "dex_liquidity_event"
-    assert event.event_kind == "dex_liquidity_modified"
+    assert event.source_kind == "dex_liquidity_event"
+    assert event.event_type == "dex_liquidity_modified"
     assert event.actor_id == sender
     assert event.quantity == 10**18
-    assert event.quantity_unit == "liquidity_units"
+    assert event.unit == "liquidity_units"
     assert event.usd_value is None
     assert event.metadata["pool_id"] == pool_id
     assert event.metadata["factory_event"] == "ModifyLiquidity"
