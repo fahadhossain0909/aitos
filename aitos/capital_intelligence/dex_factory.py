@@ -115,7 +115,9 @@ class EvmDexFactoryDiscoveryAdapter:
         try:
             head = int(cursor, 16)
         except (TypeError, ValueError):
-            raise ValueError("factory cursor must be a hex block or version-2 JSON") from None
+            raise ValueError(
+                "factory cursor must be a hex block or version-2 JSON"
+            ) from None
         if head < 0:
             raise ValueError("invalid factory cursor")
         return {"version": 1, "head_block": head, "recent_hashes": {}}
