@@ -697,9 +697,11 @@ async def main() -> None:
                 poll_interval_seconds=max(interval, 60.0),
             )
         )
-        if os.getenv(
-            "AITOS_CFEI_SEC_ARCHIVE_BACKFILL_ENABLED", "false"
-        ).lower() in {"1", "true", "yes"}:
+        if os.getenv("AITOS_CFEI_SEC_ARCHIVE_BACKFILL_ENABLED", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
             archive_source = SecEdgarArchiveBackfillSource(
                 adapter,
                 max_filings_per_poll=int(
@@ -780,9 +782,7 @@ async def main() -> None:
             redis_client=redis_client,
             watchlist=watchlist,
             webhook_url=alert_webhook_url,
-            timeout_seconds=float(
-                os.getenv("AITOS_CFEI_ALERT_TIMEOUT_SECONDS", "8")
-            ),
+            timeout_seconds=float(os.getenv("AITOS_CFEI_ALERT_TIMEOUT_SECONDS", "8")),
         )
         if alert_webhook_url
         else None
