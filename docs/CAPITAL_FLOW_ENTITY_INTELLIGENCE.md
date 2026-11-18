@@ -294,3 +294,20 @@ used. The `summarize_replay` helper retains gross metrics and separately
 reports net-of-cost mean return and hit rate using explicit per-side fees,
 round-trip spread, per-side slippage and pro-rata funding cost assumptions.
 These are transparent assumptions, not a substitute for venue-level fill replay.
+
+
+## 16. Source-level operations dashboard and alerts
+
+The observer exposes aggregate and per-source Prometheus counters/gauges:
+`aitos_cfei_source_events_persisted_total`,
+`aitos_cfei_source_poll_errors_total` and
+`aitos_cfei_source_last_success_unix_seconds`. The
+`AITOSCFEISourcePollErrors` and `AITOSCFEISourceStale` alert rules identify
+the specific source ID, instead of only showing a global observer failure.
+The Grafana dashboard is
+`monitoring/grafana/dashboards/aitos-capital-intelligence.json`.
+
+Source IDs are operator configuration values and appear as Prometheus labels.
+Keep their cardinality bounded; do not include transaction IDs, wallet IDs or
+other per-event identifiers in metric labels. Detailed event/entity analysis
+belongs in ClickHouse/Neo4j, not Prometheus.
