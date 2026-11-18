@@ -22,11 +22,7 @@ impl Book {
         Ok(())
     }
 
-    fn new(
-        last: u64,
-        bids: Vec<(i64, i64)>,
-        asks: Vec<(i64, i64)>,
-    ) -> PyResult<Self> {
+    fn new(last: u64, bids: Vec<(i64, i64)>, asks: Vec<(i64, i64)>) -> PyResult<Self> {
         Self::validate_levels(&bids)?;
         Self::validate_levels(&asks)?;
         let mut book = Self {
@@ -144,11 +140,7 @@ struct FixedPointOrderBook {
 impl FixedPointOrderBook {
     #[new]
     #[pyo3(signature = (snapshot_id, bids=Vec::new(), asks=Vec::new()))]
-    fn new(
-        snapshot_id: u64,
-        bids: Vec<(i64, i64)>,
-        asks: Vec<(i64, i64)>,
-    ) -> PyResult<Self> {
+    fn new(snapshot_id: u64, bids: Vec<(i64, i64)>, asks: Vec<(i64, i64)>) -> PyResult<Self> {
         Ok(Self {
             book: Book::new(snapshot_id, bids, asks)?,
         })
@@ -172,10 +164,7 @@ impl FixedPointOrderBook {
         )
     }
 
-    fn snapshot(
-        &self,
-        depth: usize,
-    ) -> PyResult<(u64, Vec<(i64, i64)>, Vec<(i64, i64)>)> {
+    fn snapshot(&self, depth: usize) -> PyResult<(u64, Vec<(i64, i64)>, Vec<(i64, i64)>)> {
         if depth == 0 {
             return Err(PyValueError::new_err("depth must be positive"));
         }
@@ -230,10 +219,9 @@ mod tests {
     fn bridges_then_requires_linked_sequence() {
         let mut book = Book::new(10, vec![(100, 2)], vec![(102, 3)]).unwrap();
         assert!(book.apply(10, 11, None, vec![(101, 4)], vec![]).unwrap());
-        assert!(
-            book.apply(12, 12, Some(11), vec![], vec![(102, 0), (103, 5)])
-                .unwrap()
-        );
+        assert!(book
+            .apply(12, 12, Some(11), vec![], vec![(102, 0), (103, 5)])
+            .unwrap());
         assert_eq!(book.bids.keys().next_back(), Some(&101));
         assert!(book.apply(13, 14, Some(12), vec![], vec![]).is_ok());
     }
@@ -249,12 +237,7 @@ mod tests {
 
     #[test]
     fn calculates_depth_imbalance_and_microprice() {
-        let book = Book::new(
-            10,
-            vec![(100, 3), (99, 1)],
-            vec![(102, 1), (103, 3)],
-        )
-        .unwrap();
+        let book = Book::new(10, vec![(100, 3), (99, 1)], vec![(102, 1), (103, 3)]).unwrap();
         assert_eq!(book.depth_imbalance(2), 0.0);
         assert_eq!(book.depth_imbalance(1), 0.5);
         assert_eq!(book.microprice_ticks(), Some(101.5));
