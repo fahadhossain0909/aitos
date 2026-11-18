@@ -127,3 +127,36 @@ def test_chronological_split_supports_explicit_embargo_and_validates_it():
     )
     with pytest.raises(ValueError):
         chronological_split(rows, embargo_seconds=-1)
+
+
+
+def test_replay_summary_reports_gross_and_net_of_execution_costs():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = build_point_in_time_replay(
+        [_event("costed", start)],
+        [
+            PriceObservation("BTCUSDT", start, 100),
+            PriceObservation("BTCUSDT", start + timedelta(seconds=300), 100.2),
+        ],
+        horizons_seconds=(300,),
+        max_price_age_seconds=1,
+    )
+    summary = summarize_replay(
+        rows,
+        horizon_seconds=300,
+        fee_bps_per_side=5,
+        spread_bps_round_trip=5,
+        slippage_bps_per_side=5,
+        funding_bps_per_8h=8,
+    )
+    assert summary.mean_return == pytest.approx(0.002)
+    assert summary.total_cost_bps == pytest.approx(25.0833333333)
+    assert summary.net_mean_return == pytest.approx(
+        0.002 - 25.0833333333 / 10_000
+    )
+    assert summary.net_hit_rate == 0.0
+
+
+def test_replay_summary_rejects_invalid_cost_assumptions():
+    with pytest.raises(ValueError):
+        summarize_replay([], horizon_seconds=300, fee_bps_per_side=-1)
