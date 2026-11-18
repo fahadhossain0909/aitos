@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from aitos.capital_intelligence.cftc import CftcCotAdapter
@@ -145,17 +147,19 @@ async def test_cftc_revision_refresh_replays_historical_rows_idempotently():
     ]
 
 
-def test_cftc_cursor_migrates_legacy_offset_and_validates_revision_cursor():
+@pytest.mark.asyncio
+async def test_cftc_cursor_migrates_legacy_offset_and_validates_revision_cursor():
     adapter = CftcCotAdapter(
         dataset_id="6dca-aqww",
         field_map=FIELD_MAP,
         revision_refresh_pages_per_poll=0,
     )
-    state = adapter._events_from_rows([], __import__("datetime").datetime.now(
-        __import__("datetime").timezone.utc
-    ))
-    assert state == []
+    events, cursor = await adapter.poll(cursor='{"offset":7}')
+    assert events == []
+    assert cursor == (
+        '{"incremental_offset":7,"refresh_offset":0,"version":2}'
+    )
     with pytest.raises(ValueError, match="version-2 cursor"):
-        import asyncio
-
-        asyncio.run(adapter.poll(cursor='{"version":2,"incremental_offset":-1,"refresh_offset":0}'))
+        await adapter.poll(
+            cursor='{"version":2,"incremental_offset":-1,"refresh_offset":0}'
+        )
