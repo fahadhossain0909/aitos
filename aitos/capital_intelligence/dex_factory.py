@@ -3,6 +3,7 @@
 Pool creation logs are observations only. Discovered pools are not automatically
 activated for swap ingestion; operators must review protocol/factory allowlists.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,8 +51,7 @@ class EvmDexFactoryDiscoveryAdapter:
         self.rpc_url = rpc_url
         self.chain_id = chain_id
         self.factories = {
-            self._address(key): str(value).lower()
-            for key, value in factories.items()
+            self._address(key): str(value).lower() for key, value in factories.items()
         }
         if any(value not in self.SUPPORTED for value in self.factories.values()):
             raise ValueError("unsupported DEX factory protocol")
@@ -64,8 +64,10 @@ class EvmDexFactoryDiscoveryAdapter:
     @staticmethod
     def _address(value: str) -> str:
         value = str(value).lower()
-        if len(value) != 42 or not value.startswith("0x") or any(
-            char not in "0123456789abcdef" for char in value[2:]
+        if (
+            len(value) != 42
+            or not value.startswith("0x")
+            or any(char not in "0123456789abcdef" for char in value[2:])
         ):
             raise ValueError("invalid EVM address")
         return value
@@ -142,16 +144,14 @@ class EvmDexFactoryDiscoveryAdapter:
             if token0 == token1:
                 continue
             data = str(log.get("data", "0x"))[2:]
-            words = [data[index:index + 64] for index in range(0, len(data), 64)]
+            words = [data[index : index + 64] for index in range(0, len(data), 64)]
             if len(words) < 2:
                 continue
             pool_word = words[0] if is_v2 else words[1]
             pool = self._address("0x" + pool_word[-40:])
             block = int(log["blockNumber"], 16)
             if block not in block_headers:
-                header = await self._rpc(
-                    "eth_getBlockByNumber", [hex(block), False]
-                )
+                header = await self._rpc("eth_getBlockByNumber", [hex(block), False])
                 if not header or not header.get("hash") or not header.get("timestamp"):
                     raise RuntimeError("factory event canonical block unavailable")
                 block_headers[block] = header
