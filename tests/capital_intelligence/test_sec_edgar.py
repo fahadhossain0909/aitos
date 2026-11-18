@@ -236,7 +236,7 @@ async def test_sec_filing_batch_limit_advances_cursor_without_skipping_filings()
 
 
 @pytest.mark.asyncio
-async def test_sec_recent_revision_rescan_reloads_known_accession_without_cursor_regression(
+async def test_sec_recent_revision_rescan_does_not_regress_cursor(
 ):
     cik = "0000320193"
     accession = "0000320193-26-000001"
