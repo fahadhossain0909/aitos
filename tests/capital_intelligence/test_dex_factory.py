@@ -6,6 +6,7 @@ from aitos.capital_intelligence.dex_factory import (
     EvmDexFactoryDiscoveryAdapter,
     V2_PAIR_CREATED_TOPIC,
     V3_POOL_CREATED_TOPIC,
+    V4_POOL_INITIALIZED_TOPIC,
 )
 
 
@@ -282,3 +283,71 @@ async def test_factory_reorg_reconciliation_covers_full_rescan_not_only_hash_win
     assert adapter.last_reorg["to_block"] == 19
     assert set(adapter.last_reorg["canonical_hashes"]) == set(range(10, 20))
     assert set(json.loads(next_cursor)["recent_hashes"]) == {"17", "18", "19"}
+
+
+
+@pytest.mark.asyncio
+async def test_v4_pool_manager_initialize_discovers_singleton_pool_id():
+    manager = "0x" + "1" * 40
+    token0 = "0x" + "0" * 40
+    token1 = "0x" + "2" * 40
+    pool_id = "0x" + "a" * 64
+    adapter = EvmDexFactoryDiscoveryAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        factories={manager: "uniswap_v4"},
+        confirmations=2,
+        max_block_range=10,
+    )
+    words = [
+        f"{3000:064x}",
+        f"{60:064x}",
+        "0" * 24 + ("3" * 40),
+        f"{2**96:064x}",
+        f"{-12 % 2**256:064x}",
+    ]
+    log = {
+        "address": manager,
+        "topics": [
+            V4_POOL_INITIALIZED_TOPIC,
+            pool_id,
+            "0x" + "0" * 24 + token0[2:],
+            "0x" + "0" * 24 + token1[2:],
+        ],
+        "data": "0x" + "".join(words),
+        "blockNumber": "0x20",
+        "blockHash": "0x" + "a" * 64,
+        "transactionHash": "0x" + "b" * 64,
+        "logIndex": "0x1",
+    }
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x22"
+        if method == "eth_getLogs":
+            assert params[0]["address"] == [manager]
+            assert V4_POOL_INITIALIZED_TOPIC in params[0]["topics"][0]
+            return [log]
+        if method == "eth_getBlockByNumber":
+            return {
+                "timestamp": hex(1_700_000_000),
+                "hash": "0x" + "a" * 64,
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, cursor = await adapter.poll(cursor="0x1f")
+    assert len(events) == 1
+    event = events[0]
+    assert event.instrument == pool_id
+    assert event.event_type == "dex_pool_initialized"
+    assert event.metadata["pool_manager"] == manager
+    assert event.metadata["token0_address"] == token0
+    assert event.metadata["token1_address"] == token1
+    assert event.metadata["fee_tier"] == 3000
+    assert event.metadata["tick_spacing"] == 60
+    assert event.metadata["hooks_address"] == "0x" + "3" * 40
+    assert event.metadata["singleton_pool"] is True
+    assert event.metadata["native_currency_supported"] is True
+    assert event.metadata["pool_not_auto_activated"] is True
+    assert json.loads(cursor)["head_block"] == 0x20
