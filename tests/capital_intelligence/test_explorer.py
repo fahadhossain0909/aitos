@@ -104,6 +104,10 @@ async def test_entity_explorer_returns_events_evidence_and_temporal_labels():
     assert entity["events"][0]["event_id"] == "evt-1"
     assert entity["events"][0]["entity_role"] == "counterparty"
     assert entity["events"][0]["entity_flow_sign"] == 1
+    detail_query = client.calls[0][0]
+    assert "actor_is_pool_caller_not_verified_beneficial_owner" in detail_query
+    assert "'aggregate_only'" in detail_query
+    assert "0x000000000000000000000000000000000000dead" in detail_query
     assert entity["evidence"][0]["status"] == "candidate"
     assert entity["labels"][0]["verified"] is True
     assert client.calls[1][1] == {"entity_id": "1:" + "0x" + "a" * 40}
