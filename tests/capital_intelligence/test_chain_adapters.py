@@ -509,6 +509,16 @@ async def test_solana_cpi_system_and_stake_instructions_are_retained_as_evidence
     assert transfer["raw_lamports"] == "5"
     assert transfer["is_cpi_or_inner_instruction"] is True
 
-    stake = next(event for event in events if event.event_type == "stake_instruction_observed")
-    assert stake.metadata["stake_instruction_evidence"][0]["instruction_type"] == "delegate"
-    assert stake.metadata["stake_instruction_evidence"][0]["is_cpi_or_inner_instruction"] is True
+    stake = next(
+        event for event in events if event.event_type == "stake_instruction_observed"
+    )
+    assert (
+        stake.metadata["stake_instruction_evidence"][0]["instruction_type"]
+        == "delegate"
+    )
+    assert (
+        stake.metadata["stake_instruction_evidence"][0][
+            "is_cpi_or_inner_instruction"
+        ]
+        is True
+    )
