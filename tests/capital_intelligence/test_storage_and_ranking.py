@@ -76,7 +76,7 @@ def test_ranking_is_explainable_and_excludes_aggregate_cohorts():
         event("1", "wallet:a", 100_000, 1),
         event("2", "wallet:a", 200_000, -1, "rpc-b", "wallet:y"),
         event("3", "wallet:a", 300_000, 1, "rpc-c", "wallet:x"),
-        event("4", "wallet:b", 900_000, 1),
+        event("4", "wallet:b", 900_000, 1, counterparty="wallet:other"),
     ]
     aggregate = CapitalEvent(
         "agg",
