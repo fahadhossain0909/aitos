@@ -30,7 +30,7 @@ C++/CUDA and Go are deferred until profiling demonstrates a workload that cannot
 
 ## Current scope
 
-The aitos.native_core module exposes PythonFixedPointOrderBook, InstrumentScale, NativeOrderBookSession, create_order_book and native_available. InstrumentScale converts exchange decimal strings to integer ticks/lots with exact Decimal arithmetic and rejects off-tick/off-lot values. NativeOrderBookSession adapts the existing AITOS SymbolFilters, OrderBookSnapshot and DepthUpdate contracts into the native/reference core and returns decimal snapshots plus depth imbalance and microprice. The Rust crate provides snapshot initialization, first-delta bridging, linked subsequent updates, stale-event suppression, atomic level validation, top-N snapshots, depth imbalance and microprice. It remains opt-in and is deliberately not wired into the existing live LocalOrderBook/runtime path.
+The aitos.native_core module exposes PythonFixedPointOrderBook, InstrumentScale, NativeOrderBookSession, create_order_book and native_available. InstrumentScale converts exchange decimal strings to integer ticks/lots with exact Decimal arithmetic and rejects off-tick/off-lot values. NativeOrderBookSession adapts the existing AITOS SymbolFilters, OrderBookSnapshot and DepthUpdate contracts into the native/reference core and returns decimal snapshots plus depth imbalance and microprice. Both the core and adapter expose ordered batch-delta APIs to amortize Python/Rust boundary overhead. Each delta is atomic; if a later delta has a sequence gap, earlier valid deltas in that batch remain applied. The adapter converts the entire input batch before mutation, so malformed/off-tick values cannot partially apply a batch. The Rust crate provides snapshot initialization, first-delta bridging, linked subsequent updates, stale-event suppression, atomic level validation, top-N snapshots, depth imbalance and microprice. It remains opt-in and is deliberately not wired into the existing live LocalOrderBook/runtime path.
 
 ## Build and test
 
@@ -40,6 +40,8 @@ Rust formatting/tests/lint: cargo fmt --manifest-path native/rust/Cargo.toml -- 
 
 Build extension: python -m pip install maturin; maturin develop --manifest-path native/rust/Cargo.toml; PYTHONPATH=. pytest -q native/python_tests/test_native_core.py native/python_tests/test_native_orderbook_parity.py
 
+Batch microbenchmark: PYTHONPATH=. python benchmarks/native_core_benchmark.py --events 50000 --repeats 3 --warmup 2000 --batch-size 64
+
 ## Migration gates
 
 1. Profiling identifies a measured CPU bottleneck.
@@ -48,7 +50,8 @@ Build extension: python -m pip install maturin; maturin develop --manifest-path 
 4. Recorded replay shows identical canonical outputs.
 5. Fault injection proves gaps, malformed values, overflow and restarts fail closed.
 6. Benchmarks record hardware, compiler, workload, warm-up, sample count and percentiles.
-7. Shadow deployment is opt-in and read-only; no order path switches automatically.
+7. Tune batch size against both throughput and event-queueing delay; larger batches can improve amortized FFI cost while increasing per-event waiting time.
+8. Shadow deployment is opt-in and read-only; no order path switches automatically.
 8. Independent review and explicit approval precede production wiring.
 
 ## Rollback
