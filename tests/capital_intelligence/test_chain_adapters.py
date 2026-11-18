@@ -380,7 +380,6 @@ def test_v4_swap_requires_valid_pool_id_and_sorted_currency_mapping():
         )
 
 
-
 @pytest.mark.asyncio
 async def test_solana_stake_instruction_is_persisted_without_balance_delta():
     address = "stake-account"
