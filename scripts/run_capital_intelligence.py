@@ -74,7 +74,7 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
             str(source_id)
             .replace("\\\\", "\\\\\\\\")
             .replace('"', '\\\\"')
-            .replace("\\n", "")
+            .replace("\n", "")
         )
         labels = f'source_id="{label}"'
         lines.extend(
@@ -84,18 +84,18 @@ def _render_metrics(counters: dict[str, Any]) -> bytes:
                 f"aitos_cfei_source_last_success_unix_seconds{{{labels}}} {values['last_success']}",
             ]
         )
-    return ("\\n".join(lines) + "\\n").encode()
+    return ("\n".join(lines) + "\n").encode()
 
 
 async def _metrics_server(port: int, counters: dict[str, Any]) -> None:
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         await reader.readline()
-        while await reader.readline() not in (b"\\r\\n", b"\\n", b""):
+        while await reader.readline() not in (b"\r\n", b"\n", b""):
             pass
         body = _render_metrics(counters)
         writer.write(
-            b"HTTP/1.1 200 OK\\r\\nContent-Type: text/plain; version=0.0.4\\r\\n"
-            + f"Content-Length: {len(body)}\\r\\nConnection: close\\r\\n\\r\\n".encode()
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\n"
+            + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
             + body
         )
         await writer.drain()
