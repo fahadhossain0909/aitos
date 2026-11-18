@@ -86,3 +86,5 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - Training is scoped to one asset/horizon/regime cohort and filters by both event time and outcome-availability time at the supplied `as_of` cutoff. Duplicate event IDs, insufficient matured history, and single-class cohorts fail closed.
 - The model stores its training cutoff and cohort identity. Prediction rejects cross-asset, cross-horizon, or cross-regime feature rows.
 - This is an offline research baseline, not a production return forecast. It has no scanner, strategy, risk, model-promotion, or order-execution integration. A real historical point-in-time dataset, chronological purged OOS evaluation, calibration, ablation, and cost-aware replay remain required before any canary.
+
+- `evaluate_event_impact_model` reports Brier score, log-loss, directional accuracy and sample exclusions only for events strictly later than the model training cutoff whose labels have matured by evaluation time. This is a guardrail, not a replacement for rolling-origin walk-forward, benchmark comparison, confidence intervals, or venue-cost replay.
