@@ -26,8 +26,10 @@ class FakeSession:
     def __init__(self, responses):
         self.responses = responses
         self.closed = False
+        self.requests = []
 
     def get(self, url):
+        self.requests.append(url)
         if url not in self.responses:
             raise AssertionError(f"unexpected SEC URL: {url}")
         body = self.responses[url]
@@ -230,3 +232,52 @@ async def test_sec_filing_batch_limit_advances_cursor_without_skipping_filings()
     assert len(second_events) == 1
     assert second_events[0].transaction_id == newer
     assert json.loads(second_cursor)[cik] == newer
+
+
+
+@pytest.mark.asyncio
+async def test_sec_recent_revision_rescan_reloads_known_accession_without_cursor_regression():
+    cik = "0000320193"
+    accession = "0000320193-26-000001"
+    submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    directory = (
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/"
+    )
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": [accession],
+                "form": ["13F-HR"],
+                "filingDate": ["2026-05-15"],
+                "primaryDocument": ["primary.htm"],
+                "reportDate": ["2026-03-31"],
+            }
+        }
+    }
+    index = {"directory": {"item": [{"name": "infotable.xml"}]}}
+    xml = """<informationTable><infoTable>
+      <nameOfIssuer>Example Corp</nameOfIssuer><titleOfClass>COM</titleOfClass>
+      <cusip>123456789</cusip><value>2500</value>
+      <sshPrnamt>10000</sshPrnamt><sshPrnamtType>SH</sshPrnamtType>
+      <investmentDiscretion>SOLE</investmentDiscretion>
+    </infoTable></informationTable>"""
+    session = FakeSession(
+        {
+            submissions_url: submissions,
+            directory + "index.json": index,
+            directory + "infotable.xml": xml,
+        }
+    )
+    adapter = SecEdgarFilingsAdapter(
+        ciks=[cik],
+        user_agent="AITOS research contact@example.org",
+        revision_rescan_filings_per_poll=1,
+        session=session,
+    )
+
+    first_events, cursor = await adapter.poll()
+    second_events, next_cursor = await adapter.poll(cursor=cursor)
+    assert len(first_events) == len(second_events) == 1
+    assert first_events[0].event_id == second_events[0].event_id
+    assert json.loads(next_cursor)[cik] == accession
+    assert session.requests.count(directory + "index.json") == 2
