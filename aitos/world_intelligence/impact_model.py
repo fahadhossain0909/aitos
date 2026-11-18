@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from math import exp, isfinite
+from math import exp, isfinite, log
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,18 +246,6 @@ class EventImpactEvaluation:
     mean_probability_up: float | None
 
 
-@dataclass(frozen=True, slots=True)
-class EventImpactForecast:
-    event_id: str
-    asset: str
-    horizon: str
-    regime: str
-    event_time: datetime
-    outcome_available_at: datetime
-    probability_up: float
-    outcome_up: bool
-
-
 def evaluate_event_impact_model(
     model: EventImpactProbabilityModel,
     observations: Sequence[EventImpactTrainingRow],
@@ -308,10 +296,8 @@ def evaluate_event_impact_model(
         label = float(outcome)
         clipped = min(1.0 - 1e-12, max(1e-12, probability))
         errors.append((probability - label) ** 2)
-        from math import log as _log
-
         losses.append(
-            -(label * _log(clipped) + (1.0 - label) * _log(1.0 - clipped))
+            -(label * log(clipped) + (1.0 - label) * log(1.0 - clipped))
         )
         correct.append((probability >= 0.5) == outcome)
         probabilities.append(probability)
@@ -330,7 +316,6 @@ def evaluate_event_impact_model(
 __all__ = [
     "EventImpactEvaluation",
     "EventImpactFeatures",
-    "EventImpactForecast",
     "EventImpactProbabilityModel",
     "EventImpactTrainingRow",
     "evaluate_event_impact_model",
