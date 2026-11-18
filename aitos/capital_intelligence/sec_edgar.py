@@ -332,7 +332,9 @@ class SecEdgarFilingsAdapter:
                             "period_of_report": period.isoformat(),
                             "underlying_security": underlying,
                             "underlying_shares": underlying_shares,
-                            "exercise_price": self._value(item, "conversionOrExercisePrice"),
+                            "exercise_price": self._value(
+                                item, "conversionOrExercisePrice"
+                            ),
                             "expiration_date": self._value(item, "expirationDate"),
                             "direct_or_indirect": self._value(
                                 item, "directOrIndirectOwnership"
@@ -435,9 +437,7 @@ class SecEdgarFilingsAdapter:
                 if acquired_disposed == "A"
                 else (-1 if acquired_disposed == "D" else 0)
             )
-            event_id = self._event_id(
-                "form4-derivative", cik, accession, str(index)
-            )
+            event_id = self._event_id("form4-derivative", cik, accession, str(index))
             events.append(
                 CapitalEvent(
                     event_id,
