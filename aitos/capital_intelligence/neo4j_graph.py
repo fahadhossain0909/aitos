@@ -58,6 +58,7 @@ class Neo4jEntityGraphStore:
                     "counterparty_entity_id": counterparty,
                     "transaction_id": event.transaction_id,
                     "block_number": event.block_number,
+                    "block_hash": event.block_hash,
                     "finality": event.finality,
                     "quantity": event.quantity,
                     "unit": event.unit,
@@ -72,7 +73,8 @@ class Neo4jEntityGraphStore:
             v.event_time=row.event_time, v.observed_time=row.observed_time,
             v.market=row.market, v.venue=row.venue, v.instrument=row.instrument,
             v.event_type=row.event_type, v.transaction_id=row.transaction_id,
-            v.block_number=row.block_number, v.finality=row.finality,
+            v.block_number=row.block_number, v.block_hash=row.block_hash,
+            v.finality=row.finality,
             v.quantity=row.quantity, v.unit=row.unit, v.usd_value=row.usd_value
         FOREACH (_ IN CASE WHEN row.actor_entity_id IS NULL THEN [] ELSE [1] END |
             MERGE (a:CFEIEntity {entity_id: row.actor_entity_id})
@@ -83,6 +85,40 @@ class Neo4jEntityGraphStore:
         async with self.driver.session(database=self.database) as session:
             await session.run(query, rows=rows)
         return len(rows)
+
+    async def reconcile_evm_reorg(self, instruction: dict[str, Any]) -> int:
+        """Mark orphaned event nodes reverted before the source cursor advances."""
+        source_id = str(instruction["source_id"])
+        start = int(instruction["from_block"])
+        end = int(instruction["to_block"])
+        canonical = {
+            str(int(number)): str(block_hash).lower()
+            for number, block_hash in instruction["canonical_hashes"].items()
+        }
+        if not canonical or start < 0 or end < start:
+            raise ValueError("invalid EVM reorg reconciliation range")
+        detected_at = str(instruction.get("detected_at") or "")
+        query = """MATCH (v:CFEIEvent {source_id: $source_id})
+        WHERE v.block_number >= $from_block
+          AND v.block_number <= $to_block
+          AND coalesce($canonical_hashes[toString(v.block_number)], '') <>
+              coalesce(toLower(v.block_hash), '')
+        SET v.finality = 'reverted',
+            v.reorg_detected_at = $detected_at
+        RETURN count(v) AS updated"""
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(
+                query,
+                source_id=source_id,
+                from_block=start,
+                to_block=end,
+                canonical_hashes=canonical,
+                detected_at=detected_at,
+            )
+            if hasattr(result, "single"):
+                record = await result.single()
+                return int(record["updated"]) if record else 0
+        return 0
 
     async def upsert_labels(self, labels: Iterable[EntityLabel]) -> int:
         rows = [
