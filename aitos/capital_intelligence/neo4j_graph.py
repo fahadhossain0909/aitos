@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Iterable
 
 from .contracts import CapitalEvent, EntityEvidence, EntityLabel
+
+
+def _stable_key(*parts: str) -> str:
+    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class Neo4jEntityGraphStore:
@@ -132,14 +139,12 @@ class Neo4jEntityGraphStore:
                 "valid_until": (
                     item.valid_until.isoformat() if item.valid_until else None
                 ),
-                "label_id": "|".join(
-                    (
-                        item.entity_id,
-                        item.category,
-                        item.label,
-                        item.source,
-                        item.valid_from.isoformat(),
-                    )
+                "label_id": _stable_key(
+                    item.entity_id,
+                    item.category,
+                    item.label,
+                    item.source,
+                    item.valid_from.isoformat(),
                 ),
             }
             for item in labels
@@ -168,13 +173,11 @@ class Neo4jEntityGraphStore:
                 "observed_at": item.observed_at.isoformat(),
                 "confidence": item.confidence,
                 "status": item.status,
-                "evidence_id": "|".join(
-                    (
-                        item.subject_id,
-                        item.object_id,
-                        item.relation,
-                        item.evidence_ref,
-                    )
+                "evidence_id": _stable_key(
+                    item.subject_id,
+                    item.object_id,
+                    item.relation,
+                    item.evidence_ref,
                 ),
             }
             for item in evidence
