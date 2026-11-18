@@ -131,7 +131,7 @@ class CapitalFlowIntelligenceAdapter:
                 if instrument and not instrument.startswith("0x"):
                     entities = (instrument,)
             source = SourceEvidence(
-                source_id=f"{self.source_id}:{event.source_id}",
+                source_id=self.source_id,
                 source_kind=f"capital_flow:{event.source_kind}",
                 uri=uri,
                 published_at=event.event_time,
@@ -162,6 +162,7 @@ class CapitalFlowIntelligenceAdapter:
                     impact_horizon="unknown",
                     metadata={
                         "cfei_schema_version": event.schema_version,
+                        "cfei_source_id": event.source_id,
                         "market": event.market,
                         "venue": event.venue,
                         "instrument": event.instrument,
