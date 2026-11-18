@@ -5,9 +5,13 @@ import pytest
 from aitos.capital_intelligence.contracts import CapitalEvent
 from aitos.capital_intelligence.replay import (
     PriceObservation,
+    ReplayRow,
     build_point_in_time_replay,
     chronological_split,
     summarize_replay,
+    summarize_replay_by_event_type,
+    evaluate_probabilistic_predictions,
+    walk_forward_splits,
 )
 
 
@@ -160,3 +164,59 @@ def test_replay_summary_reports_gross_and_net_of_execution_costs():
 def test_replay_summary_rejects_invalid_cost_assumptions():
     with pytest.raises(ValueError):
         summarize_replay([], horizon_seconds=300, fee_bps_per_side=-1)
+
+
+
+def test_walk_forward_splits_are_expanding_and_purged():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        ReplayRow(
+            event_id=str(index),
+            instrument="BTCUSDT",
+            event_time=start + timedelta(minutes=index),
+            event_type="transfer",
+            direction=1,
+            flow_usd=1000,
+            forward_returns={60: 0.01},
+        )
+        for index in range(30)
+    ]
+    folds = walk_forward_splits(rows, n_splits=3, max_quote_age_seconds=30)
+    assert len(folds) == 3
+    assert len(folds[0][1]) == 5
+    assert len(folds[1][0]) > len(folds[0][0])
+    for train, test in folds:
+        test_start = min(row.event_time for row in test)
+        assert all(
+            row.event_time + timedelta(seconds=90) < test_start for row in train
+        )
+
+
+def test_probability_evaluation_reports_calibration_and_classification_metrics():
+    result = evaluate_probabilistic_predictions(
+        [0, 1, 1, 0],
+        [0.1, 0.8, 0.7, 0.2],
+        calibration_bins=5,
+    )
+    assert result.sample_count == 4
+    assert result.brier_score == pytest.approx(0.045)
+    assert result.precision == 1.0
+    assert result.recall == 1.0
+    assert result.f1_score == 1.0
+    with pytest.raises(ValueError, match="probabilities"):
+        evaluate_probabilistic_predictions([0, 1], [0.1, 1.2])
+
+
+def test_replay_event_family_ablation_uses_same_cost_assumptions():
+    at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        ReplayRow("a", "BTCUSDT", at, "transfer", 1, 100, {300: 0.01}),
+        ReplayRow("b", "BTCUSDT", at, "dex_swap", -1, 200, {300: -0.02}),
+    ]
+    result = summarize_replay_by_event_type(
+        rows, horizon_seconds=300, fee_bps_per_side=5
+    )
+    assert set(result) == {"transfer", "dex_swap"}
+    assert result["transfer"].sample_count == 1
+    assert result["dex_swap"].sample_count == 1
+    assert result["transfer"].total_cost_bps == 10
