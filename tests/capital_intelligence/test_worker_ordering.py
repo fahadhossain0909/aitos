@@ -200,3 +200,19 @@ async def test_graph_reorg_failure_blocks_cursor_commit():
     with pytest.raises(RuntimeError, match="neo4j reorg unavailable"):
         await worker.run_once()
     assert await checkpoints.load_cursor("evm-source") is None
+
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_lease_contention_as_not_a_successful_poll():
+    redis = FakeRedis()
+    redis.data["aitos:cfei:source-1:lease"] = "another-worker"
+    checkpoints = RedisCheckpointStore(redis)
+    worker = CapitalIngestionWorker(
+        source_id="source-1",
+        source=Source(),
+        checkpoints=checkpoints,
+        store=Store(checkpoints),
+    )
+    assert await worker.run_once() == 0
+    assert worker.last_run_acquired_lease is False
