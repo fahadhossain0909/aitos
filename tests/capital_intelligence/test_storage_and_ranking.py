@@ -96,7 +96,7 @@ def test_ranking_is_explainable_and_excludes_aggregate_cohorts():
     ranked = rank_capital_candidates(
         rows + [aggregate], market_liquidity_usd={"USDC": 1_000_000}
     )
-    assert [item.entity_id for item in ranked] == ["wallet:a"]
+    assert [item.entity_id for item in ranked] == ["1:wallet:a"]
     assert ranked[0].event_count == 3
     assert ranked[0].source_count == 3
     assert ranked[0].component_scores["source_diversity"] == 1.0
@@ -209,3 +209,31 @@ def test_address_ranking_excludes_pool_callers_and_non_address_entities():
             )
         )
     assert rank_capital_candidates(events) == []
+
+
+
+def test_ranking_keeps_same_address_separate_across_chains():
+    first = event("chain-1-a", "0x" + "a" * 40, 1000, 1)
+    second = event("chain-1-b", "0x" + "a" * 40, 2000, 1)
+    third = event("chain-137-a", "0x" + "a" * 40, 3000, 1)
+    fourth = event("chain-137-b", "0x" + "a" * 40, 4000, 1)
+    third = CapitalEvent(
+        third.event_id, third.source_id, third.source_kind, third.market, "137",
+        third.instrument, third.event_type, third.event_time, third.observed_time,
+        third.quantity, third.unit, third.usd_value, actor_id=third.actor_id,
+        counterparty_id=third.counterparty_id, confidence=third.confidence,
+        metadata=third.metadata,
+    )
+    fourth = CapitalEvent(
+        fourth.event_id, fourth.source_id, fourth.source_kind, fourth.market, "137",
+        fourth.instrument, fourth.event_type, fourth.event_time, fourth.observed_time,
+        fourth.quantity, fourth.unit, fourth.usd_value, actor_id=fourth.actor_id,
+        counterparty_id=fourth.counterparty_id, confidence=fourth.confidence,
+        metadata=fourth.metadata,
+    )
+    ranked = rank_capital_candidates([first, second, third, fourth], minimum_events=2)
+    assert {item.entity_id for item in ranked} == {
+        "1:" + "0x" + "a" * 40,
+        "137:" + "0x" + "a" * 40,
+    }
+    assert sorted(item.gross_flow_usd for item in ranked) == [3000, 7000]
