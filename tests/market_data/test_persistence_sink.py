@@ -11,6 +11,10 @@ class FakeRepository:
         self.trades = []
         self.books = []
         self.depth_events = []
+        self.versioned_events = []
+
+    async def save_market_event_versioned(self, event):
+        self.versioned_events.append(event)
 
     async def save_depth_events(self, events):
         self.depth_events.extend(events)
@@ -224,3 +228,52 @@ async def test_book_delta_is_persisted_without_snapshot_sampling():
     assert len(repo.depth_events) == 1
     assert repo.depth_events[0]["symbol"] == "BTCUSDT"
     assert repo.depth_events[0]["payload"]["final_update_id"] == 101
+
+
+
+@pytest.mark.asyncio
+async def test_spot_ticker_is_persisted_with_market_identity_and_revision():
+    repo = FakeRepository()
+    sink = make_sink(repo)
+    now = datetime.now(timezone.utc)
+    spot_ticker = MarketEvent(
+        event_type=MarketEventType.TICKER,
+        exchange="binance",
+        market="spot",
+        market_type="spot",
+        instrument_id="binance:spot:BTCUSDT",
+        symbol="BTCUSDT",
+        event_time=now,
+        ingest_time=now,
+        payload={"last_price": "90000.5", "event_time_ms": 123456789},
+        source=MarketSource.WEBSOCKET,
+        event_revision=3,
+    )
+    await sink._enqueue(spot_ticker)
+    assert sink.snapshot()["queue_depth"] == 1
+
+    await sink._persist_batch([spot_ticker])
+
+    assert repo.versioned_events == [spot_ticker]
+    persisted = repo.versioned_events[0]
+    assert persisted.market_type == "spot"
+    assert persisted.instrument_id == "binance:spot:BTCUSDT"
+    assert persisted.event_revision == 3
+    assert persisted.payload["last_price"] == "90000.5"
+    assert sink.snapshot()["versioned_events"] == 1
+
+
+def test_market_event_rejects_non_positive_revision():
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValueError, match="event_revision"):
+        MarketEvent(
+            event_type=MarketEventType.TICKER,
+            exchange="binance",
+            market="spot",
+            symbol="BTCUSDT",
+            event_time=now,
+            ingest_time=now,
+            payload={},
+            source=MarketSource.WEBSOCKET,
+            event_revision=0,
+        )
