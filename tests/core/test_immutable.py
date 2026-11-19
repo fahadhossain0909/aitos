@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.core.immutable import FrozenDict, FrozenList, freeze_value
+from aitos.market_data.bus import market_event_from_wire, market_event_to_wire
 from aitos.market_data.contracts import (
     MarketEvent,
     MarketEventType,
@@ -85,3 +86,25 @@ def test_market_domain_event_payload_is_deeply_immutable():
     )
     with pytest.raises(TypeError, match="immutable"):
         event.payload["levels"][0]["price"] = 99.0
+
+def test_immutable_canonical_event_round_trips_through_existing_wire_format():
+    event = MarketEvent(
+        event_type=MarketEventType.TICKER,
+        exchange="binance",
+        market="spot",
+        symbol="BTCUSDT",
+        event_time=datetime.now(timezone.utc),
+        ingest_time=datetime.now(timezone.utc),
+        payload={"book": [{"price": 100.0, "sizes": [1, 2]}]},
+        source=MarketSource.WEBSOCKET,
+        stage_timestamps={"decode": 1.0},
+    )
+    wire = json.loads(json.dumps(market_event_to_wire(event)))
+    restored = market_event_from_wire(wire)
+
+    assert restored.event_id == event.event_id
+    assert restored.trace_id == event.trace_id
+    assert restored.payload == event.payload
+    assert restored.stage_timestamps == event.stage_timestamps
+    with pytest.raises(TypeError, match="immutable"):
+        restored.payload["book"][0]["sizes"].append(3)
