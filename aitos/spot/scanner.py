@@ -50,7 +50,7 @@ class SpotOpportunityScanner:
             if item.relative_volume < 0 or abs(item.order_book_imbalance) > 1:
                 continue
             score = (min(item.relative_volume, Decimal("5")) * Decimal("0.25")
-                     + min(abs(item.momentum_bps), Decimal("500")) / Decimal("500") * Decimal("0.25")
+                     + min(max(item.momentum_bps, Decimal("0")), Decimal("500")) / Decimal("500") * Decimal("0.25")
                      + max(Decimal("0"), item.order_book_imbalance) * Decimal("0.25")
                      + max(Decimal("0"), Decimal("1") - item.spread_bps / self.max_spread_bps) * Decimal("0.25"))
             reasons = ("liquid_quote_volume", "spread_within_limit",
