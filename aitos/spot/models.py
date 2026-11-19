@@ -6,6 +6,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
+from aitos.market_data.venues import InstrumentKey, MarketType, Venue
+
 
 class SpotOrderSide(str, Enum):
     BUY = "BUY"
@@ -35,6 +37,10 @@ class SpotInstrument:
     status: str
     permissions: tuple[str, ...] = ()
     is_spot_trading_allowed: bool = False
+
+    @property
+    def instrument_key(self) -> InstrumentKey:
+        return InstrumentKey(Venue.BINANCE, MarketType.SPOT, self.symbol)
 
     def __post_init__(self) -> None:
         for name in ("symbol", "base_asset", "quote_asset", "status"):
