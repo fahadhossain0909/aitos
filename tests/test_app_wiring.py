@@ -572,3 +572,83 @@ async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
     await shutdown_all(components)
     assert consumer.snapshot().started is False
 
+@pytest.mark.asyncio
+async def test_live_portfolio_tracker_projects_pending_entry_risk():
+    now = datetime.now(timezone.utc)
+
+    class EquityAwareExecutor:
+        async def get_account_equity(self, asset):
+            assert asset == "USDT"
+            return 5_000.0
+
+    async def pending_snapshot():
+        return {
+            "orders": [
+                {
+                    "orderId": 123,
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "positionSide": "BOTH",
+                    "type": "LIMIT",
+                    "status": "NEW",
+                    "origQty": "10",
+                    "executedQty": "4",
+                    "reduceOnly": False,
+                    "closePosition": False,
+                }
+            ],
+            "mark_prices": {"BTCUSDT": "100"},
+            "stop_prices": {("BTCUSDT", "LONG"): "95"},
+            "leverage_by_symbol": {"BTCUSDT": "2"},
+            "orders_observed_at": now,
+            "risk_inputs_observed_at": now,
+            "now": now,
+        }
+
+    tracker = LivePortfolioTracker(
+        EquityAwareExecutor(),
+        pending_order_snapshot_provider=pending_snapshot,
+    )
+
+    class EmptyLifecycle:
+        def get_open_trades(self):
+            return []
+
+    await tracker.refresh_equity()
+    portfolio = tracker.build_portfolio_state(EmptyLifecycle())
+
+    assert len(portfolio.pending_orders) == 1
+    pending = portfolio.pending_orders[0]
+    assert pending.order_id == "binance:123"
+    assert pending.remaining_notional_usd == pytest.approx(600.0)
+    assert pending.risk_amount_usd == pytest.approx(30.0)
+    assert pending.leverage == pytest.approx(2.0)
+    assert portfolio.gross_exposure_usd == pytest.approx(600.0)
+
+
+@pytest.mark.asyncio
+async def test_live_portfolio_tracker_fails_closed_on_stale_pending_risk():
+    now = datetime.now(timezone.utc)
+
+    class EquityAwareExecutor:
+        async def get_account_equity(self, asset):
+            return 5_000.0
+
+    async def stale_snapshot():
+        return {
+            "orders": [],
+            "mark_prices": {},
+            "stop_prices": {},
+            "leverage_by_symbol": {},
+            "orders_observed_at": now.replace(year=now.year - 1),
+            "risk_inputs_observed_at": now.replace(year=now.year - 1),
+            "now": now,
+        }
+
+    tracker = LivePortfolioTracker(
+        EquityAwareExecutor(),
+        pending_order_snapshot_provider=stale_snapshot,
+    )
+    with pytest.raises(ValueError, match="stale or incoherent"):
+        await tracker.refresh_equity()
+
