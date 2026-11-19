@@ -218,18 +218,26 @@ jobs:
           selected_non_btc_books = deep_symbols - {"BTCUSDT"}
           selected_non_btc_klines = selected_klines - {"BTCUSDT"}
           ranked_candidate_count = int(scanner_details.get("last_candidate_count", 0) or 0)
-          if ranked_candidate_count > 0:
-              assert selected_non_btc_books, (
-                  "ranked non-BTC candidates exist but none received deep order-book coverage: "
-                  f"candidates={ranked_candidate_count}, books={sorted(deep_symbols)}"
+          candidate_symbols = {
+              str(symbol).upper()
+              for symbol in scanner_details.get("last_candidate_symbols", [])
+          }
+          assert ranked_candidate_count == 0 or candidate_symbols, (
+              "scanner reported candidates without exposing their symbol identities"
+          )
+          candidate_non_btc = candidate_symbols - {"BTCUSDT"}
+          if candidate_non_btc:
+              uncovered_books = sorted(candidate_non_btc - deep_symbols)
+              uncovered_klines = sorted(candidate_non_btc - selected_klines)
+              assert not uncovered_books, (
+                  "ranked non-BTC candidates lack deep order-book coverage: "
+                  f"candidates={sorted(candidate_non_btc)}, missing={uncovered_books}, "
+                  f"books={sorted(deep_symbols)}"
               )
-              assert selected_non_btc_klines, (
-                  "ranked non-BTC candidates exist but none received live kline coverage: "
-                  f"candidates={ranked_candidate_count}, klines={sorted(selected_klines)}"
-              )
-              assert selected_non_btc_klines & selected_non_btc_books, (
-                  "ranked candidate kline/deep-book coverage diverged: "
-                  f"klines={sorted(selected_klines)}, books={sorted(deep_symbols)}"
+              assert not uncovered_klines, (
+                  "ranked non-BTC candidates lack live kline coverage: "
+                  f"candidates={sorted(candidate_non_btc)}, missing={uncovered_klines}, "
+                  f"klines={sorted(selected_klines)}"
               )
               coverage_verdict = "ranked_candidate_coverage_verified"
           else:
@@ -261,6 +269,7 @@ jobs:
               "live_kline_symbols": sorted(selected_klines),
               "deep_orderbook_symbols": sorted(deep_symbols),
               "ranked_candidate_count": ranked_candidate_count,
+              "ranked_candidate_symbols": sorted(candidate_symbols),
               "coverage_verdict": coverage_verdict,
               "trade_stream_events": trade_stream.get("events"),
               "gateway_dropped_events": gateway_health.get("dropped_events"),
