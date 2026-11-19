@@ -43,7 +43,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip pytest black==25.12.0 structlog aiohttp 'websockets>=13,<14'
-      - run: black --diff aitos/native_core.py native/python_tests/test_native_core.py native/python_tests/test_native_orderbook_parity.py benchmarks/native_core_benchmark.py benchmarks/native_core_burst_benchmark.py
       - run: black --check aitos/native_core.py native/python_tests/test_native_core.py native/python_tests/test_native_orderbook_parity.py benchmarks/native_core_benchmark.py benchmarks/native_core_burst_benchmark.py
       - run: PYTHONPATH=. pytest -q native/python_tests/test_native_core.py native/python_tests/test_native_orderbook_parity.py
 
