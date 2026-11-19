@@ -4,6 +4,7 @@ It emits the same MarketEvent envelope as Futures while retaining a distinct
 binance:spot instrument identity. Depth subscriptions bootstrap from REST and
 fail closed on a sequence gap; consumers must discard the book and resnapshot.
 """
+
 from __future__ import annotations
 
 import asyncio
