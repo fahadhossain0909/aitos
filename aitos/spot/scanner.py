@@ -17,6 +17,13 @@ class SpotCandidate:
     order_book_imbalance: Decimal
     trading_enabled: bool = True
     data_fresh: bool = True
+    futures_spot_lead_lag_status: str = "unavailable"
+    futures_spot_leader: str | None = None
+    futures_spot_lag_seconds: int | None = None
+    futures_spot_correlation: Decimal | None = None
+    futures_spot_confidence_low: Decimal | None = None
+    futures_spot_confidence_high: Decimal | None = None
+    futures_spot_observations: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", self.symbol.upper())
