@@ -91,6 +91,7 @@ def market_event_to_wire(event: MarketEvent) -> dict[str, Any]:
         "correlation_id": event.correlation_id,
         "trace_id": event.trace_id,
         "schema_version": event.schema_version,
+        "event_revision": event.event_revision,
         "payload": event.payload,
     }
 
@@ -123,6 +124,7 @@ def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
         correlation_id=payload.get("correlation_id"),
         trace_id=payload.get("trace_id"),
         schema_version=int(payload.get("schema_version", 1)),
+        event_revision=int(payload.get("event_revision", 1)),
     )
 
 
@@ -134,6 +136,11 @@ class MarketDataBus:
 
     def __init__(self, event_bus: EventBusProtocol) -> None:
         self._event_bus = event_bus
+
+    @property
+    def event_bus(self) -> EventBusProtocol:
+        """Expose the transport for sibling durable consumers."""
+        return self._event_bus
 
     async def publish(self, event: MarketEvent) -> None:
         channel = channel_for(event.event_type, event.market_type)
