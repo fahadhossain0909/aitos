@@ -4,6 +4,7 @@ The analyzer is observational only: it never emits an order, direction override,
 or strategy score. It requires timestamped prices from both markets, computes
 both lead directions, and exposes sample counts and Fisher confidence intervals.
 """
+
 from __future__ import annotations
 
 import math
@@ -95,7 +96,6 @@ class FuturesSpotLeadLagAnalyzer:
     def _price(event: MarketEvent) -> float | None:
         payload = event.payload
         try:
-            if payload.get("bid_price") is not None and payload.get("ask_price") is not None:
                 bid, ask = float(payload["bid_price"]), float(payload["ask_price"])
                 value = (bid + ask) / 2.0
             else:
@@ -155,10 +155,20 @@ class FuturesSpotLeadLagAnalyzer:
     ) -> LeadLagEstimate | None:
         futures_returns = self._returns(pair.futures)
         spot_returns = self._returns(pair.spot)
-        if len(futures_returns) < self.min_observations or len(spot_returns) < self.min_observations:
+        if (
+            len(futures_returns) < self.min_observations
+            or len(spot_returns) < self.min_observations
+        ):
             return LeadLagEstimate(
-                symbol, "insufficient_data", None, None, None, None, None,
-                min(len(futures_returns), len(spot_returns)), as_of
+                symbol,
+                "insufficient_data",
+                None,
+                None,
+                None,
+                None,
+                None,
+                min(len(futures_returns), len(spot_returns)),
+                as_of,
             )
         candidates: list[tuple[float, str, int, int]] = []
         for lag in range(0, self.max_lag_buckets + 1):
@@ -197,20 +207,27 @@ class FuturesSpotLeadLagAnalyzer:
         elif strength - runner_up < self.min_lead_advantage:
             status, leader_value, lag_value = "ambiguous_lead", None, None
         else:
-            status, leader_value, lag_value = f"{leader}_leads", leader, (
-                lag * self.bucket_seconds
+            status, leader_value, lag_value = (
+                f"{leader}_leads",
+                leader,
+                (lag * self.bucket_seconds),
             )
         return LeadLagEstimate(
-            symbol, status, leader_value, lag_value, signed_corr, low, high,
-            count, as_of
+            symbol,
+            status,
+            leader_value,
+            lag_value,
+            signed_corr,
+            low,
+            high,
+            count,
+            as_of,
         )
 
     def _returns(self, prices: dict[int, float]) -> dict[int, float]:
         ordered = sorted(prices.items())
         result: dict[int, float] = {}
-        for (previous_bucket, previous), (bucket, current) in zip(
-            ordered, ordered[1:]
-        ):
+        for (previous_bucket, previous), (bucket, current) in zip(ordered, ordered[1:]):
             if bucket - previous_bucket != 1:
                 continue
             result[bucket] = math.log(current / previous)
@@ -303,7 +320,8 @@ class FuturesSpotLeadLagAnalyzer:
                     "lag_seconds": estimate.lag_seconds,
                     "correlation": estimate.correlation,
                     "confidence_interval_95": [
-                        estimate.confidence_low, estimate.confidence_high
+                        estimate.confidence_low,
+                        estimate.confidence_high,
                     ],
                     "observations": estimate.observations,
                     "as_of": estimate.as_of.isoformat(),
