@@ -23,3 +23,22 @@ def test_hybrid_ranker_validates_inputs():
     with pytest.raises(ValueError): RetrievalWeights(-1,1,1,1)
     with pytest.raises(ValueError): rank_hybrid_memories("x", [], limit=0)
     with pytest.raises(ValueError): rank_hybrid_memories("x", [], half_life_days=0)
+
+
+def test_future_outcome_is_not_used_for_historical_retrieval():
+    now = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    result = rank_hybrid_memories(
+        "BTC",
+        [{"event_id":"future","symbol":"BTC","pnl":0.9,"closed_at":"2026-11-20T00:00:00Z"}],
+        now=now,
+    )
+    assert result[0]["retrieval_components"]["outcome"] == 0.5
+
+def test_naive_clock_and_non_finite_half_life_are_handled_safely():
+    result = rank_hybrid_memories(
+        "BTC", [{"event_id":"e","symbol":"BTC"}],
+        now=datetime(2026, 11, 19), half_life_days=30,
+    )
+    assert 0 <= result[0]["retrieval_score"] <= 1
+    with pytest.raises(ValueError):
+        rank_hybrid_memories("BTC", [], half_life_days=float("inf"))
