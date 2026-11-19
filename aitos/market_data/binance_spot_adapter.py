@@ -237,9 +237,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
                 else:
                     previous = data.get("pu")
                     if previous is not None and int(previous) != previous_final:
-                        raise SpotOrderBookGap(
-                            f"{symbol} depth previous-update gap"
-                        )
+                        raise SpotOrderBookGap(f"{symbol} depth previous-update gap")
                     if previous is None and first > previous_final + 1:
                         raise SpotOrderBookGap(f"{symbol} depth sequence gap")
                 last_update_ids[symbol] = final
