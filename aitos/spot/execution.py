@@ -39,9 +39,15 @@ class SpotOrderExecutor:
             filters = (await self.adapter.exchange_info()).get(request.symbol)
         if filters is None or filters.status != "TRADING" or not filters.is_spot_trading_allowed:
             raise ValueError("symbol is not enabled for Spot trading")
+        if request.client_order_id and len(request.client_order_id) > 36:
+            raise ValueError("client_order_id must not exceed 36 characters")
         if request.quote_order_quantity is not None:
             if request.order_type is not SpotOrderType.MARKET or not filters.quote_order_qty_market_allowed:
                 raise ValueError("quoteOrderQty is not supported for this symbol/order type")
+            if filters.min_notional > 0 and request.quote_order_quantity < filters.min_notional:
+                raise ValueError("quoteOrderQty violates minimum notional")
+            if filters.max_notional and filters.max_notional > 0 and request.quote_order_quantity > filters.max_notional:
+                raise ValueError("quoteOrderQty exceeds maximum notional")
         elif request.quantity is not None:
             price = request.price
             if price is None:
