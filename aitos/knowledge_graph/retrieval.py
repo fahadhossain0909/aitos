@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from aitos.knowledge_graph.hybrid_retrieval import (
+    RetrievalWeights,
+    rank_hybrid_memories,
+)
+
 SIMILAR_CASES_QUERY = """
 MATCH (e:KnowledgeEvent)
 OPTIONAL MATCH (e)-[:ABOUT_SYMBOL]->(s:Symbol)
@@ -52,3 +57,25 @@ class GraphContextRetriever:
             )
             rows = await result.data()
         return rows
+
+    async def hybrid_similar_cases(
+        self,
+        query: str,
+        *,
+        symbol: str = "",
+        regime: str = "",
+        strategy_id: str = "",
+        model_id: str = "",
+        semantic_scores: dict[str, float] | None = None,
+        weights: RetrievalWeights | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Retrieve graph candidates and rerank them as non-authoritative context."""
+        rows = await self.similar_cases(
+            symbol=symbol, regime=regime, strategy_id=strategy_id,
+            model_id=model_id, limit=min(max(limit * 3, limit), 100),
+        )
+        return rank_hybrid_memories(
+            query, rows, semantic_scores=semantic_scores,
+            weights=weights, limit=limit,
+        )
