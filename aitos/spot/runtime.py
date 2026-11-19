@@ -10,6 +10,7 @@ from aitos.config.paths import get_data_dir
 from aitos.config.settings import AITOSSettings, get_settings
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation
+from aitos.models.trade import Opportunity
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.coordinator import SpotTradingCoordinator
@@ -38,6 +39,41 @@ class SpotRuntime:
             quote_asset=self.quote_asset,
             min_quote_volume=self.min_quote_volume,
             limit=self.max_symbols,
+        )
+
+    async def submit_opportunity(
+        self,
+        *,
+        opportunity: Opportunity,
+        equity_quote: float,
+        quote_order_quantity: Decimal,
+    ) -> SpotOrder:
+        """Route a shared AITOS Strategy opportunity through Spot capital checks."""
+        request = SpotOrderRequest(
+            symbol=opportunity.symbol,
+            side=SpotOrderSide.BUY,
+            order_type=SpotOrderType.MARKET,
+            quote_order_quantity=quote_order_quantity,
+        )
+        return await self.coordinator.submit_entry(
+            equity_quote=equity_quote,
+            opportunity=opportunity,
+            request=request,
+        )
+
+    async def submit_exit(
+        self,
+        *,
+        symbol: str,
+        quantity: Decimal,
+        exit_authorized: bool,
+        client_order_id: str | None = None,
+    ) -> SpotOrder:
+        return await self.coordinator.submit_exit(
+            symbol=symbol,
+            quantity=quantity,
+            exit_authorized=exit_authorized,
+            client_order_id=client_order_id,
         )
 
     async def publish_trades(self, market_bus, symbols: list[str]) -> None:
