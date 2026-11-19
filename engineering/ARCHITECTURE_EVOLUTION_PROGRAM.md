@@ -60,7 +60,7 @@ Source inspection found multiple similarly named contracts. The Phase 1 consumer
 
 The market-domain contract already provides `Instrument` and `MarketEvent`, while `GlobalMarketState` is a separate aggregate. This is not proof that all duplicates are currently incompatible, but it is a concrete contract-drift risk.
 
-**Decision:** do not rename or delete these contracts in bulk. The two snapshot types and three intent types have distinct bounded-context semantics. The market-data and universal-market event envelopes are separate; the former is the live bus contract, while a production bridge to the latter was not established (the cross-market engine's only direct constructor hit was its test). Add an explicit, instrument-resolved, provenance-preserving bridge before claiming universal market context is fed by the canonical bus. The statistics event is a research sample, not a transport contract. Preserve serialized compatibility and test old/new round trips.
+**Decision:** do not rename or delete these contracts in bulk. The two snapshot types and three intent types have distinct bounded-context semantics. The market-data and universal-market event envelopes are separate; the former is the live bus contract, while a a pure provenance-preserving converter has now been added in `aitos/markets/bridges.py`, but production runtime wiring remains absent (the cross-market engine's only direct constructor hit was its test). An additive, instrument-resolved, provenance-preserving pure bridge now exists; do not claim universal market context is fed by the canonical bus until its read-only/shadow runtime consumer is wired and validated. The statistics event is a research sample, not a transport contract. Preserve serialized compatibility and test old/new round trips.
 
 ### AEP-002 — Market state is present, but end-to-end provenance is not yet one contract
 
@@ -159,7 +159,7 @@ Control plane (configuration, identity, secrets, observability, CI/CD, incident 
 ### Phase 1 — Contract and ownership audit (source-level audit completed; runtime gates remain)
 - Generate module/import/dependency inventory from source.
 - Map every `MarketSnapshot`, `ExecutionIntent`, `MarketEvent`, portfolio and risk contract and all serialization/persistence consumers.
-- Explicitly bridge canonical MarketDataBus events to universal market-domain context with resolved Instrument metadata and preserved sequence/revision/trace lineage.
+- Validate the new pure canonical MarketDataBus → universal market-domain converter and add an opt-in read-only/shadow runtime consumer with resolved Instrument metadata, bounded backpressure and preserved sequence/revision/trace lineage.
 - Publish data authority matrix and per-aggregate recovery ownership.
 - Trace every entry/exit/reduce-only path to the authoritative risk and execution gates.
 - Coordinate with open PR #246 and #250; do not duplicate or rebase their work without review.
