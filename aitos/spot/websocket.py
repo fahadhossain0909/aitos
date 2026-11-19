@@ -37,7 +37,7 @@ class BinanceSpotWebSocket:
         self, streams: list[str]
     ) -> AsyncIterator[dict[str, Any]]:
         """Multiplex up to 1024 Binance streams over one WebSocket connection."""
-        normalized = list(dict.fromkeys(stream.lower() for stream in streams))
+        normalized = list(dict.fromkeys(stream for stream in streams))
         if not normalized or len(normalized) > 1024:
             raise ValueError("combined stream count must be between 1 and 1024")
         if any(not _STREAM_RE.fullmatch(stream) for stream in normalized):
