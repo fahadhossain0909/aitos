@@ -269,6 +269,7 @@ class NativeOrderBookSession:
         prefer_native: bool = True,
     ) -> None:
         self.scale = scale
+        self._prefer_native = prefer_native
         bid_units = [
             (scale.price_to_ticks(price), scale.quantity_to_lots(quantity))
             for price, quantity in bids
@@ -292,6 +293,30 @@ class NativeOrderBookSession:
             snapshot.asks,
             prefer_native=prefer_native,
         )
+
+    def resync(self, snapshot) -> None:
+        """Atomically replace state from an authoritative REST snapshot.
+
+        Use after a sequence gap or explicit recovery decision. The replacement
+        engine starts in first-delta bridge mode, so the next stream event must
+        still bridge snapshot.last_update_id. Conversion and construction finish
+        before the active engine is swapped; invalid snapshots leave it intact.
+        """
+        bid_units = [
+            (self.scale.price_to_ticks(price), self.scale.quantity_to_lots(quantity))
+            for price, quantity in snapshot.bids
+        ]
+        ask_units = [
+            (self.scale.price_to_ticks(price), self.scale.quantity_to_lots(quantity))
+            for price, quantity in snapshot.asks
+        ]
+        replacement = create_order_book(
+            snapshot.last_update_id,
+            bid_units,
+            ask_units,
+            prefer_native=self._prefer_native,
+        )
+        self.book = replacement
 
     def apply_depth_update(self, update) -> bool:
         """Apply one DepthUpdate through the batch boundary."""
