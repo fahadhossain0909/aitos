@@ -190,7 +190,7 @@ class SpotTradingCoordinator:
             status=order.status.value,
             exchange_order_id=order.order_id,
         )
-        if self._terminal_without_fills(order):
+        if self._terminal(order):
             self.release_after_confirmed_flat(symbol)
         return order
 
