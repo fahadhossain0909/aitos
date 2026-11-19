@@ -65,6 +65,13 @@ from aitos.world_intelligence.metrics_server import (
 )
 from aitos.world_intelligence.narratives import NarrativeCluster, cluster_narratives
 from aitos.world_intelligence.pipeline import EnrichmentResult, enrich_event_batch
+from aitos.world_intelligence.point_in_time import (
+    EventRevision,
+    MarketBarRevision,
+    PointInTimeLabelReport,
+    RealizedEventLabel,
+    build_point_in_time_labels,
+)
 from aitos.world_intelligence.providers import (
     FREDSeriesAdapter,
     GDELTDocAdapter,
@@ -127,6 +134,10 @@ __all__ = [
     "EventImpactFeatures",
     "EventImpactProbabilityModel",
     "EventImpactTrainingRow",
+    "EventRevision",
+    "MarketBarRevision",
+    "PointInTimeLabelReport",
+    "RealizedEventLabel",
     "EventImpactWalkForwardFold",
     "EventImpactWalkForwardReport",
     "EventStudyObservation",
@@ -156,6 +167,7 @@ __all__ = [
     "analyze_financial_headline",
     "assess_source_batch",
     "build_asset_intelligence_snapshot",
+    "build_point_in_time_labels",
     "calibration_cohorts",
     "calibration_report",
     "chronological_walk_forward_splits",
