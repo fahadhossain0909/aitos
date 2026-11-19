@@ -230,6 +230,78 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             validated.append(dict(row))
         return validated
 
+    async def get_open_orders(
+        self, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Read-only inventory of ordinary open USD-M orders.
+
+        Conditional algo orders are returned by ``get_open_algo_orders`` and
+        must be reconciled separately. Malformed, duplicate or cross-symbol
+        rows invalidate the entire snapshot rather than silently dropping risk.
+        """
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            normalized_symbol = str(symbol).strip().upper()
+            if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
+                raise ValueError("invalid symbol for open-order inventory")
+            params["symbol"] = normalized_symbol
+        response = await self._signed_request("GET", "/fapi/v1/openOrders", params)
+        if not isinstance(response, list):
+            raise ValueError("open-order inventory must be a complete list")
+        seen_ids: set[str] = set()
+        validated: list[dict[str, Any]] = []
+        supported_types = {
+            "LIMIT",
+            "MARKET",
+            "STOP",
+            "STOP_MARKET",
+            "TAKE_PROFIT",
+            "TAKE_PROFIT_MARKET",
+            "TRAILING_STOP_MARKET",
+        }
+        for row in response:
+            if not isinstance(row, dict):
+                raise ValueError("malformed open-order inventory row")
+            order_id = row.get("orderId")
+            row_symbol = row.get("symbol")
+            if (
+                isinstance(order_id, bool)
+                or not str(order_id or "").isdigit()
+                or int(order_id) <= 0
+                or not isinstance(row_symbol, str)
+                or not re.fullmatch(r"[A-Z0-9]{1,30}", row_symbol)
+                or (symbol is not None and row_symbol != params["symbol"])
+                or row.get("status") not in {"NEW", "PARTIALLY_FILLED"}
+                or row.get("side") not in {"BUY", "SELL"}
+                or row.get("positionSide") not in {"BOTH", "LONG", "SHORT"}
+                or row.get("type") not in supported_types
+            ):
+                raise ValueError("invalid or non-open order inventory identity")
+            identity = str(int(order_id))
+            if identity in seen_ids:
+                raise ValueError("duplicate open-order identity")
+            seen_ids.add(identity)
+            for field_name in ("origQty", "executedQty"):
+                raw = row.get(field_name)
+                if isinstance(raw, bool):
+                    raise ValueError("invalid open-order quantity")
+                try:
+                    number = float(raw)
+                except (TypeError, ValueError):
+                    number = float("nan")
+                if not math.isfinite(number) or number < 0:
+                    raise ValueError("invalid open-order quantity")
+                if field_name == "origQty" and number <= 0:
+                    raise ValueError("invalid original order quantity")
+            if float(row["executedQty"]) > float(row["origQty"]):
+                raise ValueError("executed quantity exceeds original quantity")
+            for flag in ("reduceOnly", "closePosition"):
+                value = row.get(flag)
+                if value not in (True, False, "true", "false"):
+                    raise ValueError(f"invalid open-order {flag} evidence")
+            validated.append(dict(row))
+        return validated
+
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
         for a real portfolio tracker rather than the paper-trading
