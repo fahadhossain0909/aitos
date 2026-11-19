@@ -426,7 +426,6 @@ async def test_spot_candidate_kernel_short_is_never_authorized():
     inventory.close()
 
 
-
 def test_spot_runtime_updates_shared_capital_and_portfolio_fx_rate():
     inventory = InventoryLedger()
     coordinator = SpotTradingCoordinator(
