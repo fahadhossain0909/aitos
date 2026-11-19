@@ -159,9 +159,7 @@ class CapitalGateway:
         pending_risk = dict(metadata.get("pending_order_risk_pct") or {})
         pending_symbols = dict(metadata.get("pending_order_symbols") or {})
         pending_sides = dict(metadata.get("pending_order_sides") or {})
-        if not (
-            set(pending_risk) == set(pending_symbols) == set(pending_sides)
-        ):
+        if not (set(pending_risk) == set(pending_symbols) == set(pending_sides)):
             raise ValueError("pending order risk projection identity mismatch")
         for order_key, risk_value in pending_risk.items():
             risk_pct = float(risk_value)
