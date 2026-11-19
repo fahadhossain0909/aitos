@@ -2,6 +2,7 @@
 
 from .adapter import CanonicalMarketDataAdapter
 from .binance_adapter import BinanceCanonicalMarketDataAdapter
+from .binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from .bus import (
     MarketDataBus,
     channel_for,
@@ -32,6 +33,7 @@ from .venues import (
 __all__ = [
     "DEFAULT_VENUES",
     "BinanceCanonicalMarketDataAdapter",
+    "BinanceSpotCanonicalMarketDataAdapter",
     "BookLevel",
     "BybitCanonicalMarketDataAdapter",
     "CanonicalMarketDataAdapter",
