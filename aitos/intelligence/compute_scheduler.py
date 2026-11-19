@@ -3,6 +3,7 @@
 This scheduler is downstream of canonical market-data ingestion. It must never
 own, drop, reorder, or coalesce raw exchange events or order-book deltas.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -140,13 +141,12 @@ class ComputeAwareScheduler:
             market_waiting = any(
                 item.priority == TaskPriority.MARKET_CRITICAL for item in pending
             )
+
             def effective_priority(item: AnalysisTask) -> int:
                 # Position and market-critical work never age downward.
                 if item.priority <= TaskPriority.MARKET_CRITICAL:
                     return int(item.priority)
-                age_steps = int(
-                    max(0.0, now - item.submitted_at) / self.aging_seconds
-                )
+                age_steps = int(max(0.0, now - item.submitted_at) / self.aging_seconds)
                 return max(
                     int(TaskPriority.CANDIDATE_ANALYSIS),
                     int(item.priority) - age_steps,
