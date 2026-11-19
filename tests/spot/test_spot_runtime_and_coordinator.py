@@ -7,7 +7,12 @@ from aitos.config.settings import SpotSettings
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.inventory import InventoryLedger
-from aitos.spot.models import SpotOrderRequest, SpotOrderSide, SpotOrderStatus, SpotOrderType
+from aitos.spot.models import (
+    SpotOrderRequest,
+    SpotOrderSide,
+    SpotOrderStatus,
+    SpotOrderType,
+)
 
 
 def test_spot_settings_are_disabled_and_testnet_only_by_default():
@@ -38,8 +43,10 @@ class FakeCapitalGateway:
     def authorize_opportunity(self, equity, opportunity, **kwargs):
         self.symbol = opportunity.symbol
         self.kwargs = kwargs
-        return (SimpleNamespace(eligible=True, rejection_reasons=()),
-                SimpleNamespace(capital_usd=Decimal("100")))
+        return (
+            SimpleNamespace(eligible=True, rejection_reasons=()),
+            SimpleNamespace(capital_usd=Decimal("100")),
+        )
 
     def pin(self, symbol):
         self.pinned.append(symbol)
@@ -62,9 +69,14 @@ class FakeExecutor:
 
 def _opportunity(side=TradeSide.LONG):
     return Opportunity(
-        symbol="BTCUSDT", side=side, entry_price=100,
-        stop_loss_price=98, take_profit_levels=[104], confidence=0.9,
-        strategy_id="spot-test", rationale="unit test",
+        symbol="BTCUSDT",
+        side=side,
+        entry_price=100,
+        stop_loss_price=98,
+        take_profit_levels=[104],
+        confidence=0.9,
+        strategy_id="spot-test",
+        rationale="unit test",
     )
 
 
@@ -72,17 +84,22 @@ def _opportunity(side=TradeSide.LONG):
 async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
     gateway = FakeCapitalGateway()
     coordinator = SpotTradingCoordinator(
-        capital_gateway=gateway, executor=FakeExecutor(),
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
         inventory=InventoryLedger(),
     )
     request = SpotOrderRequest(
-        "BTCUSDT", SpotOrderSide.BUY, SpotOrderType.MARKET,
+        "BTCUSDT",
+        SpotOrderSide.BUY,
+        SpotOrderType.MARKET,
         quote_order_quantity=Decimal("50"),
     )
     result = await coordinator.submit_entry(
-        equity_quote=1000, opportunity=_opportunity(), request=request,
+        equity_quote=1000,
+        opportunity=_opportunity(),
+        request=request,
     )
-    assert result.client_order_id.startswith('aitos-')
+    assert result.client_order_id.startswith("aitos-")
     assert gateway.symbol == "binance:spot:BTCUSDT"
     assert gateway.kwargs["funding_bps"] == 0.0
     assert gateway.pinned == ["binance:spot:BTCUSDT"]
@@ -92,21 +109,27 @@ async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
 async def test_spot_entry_rejects_short_and_oversized_requests():
     gateway = FakeCapitalGateway()
     coordinator = SpotTradingCoordinator(
-        capital_gateway=gateway, executor=FakeExecutor(),
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
         inventory=InventoryLedger(),
     )
     request = SpotOrderRequest(
-        "BTCUSDT", SpotOrderSide.BUY, SpotOrderType.MARKET,
+        "BTCUSDT",
+        SpotOrderSide.BUY,
+        SpotOrderType.MARKET,
         quote_order_quantity=Decimal("101"),
     )
     with pytest.raises(SpotAuthorizationRejected, match="long-only"):
         await coordinator.submit_entry(
-            equity_quote=1000, opportunity=_opportunity(TradeSide.SHORT),
+            equity_quote=1000,
+            opportunity=_opportunity(TradeSide.SHORT),
             request=request,
         )
     with pytest.raises(SpotAuthorizationRejected, match="exceeds approved"):
         await coordinator.submit_entry(
-            equity_quote=1000, opportunity=_opportunity(), request=request,
+            equity_quote=1000,
+            opportunity=_opportunity(),
+            request=request,
         )
 
 
@@ -114,23 +137,34 @@ async def test_spot_entry_rejects_short_and_oversized_requests():
 async def test_spot_exit_requires_authorization_and_managed_inventory():
     ledger = InventoryLedger()
     ledger.record_fill(
-        fill_key="buy-1", symbol="BTCUSDT", base_asset="BTC",
-        quote_asset="USDT", side="BUY", quantity=Decimal("1"),
+        fill_key="buy-1",
+        symbol="BTCUSDT",
+        base_asset="BTC",
+        quote_asset="USDT",
+        side="BUY",
+        quantity=Decimal("1"),
         price=Decimal("100"),
     )
     coordinator = SpotTradingCoordinator(
-        capital_gateway=FakeCapitalGateway(), executor=FakeExecutor(),
+        capital_gateway=FakeCapitalGateway(),
+        executor=FakeExecutor(),
         inventory=ledger,
     )
     with pytest.raises(SpotAuthorizationRejected, match="Exit Intelligence"):
         await coordinator.submit_exit(
-            symbol="BTCUSDT", quantity=Decimal("0.5"), exit_authorized=False,
+            symbol="BTCUSDT",
+            quantity=Decimal("0.5"),
+            exit_authorized=False,
         )
     with pytest.raises(SpotAuthorizationRejected, match="managed Spot inventory"):
         await coordinator.submit_exit(
-            symbol="BTCUSDT", quantity=Decimal("2"), exit_authorized=True,
+            symbol="BTCUSDT",
+            quantity=Decimal("2"),
+            exit_authorized=True,
         )
     result = await coordinator.submit_exit(
-        symbol="BTCUSDT", quantity=Decimal("0.5"), exit_authorized=True,
+        symbol="BTCUSDT",
+        quantity=Decimal("0.5"),
+        exit_authorized=True,
     )
     assert result.side is SpotOrderSide.SELL
