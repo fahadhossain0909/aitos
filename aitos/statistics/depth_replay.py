@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from numbers import Real
 from dataclasses import dataclass
 
 
@@ -118,33 +119,43 @@ def replay_l2_market_order(
     direction = side.upper()
     if direction not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
-    values = (
-        quantity,
-        fee_bps,
-        impact_coefficient_bps,
-        max_participation,
-        slippage_bps,
-        funding_bps,
-        borrow_bps,
-        holding_hours,
-        funding_interval_hours,
-    )
+    values = {
+        "quantity": quantity,
+        "fee_bps": fee_bps,
+        "impact_coefficient_bps": impact_coefficient_bps,
+        "max_participation": max_participation,
+        "slippage_bps": slippage_bps,
+        "funding_bps": funding_bps,
+        "borrow_bps": borrow_bps,
+        "holding_hours": holding_hours,
+        "funding_interval_hours": funding_interval_hours,
+    }
+    for name, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise ValueError(f"{name} must be a finite numeric value")
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{name} must be a finite numeric value")
     if (
-        any(not math.isfinite(float(value)) for value in values)
-        or quantity <= 0
-        or any(value < 0 for value in values[1:])
+        quantity <= 0
+        or fee_bps < 0
+        or impact_coefficient_bps < 0
         or not 0 < max_participation <= 1
-        or funding_interval_hours <= 0
+        or slippage_bps < 0
         or slippage_bps >= 10000
+        or borrow_bps < 0
+        or holding_hours < 0
+        or funding_interval_hours <= 0
     ):
         raise ValueError("invalid replay quantity, cost, participation or horizon")
     if (
         isinstance(submitted_at_ms, bool)
+        or not isinstance(submitted_at_ms, int)
         or isinstance(latency_ms, bool)
+        or not isinstance(latency_ms, int)
         or submitted_at_ms < 0
         or latency_ms < 0
     ):
-        raise ValueError("timestamps and latency must be non-negative")
+        raise ValueError("timestamps and latency must be non-negative integers")
     books = tuple(snapshots)
     if any(not isinstance(book, DepthBookSnapshot) for book in books):
         raise TypeError("L2 replay requires DepthBookSnapshot records")
@@ -235,6 +246,25 @@ class LimitQueueEvent:
     cancelled_ahead: float = 0.0
     added_ahead: float = 0.0
 
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.timestamp_ms, bool)
+            or not isinstance(self.timestamp_ms, int)
+            or self.timestamp_ms < 0
+        ):
+            raise ValueError("queue event timestamp must be a non-negative integer")
+        for name in ("traded_at_limit", "cancelled_ahead", "added_ahead"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(float(value))
+                or value < 0
+            ):
+                raise ValueError(
+                    "queue event quantities must be finite and non-negative"
+                )
+
 
 @dataclass(frozen=True)
 class QueueReplayResult:
@@ -261,14 +291,22 @@ def replay_passive_limit_queue(
     to infer queue position and must not be passed as queue-ahead events.
     """
     if (
-        not math.isfinite(quantity)
-        or not math.isfinite(queue_ahead)
+        isinstance(quantity, bool)
+        or not isinstance(quantity, Real)
+        or not math.isfinite(float(quantity))
+        or isinstance(queue_ahead, bool)
+        or not isinstance(queue_ahead, Real)
+        or not math.isfinite(float(queue_ahead))
         or quantity <= 0
         or queue_ahead < 0
+        or isinstance(submitted_at_ms, bool)
+        or not isinstance(submitted_at_ms, int)
         or submitted_at_ms < 0
     ):
         raise ValueError("invalid simulated order or queue size")
     ordered = tuple(events)
+    if any(not isinstance(event, LimitQueueEvent) for event in ordered):
+        raise TypeError("queue replay requires LimitQueueEvent records")
     if any(a.timestamp_ms >= b.timestamp_ms for a, b in zip(ordered, ordered[1:])):
         raise ValueError("queue events must be strictly chronological")
     ahead = float(queue_ahead)
