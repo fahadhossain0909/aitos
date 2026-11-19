@@ -62,11 +62,23 @@ def score_position_risk(
         notes.append(
             f"leverage utilization high ({portfolio.max_position_leverage:.1f}x / {limits.max_leverage:.1f}x cap)"
         )
+    projected_notional_by_symbol: dict[str, float] = {}
+    for position in portfolio.positions:
+        symbol = position.symbol.upper()
+        projected_notional_by_symbol[symbol] = (
+            projected_notional_by_symbol.get(symbol, 0.0) + position.notional_usd
+        )
+    for order in portfolio.pending_orders:
+        symbol = order.symbol.upper()
+        projected_notional_by_symbol[symbol] = (
+            projected_notional_by_symbol.get(symbol, 0.0)
+            + order.remaining_notional_usd
+        )
     concentration_score = _pct_of_limit(
-        len(portfolio.positions), limits.max_open_positions
+        portfolio.projected_open_position_count, limits.max_open_positions
     )
     largest_position_pct = (
-        max((p.notional_usd for p in portfolio.positions), default=0.0)
+        max(projected_notional_by_symbol.values(), default=0.0)
         / portfolio.equity_usd
         * 100
         if portfolio.equity_usd > 0
@@ -242,7 +254,7 @@ def check_limits(portfolio: PortfolioState, limits: RiskLimits) -> list[LimitBre
     )
     _check(
         "max_open_positions",
-        len(portfolio.positions),
+        portfolio.projected_open_position_count,
         limits.max_open_positions,
         limits.max_open_positions_hard_cap,
     )
@@ -294,7 +306,7 @@ def _absolute_hard_cap_breaches(
         ("max_leverage", portfolio.max_position_leverage, limits.max_leverage_hard_cap),
         (
             "max_open_positions",
-            len(portfolio.positions),
+            portfolio.projected_open_position_count,
             limits.max_open_positions_hard_cap,
         ),
         (
