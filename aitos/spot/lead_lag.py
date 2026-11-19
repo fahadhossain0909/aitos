@@ -112,7 +112,12 @@ class FuturesSpotLeadLagAnalyzer:
     def _price(event: MarketEvent) -> float | None:
         payload = event.payload
         try:
-                bid, ask = float(payload["bid_price"]), float(payload["ask_price"])
+            if (
+                payload.get("bid_price") is not None
+                and payload.get("ask_price") is not None
+            ):
+                bid = float(payload["bid_price"])
+                ask = float(payload["ask_price"])
                 value = (bid + ask) / 2.0
             else:
                 value = float(
