@@ -304,9 +304,7 @@ class PortfolioProtection:
         existing_variance = existing_correlated**2
         cross_term = 0.0
         for other, risk in existing_positions.items():
-            other_instrument = (snapshot.position_instruments or {}).get(
-                other, other
-            )
+            other_instrument = (snapshot.position_instruments or {}).get(other, other)
             correlation = snapshot.correlation(
                 symbol, other_instrument, self.config.unknown_correlation
             )
