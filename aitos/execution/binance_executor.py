@@ -235,9 +235,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             validated.append(dict(row))
         return validated
 
-    async def get_open_orders(
-        self, symbol: str | None = None
-    ) -> list[dict[str, Any]]:
+    async def get_open_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
         """Read-only inventory of ordinary open USD-M orders.
 
         Conditional algo orders are returned by ``get_open_algo_orders`` and
