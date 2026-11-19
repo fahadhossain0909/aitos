@@ -210,16 +210,12 @@ def replay_l2_market_order(
             filled += qty
             remaining -= qty
             allowed -= qty
-            fills.append(
-                DepthFill(book.timestamp_ms, fill_price, qty, impact_bps, fee)
-            )
+            fills.append(DepthFill(book.timestamp_ms, fill_price, qty, impact_bps, fee))
         # A market order consumes one point-in-time book only. Reusing later
         # snapshots would fabricate resting-order queue priority/replenishment.
         break
     avg = notional / filled if filled else None
-    funding = (
-        notional * funding_bps / 10000.0 * holding_hours / funding_interval_hours
-    )
+    funding = notional * funding_bps / 10000.0 * holding_hours / funding_interval_hours
     borrow = notional * borrow_bps / 10000.0 * holding_hours / 24.0
     total_cost = fees + spread + impact_total + slippage_total + funding + borrow
     return DepthReplayResult(
