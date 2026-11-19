@@ -4,6 +4,7 @@ This module deliberately does not change strategy, execution, or financial risk.
 It discovers the resources visible to the current process (including Linux
 cgroup limits) and turns them into conservative workload-admission hints.
 """
+
 from __future__ import annotations
 
 import glob
@@ -146,9 +147,7 @@ def _memory_values(proc_root: Path, cgroup_root: Path) -> tuple[int, int, int, b
         limited = False
     else:
         limit_mb = limit_bytes // (1024 * 1024)
-        cgroup_available = max(
-            0, limit_mb - ((current_bytes or 0) // (1024 * 1024))
-        )
+        cgroup_available = max(0, limit_mb - ((current_bytes or 0) // (1024 * 1024)))
         available_mb = (
             min(host_available, cgroup_available)
             if host_available
