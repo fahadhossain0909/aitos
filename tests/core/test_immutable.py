@@ -67,9 +67,7 @@ def test_market_data_event_payload_and_stage_timestamps_are_deeply_immutable():
         event.payload["book"][0]["price"] = 99.0
     with pytest.raises(TypeError, match="immutable"):
         event.stage_timestamps["decode"] = 2.0
-    assert json.loads(json.dumps(event.payload)) == {
-        "book": [{"price": 100.0}]
-    }
+    assert json.loads(json.dumps(event.payload)) == {"book": [{"price": 100.0}]}
 
 
 def test_market_domain_event_payload_is_deeply_immutable():
