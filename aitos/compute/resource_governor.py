@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,10 @@ class ResourceSnapshot:
     def __post_init__(self) -> None:
         if self.logical_cpus < 1 or self.effective_cpus <= 0:
             raise ValueError("CPU capacity must be positive")
-        if min(self.memory_total_mb, self.memory_limit_mb, self.memory_available_mb) < 0:
+        if (
+            min(self.memory_total_mb, self.memory_limit_mb, self.memory_available_mb)
+            < 0
+        ):
             raise ValueError("memory values cannot be negative")
 
 
@@ -108,7 +111,9 @@ def _memory_values(proc_root: Path, cgroup_root: Path) -> tuple[int, int, int, b
             try:
                 parsed = int(value)
                 if 0 < parsed < (1 << 60):
-                    limit_bytes = parsed if limit_bytes is None else min(limit_bytes, parsed)
+                    limit_bytes = (
+                        parsed if limit_bytes is None else min(limit_bytes, parsed)
+                    )
             except ValueError:
                 pass
     for relative in ("memory.current", "memory/memory.usage_in_bytes"):
@@ -128,8 +133,14 @@ def _memory_values(proc_root: Path, cgroup_root: Path) -> tuple[int, int, int, b
         limited = False
     else:
         limit_mb = limit_bytes // (1024 * 1024)
-        cgroup_available = max(0, limit_mb - ((current_bytes or 0) // (1024 * 1024)))
-        available_mb = min(host_available, cgroup_available) if host_available else cgroup_available
+        cgroup_available = max(
+            0, limit_mb - ((current_bytes or 0) // (1024 * 1024))
+        )
+        available_mb = (
+            min(host_available, cgroup_available)
+            if host_available
+            else cgroup_available
+        )
         if host_total:
             limit_mb = min(limit_mb, host_total)
         limited = bool(host_total and limit_mb < host_total)
@@ -215,7 +226,9 @@ def build_resource_budget(
         raise ValueError("worker limits are invalid")
 
     workers = min(max_workers, max(1, int(resources.effective_cpus)))
-    usable_memory = max(0, resources.memory_limit_mb * (100 - memory_reserve_pct) // 100)
+    usable_memory = max(
+        0, resources.memory_limit_mb * (100 - memory_reserve_pct) // 100
+    )
     # Do not budget more than currently available memory. A low available-memory
     # reading is treated conservatively rather than assuming reclaim will succeed.
     usable_memory = min(usable_memory, resources.memory_available_mb)
@@ -251,7 +264,8 @@ def plan_symbol_capacity(
         elif item.protected and not previous.protected:
             unique[key] = item
         elif item.protected == previous.protected and (
-            item.opportunity_score, item.liquidity_score
+            item.opportunity_score,
+            item.liquidity_score,
         ) > (previous.opportunity_score, previous.liquidity_score):
             unique[key] = item
 
@@ -286,7 +300,11 @@ def plan_symbol_capacity(
                 memory_used += item.memory_cost_mb
 
     selected_ids = {item.symbol.strip().upper() for item in selected}
-    deferred = [item.symbol for item in ordered if item.symbol.strip().upper() not in selected_ids]
+    deferred = [
+        item.symbol
+        for item in ordered
+        if item.symbol.strip().upper() not in selected_ids
+    ]
     selected = selected[:max_symbols] if len(protected) <= max_symbols else protected
     # Protected symbols can exceed the configured soft cap: safety beats capacity.
     deep_slots = min(budget.deep_analysis_slots, max(0, len(selected) - len(protected)))
@@ -310,10 +328,22 @@ def classify_pressure(
     values = (cpu_utilization_pct, memory_utilization_pct, queue_lag_seconds)
     if any(value < 0 for value in values):
         raise ValueError("pressure metrics cannot be negative")
-    if cpu_utilization_pct >= 98 or memory_utilization_pct >= 95 or queue_lag_seconds >= 10:
+    if (
+        cpu_utilization_pct >= 98
+        or memory_utilization_pct >= 95
+        or queue_lag_seconds >= 10
+    ):
         return PressureLevel.CRITICAL
-    if cpu_utilization_pct >= 90 or memory_utilization_pct >= 90 or queue_lag_seconds >= 5:
+    if (
+        cpu_utilization_pct >= 90
+        or memory_utilization_pct >= 90
+        or queue_lag_seconds >= 5
+    ):
         return PressureLevel.HIGH
-    if cpu_utilization_pct >= 80 or memory_utilization_pct >= 80 or queue_lag_seconds >= 2:
+    if (
+        cpu_utilization_pct >= 80
+        or memory_utilization_pct >= 80
+        or queue_lag_seconds >= 2
+    ):
         return PressureLevel.WARNING
     return PressureLevel.NORMAL
