@@ -235,6 +235,99 @@ async def _audit_account_exposure(
     }
 
 
+def _audit_local_stop_orders(
+    trades: tuple[Any, ...] | None,
+    orders: list[dict[str, Any]],
+    *,
+    hedge_mode: bool,
+) -> list[dict[str, Any]]:
+    if trades is None:
+        return []
+    by_algo_id = {
+        str(order.get("algoId")): order
+        for order in orders
+        if order.get("algoId") is not None
+    }
+    findings = []
+    for trade in trades:
+        trade_id = str(getattr(trade, "trade_id", "unknown"))
+        symbol = str(getattr(trade, "symbol", "")).strip().upper()
+        raw_side = getattr(trade, "side", "")
+        side = str(getattr(raw_side, "value", raw_side)).upper()
+        order_id = getattr(trade, "sl_order_id", None)
+        if not isinstance(order_id, str) or not order_id:
+            findings.append(
+                {
+                    "client_id": f"trade:{trade_id}",
+                    "symbol": symbol,
+                    "status": "local_position_missing_stop_id",
+                    "reasons": ["active live position has no durable stop order ID"],
+                }
+            )
+            continue
+        if not order_id.startswith("algo:"):
+            findings.append(
+                {
+                    "client_id": f"trade:{trade_id}",
+                    "symbol": symbol,
+                    "status": "unsupported_local_stop_identity",
+                    "reasons": ["live account audit requires a conditional algo stop ID"],
+                }
+            )
+            continue
+        algo_id = order_id.removeprefix("algo:")
+        order = by_algo_id.get(algo_id)
+        if order is None:
+            findings.append(
+                {
+                    "client_id": f"trade:{trade_id}",
+                    "symbol": symbol,
+                    "status": "local_stop_missing_from_venue_inventory",
+                    "reasons": ["active position stop is absent from open algo inventory"],
+                }
+            )
+            continue
+        expected_side = "SELL" if side == "LONG" else "BUY"
+        expected_position_side = side if hedge_mode else "BOTH"
+        reasons = []
+        if (
+            not symbol
+            or side not in {"LONG", "SHORT"}
+            or order.get("symbol") != symbol
+            or order.get("side") != expected_side
+            or order.get("positionSide") != expected_position_side
+            or order.get("orderType") != "STOP_MARKET"
+        ):
+            reasons.append("local stop symbol/side/type does not match active position")
+        try:
+            close_position = _exchange_flag(
+                order.get("closePosition", False), "closePosition"
+            )
+            reduce_only = _exchange_flag(order.get("reduceOnly", False), "reduceOnly")
+        except ValueError:
+            close_position = False
+            reduce_only = False
+            reasons.append("local stop reduction flags are invalid")
+        if hedge_mode and reduce_only:
+            reasons.append("hedge-mode stop must use positionSide rather than reduceOnly")
+        if not hedge_mode and not close_position and not reduce_only:
+            reasons.append("one-way stop is not reduce-only")
+        if not close_position and not _decimal_matches(
+            order.get("quantity"), getattr(trade, "quantity", None)
+        ):
+            reasons.append("local stop quantity does not match active position")
+        if reasons:
+            findings.append(
+                {
+                    "client_id": f"trade:{trade_id}",
+                    "symbol": symbol,
+                    "status": "local_stop_identity_mismatch",
+                    "reasons": reasons,
+                }
+            )
+    return findings
+
+
 async def audit_exchange_protection_inventory(
     executor: Any,
     intent_store: Any,
@@ -300,6 +393,9 @@ async def audit_exchange_protection_inventory(
         symbols.add(symbol)
 
     account_audit = await _audit_account_exposure(executor, local_trades)
+    local_stop_findings = _audit_local_stop_orders(
+        local_trades, orders, hedge_mode=bool(executor.hedge_mode)
+    )
     if not symbols:
         return {
             "schema_version": 1,
@@ -310,7 +406,7 @@ async def audit_exchange_protection_inventory(
             **account_audit,
             "safe_to_resume": False,
             "automatic_actions": [],
-            "findings": [],
+            "findings": local_stop_findings,
             "ambiguous_submissions": [],
             "next_steps": [
                 "No protective intents or open conditional orders were returned.",
@@ -345,6 +441,10 @@ async def audit_exchange_protection_inventory(
         max_age_seconds=max_age_seconds,
     )
     report.update(account_audit)
+    report["findings"] = sorted(
+        [*report.get("findings", []), *local_stop_findings],
+        key=lambda item: item["client_id"],
+    )
     report["evidence"] = "AUTHENTICATED_READ_ONLY_EXCHANGE_API"
     report["ambiguous_submissions"] = await query_ambiguous_protection_submissions(
         executor,
