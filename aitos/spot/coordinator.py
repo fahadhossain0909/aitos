@@ -67,7 +67,17 @@ class SpotTradingCoordinator:
             )
 
         key = InstrumentKey(Venue.BINANCE, MarketType.SPOT, request.symbol)
-        scoped_opportunity = replace(opportunity, symbol=key.value)
+        scoped_consensus = dict(opportunity.agent_consensus or {})
+        scoped_consensus.update(
+            {
+                "leverage": 1.0,
+                "liquidation_buffer_pct": None,
+                "funding_bps": 0.0,
+            }
+        )
+        scoped_opportunity = replace(
+            opportunity, symbol=key.value, agent_consensus=scoped_consensus
+        )
         decision, allocation = self.capital_gateway.authorize_opportunity(
             equity_quote,
             scoped_opportunity,
