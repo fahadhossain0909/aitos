@@ -1,0 +1,235 @@
+# AITOS Architecture Evolution Program (AEP-1)
+
+Date: 2026-11-19  
+Baseline: `main` at the branch point used for `feat/architecture-evolution-baseline`.  
+Status: Phase 0 architecture baseline and migration contract. This document does not certify runtime or production readiness.
+
+## Executive decision
+
+Evolve AITOS in place. Do not rewrite the platform, add a second event broker, create a parallel feature store, or move all Python code to another language. Preserve the current Python-first design and optional Rust/PyO3 kernel. Keep Redis Streams as bounded hot transport, ClickHouse for analytical/history workloads, and existing transactional stores for their explicitly scoped journals/reservations. Evaluate storage changes only after a source-of-truth and failure-boundary audit.
+
+The target is an event-driven, modular, multi-market quantitative platform with:
+- one canonical market/event vocabulary and explicit compatibility adapters;
+- point-in-time, versioned market/feature context for every decision;
+- independent portfolio/risk authority before every risk-increasing execution intent;
+- durable, reconciled order/position/accounting state;
+- shared decision semantics across backtest, paper and live adapters;
+- governed research, model rollout and human-controlled production authority;
+- bounded, observable and recoverable critical paths.
+
+This is a migration program, not permission to activate new trading behavior. No live orders, production deployment, schema migration, data reset, strategy change, risk-limit change, or execution-policy change is authorized by this document.
+
+## Evidence labels and scope
+
+- **SOURCE-VERIFIED** means code and/or call paths were inspected.
+- **DOCUMENTED** means the repository states the capability, but its runtime path was not independently established here.
+- **NOT TESTED** means no relevant test or runtime verification was performed in this tranche.
+- **BLOCKED** means an overlapping branch, unavailable environment, or approval boundary prevents safe integration.
+
+Static inspection does not prove process health, exchange correctness, durability under power loss, performance, or profitability. Latency percentiles and production capacity remain NOT MEASURED unless a separate evidence record supplies reproducible samples.
+
+## Current architecture: verified building blocks
+
+| Domain | Existing owner / contract | Assessment |
+|---|---|---|
+| Application composition | `run_paper_trading.py`, `run_live_trading.py`, `aitos/app.py` | SOURCE-VERIFIED entrypoints; runtime lifecycle still needs environment-specific evidence |
+| Market identity/events | `aitos/markets/contracts.py` | SOURCE-VERIFIED asset-class-neutral `Instrument`, `MarketEvent`, event types and schema version |
+| Cross-market context | `aitos/markets/state.py` | SOURCE-VERIFIED immutable `GlobalMarketState` and deterministic builder |
+| Market ingress | `aitos/market_data/*` and canonical market-data documentation | Existing canonical pipeline; freshness and backpressure policy is documented |
+| Transport/storage | Redis Streams, Clickhouse and scoped transactional stores | Existing separation is documented; each table/journal's authority and runtime writers require a complete inventory |
+| Portfolio primitives | `aitos/markets/portfolio.py` | SOURCE-VERIFIED positions, gross/net notional, PnL and asset-class exposure |
+| Universal risk | `aitos/markets/risk.py`; `aitos/risk/risk_engine.py` | SOURCE-VERIFIED risk components exist; authority and composition across all entry paths must be traced |
+| Strategy contracts | `aitos/strategy/contracts.py` | SOURCE-VERIFIED strategy context, capital requests, intents and correlation metadata |
+| Decision intelligence | `aitos/decision/types.py`, ADL runtime and replay | SOURCE-VERIFIED typed probabilistic decision contracts and replay-oriented interface |
+| Execution recovery | `aitos/execution/*`, `docs/EXECUTION_RECOVERY.md` | Strong durable-intent and fail-closed design; protective-order crash recovery and venue certification remain explicit gates |
+| Quant/research | `docs/QUANTITATIVE_INTELLIGENCE_ENGINE.md` and associated modules | Broad statistical/replay/validation capability; empirical calibration and complete runtime wiring are not implied |
+| Learning/governance | `docs/CONTINUAL_LEARNING_ARCHITECTURE.md`, model registry and approval services | Governed lifecycle exists in part; deployed identity provider, schedules, canary collection and production adapters remain separate gates |
+| Operations | health server, data-flow telemetry, CI and deployment workflows | Source instrumentation exists; live scrape, retention, complete tracing and SLO evidence need verification |
+
+## Architectural findings and gaps
+
+### AEP-001 — Canonical contracts have overlapping definitions
+
+Source inspection found multiple similarly named contracts:
+- `aitos/decision/types.py::MarketSnapshot`;
+- `aitos/strategy/contracts.py::MarketSnapshot`;
+- `aitos/strategy/contracts.py::ExecutionIntent`;
+- `aitos/markets/adapters.py::ExecutionIntent`;
+- an additional `ExecutionIntent` in `aitos/intelligence/autonomy_pipeline.py`.
+
+The market-domain contract already provides `Instrument` and `MarketEvent`, while `GlobalMarketState` is a separate aggregate. This is not proof that all duplicates are currently incompatible, but it is a concrete contract-drift risk.
+
+**Decision:** do not rename or delete these contracts in bulk. First inventory imports, serialization formats, persistence payloads and public APIs. Define one canonical owner per concept, then add explicit adapters/deprecation shims and migrate consumers incrementally. Preserve serialized compatibility and test old/new round trips.
+
+### AEP-002 — Market state is present, but end-to-end provenance is not yet one contract
+
+`GlobalMarketState` is immutable and `decision.MarketSnapshot` already carries a timestamp and source-version mapping. The market-domain event also carries source, event/receive timestamps, event ID and schema version.
+
+The remaining architecture task is to prove and standardize the lineage between these existing types rather than invent another `MarketState` class.
+
+**Target requirements:** stable snapshot ID; instrument identity; event-time and observation-time semantics; per-source freshness/quality; feature/model/config versions; missing/degraded-input reasons; deterministic serialization; bounded provenance references. Never place raw unbounded payloads in the hot decision object. The builder must fail closed or explicitly degrade according to a documented per-feature policy.
+
+### AEP-003 — Portfolio and risk primitives need a single enforced authority path
+
+The repository has market portfolio primitives, a universal market risk engine and a separate risk package. Strategy contracts also carry capital requests, positions, portfolio delta, risk budget and measured strategy correlations.
+
+The gap is not “no portfolio/risk code”; it is a source-backed proof that every risk-increasing path reserves capital and passes through the same authoritative, concurrency-safe projected-portfolio gate.
+
+**Target requirements:** include open positions, pending orders and in-flight reservations; calculate gross/net/concentration and correlated exposure; apply asset-specific margin/contract semantics; reserve atomically before dispatch; keep reduce-only de-risking available under explicitly bounded emergency policy; make risk decisions immutable and auditable. Do not add a new optimizer until existing allocation and lifecycle paths are mapped and tested.
+
+### AEP-004 — Financial truth is distributed across purpose-specific stores
+
+Existing documentation describes ClickHouse analytical/history, Redis hot state/transport, SQLite execution/capital/revision journals, model/checkpoint files and a PostgreSQL fallback/capability path. These stores do not share one cross-database transaction.
+
+**Decision:** do not introduce another database or silently declare ClickHouse the authority for every financial record. Publish a per-aggregate authority matrix (orders, fills, positions, cash, fees, funding, reservations, model artifacts, market history), transaction boundary, idempotency key, reconciliation source and recovery procedure. Only after that audit decide whether an OLTP consolidation is justified. Reconciliation must detect discrepancies; it must not silently repair or release capital.
+
+### AEP-005 — Research/live parity is a contract and test problem
+
+Backtest, paper and live have different execution adapters and unavoidable fill-model differences. They must share strategy evaluation, decision schema, risk semantics and lifecycle intent contracts, while each adapter reports its actual execution assumptions and evidence.
+
+**Target requirements:** point-in-time feature availability; deterministic replay; immutable dataset/code/config/model digests; event-time ordering; realistic fees, spread, funding, latency, partial fills, queue and market impact; explicit simulator-vs-venue differences; decision/rejection/HOLD/exit attribution. Synthetic tests are not empirical venue calibration.
+
+### AEP-006 — Execution recovery still has explicit unresolved crash windows
+
+`docs/EXECUTION_RECOVERY.md` explicitly records that market-order durable intent does not yet constitute a complete protective-order intent ledger: a crash between protective POST and ID persistence requires open-algo-order inventory/reconciliation. It also documents adapter-specific capability limitations and the need for complete account/position/protection recovery tests.
+
+**Decision:** retain fail-closed quarantine and no-blind-resubmit behavior. Build a fault matrix and adapter capability contract before modifying the active order lifecycle. No live activation is part of AEP-1.
+
+### AEP-007 — Model governance primitives are not the same as a deployed governance service
+
+The repository includes validation, registry, approval and rollout primitives. Their presence does not prove authenticated identity middleware, durable scheduled evaluation, canary evidence collection, alert delivery, rollback adapters or production operation are deployed.
+
+**Target requirements:** immutable artifact/data/config provenance; explicit role-bound approval; challenger shadow; evidence thresholds; controlled canary; automatic *halt/rollback only under pre-authorized deterministic conditions*; human approval for promotion; append-only audit.
+
+### AEP-008 — Observability needs end-to-end coverage evidence
+
+Existing data-flow and lifecycle telemetry is valuable. Complete stage correlation, durable decision traces, bounded cardinality, retention, alert delivery and real scrape/render verification remain acceptance items. Existing latency baseline correctly marks production percentiles NOT MEASURED; preserve that truth.
+
+## Target logical architecture
+
+```text
+External venues / providers / macro / news / on-chain
+                     |
+          Adapter + instrument master
+                     |
+       Normalize / validate / sequence / freshness
+                     |
+         Canonical event contracts + lineage
+              /             |             \
+       bounded hot state   event bus    durable history
+              \             |             /
+                point-in-time feature context
+                             |
+                Global / per-instrument state
+                             |
+             independent strategy proposals
+                             |
+             decision + EV + uncertainty + rank
+                             |
+          portfolio projection + atomic reservation
+                             |
+                 independent risk authority
+                             |
+             durable OMS/EMS execution intent
+                             |
+                venue-specific execution adapter
+                             |
+            fills + accounting + reconciliation
+                             |
+             decision/outcome attribution store
+                             |
+              research + governed model lifecycle
+                             |
+             shadow/canary + operator approval
+```
+
+Control plane (configuration, identity, secrets, observability, CI/CD, incident response and operator console) spans all layers but must not bypass their authority boundaries. Background training, graph queries, RAG, historical backfill and reporting must remain outside the latency-sensitive market/execution path.
+
+## Delivery plan and dependency order
+
+### Phase 0 — Baseline and overlap coordination (this tranche)
+- Record current source-backed components and gaps.
+- Identify overlapping open work before editing shared domains.
+- Establish non-negotiable invariants, status vocabulary and acceptance gates.
+- No runtime behavior changes.
+
+**Exit:** this baseline document, architecture map pointer, branch/PR handoff and explicit blockers.
+
+### Phase 1 — Contract and ownership audit (next)
+- Generate module/import/dependency inventory from source.
+- Map every `MarketSnapshot`, `ExecutionIntent`, `MarketEvent`, portfolio and risk contract and all serialization/persistence consumers.
+- Publish data authority matrix and per-aggregate recovery ownership.
+- Trace every entry/exit/reduce-only path to the authoritative risk and execution gates.
+- Coordinate with open PR #246 and #250; do not duplicate or rebase their work without review.
+
+**Exit:** no unresolved duplicate-authority path for the audited domains; compatibility plan and tests accepted.
+
+### Phase 2 — Canonical market context (approval required before active wiring)
+- Extend existing contracts only where the inventory demonstrates missing fields.
+- Add stable snapshot/version/lineage references and explicit quality/freshness states.
+- Add deterministic serialization, compatibility tests and replay fixtures.
+- Shadow-compare new context against existing consumers before cutover.
+
+**Exit:** old/new parity, stale/degraded handling tests, replay reproducibility and explicit operator approval for cutover.
+
+### Phase 3 — Portfolio/risk authority (approval required before active wiring)
+- Trace and consolidate existing allocation/risk path; do not create parallel risk engines.
+- Add pending-order and in-flight reservation projection if absent.
+- Verify atomic reservation under concurrent proposals.
+- Prove risk veto cannot be overridden and reduce-only exits remain safely bounded.
+
+**Exit:** property/concurrency/fault tests and paper-only integration evidence; no change to risk policy values without separate approval.
+
+### Phase 4 — Financial/execution integrity (approval required before active wiring)
+- Map order/fill/position/cash/fee/funding authority.
+- Complete protective-order intent inventory and restart reconciliation.
+- Verify duplicate/out-of-order/partial fills, ambiguous ACK, process death, disk-full and store outage.
+- Define backup/restore and operator reconciliation procedures.
+
+**Exit:** isolated adapter and Redis/ClickHouse/transactional-store fault matrix; no unresolved state is silently treated as safe.
+
+### Phase 5 — Research-to-live parity and quant certification
+- Reuse canonical decision and risk contracts across backtest/paper/live adapters.
+- Complete data/model/feature provenance and execution calibration.
+- Run walk-forward/OOS/regime/side/cost/ablation and multiple-testing controls.
+- Publish confidence intervals and benchmark-relative results.
+
+**Exit:** reproducible evidence package; no profitability claims from synthetic fixtures.
+
+### Phase 6 — Governance and operations
+- Verify real identity middleware, alert sinks, scheduled drift evaluation and canary collectors.
+- Complete end-to-end traces, retention, SLO definitions, capacity and disaster-recovery drills.
+- Keep candidate promotion human-approved and live trading disabled absent separate authorization.
+
+**Exit:** independent review and operational acceptance record.
+
+## Explicit non-goals / decisions deferred
+
+- No blanket microservices conversion.
+- No Kafka/Redpanda/Flink/Ray adoption without workload benchmark and operational justification.
+- No blanket Rust/C++/Go rewrite; Python remains primary and optional Rust remains benchmark-gated.
+- No second feature store, second risk engine or duplicate portfolio ledger.
+- No automatic model promotion or autonomous risk-policy mutation.
+- No VPS deployment, live trading, real exchange orders, data deletion/reset or destructive migration.
+- No production latency or profitability claims without measured evidence.
+
+## Approval and rollback gates
+
+Architecture-sensitive changes to event schemas, subscriptions, Redis consumer semantics, persistence/recovery, concurrency, queue limits, portfolio/risk authority or order lifecycle require a concrete change proposal, dependency analysis, regression tests, rollback plan and explicit approval before activation/deployment.
+
+Every migration must be additive first, support old readers during transition, include deterministic backfill/reconciliation where needed, and have a tested rollback. Never drop old fields/tables or release uncertain reservations as part of a convenience cleanup.
+
+## Current blockers and coordination
+
+- **PR #246** is an open Draft with broad quantitative/statistical, financial-ML, drift/governance and storage-reliability changes. Its description explicitly says not to merge it as part of another task. Shared files in these domains are therefore out of scope until the branch is independently reviewed and reconciled.
+- **PR #250** contains on-demand historical market intelligence and cache/request-budget changes. Do not duplicate or modify its scanner/history budget files in this tranche.
+- PR #244/#215 concern Binance testnet routing; testnet routing is not equivalent to simulated paper or live readiness.
+- Runtime access and current local process/position state were not available in this GitHub-only tranche. Runtime, exchange, service-backed and latency checks are NOT TESTED / NOT MEASURED.
+
+## Verification record for this tranche
+
+- Repository instructions `AGENTS.md`, `skills/aitos-skill.md` and `engineering/AGENT_OPERATING_MODEL.md` reviewed.
+- Architecture, market-data, multi-market, freshness, compute-aware intelligence, execution recovery, quantitative intelligence, module inventory, latency baseline and backend-first roadmap reviewed.
+- Source contracts inspected: `aitos/markets/contracts.py`, `aitos/markets/state.py`, `aitos/markets/portfolio.py`, `aitos/markets/risk.py`, `aitos/decision/types.py`, `aitos/strategy/contracts.py`.
+- Source-level duplicate contract names identified; full consumer/serialization migration inventory remains Phase 1.
+- Tests and CI were not run in this documentation-only tranche. Runtime checks and production latency remain NOT TESTED / NOT MEASURED.
