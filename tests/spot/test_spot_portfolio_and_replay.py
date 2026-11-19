@@ -6,8 +6,10 @@ from aitos.spot.models import SpotBalance
 from aitos.spot.portfolio import SpotPortfolioValuator
 from aitos.spot.replay import (
     BookLevel,
+    TimedBookSnapshot,
     replay_spot_limit_order,
     replay_spot_market_order,
+    replay_spot_order_with_latency,
 )
 
 
@@ -110,3 +112,35 @@ def test_spot_maker_replay_uses_observed_queue_ahead():
     assert result.unfilled_quantity == Decimal("3")
     assert result.fees_quote == Decimal("0.10")
     assert result.fills[0].maker
+
+
+
+def test_spot_replay_uses_first_book_after_order_latency():
+    snapshots = [
+        TimedBookSnapshot(
+            1000,
+            (BookLevel(Decimal("99"), Decimal("10")),),
+            (BookLevel(Decimal("100"), Decimal("10")),),
+        ),
+        TimedBookSnapshot(
+            1125,
+            (BookLevel(Decimal("100"), Decimal("10")),),
+            (BookLevel(Decimal("102"), Decimal("10")),),
+        ),
+        TimedBookSnapshot(
+            1200,
+            (BookLevel(Decimal("101"), Decimal("10")),),
+            (BookLevel(Decimal("103"), Decimal("10")),),
+        ),
+    ]
+    result = replay_spot_order_with_latency(
+        side="BUY",
+        quantity=Decimal("1"),
+        submitted_at_ms=1000,
+        latency_ms=100,
+        snapshots=snapshots,
+        maker_fee_bps=Decimal("10"),
+        taker_fee_bps=Decimal("20"),
+    )
+    assert result.average_price == Decimal("102")
+    assert result.latency_ms == 100
