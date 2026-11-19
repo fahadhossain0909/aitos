@@ -42,6 +42,11 @@ async def test_third_asset_fee_uses_latest_historical_trade_before_fill():
     position = ledger.get_position("BTCUSDT")
     assert position.cost_quote == Decimal("103.10")
     assert not position.fee_conversion_pending
+    provenance = ledger.commission_conversion_provenance("fee-fill")
+    assert provenance["symbol"] == "BNBUSDT"
+    assert provenance["price"] == "310"
+    assert provenance["time_ms"] == 1_700_000_000_000 - 100
+    assert provenance["source"] == "binance_spot_aggTrades"
     ledger.close()
 
 
