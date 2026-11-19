@@ -49,8 +49,13 @@ class SpotCandidate:
         if abs(self.order_book_imbalance) > 1:
             raise ValueError("order book imbalance must be in [-1, 1]")
         if self.futures_spot_correlation is not None:
-            if not self.futures_spot_correlation.is_finite() or abs(self.futures_spot_correlation) > 1:
-                raise ValueError("Futures-Spot correlation must be finite and in [-1, 1]")
+            if (
+                not self.futures_spot_correlation.is_finite()
+                or abs(self.futures_spot_correlation) > 1
+            ):
+                raise ValueError(
+                    "Futures-Spot correlation must be finite and in [-1, 1]"
+                )
         if self.futures_spot_observations < 0:
             raise ValueError("Futures-Spot observations cannot be negative")
 
