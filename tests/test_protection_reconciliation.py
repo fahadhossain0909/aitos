@@ -14,7 +14,6 @@ from aitos.models.trade import TradeSide
 
 NOW = datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc)
 
-
 class ReadOnlyExecutor:
     def __init__(self, scope, orders):
         self.execution_scope = scope
@@ -32,7 +31,6 @@ class ReadOnlyExecutor:
         self.get_position_risk = AsyncMock(return_value=[])
         self.get_open_orders = AsyncMock(return_value=[])
 
-
 @pytest.fixture
 def protected_intent(tmp_path):
     store = ExecutionIntentStore(tmp_path / "intents.sqlite", scope="paper-account")
@@ -49,7 +47,6 @@ def protected_intent(tmp_path):
     )
     return store
 
-
 def inventory_row():
     return {
         "algoId": 123,
@@ -64,7 +61,6 @@ def inventory_row():
         "algoStatus": "NEW",
         "reduceOnly": True,
     }
-
 
 @pytest.mark.asyncio
 async def test_authenticated_inventory_match_is_observational_only(protected_intent):
@@ -81,7 +77,6 @@ async def test_authenticated_inventory_match_is_observational_only(protected_int
     assert report["automatic_actions"] == []
     assert protected_intent.unresolved()[0]["state"] == "SUBMITTING"
 
-
 @pytest.mark.asyncio
 async def test_missing_algo_order_does_not_clear_intent_or_claim_no_exposure(
     protected_intent,
@@ -96,7 +91,6 @@ async def test_missing_algo_order_does_not_clear_intent_or_claim_no_exposure(
     assert report["safe_to_resume"] is False
     assert protected_intent.unresolved()[0]["state"] == "SUBMITTING"
 
-
 @pytest.mark.asyncio
 async def test_scope_mismatch_fails_before_exchange_inventory_read(protected_intent):
     executor = ReadOnlyExecutor("another-account", [inventory_row()])
@@ -105,7 +99,6 @@ async def test_scope_mismatch_fails_before_exchange_inventory_read(protected_int
         await audit_exchange_protection_inventory(executor, protected_intent, now=NOW)
 
     executor.get_open_algo_orders.assert_not_awaited()
-
 
 @pytest.mark.asyncio
 async def test_empty_journal_and_empty_inventory_return_non_authorizing_report(
@@ -119,7 +112,6 @@ async def test_empty_journal_and_empty_inventory_return_non_authorizing_report(
     assert report["findings"] == []
     assert report["safe_to_resume"] is False
     assert report["account_exposure_verified"] is False
-
 
 @pytest.mark.asyncio
 async def test_applied_protection_is_matched_to_its_durable_history(protected_intent):
@@ -144,7 +136,6 @@ async def test_applied_protection_is_matched_to_its_durable_history(protected_in
     assert report["findings"][0]["status"] == "applied_order_present"
     assert report["safe_to_resume"] is False
 
-
 @pytest.mark.asyncio
 async def test_ambiguous_post_ack_is_queried_by_client_id_without_journal_write(
     protected_intent,
@@ -161,7 +152,6 @@ async def test_ambiguous_post_ack_is_queried_by_client_id_without_journal_write(
     assert finding["algo_id"] == "123"
     assert report["safe_to_resume"] is False
     assert protected_intent.protection_intents()[0]["state"] == "SUBMITTING"
-
 
 @pytest.mark.asyncio
 async def test_ambiguous_triggered_algo_queries_child_fill_read_only(protected_intent):
@@ -180,8 +170,6 @@ async def test_ambiguous_triggered_algo_queries_child_fill_read_only(protected_i
     assert finding["executed_quantity"] == "1.0"
     executor.get_order_status.assert_awaited_once_with("BTCUSDT", "algo:123")
     assert protected_intent.protection_intents()[0]["state"] == "SUBMITTING"
-
-
 
 @pytest.mark.asyncio
 async def test_account_exposure_audit_verifies_full_position_snapshot(protected_intent):
@@ -211,7 +199,6 @@ async def test_account_exposure_audit_verifies_full_position_snapshot(protected_
     executor.get_position_risk.assert_awaited_once()
     executor.get_open_orders.assert_awaited_once()
 
-
 @pytest.mark.asyncio
 async def test_account_exposure_mismatch_is_reported_not_authorized(protected_intent):
     executor = ReadOnlyExecutor("paper-account", [inventory_row()])
@@ -238,7 +225,6 @@ async def test_account_exposure_mismatch_is_reported_not_authorized(protected_in
     assert "mismatch" in report["position_snapshot_error"]
     assert report["account_exposure_verified"] is False
     assert report["safe_to_resume"] is False
-
 
 @pytest.mark.asyncio
 async def test_unpriced_open_entry_order_prevents_account_exposure_verification(
@@ -274,7 +260,6 @@ async def test_unpriced_open_entry_order_prevents_account_exposure_verification(
             "reason": "entry order lacks a validated stop-risk projection",
         }
     ]
-
 
 @pytest.mark.asyncio
 async def test_reduce_only_and_hedge_closing_orders_do_not_count_as_entry_exposure(
@@ -321,8 +306,6 @@ async def test_reduce_only_and_hedge_closing_orders_do_not_count_as_entry_exposu
     assert report["account_exposure_verified"] is True
     assert report["pending_entry_orders"] == []
 
-
-
 @pytest.mark.asyncio
 async def test_closed_trade_protection_history_does_not_require_resting_order(
     protected_intent,
@@ -348,7 +331,6 @@ async def test_closed_trade_protection_history_does_not_require_resting_order(
     assert report["findings"] == []
     assert report["account_exposure_verified"] is True
 
-
 @pytest.mark.asyncio
 async def test_closed_trade_with_orphaned_resting_protection_is_reported(
     protected_intent,
@@ -373,7 +355,6 @@ async def test_closed_trade_with_orphaned_resting_protection_is_reported(
 
     assert report["findings"][0]["status"] == "unowned_order"
     assert report["account_exposure_verified"] is True
-
 
 @pytest.mark.asyncio
 async def test_live_guard_accepts_only_reconciled_account_and_owned_protection(
@@ -414,7 +395,6 @@ async def test_live_guard_accepts_only_reconciled_account_and_owned_protection(
 
     assert report["account_exposure_verified"] is True
 
-
 @pytest.mark.asyncio
 async def test_live_guard_blocks_unpriced_pending_entry_order(protected_intent):
     executor = ReadOnlyExecutor("paper-account", [])
@@ -436,8 +416,6 @@ async def test_live_guard_blocks_unpriced_pending_entry_order(protected_intent):
         await require_live_account_exposure_reconciled(
             executor, protected_intent, [], now=NOW
         )
-
-
 
 @pytest.mark.asyncio
 async def test_terminal_protection_is_not_expected_in_open_inventory(
