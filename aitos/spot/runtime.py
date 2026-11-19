@@ -162,6 +162,7 @@ def build_spot_runtime(
         rest,
         enabled=policy.execution_enabled,
         allow_mainnet=bool(policy.allow_mainnet and mainnet_approved),
+        quote_asset=policy.quote_asset,
         symbol_filters=symbol_filters,
     )
     path = (
