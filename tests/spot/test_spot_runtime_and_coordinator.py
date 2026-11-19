@@ -189,6 +189,12 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
             quantity=Decimal("2"),
             authorization=_exit_decision(),
         )
+    with pytest.raises(SpotAuthorizationRejected, match="EIE suggested"):
+        await coordinator.submit_exit(
+            symbol="BTCUSDT",
+            quantity=Decimal("0.5"),
+            authorization=_exit_decision(ExitAction.MANAGE, fraction=0.25),
+        )
     result = await coordinator.submit_exit(
         symbol="BTCUSDT",
         quantity=Decimal("0.5"),
