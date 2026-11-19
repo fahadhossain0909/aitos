@@ -248,7 +248,11 @@ class SpotRuntime:
                     },
                 )
             health["restarts"] = int(health["restarts"]) + 1
-            await asyncio.sleep(delay)
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                health["state"] = "stopped"
+                raise
             delay = min(delay * 2.0, 30.0)
 
     async def stop_market_data(self) -> None:
