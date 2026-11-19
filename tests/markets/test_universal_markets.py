@@ -171,7 +171,7 @@ def test_timestamped_returns_do_not_bridge_missing_buckets():
             )
         )
     returns = engine.timestamped_returns(symbol.id, bucket_seconds=1.0)
-    assert set(returns) == {1704067201, 1704067204}
+    assert set(returns) == {int(start.timestamp()) + 1, int(start.timestamp()) + 4}
 
 
 def test_timestamp_aligned_lead_lag_rejects_invalid_lag_and_bucket():
