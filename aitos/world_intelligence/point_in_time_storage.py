@@ -199,12 +199,20 @@ class ClickHousePointInTimeStore:
             "ORDER BY asset, open_time, available_at LIMIT {limit:UInt32}",
             parameters={"as_of": stamp, "limit": limit},
         )
-        event_rows = tuple(
-            EventRevision(**json.loads(row[0])) for row in events.result_rows
-        )
-        bar_rows = tuple(
-            MarketBarRevision(**json.loads(row[0])) for row in bars.result_rows
-        )
+        event_rows_list = []
+        for row in events.result_rows:
+            payload = json.loads(row[0])
+            for field in ("published_at", "known_at"):
+                payload[field] = datetime.fromisoformat(payload[field])
+            event_rows_list.append(EventRevision(**payload))
+        bar_rows_list = []
+        for row in bars.result_rows:
+            payload = json.loads(row[0])
+            for field in ("open_time", "close_time", "available_at"):
+                payload[field] = datetime.fromisoformat(payload[field])
+            bar_rows_list.append(MarketBarRevision(**payload))
+        event_rows = tuple(event_rows_list)
+        bar_rows = tuple(bar_rows_list)
         return event_rows, bar_rows
 
 
