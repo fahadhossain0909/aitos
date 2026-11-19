@@ -1,4 +1,5 @@
 """Point-in-time conversion of third-asset Spot commissions into quote currency."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -38,7 +39,8 @@ class SpotCommissionConversionService:
             limit=1000,
         )
         eligible = [
-            row for row in rows
+            row
+            for row in rows
             if int(row.get("T", -1)) <= fill_time_ms
             and int(row.get("T", -1)) >= fill_time_ms - self.max_price_age_ms
         ]
