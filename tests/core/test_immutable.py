@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 import pytest
 
@@ -49,12 +50,8 @@ def test_market_data_event_payload_and_stage_timestamps_are_deeply_immutable():
         exchange="binance",
         market="spot",
         symbol="BTCUSDT",
-        event_time=__import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ),
-        ingest_time=__import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ),
+        event_time=datetime.now(timezone.utc),
+        ingest_time=datetime.now(timezone.utc),
         payload={"book": [{"price": 100.0}]},
         source=MarketSource.WEBSOCKET,
         stage_timestamps={"decode": 1.0},
