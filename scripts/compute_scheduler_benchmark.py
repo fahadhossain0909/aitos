@@ -6,9 +6,11 @@ or production CPU throughput.
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 import time
+
 from aitos.intelligence.compute_scheduler import (
     AnalysisTask,
     ComputeAwareScheduler,

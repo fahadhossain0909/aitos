@@ -1,5 +1,7 @@
 import math
+
 import pytest
+
 from aitos.intelligence.compute_scheduler import (
     AnalysisTask,
     ComputeAwareScheduler,

@@ -6,9 +6,9 @@ own, drop, reorder, or coalesce raw exchange events or order-book deltas.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import IntEnum
-import math
 from typing import Any
 
 

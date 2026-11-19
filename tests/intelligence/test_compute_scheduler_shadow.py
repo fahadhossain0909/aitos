@@ -1,7 +1,7 @@
 from aitos.intelligence.compute_scheduler import (
     AnalysisTask,
-    TaskPriority,
     ComputeAwareScheduler,
+    TaskPriority,
 )
 from aitos.intelligence.compute_scheduler_shadow import ComputeSchedulerShadow
 

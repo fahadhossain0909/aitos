@@ -1,8 +1,10 @@
 """Read-only shadow adapter for compute-aware task scheduling."""
 
 from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+
 from aitos.intelligence.compute_scheduler import (
     AnalysisTask,
     ComputeAwareScheduler,

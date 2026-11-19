@@ -1,11 +1,13 @@
 """Dependency-free hybrid ranking for retrieved quantitative memories."""
 
 from __future__ import annotations
+
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 _TOKEN = re.compile(r"[a-z0-9_]+")
 
