@@ -505,3 +505,46 @@ def test_nonterminal_protection_cannot_be_marked_terminal(tmp_path, status):
         journal.mark_protection_terminal(
             "algo:123", symbol="BTCUSDT", status=status
         )
+
+
+
+async def test_confirmed_binance_algo_cancel_updates_protection_journal(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(
+        request(
+            order_type="STOP_MARKET",
+            reduce_only=True,
+            reference_price=90.0,
+        )
+    )
+    journal.record_protection(
+        "intent-one",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="intent-one",
+        ),
+    )
+    journal.mark_applied("intent-one", "trade-one")
+    executor = BinanceFuturesOrderExecutor(
+        "dummy", "dummy", intent_store=journal
+    )
+    executor._signed_request = AsyncMock(
+        side_effect=[
+            {"algoId": 123, "algoStatus": "CANCELED"},
+            {
+                "algoId": 123,
+                "symbol": "BTCUSDT",
+                "algoStatus": "CANCELED",
+            },
+        ]
+    )
+
+    result = await executor.cancel_order("BTCUSDT", "algo:123")
+
+    assert result["status"] == "CANCELED"
+    assert journal.unresolved() == []
+    assert journal.protection_intents()[0]["state"] == "TERMINAL"
