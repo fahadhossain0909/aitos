@@ -98,9 +98,7 @@ class SpotTradingCoordinator:
                 f"capital gateway rejected Spot entry: {reasons}"
             )
 
-        approved_budget = (
-            Decimal(str(allocation.capital_usd)) / self.quote_to_usd_rate
-        )
+        approved_budget = Decimal(str(allocation.capital_usd)) / self.quote_to_usd_rate
         if request.quote_order_quantity > approved_budget:
             self.capital_gateway.release(key.value)
             raise SpotAuthorizationRejected(
