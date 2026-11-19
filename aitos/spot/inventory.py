@@ -41,7 +41,7 @@ class InventoryLedger:
               side TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
               commission TEXT NOT NULL, commission_asset TEXT NOT NULL,
               quote_value TEXT NOT NULL, commission_quote_value TEXT,
-              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+              fill_time_ms INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """
         )
@@ -64,6 +64,10 @@ class InventoryLedger:
         if "commission_quote_value" not in columns:
             self._db.execute(
                 "ALTER TABLE spot_fills ADD COLUMN commission_quote_value TEXT"
+            )
+        if "fill_time_ms" not in columns:
+            self._db.execute(
+                "ALTER TABLE spot_fills ADD COLUMN fill_time_ms INTEGER"
             )
         self._db.commit()
 
@@ -105,7 +109,8 @@ class InventoryLedger:
     def pending_fee_conversions(self) -> list[dict[str, str]]:
         with self._lock:
             rows = self._db.execute(
-                """SELECT fill_key,symbol,commission,commission_asset
+                """SELECT fill_key,symbol,commission,commission_asset,base_asset,
+                      quote_asset,fill_time_ms
                    FROM spot_fills
                    WHERE CAST(commission AS REAL) > 0
                      AND commission_asset NOT IN (base_asset, quote_asset)
@@ -115,7 +120,10 @@ class InventoryLedger:
         return [
             dict(
                 zip(
-                    ("fill_key", "symbol", "commission", "commission_asset"),
+                    (
+                        "fill_key", "symbol", "commission", "commission_asset",
+                        "base_asset", "quote_asset", "fill_time_ms"
+                    ),
                     row,
                 )
             )
@@ -214,6 +222,7 @@ class InventoryLedger:
         price: Decimal,
         commission: Decimal = Decimal("0"),
         commission_asset: str = "",
+        fill_time_ms: int | None = None,
     ) -> bool:
         if not fill_key or quantity <= 0 or price <= 0 or commission < 0:
             raise ValueError("invalid fill")
@@ -230,8 +239,8 @@ class InventoryLedger:
                 cur.execute(
                     """INSERT OR IGNORE INTO spot_fills
                     (fill_key,symbol,base_asset,quote_asset,side,quantity,price,
-                     commission,commission_asset,quote_value)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                     commission,commission_asset,quote_value,fill_time_ms)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         fill_key,
                         symbol.upper(),
@@ -243,6 +252,7 @@ class InventoryLedger:
                         str(commission),
                         commission_asset,
                         str(quote_value),
+                        fill_time_ms,
                     ),
                 )
                 inserted = cur.rowcount == 1
