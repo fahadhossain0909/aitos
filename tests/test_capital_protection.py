@@ -1,5 +1,7 @@
 import multiprocessing
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -368,3 +370,33 @@ def test_spot_and_futures_reservations_have_distinct_market_namespaces(
         }
     finally:
         ledger.close()
+
+def test_sqlite_reservation_risk_policy_is_serialized_across_instances(tmp_path):
+    path = tmp_path / "atomic-risk-policy.sqlite3"
+    first = CapitalReservation(path=path, owner_id="worker-a")
+    second = CapitalReservation(path=path, owner_id="worker-b")
+    barrier = Barrier(2)
+
+    def reserve(ledger, symbol):
+        barrier.wait(timeout=5)
+        return ledger.reserve(
+            Reservation(symbol, 100.0, 1.0),
+            available_capital_usd=1_000.0,
+            available_risk_usd=10.0,
+            capital_limit_usd=1_000.0,
+            risk_limit_usd=10.0,
+            risk_policy=lambda active: len(active) == 0,
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(reserve, first, "BTCUSDT"),
+                pool.submit(reserve, second, "ETHUSDT"),
+            ]
+            accepted = [future.result(timeout=10) for future in futures]
+        assert sum(accepted) == 1
+        assert len(first.snapshot()) == 1
+    finally:
+        first.close()
+        second.close()
