@@ -266,7 +266,9 @@ async def _merge_symbols(
         except Exception as exc:
             await queue.put(("error", exc))
         finally:
-            await queue.put(("done", symbol))
+            task = asyncio.current_task()
+            if task is None or not task.cancelling():
+                await queue.put(("done", symbol))
 
     tasks = [
         asyncio.create_task(worker(symbol), name=f"spot-stream-{symbol}")
