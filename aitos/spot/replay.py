@@ -64,6 +64,10 @@ def replay_spot_market_order(
     latency_ms is recorded and can select a later timestamped book snapshot
     upstream. This pure function does not shift prices by guessing future data.
     """
+    if maker:
+        raise ValueError(
+            "maker fills require queue-aware limit-order replay; use replay_spot_limit_order"
+        )
     if side not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
     if quantity <= 0 or latency_ms < 0:
@@ -118,7 +122,7 @@ def replay_spot_market_order(
             price=(price * adverse if side == "BUY" else price / adverse),
             quantity=qty,
             fee_quote=price * qty * fees_rate / Decimal("10000"),
-            maker=maker,
+            maker=False,
         )
         for price, qty in raw_fills
     )
@@ -133,4 +137,41 @@ def replay_spot_market_order(
         slippage_bps=slippage,
         latency_ms=latency_ms,
         fills=fills,
+    )
+
+
+
+def replay_spot_limit_order(
+    *,
+    side: Literal["BUY", "SELL"],
+    quantity: Decimal,
+    limit_price: Decimal,
+    queue_ahead: Decimal,
+    traded_quantity_at_price: Decimal,
+    maker_fee_bps: Decimal,
+    latency_ms: int = 0,
+) -> SpotExecutionReplayResult:
+    """Replay passive limit fills from observed traded volume and queue ahead."""
+    if side not in {"BUY", "SELL"}:
+        raise ValueError("side must be BUY or SELL")
+    if min(quantity, limit_price) <= 0 or min(queue_ahead, traded_quantity_at_price) < 0:
+        raise ValueError("limit replay quantities/prices are invalid")
+    if maker_fee_bps < 0 or latency_ms < 0:
+        raise ValueError("maker fee and latency must be non-negative")
+    filled = min(quantity, max(Decimal("0"), traded_quantity_at_price - queue_ahead))
+    gross = filled * limit_price
+    fee = gross * maker_fee_bps / Decimal("10000")
+    return SpotExecutionReplayResult(
+        side=side,
+        requested_quantity=quantity,
+        filled_quantity=filled,
+        average_price=limit_price if filled else None,
+        gross_quote=gross,
+        fees_quote=fee,
+        market_impact_bps=Decimal("0"),
+        slippage_bps=Decimal("0"),
+        latency_ms=latency_ms,
+        fills=(
+            (ReplayFill(limit_price, filled, fee, True),) if filled else ()
+        ),
     )
