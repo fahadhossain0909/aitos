@@ -77,7 +77,8 @@ class BinanceSpotCanonicalMarketDataAdapter:
             async for item in self.websocket.stream(symbol, "@bookTicker"):
                 data = item["data"]
                 event_ms = data.get("E") or data.get("T")
-                yield _event(symbol, MarketEventType.TICKER, _event_time(event_ms),
+                observed_at = _event_time(event_ms) if event_ms is not None else datetime.now(timezone.utc)
+                yield _event(symbol, MarketEventType.TICKER, observed_at,
                     {"bid_price": str(data["b"]), "bid_quantity": str(data["B"]),
                      "ask_price": str(data["a"]), "ask_quantity": str(data["A"])},
                     MarketSource.WEBSOCKET, int(data.get("u", 0)) or None)
