@@ -191,8 +191,8 @@ def replay_l2_market_order(
                 raise ValueError("impact and slippage imply a non-positive fill price")
             fee = qty * fill_price * fee_bps / 10000.0
             fees += fee
-            spread += qty * abs(price - mid)
-            impact_total += qty * abs(impacted - price)
+            spread += qty * abs(levels[0][0] - mid)
+            impact_total += qty * abs(impacted - levels[0][0])
             slippage_total += qty * abs(fill_price - impacted)
             notional += qty * fill_price
             filled += qty
