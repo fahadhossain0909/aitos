@@ -204,14 +204,18 @@ class SpotRuntime:
             asyncio.create_task(
                 self._supervise_market_stream(
                     "order_books",
-                    lambda: self.publish_order_books(market_bus, book_symbols, levels=20),
+                    lambda: self.publish_order_books(
+                        market_bus, book_symbols, levels=20
+                    ),
                 ),
                 name="aitos-spot-order-books",
             ),
             asyncio.create_task(
                 self._supervise_market_stream(
                     "klines",
-                    lambda: self.publish_klines(market_bus, kline_symbols, timeframe="1m"),
+                    lambda: self.publish_klines(
+                        market_bus, kline_symbols, timeframe="1m"
+                    ),
                 ),
                 name="aitos-spot-klines",
             ),
