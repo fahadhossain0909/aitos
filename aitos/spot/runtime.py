@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 from aitos.config.paths import get_data_dir
@@ -75,7 +76,7 @@ def build_spot_runtime(
     path.parent.mkdir(parents=True, exist_ok=True)
     inventory = InventoryLedger(path)
     scanner = SpotOpportunityScanner(
-        min_quote_volume=__import__("decimal").Decimal(str(policy.min_quote_volume)),
+        min_quote_volume=Decimal(str(policy.min_quote_volume)),
         max_spread_bps=__import__("decimal").Decimal(str(policy.max_spread_bps)),
         max_volatility_bps=__import__("decimal").Decimal(str(policy.max_volatility_bps)),
     )
