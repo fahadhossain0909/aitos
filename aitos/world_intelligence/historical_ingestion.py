@@ -249,7 +249,8 @@ class HistoricalIngestionStore:
         provider: HistoricalProvider,
         *,
         start_cursor: str | None = None,
-        max_pages: int = 1000, fencing_token: int = 0,
+        max_pages: int = 1000,
+        fencing_token: int = 0,
     ) -> tuple[int, str | None]:
         """Run a bounded provider cursor to exhaustion; date semantics stay in adapter."""
         if isinstance(max_pages, bool) or not 1 <= max_pages <= 100_000:
@@ -288,7 +289,10 @@ class HistoricalIngestionStore:
         )
 
     async def ingest(
-        self, provider: HistoricalProvider, *, cursor: str | None = None,
+        self,
+        provider: HistoricalProvider,
+        *,
+        cursor: str | None = None,
         fencing_token: int = 0,
     ) -> str | None:
         current_cursor = (
