@@ -315,9 +315,9 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                any(symbol) AS symbol,
-                any(state) AS state,
-                any(request_json) AS request_json,
+                any(symbol) AS latest_symbol,
+                any(state) AS latest_state,
+                any(request_json) AS latest_request_json,
                 uniqExact(tuple(symbol, state, request_json, result_json))
                     AS latest_versions
             FROM order_execution_ledger
@@ -355,8 +355,8 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                any(state) AS state,
-                any(result_json) AS result_json,
+                any(state) AS latest_state,
+                any(result_json) AS latest_result_json,
                 uniqExact(tuple(symbol, state, request_json, result_json)) AS latest_versions
             FROM order_execution_ledger
             WHERE (client_order_id, updated_at) IN (
@@ -399,10 +399,10 @@ class DurableTradingStateStore:
         result = await client.query(
             """
             SELECT
-                any(symbol) AS symbol,
-                any(state) AS state,
-                any(request_json) AS request_json,
-                any(result_json) AS result_json,
+                any(symbol) AS latest_symbol,
+                any(state) AS latest_state,
+                any(request_json) AS latest_request_json,
+                any(result_json) AS latest_result_json,
                 uniqExact(tuple(symbol, state, request_json, result_json))
                     AS latest_versions
             FROM order_execution_ledger
