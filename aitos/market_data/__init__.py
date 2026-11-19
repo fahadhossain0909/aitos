@@ -29,12 +29,10 @@ from .venues import (
     VenueConfig,
 )
 
-from .binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 
 __all__ = [
     "DEFAULT_VENUES",
     "BinanceCanonicalMarketDataAdapter",
-    "BinanceSpotCanonicalMarketDataAdapter",
     "BookLevel",
     "BybitCanonicalMarketDataAdapter",
     "CanonicalMarketDataAdapter",
