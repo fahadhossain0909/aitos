@@ -120,6 +120,9 @@ class CapitalGateway:
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
                 "position_sides": consensus.get("position_sides", {}),
+                "pending_order_risk_pct": consensus.get("pending_order_risk_pct", {}),
+                "pending_order_symbols": consensus.get("pending_order_symbols", {}),
+                "pending_order_sides": consensus.get("pending_order_sides", {}),
                 "correlations": consensus.get("correlations", {}),
                 "daily_pnl_pct": consensus.get("daily_pnl_pct", 0.0),
                 "consecutive_losses": consensus.get("consecutive_losses", 0),
@@ -152,6 +155,29 @@ class CapitalGateway:
             str(k): str(v).upper()
             for k, v in dict(metadata.get("position_sides") or {}).items()
         }
+        position_instruments = {key: key for key in positions}
+        pending_risk = dict(metadata.get("pending_order_risk_pct") or {})
+        pending_symbols = dict(metadata.get("pending_order_symbols") or {})
+        pending_sides = dict(metadata.get("pending_order_sides") or {})
+        if not (
+            set(pending_risk) == set(pending_symbols) == set(pending_sides)
+        ):
+            raise ValueError("pending order risk projection identity mismatch")
+        for order_key, risk_value in pending_risk.items():
+            risk_pct = float(risk_value)
+            instrument = str(pending_symbols[order_key])
+            side = str(pending_sides[order_key]).upper()
+            if (
+                not instrument
+                or side not in {"LONG", "SHORT"}
+                or not isfinite(risk_pct)
+                or risk_pct < 0
+            ):
+                raise ValueError("invalid pending order risk projection")
+            if risk_pct > 0:
+                positions[str(order_key)] = risk_pct
+                position_sides[str(order_key)] = side
+                position_instruments[str(order_key)] = instrument
         if not correlations and metadata.get("return_observations"):
             decision_at = metadata.get("decision_at")
             if decision_at is not None:
@@ -166,7 +192,12 @@ class CapitalGateway:
                     metadata["return_observations"], as_of=cutoff
                 )
         return PortfolioRiskSnapshot(
-            equity_usd, peak, positions, correlations, position_sides
+            equity_usd,
+            peak,
+            positions,
+            correlations,
+            position_sides,
+            position_instruments,
         )
 
     def _include_in_flight_reservations(
@@ -185,10 +216,13 @@ class CapitalGateway:
         if not isfinite(equity_usd) or equity_usd <= 0:
             return snapshot
         positions = dict(snapshot.position_risk_pct)
+        instruments = dict(snapshot.position_instruments or {})
         active_reservations = (
             self.reservation.snapshot() if reservations is None else reservations
         )
-        known_symbols = {key.upper() for key in positions}
+        known_symbols = {
+            instruments.get(key, key).upper() for key in positions
+        }
         for reservation in active_reservations:
             symbol = str(reservation.symbol)
             if symbol.upper() in known_symbols:
@@ -196,9 +230,18 @@ class CapitalGateway:
             risk_pct = max(0.0, float(reservation.risk_budget_usd)) / equity_usd * 100.0
             if risk_pct > 0:
                 positions[symbol] = risk_pct
-        if positions == snapshot.position_risk_pct:
+                instruments[symbol] = symbol
+                known_symbols.add(symbol.upper())
+        if (
+            positions == snapshot.position_risk_pct
+            and instruments == (snapshot.position_instruments or {})
+        ):
             return snapshot
-        return replace(snapshot, position_risk_pct=positions)
+        return replace(
+            snapshot,
+            position_risk_pct=positions,
+            position_instruments=instruments,
+        )
 
     def evaluate(
         self,
