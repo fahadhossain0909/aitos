@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,6 +27,9 @@ class ReadOnlyExecutor:
         self.get_order_status = AsyncMock(
             return_value={"status": "FILLED", "executedQty": "1.0"}
         )
+        self.hedge_mode = False
+        self.get_position_risk = AsyncMock(return_value=[])
+        self.get_open_orders = AsyncMock(return_value=[])
 
 
 @pytest.fixture
@@ -175,3 +179,143 @@ async def test_ambiguous_triggered_algo_queries_child_fill_read_only(protected_i
     assert finding["executed_quantity"] == "1.0"
     executor.get_order_status.assert_awaited_once_with("BTCUSDT", "algo:123")
     assert protected_intent.protection_intents()[0]["state"] == "SUBMITTING"
+
+
+
+@pytest.mark.asyncio
+async def test_account_exposure_audit_verifies_full_position_snapshot(protected_intent):
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    executor.get_position_risk = AsyncMock(
+        return_value=[
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "BOTH",
+                "positionAmt": "1.0",
+            }
+        ]
+    )
+    trade = SimpleNamespace(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+    )
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[trade]
+    )
+
+    assert report["position_snapshot_verified"] is True
+    assert report["account_exposure_verified"] is True
+    assert report["pending_entry_orders"] == []
+    executor.get_position_risk.assert_awaited_once()
+    executor.get_open_orders.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_account_exposure_mismatch_is_reported_not_authorized(protected_intent):
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    executor.get_position_risk = AsyncMock(
+        return_value=[
+            {
+                "symbol": "ETHUSDT",
+                "positionSide": "BOTH",
+                "positionAmt": "1.0",
+            }
+        ]
+    )
+    trade = SimpleNamespace(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+    )
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[trade]
+    )
+
+    assert report["position_snapshot_verified"] is False
+    assert "mismatch" in report["position_snapshot_error"]
+    assert report["account_exposure_verified"] is False
+    assert report["safe_to_resume"] is False
+
+
+@pytest.mark.asyncio
+async def test_unpriced_open_entry_order_prevents_account_exposure_verification(
+    protected_intent,
+):
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    executor.get_open_orders = AsyncMock(
+        return_value=[
+            {
+                "orderId": 987,
+                "symbol": "ETHUSDT",
+                "side": "BUY",
+                "positionSide": "BOTH",
+                "status": "NEW",
+                "reduceOnly": False,
+                "closePosition": False,
+            }
+        ]
+    )
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[]
+    )
+
+    assert report["position_snapshot_verified"] is True
+    assert report["account_exposure_verified"] is False
+    assert report["pending_entry_orders"] == [
+        {
+            "order_id": "987",
+            "symbol": "ETHUSDT",
+            "side": "LONG",
+            "status": "NEW",
+            "reason": "entry order lacks a validated stop-risk projection",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reduce_only_and_hedge_closing_orders_do_not_count_as_entry_exposure(
+    protected_intent,
+):
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    executor.hedge_mode = True
+    executor.get_open_orders = AsyncMock(
+        return_value=[
+            {
+                "orderId": 1,
+                "symbol": "BTCUSDT",
+                "side": "SELL",
+                "positionSide": "LONG",
+                "status": "NEW",
+                "reduceOnly": False,
+                "closePosition": False,
+            },
+            {
+                "orderId": 2,
+                "symbol": "ETHUSDT",
+                "side": "BUY",
+                "positionSide": "SHORT",
+                "status": "NEW",
+                "reduceOnly": False,
+                "closePosition": False,
+            },
+            {
+                "orderId": 3,
+                "symbol": "SOLUSDT",
+                "side": "SELL",
+                "positionSide": "BOTH",
+                "status": "NEW",
+                "reduceOnly": True,
+                "closePosition": False,
+            },
+        ]
+    )
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[]
+    )
+
+    assert report["account_exposure_verified"] is True
+    assert report["pending_entry_orders"] == []
