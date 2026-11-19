@@ -1,4 +1,5 @@
 """Deterministic Spot execution replay with depth, latency, fees and impact."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -106,8 +107,10 @@ def replay_spot_market_order(
     )
     adverse = Decimal("1") + impact / Decimal("10000")
     adjusted_average = (
-        average * adverse if side == "BUY" else average / adverse
-    ) if average is not None else None
+        (average * adverse if side == "BUY" else average / adverse)
+        if average is not None
+        else None
+    )
     fees_rate = taker_fee_bps
     fills = tuple(
         ReplayFill(
@@ -115,7 +118,9 @@ def replay_spot_market_order(
             quantity=qty,
             fee_quote=(
                 (price * adverse if side == "BUY" else price / adverse)
-                * qty * fees_rate / Decimal("10000")
+                * qty
+                * fees_rate
+                / Decimal("10000")
             ),
             maker=False,
         )
@@ -125,7 +130,8 @@ def replay_spot_market_order(
     fees = sum((fill.fee_quote for fill in fills), Decimal("0"))
     slippage = (
         ((adjusted_average - mid) if side == "BUY" else (mid - adjusted_average))
-        / mid * Decimal("10000")
+        / mid
+        * Decimal("10000")
         if adjusted_average is not None
         else Decimal("0")
     )
@@ -156,7 +162,10 @@ def replay_spot_limit_order(
     """Replay passive limit fills from observed traded volume and queue ahead."""
     if side not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
-    if min(quantity, limit_price) <= 0 or min(queue_ahead, traded_quantity_at_price) < 0:
+    if (
+        min(quantity, limit_price) <= 0
+        or min(queue_ahead, traded_quantity_at_price) < 0
+    ):
         raise ValueError("limit replay quantities/prices are invalid")
     if maker_fee_bps < 0 or latency_ms < 0:
         raise ValueError("maker fee and latency must be non-negative")
@@ -173,11 +182,8 @@ def replay_spot_limit_order(
         market_impact_bps=Decimal("0"),
         slippage_bps=Decimal("0"),
         latency_ms=latency_ms,
-        fills=(
-            (ReplayFill(limit_price, filled, fee, True),) if filled else ()
-        ),
+        fills=((ReplayFill(limit_price, filled, fee, True),) if filled else ()),
     )
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +208,8 @@ def replay_spot_order_with_latency(
     if submitted_at_ms < 0 or latency_ms < 0:
         raise ValueError("submission time and latency must be non-negative")
     eligible = [
-        snapshot for snapshot in snapshots
+        snapshot
+        for snapshot in snapshots
         if snapshot.timestamp_ms >= submitted_at_ms + latency_ms
     ]
     if not eligible:
