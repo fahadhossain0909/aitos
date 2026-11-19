@@ -10,7 +10,6 @@ from math import log, sqrt
 from typing import Any, Sequence
 
 
-
 @dataclass(frozen=True, slots=True)
 class AlignedFuturesSpotReturns:
     """Uniform one-second log returns from explicitly paired market identities."""
@@ -46,7 +45,10 @@ def _event_price(event: dict[str, Any]) -> float | None:
             price = float(payload["last_price"])
         elif payload.get("lastPrice") is not None:
             price = float(payload["lastPrice"])
-        elif payload.get("bid_price") is not None and payload.get("ask_price") is not None:
+        elif (
+            payload.get("bid_price") is not None
+            and payload.get("ask_price") is not None
+        ):
             price = (float(payload["bid_price"]) + float(payload["ask_price"])) / 2.0
         else:
             return None
@@ -106,9 +108,7 @@ def align_futures_spot_ticker_events(
     timestamps: list[datetime] = []
     for previous, current_bucket in zip(selected, selected[1:]):
         spot_returns.append(log(spot[current_bucket][1] / spot[previous][1]))
-        futures_returns.append(
-            log(futures[current_bucket][1] / futures[previous][1])
-        )
+        futures_returns.append(log(futures[current_bucket][1] / futures[previous][1]))
         timestamps.append(max(spot[current_bucket][0], futures[current_bucket][0]))
     return AlignedFuturesSpotReturns(
         bucket_timestamps=tuple(timestamps),
@@ -133,7 +133,9 @@ async def validate_futures_spot_lead_lag_from_clickhouse(
 ) -> LeadLagOOSResult:
     """Load source-provenance history by exact IDs and run frozen OOS validation."""
     if bucket_seconds != 1:
-        raise ValueError("lead-lag OOS validation currently requires one-second buckets")
+        raise ValueError(
+            "lead-lag OOS validation currently requires one-second buckets"
+        )
     spot_events, futures_events = await asyncio.gather(
         repository.load_versioned_market_events(
             market_type="spot",
