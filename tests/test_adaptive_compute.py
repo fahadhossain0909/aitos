@@ -125,3 +125,23 @@ def test_invalid_budget_and_workload_inputs_are_rejected():
         pass
     else:
         raise AssertionError("negative workload cost must be rejected")
+
+
+
+def test_zero_available_memory_produces_zero_optional_budget():
+    resources = ResourceSnapshot(2, 2.0, 4096, 4096, 0, False, False)
+    budget = build_resource_budget(resources)
+    assert budget.memory_budget_mb == 0
+
+
+def test_high_scoring_duplicate_cannot_replace_protected_symbol():
+    budget = build_resource_budget(ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False))
+    plan = plan_symbol_capacity(
+        [
+            SymbolWorkload("BTCUSDT", open_position=True, opportunity_score=0),
+            SymbolWorkload("btcusdt", opportunity_score=1000),
+        ],
+        budget,
+    )
+    assert plan.protected_symbols == ("BTCUSDT",)
+    assert plan.selected_symbols == ("BTCUSDT",)
