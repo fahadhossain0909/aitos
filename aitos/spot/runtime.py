@@ -27,7 +27,11 @@ from aitos.spot.lead_lag import FuturesSpotLeadLagAnalyzer
 from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
-from aitos.spot.scanner import RankedSpotCandidate, SpotCandidate, SpotOpportunityScanner
+from aitos.spot.scanner import (
+    RankedSpotCandidate,
+    SpotCandidate,
+    SpotOpportunityScanner,
+)
 from aitos.spot.websocket import BinanceSpotWebSocket
 from aitos.spot.user_stream import SpotUserDataStreamSupervisor
 
@@ -49,7 +53,9 @@ class SpotRuntime:
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     _user_stream: SpotUserDataStreamSupervisor | None = field(default=None, repr=False)
-    commission_service: SpotCommissionConversionService | None = field(default=None, repr=False)
+    commission_service: SpotCommissionConversionService | None = field(
+        default=None, repr=False
+    )
     portfolio_valuator: SpotPortfolioValuator | None = field(default=None, repr=False)
     quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
     _market_stream_health: dict[str, dict[str, object]] = field(
@@ -69,7 +75,9 @@ class SpotRuntime:
         *,
         ranked_candidate: RankedSpotCandidate,
         kernel,
-        opportunity_builder: Callable[[SpotCandidate, object], Opportunity | Awaitable[Opportunity]],
+        opportunity_builder: Callable[
+            [SpotCandidate, object], Opportunity | Awaitable[Opportunity]
+        ],
         equity_usd: float,
         quote_order_quantity: Decimal,
     ) -> SpotOrder:
@@ -93,7 +101,13 @@ class SpotRuntime:
         volatility_limit = self.scanner.max_volatility_bps
         scores = {
             "spot_momentum": float(
-                max(Decimal("0"), min(Decimal("10"), Decimal("5") + candidate.momentum_bps / Decimal("100")))
+                max(
+                    Decimal("0"),
+                    min(
+                        Decimal("10"),
+                        Decimal("5") + candidate.momentum_bps / Decimal("100"),
+                    ),
+                )
             ),
             "spot_relative_volume": float(
                 min(Decimal("10"), candidate.relative_volume * Decimal("2"))
@@ -102,10 +116,18 @@ class SpotRuntime:
                 Decimal("5") + candidate.order_book_imbalance * Decimal("5")
             ),
             "spot_spread_quality": float(
-                max(Decimal("0"), Decimal("10") * (Decimal("1") - candidate.spread_bps / spread_limit))
+                max(
+                    Decimal("0"),
+                    Decimal("10")
+                    * (Decimal("1") - candidate.spread_bps / spread_limit),
+                )
             ),
             "spot_volatility_quality": float(
-                max(Decimal("0"), Decimal("10") * (Decimal("1") - candidate.volatility_bps / volatility_limit))
+                max(
+                    Decimal("0"),
+                    Decimal("10")
+                    * (Decimal("1") - candidate.volatility_bps / volatility_limit),
+                )
             ),
         }
         context = {
@@ -144,7 +166,9 @@ class SpotRuntime:
         decision = await kernel.request_decision(
             DecisionContext(symbol=symbol, context=context)
         )
-        direction = str(getattr(decision.direction, "value", decision.direction)).lower()
+        direction = str(
+            getattr(decision.direction, "value", decision.direction)
+        ).lower()
         if direction != "long" or decision.confidence < kernel.fusion_min_confidence:
             raise ValueError("shared AI Kernel did not approve a confident Spot LONG")
         opportunity = opportunity_builder(candidate, decision)
@@ -152,8 +176,13 @@ class SpotRuntime:
             opportunity = await opportunity
         if not isinstance(opportunity, Opportunity):
             raise TypeError("Spot opportunity_builder must return an Opportunity")
-        if opportunity.symbol.upper() != symbol or opportunity.side is not TradeSide.LONG:
-            raise ValueError("Spot opportunity builder returned a mismatched or non-LONG thesis")
+        if (
+            opportunity.symbol.upper() != symbol
+            or opportunity.side is not TradeSide.LONG
+        ):
+            raise ValueError(
+                "Spot opportunity builder returned a mismatched or non-LONG thesis"
+            )
         opportunity = replace(
             opportunity,
             confidence=min(opportunity.confidence, float(decision.confidence)),
@@ -205,8 +234,7 @@ class SpotRuntime:
             opportunity,
             confidence=min(opportunity.confidence, decision.confidence),
             rationale=(
-                f"kernel_confidence={decision.confidence:.4f}; "
-                + opportunity.rationale
+                f"kernel_confidence={decision.confidence:.4f}; " + opportunity.rationale
             ),
             agent_consensus={
                 **(opportunity.agent_consensus or {}),
@@ -296,7 +324,9 @@ class SpotRuntime:
         if self._user_stream is not None:
             raise RuntimeError("Spot User Data Stream is already configured")
         if not (self.market_data.rest.api_key and self.market_data.rest.api_secret):
-            raise RuntimeError("Spot User Data Stream requires dedicated API credentials")
+            raise RuntimeError(
+                "Spot User Data Stream requires dedicated API credentials"
+            )
 
         async def handle(event: dict[str, object]) -> None:
             if event.get("e") == "executionReport":
@@ -313,7 +343,9 @@ class SpotRuntime:
                     except Exception as exc:
                         logger.warning(
                             "Spot private event reconciliation deferred to recovery",
-                            extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
                         )
             if on_event is not None:
                 result = on_event(event)
