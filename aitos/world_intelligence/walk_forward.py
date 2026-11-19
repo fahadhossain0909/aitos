@@ -122,9 +122,7 @@ def evaluate_event_impact_walk_forward(
             row for row in eligible_test if row.event_type in model.event_types
         ]
         unseen_count = len(eligible_test) - len(known_type_rows)
-        evaluation = evaluate_event_impact_model(
-            model, known_type_rows, as_of=cutoff
-        )
+        evaluation = evaluate_event_impact_model(model, known_type_rows, as_of=cutoff)
         folds.append(
             EventImpactWalkForwardFold(
                 fold_index=fold_index,
