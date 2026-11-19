@@ -16,6 +16,7 @@ from aitos.spot.inventory import InventoryLedger
 @dataclass(frozen=True, slots=True)
 class SpotPortfolioSnapshot:
     quote_asset: str
+    quote_to_usd_rate: Decimal
     futures_account_equity_quote: Decimal
     spot_quote_cash: Decimal
     managed_inventory_market_value: Decimal
@@ -25,6 +26,10 @@ class SpotPortfolioSnapshot:
     pending_third_asset_fee_conversions: int
     marks_missing: tuple[str, ...]
     unpriced_wallet_assets: tuple[str, ...]
+
+    @property
+    def total_equity_usd(self) -> Decimal:
+        return self.total_equity_quote * self.quote_to_usd_rate
 
     @property
     def accounting_complete(self) -> bool:
@@ -43,9 +48,17 @@ class SpotPortfolioValuator:
     cross-account aggregate into either input.
     """
 
-    def __init__(self, inventory: InventoryLedger, quote_asset: str = "USDT") -> None:
+    def __init__(
+        self,
+        inventory: InventoryLedger,
+        quote_asset: str = "USDT",
+        quote_to_usd_rate: Decimal = Decimal("1"),
+    ) -> None:
+        if quote_to_usd_rate <= 0:
+            raise ValueError("quote_to_usd_rate must be positive")
         self.inventory = inventory
         self.quote_asset = quote_asset.upper()
+        self.quote_to_usd_rate = quote_to_usd_rate
 
     async def snapshot(
         self,
@@ -100,6 +113,7 @@ class SpotPortfolioValuator:
         total = futures_account_equity_quote + quote_cash + wallet_value
         return SpotPortfolioSnapshot(
             quote_asset=self.quote_asset,
+            quote_to_usd_rate=self.quote_to_usd_rate,
             futures_account_equity_quote=futures_account_equity_quote,
             spot_quote_cash=quote_cash,
             managed_inventory_market_value=inventory_value,
