@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from aitos.markets.contracts import AssetClass, Instrument, MarketEvent as DomainMarketEvent, MarketEventType as DomainMarketEventType
+
 from aitos.core.immutable import FrozenDict, FrozenList, freeze_value
 from aitos.market_data.contracts import (
     MarketEvent,
@@ -64,3 +66,18 @@ def test_market_data_event_payload_and_stage_timestamps_are_deeply_immutable():
     assert json.loads(json.dumps(event.payload)) == {
         "book": [{"price": 100.0}]
     }
+
+
+def test_market_domain_event_payload_is_deeply_immutable():
+    now = datetime.now(timezone.utc)
+    event = DomainMarketEvent(
+        event_type=DomainMarketEventType.QUOTE,
+        instrument=Instrument("BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot"),
+        event_time=now,
+        payload={"levels": [{"price": 100.0}]},
+        source="websocket",
+        received_at=now,
+        stage_timestamps={"normalize": 1.0},
+    )
+    with pytest.raises(TypeError, match="immutable"):
+        event.payload["levels"][0]["price"] = 99.0
