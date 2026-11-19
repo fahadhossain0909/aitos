@@ -249,18 +249,24 @@ class CapitalGateway:
         """
         if not isinstance(required, (tuple, list)):
             raise TypeError("required reservation sequence is required")
-        verified: dict[str, Reservation] = {}
+        normalized: list[tuple[str, Reservation]] = []
+        seen_symbols: set[str] = set()
         for item in required:
             if not isinstance(item, Reservation):
                 raise TypeError("required exposure must use Reservation")
             symbol = str(item.symbol).strip().upper()
-            if not symbol or symbol in verified:
+            if not symbol or symbol in seen_symbols:
                 raise ValueError("required reservation symbols must be unique")
+            seen_symbols.add(symbol)
             values = (item.capital_usd, item.risk_budget_usd)
             if any(not isfinite(float(value)) or float(value) < 0 for value in values):
                 raise ValueError(
                     "required reservation values must be finite and non-negative"
                 )
+            normalized.append((symbol, item))
+
+        verified: dict[str, Reservation] = {}
+        for symbol, item in normalized:
             actual = self.reservation.get(symbol)
             if actual is None:
                 raise RuntimeError(
