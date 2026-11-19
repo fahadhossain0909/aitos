@@ -73,8 +73,10 @@ The coordinator allows long-only market BUY entries bounded by `quoteOrderQty`
 and the shared capital allocation. It pins capital before submission. If a
 network error makes order acceptance ambiguous, the reservation remains pinned;
 query the exchange by client order ID and reconcile fills before releasing it.
-Spot SELL is not exchange reduce-only: the exit port requires explicit Exit
-Intelligence authorization and verifies AITOS-managed inventory before sending.
+Spot SELL is not exchange reduce-only: the exit port requires the shared
+`ExitDecision` contract from Exit Intelligence, accepts only `EXIT` or
+`MANAGE`, enforces the suggested reduction fraction for `MANAGE`, and verifies
+AITOS-managed inventory before sending.
 External wallet holdings are never adopted as strategy-owned inventory.
 
 The SQLite inventory ledger is durable, fill-idempotent and records commission
