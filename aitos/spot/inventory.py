@@ -20,6 +20,7 @@ class InventoryPosition:
     quantity: Decimal
     cost_quote: Decimal
     realized_quote_pnl: Decimal
+    fee_conversion_pending: bool = False
 
     @property
     def average_cost(self) -> Decimal:
@@ -87,6 +88,7 @@ class InventoryLedger:
             (symbol,)).fetchall()
         base = quote = ""
         qty = cost = realized = Decimal("0")
+        fee_conversion_pending = False
         for b, q, side, qraw, praw, craw, casset in rows:
             base, quote = b, q
             amount, price, fee = Decimal(qraw), Decimal(praw), Decimal(craw)
@@ -98,19 +100,25 @@ class InventoryLedger:
                     qty -= fee
                 elif casset == quote:
                     cost += fee
+                elif fee > 0:
+                    fee_conversion_pending = True
             else:
-                if amount > qty:
-                    raise ValueError("sell exceeds AITOS-managed inventory")
                 avg = cost / qty if qty else Decimal("0")
                 proceeds = value
+                debit_quantity = amount
                 if casset == quote:
                     proceeds -= fee
                 elif casset == base:
-                    amount += fee
-                cost -= avg * amount
-                qty -= amount
-                realized += proceeds - avg * amount
-        return InventoryPosition(symbol, base, quote, qty, cost, realized)
+                    debit_quantity += fee
+                elif fee > 0:
+                    fee_conversion_pending = True
+                if debit_quantity > qty:
+                    raise ValueError("sell exceeds AITOS-managed inventory")
+                cost -= avg * debit_quantity
+                qty -= debit_quantity
+                realized += proceeds - avg * debit_quantity
+        return InventoryPosition(symbol, base, quote, qty, cost, realized,
+                                 fee_conversion_pending)
 
     def get_position(self, symbol: str) -> InventoryPosition | None:
         with self._lock:
