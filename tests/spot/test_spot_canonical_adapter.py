@@ -8,6 +8,7 @@ from aitos.market_data.contracts import MarketEventType, MarketSource
 from aitos.market_data.bus import channel_for
 from aitos.market_data.channels import ALL_CHANNELS, CHANNEL_KLINE
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
+from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.spot.websocket import SpotOrderBookGap
 
 
@@ -129,3 +130,19 @@ async def test_spot_ticker_stream_handles_book_ticker_without_exchange_time():
 def test_spot_kline_uses_registered_canonical_event_channel():
     assert channel_for(MarketEventType.KLINE) == CHANNEL_KLINE
     assert CHANNEL_KLINE in ALL_CHANNELS
+
+
+
+@pytest.mark.asyncio
+async def test_spot_events_never_enter_futures_live_scanner_cache():
+    cache = LiveScannerCache(None, ["BTCUSDT"])
+    event = _event(
+        "BTCUSDT",
+        MarketEventType.TRADE,
+        datetime.now(timezone.utc),
+        {"trade_id": 1, "price": "100", "quantity": "1", "buyer_is_maker": False},
+        MarketSource.WEBSOCKET,
+        1,
+    )
+    await cache._on_trade_event(event)
+    assert cache.snapshot("BTCUSDT") is None
