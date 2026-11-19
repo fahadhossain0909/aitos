@@ -66,9 +66,19 @@ class HistoricalIngestionStore:
         self.revisions = ClickHousePointInTimeStore(client, database)
         self.database = database
         self.table = f"{database}.world_intelligence_source_provenance"
+        self.cursors_table = f"{database}.world_intelligence_historical_cursors"
 
     async def ensure_schema(self):
         await self.revisions.ensure_schema()
+        await self.client.command(f"""
+            CREATE TABLE IF NOT EXISTS {self.cursors_table} (
+                source_id LowCardinality(String),
+                cursor String,
+                updated_at DateTime64(6, 'UTC')
+            )
+            ENGINE = ReplacingMergeTree(updated_at)
+            ORDER BY source_id
+        """)
         await self.client.command(f"""
             CREATE TABLE IF NOT EXISTS {self.table} (
                 source_id LowCardinality(String),
@@ -112,16 +122,34 @@ class HistoricalIngestionStore:
             ])
         return len(rows)
 
+    async def load_cursor(self, source_id: str) -> str | None:
+        result = await self.client.query(
+            f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "
+            "WHERE source_id = {source_id:String}",
+            parameters={"source_id": source_id},
+        )
+        return (result.result_rows[0][0] or None) if result.result_rows else None
+
+    async def save_cursor(self, source_id: str, cursor: str | None) -> None:
+        await self.client.insert(
+            self.cursors_table,
+            [(source_id, cursor or "", datetime.now(timezone.utc))],
+            column_names=["source_id", "cursor", "updated_at"],
+        )
+
     async def ingest(self, provider: HistoricalProvider, *, cursor: str | None = None) -> str | None:
-        page = await provider.fetch_page(cursor=cursor)
+        current_cursor = cursor if cursor is not None else await self.load_cursor(provider.source_id)
+        page = await provider.fetch_page(cursor=current_cursor)
         if page.source_id != provider.source_id:
             raise ValueError("provider/page source identity mismatch")
         if any(item.source_id != page.source_id for item in page.provenance):
             raise ValueError("provenance source identity mismatch")
-        # Persist provenance and revisions before returning the next cursor.
+        # Persist provenance and revisions before checkpointing. A crash before
+        # save_cursor safely replays the page; stable revision IDs deduplicate it.
         await self.append_provenance(page.provenance)
         await self.revisions.append_event_revisions(list(page.event_revisions))
         await self.revisions.append_market_bar_revisions(list(page.market_bar_revisions))
+        await self.save_cursor(page.source_id, page.next_cursor)
         return page.next_cursor
 
 
