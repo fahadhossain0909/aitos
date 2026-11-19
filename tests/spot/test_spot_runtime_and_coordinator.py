@@ -12,6 +12,7 @@ from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordin
 from aitos.spot.execution import SpotExecutionDisabled
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.runtime import SpotRuntime
+from aitos.spot.scanner import RankedSpotCandidate, SpotCandidate
 from aitos.spot.models import (
     SpotOrderRequest,
     SpotOrderSide,
@@ -328,3 +329,94 @@ async def test_spot_capital_allocation_converts_usd_to_quote_notional():
         )
     assert gateway.released == ["binance:spot:BTCUSDT"]
     ledger.close()
+
+
+
+class FakeKernelDecision:
+    fusion_min_confidence = 0.6
+
+    async def request_decision(self, context):
+        assert context.symbol == "BTCUSDT"
+        assert context.context["market_type"] == "spot"
+        assert context.context["futures_spot_lead_lag_shadow"]["decision_impact"] is False
+        return SimpleNamespace(direction="long", confidence=0.85)
+
+
+@pytest.mark.asyncio
+async def test_spot_prefilter_candidate_uses_kernel_and_explicit_strategy_builder():
+    gateway = FakeCapitalGateway()
+    inventory = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
+        inventory=inventory,
+    )
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=__import__("aitos.spot.scanner", fromlist=["SpotOpportunityScanner"]).SpotOpportunityScanner(),
+        coordinator=coordinator,
+        market_consumer=SimpleNamespace(),
+        lead_lag=SimpleNamespace(),
+        quote_volumes_24h={"BTCUSDT": Decimal("100000")},
+    )
+    candidate = SpotCandidate(
+        symbol="BTCUSDT",
+        quote_volume=Decimal("100000"),
+        relative_volume=Decimal("2"),
+        spread_bps=Decimal("2"),
+        volatility_bps=Decimal("100"),
+        momentum_bps=Decimal("50"),
+        order_book_imbalance=Decimal("0.2"),
+        last_price=Decimal("100"),
+    )
+    ranked = RankedSpotCandidate(candidate, Decimal("0.8"), ("fresh",))
+    result = await runtime.submit_ranked_spot_candidate(
+        ranked_candidate=ranked,
+        kernel=FakeKernelDecision(),
+        opportunity_builder=lambda item, decision: _opportunity(),
+        equity_usd=1000,
+        quote_order_quantity=Decimal("50"),
+    )
+    assert result.status is SpotOrderStatus.NEW
+    assert gateway.opportunity.agent_consensus["market_type"] == "spot"
+    inventory.close()
+
+
+@pytest.mark.asyncio
+async def test_spot_candidate_kernel_short_is_never_authorized():
+    class ShortKernel(FakeKernelDecision):
+        async def request_decision(self, context):
+            return SimpleNamespace(direction="short", confidence=0.99)
+
+    inventory = InventoryLedger()
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=__import__("aitos.spot.scanner", fromlist=["SpotOpportunityScanner"]).SpotOpportunityScanner(),
+        coordinator=SimpleNamespace(),
+        market_consumer=SimpleNamespace(),
+        lead_lag=SimpleNamespace(),
+        quote_volumes_24h={"BTCUSDT": Decimal("100000")},
+    )
+    candidate = SpotCandidate(
+        symbol="BTCUSDT",
+        quote_volume=Decimal("100000"),
+        relative_volume=Decimal("2"),
+        spread_bps=Decimal("2"),
+        volatility_bps=Decimal("100"),
+        momentum_bps=Decimal("50"),
+        order_book_imbalance=Decimal("0.2"),
+        last_price=Decimal("100"),
+    )
+    with pytest.raises(ValueError, match="did not approve"):
+        await runtime.submit_ranked_spot_candidate(
+            ranked_candidate=RankedSpotCandidate(candidate, Decimal("0.8"), ()),
+            kernel=ShortKernel(),
+            opportunity_builder=lambda item, decision: _opportunity(),
+            equity_usd=1000,
+            quote_order_quantity=Decimal("50"),
+        )
+    inventory.close()
