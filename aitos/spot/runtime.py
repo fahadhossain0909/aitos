@@ -184,6 +184,7 @@ class SpotRuntime:
         if not symbols:
             raise RuntimeError("no eligible liquid Spot instruments were discovered")
         self.quote_volumes_24h = dict(self.market_data.rest.universe_quote_volumes)
+        self.market_consumer.set_symbols(symbols)
         await self.market_consumer.start(market_bus)
         self.lead_lag.set_symbols(symbols)
         await self.lead_lag.start(market_bus)
