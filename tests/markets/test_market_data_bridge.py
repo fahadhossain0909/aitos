@@ -19,6 +19,7 @@ def instrument():
         venue="binance",
         settlement_type="perpetual",
         margin_model="cross",
+        market_type="usd_m_futures",
     )
 
 
@@ -51,7 +52,7 @@ def test_bridge_preserves_identity_timing_and_provenance(instrument):
 
     assert domain.event_type is MarketEventType.TRADE
     assert domain.instrument is instrument
-    assert domain.instrument.id == "binance:crypto:BTCUSDT"
+    assert domain.instrument.id == "binance:crypto:usd_m_futures:BTCUSDT"
     assert domain.event_id == source.event_id
     assert domain.event_time == source.event_time
     assert domain.received_at == source.ingest_time
@@ -106,12 +107,19 @@ def test_bridge_keeps_book_delta_and_snapshot_distinguishable(instrument):
 def test_bridge_rejects_symbol_or_venue_mismatch(instrument):
     wrong_symbol = Instrument("ETHUSDT", AssetClass.CRYPTO, "binance")
     wrong_venue = Instrument("BTCUSDT", AssetClass.CRYPTO, "bybit")
+    wrong_market = Instrument(
+        "BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot"
+    )
     with pytest.raises(ValueError, match="symbol"):
         market_data_event_to_domain(event(), wrong_symbol)
     with pytest.raises(ValueError, match="venue"):
         market_data_event_to_domain(event(), wrong_venue)
+    with pytest.raises(ValueError, match="market_type"):
+        market_data_event_to_domain(event(), wrong_market)
 
 
 def test_bridge_requires_explicit_resolved_instrument():
     with pytest.raises(TypeError, match="resolved markets.Instrument"):
         market_data_event_to_domain(event(), object())
+    with pytest.raises(ValueError, match="market_type is required"):
+        market_data_event_to_domain(event(), Instrument("BTCUSDT", AssetClass.CRYPTO, "binance"))
