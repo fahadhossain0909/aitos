@@ -149,6 +149,87 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         """Read-only full-account snapshot; no symbol filter can hide exposure."""
         return await self._signed_request("GET", "/fapi/v3/positionRisk", {})
 
+    async def get_open_algo_orders(
+        self, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Read-only authenticated inventory of currently open conditional orders.
+
+        This is inventory evidence only: it does not reconcile child fills,
+        positions, or the local intent journal and never authorizes recovery.
+        An incomplete or malformed response is rejected as a whole.
+        """
+        params: dict[str, Any] = {"algoType": "CONDITIONAL"}
+        if symbol is not None:
+            normalized_symbol = str(symbol).strip().upper()
+            if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
+                raise ValueError("invalid symbol for algo inventory")
+            params["symbol"] = normalized_symbol
+        response = await self._signed_request(
+            "GET", "/fapi/v1/openAlgoOrders", params
+        )
+        if not isinstance(response, list):
+            raise ValueError("algo inventory must be a complete list")
+        seen_ids: set[str] = set()
+        seen_clients: set[str] = set()
+        validated: list[dict[str, Any]] = []
+        supported_types = {
+            "STOP_MARKET",
+            "TAKE_PROFIT_MARKET",
+            "STOP",
+            "TAKE_PROFIT",
+            "TRAILING_STOP_MARKET",
+        }
+        for row in response:
+            if not isinstance(row, dict):
+                raise ValueError("malformed algo inventory row")
+            algo_id = row.get("algoId")
+            client_id = row.get("clientAlgoId")
+            row_symbol = row.get("symbol")
+            if (
+                isinstance(algo_id, bool)
+                or not str(algo_id or "").isdigit()
+                or int(algo_id) <= 0
+                or not isinstance(client_id, str)
+                or not client_id.strip()
+                or not isinstance(row_symbol, str)
+                or not re.fullmatch(r"[A-Z0-9]{1,30}", row_symbol)
+                or (symbol is not None and row_symbol != params["symbol"])
+                or row.get("algoType") != "CONDITIONAL"
+                or row.get("algoStatus") != "NEW"
+                or row.get("orderType") not in supported_types
+                or row.get("side") not in {"BUY", "SELL"}
+                or row.get("positionSide") not in {"BOTH", "LONG", "SHORT"}
+            ):
+                raise ValueError("invalid or non-open algo inventory identity")
+            quantity = row.get("quantity")
+            try:
+                quantity_value = float(quantity)
+            except (TypeError, ValueError):
+                quantity_value = float("nan")
+            close_position = row.get("closePosition") is True
+            if not close_position and (
+                not math.isfinite(quantity_value) or quantity_value <= 0
+            ):
+                raise ValueError("invalid algo inventory quantity")
+            if row.get("orderType") == "TRAILING_STOP_MARKET":
+                trigger = row.get("activatePrice") or row.get("triggerPrice")
+            else:
+                trigger = row.get("triggerPrice")
+            try:
+                trigger_value = float(trigger)
+            except (TypeError, ValueError):
+                trigger_value = float("nan")
+            if not math.isfinite(trigger_value) or trigger_value <= 0:
+                raise ValueError("invalid algo inventory trigger")
+            identity = str(int(algo_id))
+            client_identity = client_id.strip()
+            if identity in seen_ids or client_identity in seen_clients:
+                raise ValueError("duplicate algo inventory identity")
+            seen_ids.add(identity)
+            seen_clients.add(client_identity)
+            validated.append(dict(row))
+        return validated
+
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
         for a real portfolio tracker rather than the paper-trading
