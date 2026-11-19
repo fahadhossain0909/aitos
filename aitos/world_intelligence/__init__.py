@@ -91,6 +91,11 @@ from aitos.world_intelligence.verification import (
     VerificationResult,
     verify_observations,
 )
+from aitos.world_intelligence.walk_forward import (
+    EventImpactWalkForwardFold,
+    EventImpactWalkForwardReport,
+    evaluate_event_impact_walk_forward,
+)
 from aitos.world_intelligence.worker import (
     CursorReplayConflict,
     IntelligenceIngestionWorker,
@@ -122,6 +127,8 @@ __all__ = [
     "EventImpactFeatures",
     "EventImpactProbabilityModel",
     "EventImpactTrainingRow",
+    "EventImpactWalkForwardFold",
+    "EventImpactWalkForwardReport",
     "EventStudyObservation",
     "FREDSeriesAdapter",
     "FinancialNLPResult",
@@ -158,6 +165,7 @@ __all__ = [
     "enrich_event_batch",
     "estimate_asset_impact",
     "evaluate_event_impact_model",
+    "evaluate_event_impact_walk_forward",
     "fit_event_impact_model",
     "estimate_event_beta",
     "estimate_source_reliability",
