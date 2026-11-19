@@ -142,10 +142,10 @@ The Market Data Contract Audit job stopped at its formatting step for the same r
 
 ## 6. Required next implementation sequence
 
-1. **Complete consumer/call-site graph:** use repository-wide import and call-site inventory for all contract constructors, serializers, event bus boundaries, persistence payloads, direct executor calls and Spot/Futures order paths. The additive pure converter `aitos.markets.market_data_event_to_domain` now resolves no metadata by guess and preserves sequence/revision/trace provenance; verify it in CI, then wire a read-only/shadow consumer into the cross-market engine only after explicit instrument-master resolution and backpressure policy are defined.
+1. **Complete consumer/call-site graph:** use repository-wide import and call-site inventory for all contract constructors, serializers, event bus boundaries, persistence payloads, direct executor calls and Spot/Futures order paths. The additive pure converter `aitos.markets.market_data_event_to_domain` preserves sequence/revision/trace provenance. A bounded, opt-in, live-only `MarketDataShadowConsumer` now exists in `aitos/markets/shadow_consumer.py`; it has an explicit resolver callback, market-type allow-list, bounded queue, stale/out-of-order/dedupe/overload counters and no execution authority. It is not wired into an application entrypoint until the authoritative multi-market instrument resolver and lifecycle ownership are established.
 2. **Add explicit mappers, not a universal mega-contract:** canonical event → bounded market-domain event now has a pure additive converter. Do not map strategy proposal → adapter request until the StrategyEngine rollout is actually authorized; when that stage is implemented, the mapper must cross the shared capital/risk authority rather than call the venue directly. ADL snapshot ↔ strategy view only where a caller needs it. Each mapper must be pure, versioned and reject missing/ambiguous identity.
-3. **Deep immutability compatibility proposal:** make event payload and global-state feature maps safely immutable without breaking JSON encoding, dataclass/asdict consumers or historical persisted payloads. Add round-trip and mutation-rejection tests before wiring.
-4. **Reservation namespace and in-flight projection:** test same symbol across venue/asset class/account, concurrent proposals, expired leases, pinned exposure, duplicate workers and pending-order correlation risk. Extend market-scoped identity tests to Spot and USD-M/COIN-M Futures sharing the same ticker symbol.
+3. **Deep immutability:** implemented recursive JSON-compatible `FrozenDict`/`FrozenList` for canonical market-data event payloads and stage timestamps, universal market-domain event payloads and stage timestamps, and `GlobalMarketState.features`. Added nested mutation rejection, JSON encoding and dataclass/asdict regression tests. Historical wire shape remains dict/list; old persisted JSON deserializes through the same contract constructors.
+4. **Reservation namespace and in-flight projection:** the CapitalGateway now includes active reservations for symbols not represented by the open-position risk snapshot in the correlation-risk projection; unknown side metadata receives conservative unknown-correlation treatment. Added a regression test. Remaining: test same symbol across venue/asset class/account, concurrent proposals, expired leases, pinned exposure, duplicate workers, and same-symbol open-position plus additional pending-order risk. Extend market-scoped identity tests to Spot and USD-M/COIN-M Futures sharing the same ticker symbol.
 5. **Execution/accounting fault matrix:** process death before/after POST, ambiguous ACK, partial fill, protection POST/ID-write crash, store outage, manual/external order and restart reconciliation.
 6. **Paper-only integration:** prove shared CapitalGateway, Spot/Futures isolation, fills/fees/funding and reconciliation with synthetic or isolated paper adapters. No live exchange order is required.
 7. **Quant certification:** after implementation, run walk-forward/OOS/regime/side/cost/ablation, confidence intervals and benchmark comparison. Synthetic tests are not venue calibration.
@@ -169,3 +169,21 @@ The Market Data Contract Audit job stopped at its formatting step for the same r
 - Production latency p50/p95/p99 and empirical venue execution calibration.
 
 These remain NOT TESTED / NOT MEASURED until a reproducible CI/runtime evidence record is attached.
+
+
+## 9. Phase 2 implementation addendum
+
+The follow-on implementation and safety semantics are documented in
+`engineering/AEP1_PHASE2_SHADOW_AND_IMMUTABILITY.md`.
+
+- `aitos/core/immutable.py`: JSON-compatible recursive immutable mappings/lists.
+- `aitos/markets/shadow_consumer.py`: opt-in bounded read-only MarketDataBus consumer.
+- `aitos/intelligence/capital_gateway.py`: unrepresented active reservations are included in projected correlation risk.
+- `tests/core/test_immutable.py` and `tests/markets/test_shadow_consumer.py`: immutability, serialization, queue/backpressure, stale input, dedupe, instrument identity and lifecycle tests.
+- `tests/test_capital_runtime.py`: pending reservation projection regression.
+
+The shadow consumer is deliberately not started by any app entrypoint. Its queue
+is lossy/at-most-once after the bus callback returns and is not a durable consumer.
+The generic CrossMarketIntelligenceEngine's arrival-ordered samples are not
+causal lead-lag evidence; the existing timestamp-bucketed FuturesSpot analyzer
+remains the correct causal diagnostic.
