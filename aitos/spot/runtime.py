@@ -18,7 +18,7 @@ from aitos.intelligence.exit_intelligence.models import ExitDecision
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from aitos.spot.binance import BinanceSpotAdapter
-from aitos.spot.coordinator import SpotTradingCoordinator
+from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.commission import SpotCommissionConversionService
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.filters import SpotSymbolFilters
@@ -36,6 +36,14 @@ from aitos.spot.websocket import BinanceSpotWebSocket
 from aitos.spot.user_stream import SpotUserDataStreamSupervisor
 
 logger = get_logger("aitos.spot.runtime")
+
+
+@dataclass(frozen=True, slots=True)
+class SpotScanCycleResult:
+    candidates_seen: int
+    selected_symbol: str | None
+    order: SpotOrder | None
+    rejected: tuple[tuple[str, str], ...]
 
 
 @dataclass(slots=True)
@@ -69,6 +77,53 @@ class SpotRuntime:
             quote_asset=self.quote_asset,
             min_quote_volume=self.min_quote_volume,
             limit=self.max_symbols,
+        )
+
+    async def scan_and_submit_candidates(
+        self,
+        *,
+        kernel,
+        opportunity_builder: Callable[[SpotCandidate, object], Opportunity | Awaitable[Opportunity]],
+        equity_usd: float,
+        quote_order_quantity_for: Callable[
+            [RankedSpotCandidate], Decimal | Awaitable[Decimal]
+        ],
+        max_candidates: int = 2,
+    ) -> SpotScanCycleResult:
+        """Rank Spot instruments, apply shared Kernel, rotate rejected candidates."""
+        if max_candidates < 1:
+            raise ValueError("max_candidates must be positive")
+        ranked = self.market_consumer.rank_candidates(self.quote_volumes_24h)
+        selected = ranked[:max_candidates]
+        rejected: list[tuple[str, str]] = []
+        for item in selected:
+            symbol = item.candidate.symbol
+            try:
+                quote_quantity = quote_order_quantity_for(item)
+                if inspect.isawaitable(quote_quantity):
+                    quote_quantity = await quote_quantity
+                if not isinstance(quote_quantity, Decimal) or quote_quantity <= 0:
+                    raise ValueError("Spot quote allocation must be a positive Decimal")
+                order = await self.submit_ranked_spot_candidate(
+                    ranked_candidate=item,
+                    kernel=kernel,
+                    opportunity_builder=opportunity_builder,
+                    equity_usd=equity_usd,
+                    quote_order_quantity=quote_quantity,
+                )
+                return SpotScanCycleResult(
+                    candidates_seen=len(selected),
+                    selected_symbol=symbol,
+                    order=order,
+                    rejected=tuple(rejected),
+                )
+            except (SpotAuthorizationRejected, ValueError) as exc:
+                rejected.append((symbol, str(exc)))
+        return SpotScanCycleResult(
+            candidates_seen=len(selected),
+            selected_symbol=None,
+            order=None,
+            rejected=tuple(rejected),
         )
 
     async def submit_ranked_spot_candidate(
