@@ -33,6 +33,8 @@ class MarketEventType(str, Enum):
     NEWS = "news"
     ON_CHAIN = "on_chain"
     INSTRUMENT = "instrument"
+    LIQUIDATION = "liquidation"
+    OPTIONS = "options"
 
 
 def utc_now() -> datetime:
@@ -77,8 +79,21 @@ class MarketEvent:
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     schema_version: int = 1
     correlation_id: str | None = None
+    event_revision: int = 1
+    sequence: int | None = None
+    trace_id: str | None = None
+    venue: str | None = None
+    market_type: str | None = None
+    source_event_type: str | None = None
+    stage_timestamps: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.schema_version < 1:
+            raise ValueError("schema_version must be positive")
+        if self.event_revision < 1:
+            raise ValueError("event_revision must be positive")
+        if self.sequence is not None and self.sequence < 0:
+            raise ValueError("sequence must be non-negative")
         if self.correlation_id is None:
             object.__setattr__(self, "correlation_id", self.event_id)
 
