@@ -20,8 +20,7 @@ class SpotCandidate:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", self.symbol.upper())
-        fields = (
-        )
+        fields = ()
         for name in fields:
             value = getattr(self, name)
             if not isinstance(value, Decimal):
