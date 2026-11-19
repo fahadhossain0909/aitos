@@ -23,7 +23,7 @@ from aitos.spot.models import (
 
 
 @pytest.mark.asyncio
-async def test_binance_spot_testnet_limit_order_cancel_and_reconcile():
+async def test_binance_spot_testnet_limit_order_cancel_and_reconcile(tmp_path):
     api_key = os.getenv("AITOS_SPOT_API_KEY", "").strip()
     api_secret = os.getenv("AITOS_SPOT_API_SECRET", "").strip()
     if not api_key or not api_secret:
@@ -34,7 +34,8 @@ async def test_binance_spot_testnet_limit_order_cancel_and_reconcile():
         api_secret=api_secret,
         testnet=True,
     )
-    ledger = InventoryLedger()
+    ledger_path = tmp_path / "spot-testnet-recovery.sqlite3"
+    ledger = InventoryLedger(ledger_path)
     try:
         await adapter.sync_server_time()
         filters = await adapter.exchange_info()
@@ -86,7 +87,19 @@ async def test_binance_spot_testnet_limit_order_cancel_and_reconcile():
             enabled=True,
             symbol_filters={"BTCUSDT": symbol_filters},
         )
+        ledger.record_order_intent(
+            client_order_id=request.client_order_id,
+            symbol=request.symbol,
+            side=request.side.value,
+            order_type=request.order_type.value,
+            quantity=request.quantity,
+        )
         placed = await executor.submit(request)
+        ledger.update_order_intent(
+            request.client_order_id,
+            status=placed.status.value,
+            exchange_order_id=placed.order_id,
+        )
         queried = await adapter.query_order(
             "BTCUSDT", client_order_id=request.client_order_id
         )
@@ -97,9 +110,17 @@ async def test_binance_spot_testnet_limit_order_cancel_and_reconcile():
                 "BTCUSDT", client_order_id=request.client_order_id
             )
 
+        ledger.close()
+        ledger = InventoryLedger(ledger_path)
         reconciled = await executor.reconcile_order(
             "BTCUSDT", request.client_order_id, ledger
         )
+        ledger.update_order_intent(
+            request.client_order_id,
+            status=reconciled.status.value,
+            exchange_order_id=reconciled.order_id,
+        )
+        assert ledger.unresolved_order_intents() == []
         assert reconciled.status in {
             SpotOrderStatus.FILLED,
             SpotOrderStatus.CANCELED,
