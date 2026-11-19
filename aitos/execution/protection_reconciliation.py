@@ -265,6 +265,7 @@ async def audit_exchange_protection_inventory(
     captured_at = now or datetime.now(timezone.utc)
     if captured_at.utcoffset() is None:
         raise ValueError("timezone-aware inventory timestamp required")
+    local_trades = tuple(trades) if trades is not None else None
     rows = await asyncio.to_thread(journal_reader)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded durable intent inventory required")
@@ -297,7 +298,7 @@ async def audit_exchange_protection_inventory(
             raise ValueError("authenticated algo inventory symbol is missing")
         symbols.add(symbol)
 
-    account_audit = await _audit_account_exposure(executor, trades)
+    account_audit = await _audit_account_exposure(executor, local_trades)
     if not symbols:
         return {
             "schema_version": 1,
@@ -322,6 +323,17 @@ async def audit_exchange_protection_inventory(
         "captured_at": captured_at.isoformat(),
         "symbols": sorted(symbols),
         "orders": orders,
+        **(
+            {
+                "active_trade_ids": [
+                    str(getattr(trade, "trade_id"))
+                    for trade in local_trades
+                    if getattr(trade, "trade_id", None)
+                ]
+            }
+            if local_trades is not None
+            else {}
+        ),
     }
     report = audit_protection_inventory(
         rows,
