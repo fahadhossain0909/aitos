@@ -48,9 +48,10 @@ def test_same_symbol_across_market_types_is_not_ambiguous():
     futures = _instrument(market_type="usd_m_futures")
     master = InstrumentMaster([spot, futures], version="v1")
     assert master.resolve(venue="binance", market_type="spot", symbol="BTCUSDT") is spot
-    assert master.resolve(
-        venue="binance", market_type="usd_m_futures", symbol="BTCUSDT"
-    ) is futures
+    assert (
+        master.resolve(venue="binance", market_type="usd_m_futures", symbol="BTCUSDT")
+        is futures
+    )
 
 
 def test_duplicate_normalized_identity_is_rejected():
