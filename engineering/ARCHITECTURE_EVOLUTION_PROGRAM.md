@@ -176,6 +176,9 @@ Control plane (configuration, identity, secrets, observability, CI/CD, incident 
 **Exit:** old/new parity, stale/degraded handling tests, replay reproducibility and explicit operator approval for cutover.
 
 ### Phase 3 — Portfolio/risk authority (approval required before active wiring)
+- Added a typed `PendingOrderExposure` contract to the existing `PortfolioState`; duplicate pending client identities, invalid sides and non-finite/negative risk inputs are rejected.
+- The final lifecycle capital guard now projects each pending order as a distinct exposure key while retaining its underlying instrument identity and LONG/SHORT side. This means an already-open BTC position and another pending BTC order are both counted, with same-instrument correlation and side-aware hedge treatment; they are no longer collapsed by a symbol-keyed dictionary.
+- The pending-order projection is additive and defaults to empty for existing providers. A live/account adapter must populate it from a fresh, authoritative open-order snapshot before the capability can be considered active; provider population and venue reconciliation are NOT TESTED.
 - Trace and consolidate existing allocation/risk path; do not create parallel risk engines.
 - Add pending-order and in-flight reservation projection if absent.
 - Verify atomic reservation under concurrent proposals.
