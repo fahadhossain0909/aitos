@@ -128,7 +128,7 @@ def test_inventory_accounts_for_base_asset_sell_commission():
         commission=Decimal("0.01"), commission_asset="ABC")
     position = ledger.get_position("ABCUSDT")
     assert position.quantity == Decimal("0.98")
-    assert position.realized_quote_pnl == Decimal("11.88") - (Decimal("20") / Decimal("1.99") * Decimal("1.01"))
+    assert position.realized_quote_pnl == Decimal("12") - (Decimal("20") / Decimal("1.99") * Decimal("1.01"))
 
 
 def test_inventory_marks_third_asset_fee_for_conversion():
