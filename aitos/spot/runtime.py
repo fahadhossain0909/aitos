@@ -134,15 +134,18 @@ class SpotRuntime:
                 futures_spot_lag_seconds=estimate.lag_seconds,
                 futures_spot_correlation=(
                     Decimal(str(estimate.correlation))
-                    if estimate.correlation is not None else None
+                    if estimate.correlation is not None
+                    else None
                 ),
                 futures_spot_confidence_low=(
                     Decimal(str(estimate.confidence_low))
-                    if estimate.confidence_low is not None else None
+                    if estimate.confidence_low is not None
+                    else None
                 ),
                 futures_spot_confidence_high=(
                     Decimal(str(estimate.confidence_high))
-                    if estimate.confidence_high is not None else None
+                    if estimate.confidence_high is not None
+                    else None
                 ),
                 futures_spot_observations=estimate.observations,
             )
@@ -170,9 +173,7 @@ class SpotRuntime:
         symbols = [item.symbol for item in instruments]
         if not symbols:
             raise RuntimeError("no eligible liquid Spot instruments were discovered")
-        self.quote_volumes_24h = dict(
-            self.market_data.rest.universe_quote_volumes
-        )
+        self.quote_volumes_24h = dict(self.market_data.rest.universe_quote_volumes)
         await self.market_consumer.start(market_bus)
         await self.lead_lag.start(market_bus)
         book_symbols = symbols[:5]
