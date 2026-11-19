@@ -104,12 +104,15 @@ class SpotOrderExecutor:
         response. The client order ID is queried; an uncertain POST is never
         blindly resubmitted.
         """
+        order = await self.adapter.query_order(
+            symbol, client_order_id=client_order_id
+        )
         filters = self.filters.get(symbol.upper())
         if filters is None:
             filters = (await self.adapter.exchange_info()).get(symbol.upper())
         if filters is None:
             raise ValueError("symbol filters unavailable during fill reconciliation")
-        trades = await self.adapter.my_trades(symbol, order_id=order.order_id)
+        trades = await self.adapter.my_trades(symbol, order_id=order.order_id, limit=1000)
         for trade in trades:
             trade_side = "BUY" if bool(trade.get("isBuyer")) else "SELL"
             if trade_side != order.side.value:
