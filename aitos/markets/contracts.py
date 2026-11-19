@@ -85,6 +85,7 @@ class MarketEvent:
     venue: str | None = None
     market_type: str | None = None
     source_event_type: str | None = None
+    source_instrument_id: str | None = None
     stage_timestamps: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
