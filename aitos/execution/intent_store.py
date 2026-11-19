@@ -173,8 +173,16 @@ class ExecutionIntentStore:
                 request.get("symbol") != row["symbol"]
                 or result.symbol != row["symbol"]
                 or result_side != request_side
+                or not math.isclose(
+                    result.fill_price,
+                    float(request.get("reference_price", 0)),
+                    rel_tol=1e-12,
+                    abs_tol=0.0,
+                )
             ):
-                raise ValueError("protection result does not match preclaim identity")
+                raise ValueError(
+                    "protection result does not match preclaim identity or trigger price"
+                )
             cursor = conn.execute(
                 "UPDATE execution_intents SET state='PROTECTED',result_json=?,updated_at=CURRENT_TIMESTAMP "
                 "WHERE scope=? AND client_id=? AND state='SUBMITTING'",
