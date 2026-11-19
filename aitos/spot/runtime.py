@@ -83,7 +83,9 @@ class SpotRuntime:
         self,
         *,
         kernel,
-        opportunity_builder: Callable[[SpotCandidate, object], Opportunity | Awaitable[Opportunity]],
+        opportunity_builder: Callable[
+            [SpotCandidate, object], Opportunity | Awaitable[Opportunity]
+        ],
         equity_usd: float,
         quote_order_quantity_for: Callable[
             [RankedSpotCandidate], Decimal | Awaitable[Decimal]
@@ -103,7 +105,9 @@ class SpotRuntime:
                 if inspect.isawaitable(quote_quantity):
                     quote_quantity = await quote_quantity
                 if not isinstance(quote_quantity, Decimal) or quote_quantity <= 0:
-                    raise SpotCandidateRejected("Spot quote allocation must be a positive Decimal")
+                    raise SpotCandidateRejected(
+                        "Spot quote allocation must be a positive Decimal"
+                    )
                 order = await self.submit_ranked_spot_candidate(
                     ranked_candidate=item,
                     kernel=kernel,
@@ -152,7 +156,9 @@ class SpotRuntime:
         if not candidate.trading_enabled or not candidate.data_fresh:
             raise SpotCandidateRejected("Spot candidate is disabled or stale")
         if candidate.last_price is None or candidate.last_price <= 0:
-            raise SpotCandidateRejected("Spot candidate has no valid exchange reference price")
+            raise SpotCandidateRejected(
+                "Spot candidate has no valid exchange reference price"
+            )
         spread_limit = self.scanner.max_spread_bps
         volatility_limit = self.scanner.max_volatility_bps
         scores = {
@@ -226,7 +232,9 @@ class SpotRuntime:
             getattr(decision.direction, "value", decision.direction)
         ).lower()
         if direction != "long" or decision.confidence < kernel.fusion_min_confidence:
-            raise SpotCandidateRejected("shared AI Kernel did not approve a confident Spot LONG")
+            raise SpotCandidateRejected(
+                "shared AI Kernel did not approve a confident Spot LONG"
+            )
         opportunity = opportunity_builder(candidate, decision)
         if inspect.isawaitable(opportunity):
             opportunity = await opportunity
