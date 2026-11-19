@@ -79,3 +79,31 @@ def test_futures_symbol_alias_maps_to_spot_underlying():
     analyzer.ingest(_ticker("usd_m_futures", "BTCUSDT_UMCBL", 100, now))
     assert "BTCUSDT" in analyzer._pairs
     assert "BTCUSDT_UMCBL" not in analyzer._pairs
+
+
+
+def test_futures_spot_synchronous_correlation_is_not_misreported_as_lead():
+    analyzer = FuturesSpotLeadLagAnalyzer(
+        max_lag_seconds=3,
+        window_seconds=180,
+        min_observations=30,
+        min_abs_correlation=0.2,
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    returns = [
+        0.0004 * math.sin(index * 1.37)
+        + 0.0002 * math.cos(index * 0.29)
+        for index in range(180)
+    ]
+    prices = [100.0]
+    for value in returns[:-1]:
+        prices.append(prices[-1] * math.exp(value))
+    estimate = None
+    for index, price in enumerate(prices):
+        at = start + timedelta(seconds=index)
+        analyzer.ingest(_ticker("usd_m_futures", "ETHUSDT", price, at))
+        estimate = analyzer.ingest(_ticker("spot", "ETHUSDT", price, at))
+    assert estimate is not None
+    assert estimate.status == "synchronous"
+    assert estimate.leader is None
+    assert estimate.lag_seconds is None
