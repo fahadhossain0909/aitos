@@ -41,18 +41,14 @@ def test_futures_spot_lead_lag_detects_futures_leading_by_two_seconds():
     futures_prices = [100.0]
     spot_prices = [100.0]
     for index in range(1, 240):
-        futures_prices.append(
-            futures_prices[-1] * math.exp(futures_returns[index - 1])
-        )
+        futures_prices.append(futures_prices[-1] * math.exp(futures_returns[index - 1]))
         delayed_return = futures_returns[index - 3] if index >= 3 else 0.0
         spot_prices.append(spot_prices[-1] * math.exp(delayed_return))
 
     estimate = None
     for index in range(240):
         at = start + timedelta(seconds=index)
-        analyzer.ingest(
-            _ticker("usd_m_futures", "BTCUSDT", futures_prices[index], at)
-        )
+        analyzer.ingest(_ticker("usd_m_futures", "BTCUSDT", futures_prices[index], at))
         estimate = analyzer.ingest(_ticker("spot", "BTCUSDT", spot_prices[index], at))
 
     assert estimate is not None
@@ -72,14 +68,11 @@ def test_futures_spot_lead_lag_rejects_unmatched_markets_and_bad_prices():
 
 
 def test_futures_symbol_alias_maps_to_spot_underlying():
-    analyzer = FuturesSpotLeadLagAnalyzer(
-        symbol_aliases={"BTCUSDT_UMCBL": "BTCUSDT"}
-    )
+    analyzer = FuturesSpotLeadLagAnalyzer(symbol_aliases={"BTCUSDT_UMCBL": "BTCUSDT"})
     now = datetime.now(timezone.utc)
     analyzer.ingest(_ticker("usd_m_futures", "BTCUSDT_UMCBL", 100, now))
     assert "BTCUSDT" in analyzer._pairs
     assert "BTCUSDT_UMCBL" not in analyzer._pairs
-
 
 
 def test_futures_spot_synchronous_correlation_is_not_misreported_as_lead():
@@ -91,8 +84,7 @@ def test_futures_spot_synchronous_correlation_is_not_misreported_as_lead():
     )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     returns = [
-        0.0004 * math.sin(index * 1.37)
-        + 0.0002 * math.cos(index * 0.29)
+        0.0004 * math.sin(index * 1.37) + 0.0002 * math.cos(index * 0.29)
         for index in range(180)
     ]
     prices = [100.0]
