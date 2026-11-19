@@ -146,7 +146,9 @@ def _symbols(values: list[str]) -> list[str]:
 
 def _depth_limit(levels: int) -> int:
     allowed = (5, 10, 20, 50, 100, 500, 1000, 5000)
-    return min(allowed, key=lambda n: abs(n - levels))
+    if levels not in allowed:
+        raise ValueError(f"unsupported Spot depth limit: {levels}")
+    return levels
 
 
 async def _merge_symbols(symbols: list[str], factory: Callable[[str], AsyncIterator[MarketEvent]]) -> AsyncIterator[MarketEvent]:
