@@ -140,6 +140,7 @@ def test_futures_spot_lead_lag_estimates_expire_when_market_feed_stales():
     )
     assert analyzer.estimate("BTCUSDT", max_age_seconds=15) is None
 
+
 def test_futures_spot_lead_lag_detects_spot_leading_by_two_seconds():
     analyzer = FuturesSpotLeadLagAnalyzer(
         bucket_seconds=1,
