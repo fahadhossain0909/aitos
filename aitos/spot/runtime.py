@@ -239,7 +239,9 @@ class SpotRuntime:
         """Mark managed Spot inventory and Spot quote cash beside Futures equity."""
         if self.portfolio_valuator is None:
             self.portfolio_valuator = SpotPortfolioValuator(
-                self.inventory, quote_asset=self.quote_asset
+                self.inventory,
+                quote_asset=self.quote_asset,
+                quote_to_usd_rate=self.coordinator.quote_to_usd_rate,
             )
         return await self.portfolio_valuator.snapshot(
             spot_adapter=self.market_data.rest,
@@ -558,7 +560,9 @@ def build_spot_runtime(
         inventory=inventory,
     )
     portfolio_valuator = SpotPortfolioValuator(
-        inventory, quote_asset=policy.quote_asset
+        inventory,
+        quote_asset=policy.quote_asset,
+        quote_to_usd_rate=Decimal(str(policy.quote_to_usd_rate)),
     )
     market_consumer = SpotMarketDataConsumer(
         scanner,
