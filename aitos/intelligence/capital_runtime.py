@@ -174,7 +174,7 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     consensus["position_risk_pct"] = {}
     consensus["position_sides"] = {}
     for position in positions:
-        symbol = str(getattr(position, "symbol", "") or "")
+        symbol = str(getattr(position, "symbol", "") or "").strip().upper()
         if not symbol:
             continue
         risk_amount = getattr(position, "risk_amount_usd", None)
@@ -193,7 +193,7 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     consensus["pending_order_sides"] = {}
     for pending in pending_orders:
         order_id = str(getattr(pending, "order_id", "") or "")
-        symbol = str(getattr(pending, "symbol", "") or "")
+        symbol = str(getattr(pending, "symbol", "") or "").strip().upper()
         side = str(getattr(pending, "side", "") or "").upper()
         risk_amount = float(getattr(pending, "risk_amount_usd", -1.0))
         if (
