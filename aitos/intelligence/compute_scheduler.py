@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+import math
 from typing import Any
 
 
@@ -30,6 +31,10 @@ class AnalysisTask:
     def __post_init__(self) -> None:
         if not self.task_id:
             raise ValueError("task_id is required")
+        if not isinstance(self.priority, TaskPriority):
+            raise ValueError("priority must be a TaskPriority")
+        if not math.isfinite(self.submitted_at):
+            raise ValueError("submitted_at must be finite")
         if self.cost_units < 1:
             raise ValueError("cost_units must be positive")
         if self.coalesce_key and not self.replaceable:
@@ -84,6 +89,8 @@ class ComputeAwareScheduler:
         self._evicted = self._dispatched = 0
 
     def submit(self, task: AnalysisTask, *, now: float) -> bool:
+        if not math.isfinite(now):
+            raise ValueError("now must be finite")
         if task.submitted_at > now:
             raise ValueError("submitted_at cannot be in the future")
         if task.cost_units > self.capacity_units:
@@ -118,6 +125,8 @@ class ComputeAwareScheduler:
         return True
 
     def drain(self, *, now: float, max_tasks: int | None = None) -> list[AnalysisTask]:
+        if not math.isfinite(now):
+            raise ValueError("now must be finite")
         if max_tasks is not None and max_tasks < 0:
             raise ValueError("max_tasks cannot be negative")
         remaining = self.capacity_units
