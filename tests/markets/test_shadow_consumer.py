@@ -169,3 +169,13 @@ def test_shadow_consumer_rejects_invalid_price_and_bounds_instrument_count():
     limited._process(make_event(symbol="ETHUSDT", event_id="eth"))
     assert limited.snapshot().processed == 1
     assert limited.snapshot().rejected_unresolved == 1
+
+
+def test_shadow_consumer_rejects_instrument_market_type_mismatch():
+    consumer = make_consumer()
+    consumer._resolver = lambda event: Instrument(
+        event.symbol, AssetClass.CRYPTO, "binance", market_type="usd_m_futures"
+    )
+    consumer._process(make_event(market_type="spot", event_id="wrong-market"))
+    assert consumer.snapshot().processed == 0
+    assert consumer.snapshot().rejected_unresolved == 1
