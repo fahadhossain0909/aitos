@@ -231,7 +231,6 @@ async def test_book_delta_is_persisted_without_snapshot_sampling():
     assert repo.depth_events[0]["payload"]["final_update_id"] == 101
 
 
-
 @pytest.mark.asyncio
 async def test_spot_ticker_is_persisted_with_market_identity_and_revision():
     repo = FakeRepository()
