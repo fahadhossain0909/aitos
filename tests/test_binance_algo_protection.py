@@ -150,6 +150,7 @@ async def test_open_algo_inventory_is_read_only_and_validates_complete_rows():
         {"positionSide": "UNKNOWN"},
         {"quantity": "NaN"},
         {"triggerPrice": "0"},
+        {"reduceOnly": 1},
     ],
 )
 async def test_open_algo_inventory_rejects_malformed_or_mismatched_rows(override):
@@ -237,6 +238,8 @@ async def test_open_order_inventory_is_read_only_and_symbol_scoped():
         {"executedQty": "3"},
         {"reduceOnly": "unknown"},
         {"closePosition": None},
+        {"reduceOnly": 1},
+        {"closePosition": 0},
     ],
 )
 async def test_open_order_inventory_rejects_invalid_rows(override):
