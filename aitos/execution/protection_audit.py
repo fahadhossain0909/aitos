@@ -93,10 +93,10 @@ def audit_protection_inventory(
         if row.get("scope", scope) != scope:
             raise ValueError("journal account scope mismatch")
         request = _object(row.get("request_json", {}))
-        if (
-            request.get("order_type") not in PROTECTION_TYPES
-            or row.get("state") in {"REJECTED", "TERMINAL"}
-        ):
+        if request.get("order_type") not in PROTECTION_TYPES or row.get("state") in {
+            "REJECTED",
+            "TERMINAL",
+        }:
             continue
         if (
             active_trade_ids is not None
