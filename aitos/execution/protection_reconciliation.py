@@ -177,14 +177,6 @@ async def _audit_account_exposure(
     orders = await order_reader()
     if not isinstance(orders, list) or len(orders) > 10000:
         raise ValueError("complete bounded ordinary open-order inventory required")
-    local_sides: dict[str, set[str]] = {}
-    for trade in local_trades:
-        raw_side = getattr(trade, "side", "")
-        side = str(getattr(raw_side, "value", raw_side)).upper()
-        symbol = str(getattr(trade, "symbol", "")).strip().upper()
-        if symbol and side in {"LONG", "SHORT"}:
-            local_sides.setdefault(symbol, set()).add(side)
-
     pending_entries = []
     for order in orders:
         if not isinstance(order, dict):
