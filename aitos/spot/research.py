@@ -1,4 +1,5 @@
 """Chronological out-of-sample validation for Futures/Spot lead-lag hypotheses."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,22 +30,27 @@ def _pearson(left: Sequence[float], right: Sequence[float]) -> float:
     mx, my = sum(x) / n, sum(y) / n
     dx, dy = [v - mx for v in x], [v - my for v in y]
     denominator = sqrt(sum(v * v for v in dx) * sum(v * v for v in dy))
-    return 0.0 if denominator <= 1e-18 else sum(a * b for a, b in zip(dx, dy)) / denominator
+    return (
+        0.0
+        if denominator <= 1e-18
+        else sum(a * b for a, b in zip(dx, dy)) / denominator
+    )
 
 
-def _hac_interval(values: Sequence[float], confidence_z: float = 1.96) -> tuple[float, float]:
+def _hac_interval(
+    values: Sequence[float], confidence_z: float = 1.96
+) -> tuple[float, float]:
     n = len(values)
     if n < 8:
         return -1.0, 1.0
     mean = sum(values) / n
     centered = [value - mean for value in values]
-    bandwidth = min(int(n ** 0.25), 10)
+    bandwidth = min(int(n**0.25), 10)
     long_run_variance = sum(value * value for value in centered) / n
     for lag in range(1, bandwidth + 1):
-        covariance = sum(
-            centered[index] * centered[index - lag]
-            for index in range(lag, n)
-        ) / n
+        covariance = (
+            sum(centered[index] * centered[index - lag] for index in range(lag, n)) / n
+        )
         weight = 1.0 - lag / (bandwidth + 1)
         long_run_variance += 2.0 * weight * covariance
     standard_error = sqrt(max(0.0, long_run_variance) / n)
@@ -83,7 +89,9 @@ def validate_futures_spot_lead_lag_oos(
         raise ValueError("insufficient chronological train/test observations")
     spot = list(map(float, spot_returns[:n]))
     futures = list(map(float, futures_returns[:n]))
-    if any(not (value == value and abs(value) != float("inf")) for value in spot + futures):
+    if any(
+        not (value == value and abs(value) != float("inf")) for value in spot + futures
+    ):
         raise ValueError("returns must be finite")
     candidates: list[tuple[float, str, int]] = []
     for lag in range(max_lag_seconds + 1):
