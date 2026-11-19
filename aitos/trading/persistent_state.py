@@ -357,7 +357,7 @@ class DurableTradingStateStore:
                 client_order_id,
                 any(state) AS state,
                 any(result_json) AS result_json,
-                uniqExact(tuple(state, result_json)) AS latest_versions
+                uniqExact(tuple(symbol, state, request_json, result_json)) AS latest_versions
             FROM order_execution_ledger
             WHERE (client_order_id, updated_at) IN (
                 SELECT client_order_id, max(updated_at)
