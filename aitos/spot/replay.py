@@ -108,7 +108,7 @@ def replay_spot_market_order(
     adjusted_average = (
         average * adverse if side == "BUY" else average / adverse
     ) if average is not None else None
-    fees_rate = maker_fee_bps if maker else taker_fee_bps
+    fees_rate = taker_fee_bps
     fills = tuple(
         ReplayFill(
             price=(price * adverse if side == "BUY" else price / adverse),
@@ -141,7 +141,6 @@ def replay_spot_market_order(
         latency_ms=latency_ms,
         fills=fills,
     )
-
 
 
 def replay_spot_limit_order(
