@@ -95,3 +95,91 @@ def test_l2_market_order_does_not_reuse_later_snapshot_depth():
     assert result.remaining_quantity == pytest.approx(0.3)
     assert not result.complete
 
+def test_l2_market_order_accepts_signed_funding_credit():
+    book = DepthBookSnapshot(
+        1000,
+        bids=((99.0, 2.0),),
+        asks=((101.0, 2.0),),
+    )
+    result = replay_l2_market_order(
+        [book],
+        side="BUY",
+        quantity=1.0,
+        submitted_at_ms=1000,
+        latency_ms=0,
+        fee_bps=0.0,
+        funding_bps=-8.0,
+        holding_hours=8.0,
+        funding_interval_hours=8.0,
+    )
+    assert result.funding_cost < 0
+    assert result.total_cost == pytest.approx(
+        result.fees
+        + result.spread_cost
+        + result.impact_cost
+        + result.slippage_cost
+        + result.funding_cost
+        + result.borrow_cost
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"quantity": True},
+        {"fee_bps": True},
+        {"impact_coefficient_bps": True},
+        {"max_participation": True},
+        {"slippage_bps": True},
+        {"borrow_bps": True},
+        {"holding_hours": True},
+        {"submitted_at_ms": 1000.5},
+        {"latency_ms": 0.5},
+    ],
+)
+def test_l2_market_order_rejects_boolean_and_non_integer_time_inputs(overrides):
+    arguments = {
+        "side": "BUY",
+        "quantity": 1.0,
+        "submitted_at_ms": 1000,
+        "latency_ms": 0,
+        "fee_bps": 0.0,
+    }
+    arguments.update(overrides)
+    with pytest.raises(ValueError):
+        replay_l2_market_order([], **arguments)
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        LimitQueueEvent(1000, traded_at_limit=True),
+        LimitQueueEvent(1000, cancelled_ahead=-1.0),
+    ],
+)
+def test_queue_event_rejects_invalid_quantities(event):
+    assert event.timestamp_ms == 1000
+
+
+def test_queue_replay_rejects_boolean_and_non_integer_inputs():
+    with pytest.raises(ValueError):
+        replay_passive_limit_queue(
+            [],
+            quantity=True,
+            queue_ahead=0.0,
+            submitted_at_ms=1000,
+        )
+    with pytest.raises(ValueError):
+        replay_passive_limit_queue(
+            [],
+            quantity=1.0,
+            queue_ahead=0.0,
+            submitted_at_ms=1000.5,
+        )
+    with pytest.raises(TypeError, match="LimitQueueEvent"):
+        replay_passive_limit_queue(
+            [object()],
+            quantity=1.0,
+            queue_ahead=0.0,
+            submitted_at_ms=1000,
+        )
