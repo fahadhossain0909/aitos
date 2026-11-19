@@ -160,6 +160,7 @@ async def test_load_versioned_events_filters_exact_spot_instrument_and_decodes_p
     repo = MarketDataRepository.__new__(MarketDataRepository)
     repo._client = FakeClient()
     repo._initialized = True
+    repo._query_timeout_seconds = 5.0
     start = datetime(2026, 11, 1, tzinfo=timezone.utc)
     end = start + timedelta(hours=1)
 
