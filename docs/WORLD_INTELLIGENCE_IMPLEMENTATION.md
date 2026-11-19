@@ -182,3 +182,5 @@ This facade does not load artifacts, switch live strategies or place orders.
 The bounded `HistoricalIngestionStore.backfill` runner follows provider cursors to exhaustion, rejects non-advancing cursors, and fails rather than claiming completeness when its page budget is reached.
 
 The research validation reports must be reviewed by asset, horizon and regime; aggregate metrics alone are not sufficient for model selection or deployment approval.
+
+Historical source checkpoints carry monotonic fencing tokens; stale ingestion workers cannot supersede a checkpoint written by a newer lease holder.
