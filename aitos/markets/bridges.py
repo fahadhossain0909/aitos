@@ -77,5 +77,6 @@ def market_data_event_to_domain(
         venue=event.venue or event.exchange,
         market_type=event.market_type or event.market,
         source_event_type=source_event_type,
+        source_instrument_id=event.instrument_id,
         stage_timestamps=dict(event.stage_timestamps),
     )
