@@ -116,8 +116,8 @@ def build_spot_runtime(
     inventory = InventoryLedger(path)
     scanner = SpotOpportunityScanner(
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
-        max_spread_bps=__import__("decimal").Decimal(str(policy.max_spread_bps)),
-        max_volatility_bps=__import__("decimal").Decimal(str(policy.max_volatility_bps)),
+        max_spread_bps=Decimal(str(policy.max_spread_bps)),
+        max_volatility_bps=Decimal(str(policy.max_volatility_bps)),
     )
     coordinator = SpotTradingCoordinator(
         capital_gateway=capital_gateway or CapitalGateway(),
