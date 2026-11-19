@@ -147,6 +147,7 @@ async def test_runtime_batch_path_uses_live_rank_and_enriches_only_promoted_top_
         == "not_promoted_for_deep_history"
     )
 
+
 class EmptyBatchScanner(Scanner):
     async def iter_candidate_batches(self):
         if False:
@@ -165,4 +166,3 @@ async def test_empty_batch_cycle_clears_previous_promoted_candidate_identity():
     assert batches == []
     assert scanner._last_candidate_count == 0
     assert scanner._last_candidate_symbols == ()
-
