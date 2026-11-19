@@ -393,6 +393,7 @@ def test_adaptive_exit_observation_counter_survives_trade_recovery():
 
     assert restored.adaptive_exit_observations == 17
 
+
 @pytest.mark.asyncio
 async def test_order_record_rejects_conflicting_latest_timestamp_versions():
     class QueryResult:
@@ -463,6 +464,7 @@ async def test_unlinked_order_recovery_fails_closed_on_latest_timestamp_tie():
         RuntimeError, match="ambiguous latest acknowledged-order evidence"
     ):
         await store.load_unlinked_acknowledged_orders()
+
 
 @pytest.mark.asyncio
 async def test_order_record_lookup_returns_none_when_no_order_exists():
