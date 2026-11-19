@@ -2300,6 +2300,7 @@ class OpportunityScanner(AITOSModule):
         budget = min(cfg.max_candidate_analyses_per_cycle, cfg.candidate_pool_limit)
         selected = selected[:budget]
         scanned = found = 0
+        candidate_symbols_seen: set[str] = set()
         batch_size = max(1, cfg.candidate_batch_size)
         for offset in range(0, len(selected), batch_size):
             batch = selected[offset : offset + batch_size]
@@ -2339,9 +2340,8 @@ class OpportunityScanner(AITOSModule):
             ranked = await self.rank(candidates, top_n=len(candidates))
             found += len(ranked)
             self._last_scan_at, self._last_candidate_count = _utc_now_iso(), found
-            self._last_candidate_symbols = tuple(
-                sorted({item.symbol for item in ranked})
-            )
+            candidate_symbols_seen.update(item.symbol for item in ranked)
+            self._last_candidate_symbols = tuple(sorted(candidate_symbols_seen))
             payload = {
                 "phase": "batch_completed",
                 "batch_index": offset // batch_size + 1,
