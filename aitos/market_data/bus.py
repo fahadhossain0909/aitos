@@ -52,9 +52,7 @@ _SPOT_CHANNEL_BY_TYPE = {
 }
 
 
-def channel_for(
-    event_type: MarketEventType, market_type: str | None = None
-) -> str:
+def channel_for(event_type: MarketEventType, market_type: str | None = None) -> str:
     mapping = (
         _SPOT_CHANNEL_BY_TYPE
         if str(market_type or "").lower() == "spot"
