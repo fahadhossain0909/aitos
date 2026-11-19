@@ -7,6 +7,7 @@ the point-in-time dataset replayable. Raw responses are bounded and hashed.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from dataclasses import dataclass
@@ -181,7 +182,7 @@ class HistoricalIngestionStore:
                 known_at DateTime64(3, 'UTC'),
                 ingested_at DateTime64(6, 'UTC'),
                 payload_sha256 FixedString(64),
-                raw_payload String,
+                raw_payload_base64 String,
                 metadata_json String
             )
             ENGINE = ReplacingMergeTree(ingested_at)
@@ -214,7 +215,7 @@ class HistoricalIngestionStore:
                     record.known_at,
                     now,
                     hashlib.sha256(record.raw_payload).hexdigest(),
-                    record.raw_payload.decode("utf-8", errors="replace"),
+                    base64.b64encode(record.raw_payload).decode("ascii"),
                     json.dumps(
                         record.metadata,
                         sort_keys=True,
