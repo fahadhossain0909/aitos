@@ -311,9 +311,7 @@ class CapitalGateway:
                 "liquidation_buffer_pct": metadata.get("liquidation_buffer_pct"),
                 "leverage": float(metadata.get("leverage", 1.0)),
             }
-            protection = self.protection.evaluate(
-                snapshot=snapshot, **protection_args
-            )
+            protection = self.protection.evaluate(snapshot=snapshot, **protection_args)
             if not protection.allowed:
                 continue
             risk_budget = equity_usd * protection.allowed_risk_pct / 100.0
