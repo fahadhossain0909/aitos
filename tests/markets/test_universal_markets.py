@@ -181,4 +181,3 @@ def test_timestamp_aligned_lead_lag_rejects_invalid_lag_and_bucket():
         engine.timestamp_aligned_correlation(symbol.id, symbol.id, lag_buckets=-1)
     with pytest.raises(ValueError, match="bucket_seconds"):
         engine.timestamped_returns(symbol.id, bucket_seconds=0)
-
