@@ -67,6 +67,31 @@ class SpotTradingCoordinator:
             # must query the client order ID before deciding whether to release.
             raise
 
+    async def submit_exit(self, *, symbol: str, quantity: Decimal,
+                          exit_authorized: bool,
+                          client_order_id: str | None = None) -> SpotOrder:
+        """Submit an inventory-bounded Spot sell after Exit Intelligence approval.
+
+        Spot has no exchange reduceOnly flag, so managed inventory is checked
+        locally and the lifecycle must explicitly authorize the exit.
+        """
+        if not exit_authorized:
+            raise SpotAuthorizationRejected(
+                "Spot exits require explicit Exit Intelligence authorization"
+            )
+        if quantity <= 0:
+            raise SpotAuthorizationRejected("exit quantity must be positive")
+        position = self.inventory.get_position(symbol)
+        if position is None or position.quantity < quantity:
+            raise SpotAuthorizationRejected(
+                "sell exceeds AITOS-managed Spot inventory"
+            )
+        request = SpotOrderRequest(
+            symbol=symbol, side=SpotOrderSide.SELL, order_type=SpotOrderType.MARKET,
+            quantity=quantity, client_order_id=client_order_id,
+        )
+        return await self.executor.submit(request)
+
     async def reconcile(self, symbol: str, client_order_id: str) -> SpotOrder:
         return await self.executor.reconcile_order(symbol, client_order_id, self.inventory)
 
