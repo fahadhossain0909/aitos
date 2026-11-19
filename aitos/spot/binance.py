@@ -88,7 +88,7 @@ class BinanceSpotAdapter:
             return payload
 
     async def exchange_info(self) -> dict[str, SpotSymbolFilters]:
-        raw = await self._request("GET", "/api/v3/exchangeInfo")
+        raw = await self._request("GET", "/api/v3/exchangeInfo", weight=20)
         self.filters = parse_spot_exchange_info(raw)
         return dict(self.filters)
 
@@ -140,17 +140,17 @@ class BinanceSpotAdapter:
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
         return await self._request("GET", "/api/v3/klines",
-                                   params={"symbol": symbol.upper(), "interval": interval, "limit": limit})
+                                   params={"symbol": symbol.upper(), "interval": interval, "limit": limit}, weight=2)
 
     async def depth(self, symbol: str, limit: int = 100) -> dict[str, Any]:
         if limit not in {5, 10, 20, 50, 100, 500, 1000, 5000}:
             raise ValueError("unsupported Binance depth limit")
         return await self._request("GET", "/api/v3/depth",
-                                   params={"symbol": symbol.upper(), "limit": limit})
+                                   params={"symbol": symbol.upper(), "limit": limit}, weight=(5 if limit <= 100 else (25 if limit <= 500 else (50 if limit <= 1000 else 250))))
 
     async def ticker_24h(self, symbol: str | None = None) -> Any:
         params = {"symbol": symbol.upper()} if symbol else {}
-        return await self._request("GET", "/api/v3/ticker/24hr", params=params)
+        return await self._request("GET", "/api/v3/ticker/24hr", params=params, weight=2 if symbol else 80)
 
     async def create_listen_key(self) -> str:
         """Create a private User Data Stream listen key."""
@@ -166,7 +166,7 @@ class BinanceSpotAdapter:
                             params={"listenKey": listen_key}, api_key_only=True)
 
     async def account(self) -> list[SpotBalance]:
-        raw = await self._request("GET", "/api/v3/account", signed=True)
+        raw = await self._request("GET", "/api/v3/account", signed=True, weight=20)
         return [SpotBalance(x["asset"], D(x["free"]), D(x["locked"]))
                 for x in raw.get("balances", [])]
 
@@ -186,7 +186,7 @@ class BinanceSpotAdapter:
             params["timeInForce"] = request.time_in_force
         if request.client_order_id:
             params["newClientOrderId"] = request.client_order_id
-        raw = await self._request("POST", "/api/v3/order", params=params, signed=True)
+        raw = await self._request("POST", "/api/v3/order", params=params, signed=True, weight=5)
         return self._parse_order(raw, request.side)
 
     async def query_order(self, symbol: str, *, order_id: int | None = None,
@@ -196,7 +196,7 @@ class BinanceSpotAdapter:
         params: dict[str, Any] = {"symbol": symbol.upper()}
         params["orderId" if order_id is not None else "origClientOrderId"] = (
             order_id if order_id is not None else client_order_id)
-        raw = await self._request("GET", "/api/v3/order", params=params, signed=True)
+        raw = await self._request("GET", "/api/v3/order", params=params, signed=True, weight=2)
         return self._parse_order(raw, SpotOrderSide(raw["side"]))
 
     async def my_trades(self, symbol: str, *, order_id: int | None = None,
@@ -220,7 +220,7 @@ class BinanceSpotAdapter:
         params: dict[str, Any] = {"symbol": symbol.upper()}
         params["orderId" if order_id is not None else "origClientOrderId"] = (
             order_id if order_id is not None else client_order_id)
-        return await self._request("DELETE", "/api/v3/order", params=params, signed=True)
+        return await self._request("DELETE", "/api/v3/order", params=params, signed=True, weight=1)
 
     @staticmethod
     def _parse_order(raw: dict[str, Any], side: SpotOrderSide) -> SpotOrder:
