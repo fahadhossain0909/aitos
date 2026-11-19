@@ -74,12 +74,28 @@ CREATE_MARKET_EVENTS = """
 CREATE TABLE IF NOT EXISTS market_events (
     event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
     event_id String, exchange LowCardinality(String), market LowCardinality(String),
-    symbol LowCardinality(String), event_type LowCardinality(String),
-    source LowCardinality(String), sequence Nullable(UInt64), schema_version UInt16,
+    venue LowCardinality(String), market_type LowCardinality(String),
+    instrument_id String, symbol LowCardinality(String),
+    event_type LowCardinality(String), source LowCardinality(String),
+    sequence Nullable(UInt64), schema_version UInt16,
     correlation_id String, trace_id String, payload_json String
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(event_time)
-ORDER BY (symbol, event_type, event_time, event_id)
+ORDER BY (instrument_id, event_type, event_time, event_id)
+"""
+CREATE_VERSIONED_MARKET_EVENTS = """
+CREATE TABLE IF NOT EXISTS market_event_versions (
+    event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
+    event_id String, event_revision UInt64,
+    exchange LowCardinality(String), market LowCardinality(String),
+    venue LowCardinality(String), market_type LowCardinality(String),
+    instrument_id String, symbol LowCardinality(String),
+    event_type LowCardinality(String), source LowCardinality(String),
+    sequence Nullable(UInt64), schema_version UInt16,
+    correlation_id String, trace_id String, payload_json String
+) ENGINE = ReplacingMergeTree(event_revision)
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (instrument_id, event_id)
 """
 CREATE_LIVE_ANALYTICS_EVENTS = """
 CREATE TABLE IF NOT EXISTS live_analytics_events (
@@ -125,6 +141,7 @@ ALL_DDL = [
     CREATE_FUNDING_RATES,
     CREATE_OPEN_INTEREST,
     CREATE_MARKET_EVENTS,
+    CREATE_VERSIONED_MARKET_EVENTS,
     CREATE_LIVE_ANALYTICS_EVENTS,
     CREATE_LEARNING_EXPERIENCES,
     CREATE_TRADE_RUNTIME_STATE,
@@ -186,6 +203,14 @@ class MarketDataRepository(AITOSModule):
                 "ALTER TABLE learning_experiences "
                 "ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp"
             )
+            # CREATE IF NOT EXISTS does not migrate existing market_events tables.
+            # Defaults preserve historical Futures rows while separating Spot identity.
+            for migration in (
+                "ADD COLUMN IF NOT EXISTS venue LowCardinality(String) DEFAULT exchange",
+                "ADD COLUMN IF NOT EXISTS market_type LowCardinality(String) DEFAULT market",
+                "ADD COLUMN IF NOT EXISTS instrument_id String DEFAULT symbol",
+            ):
+                await self._client.command(f"ALTER TABLE market_events {migration}")
         except BaseException:
             # Cancellation is also a startup failure: release acquired resources
             # without hiding the original schema/connection failure.
@@ -251,6 +276,9 @@ class MarketDataRepository(AITOSModule):
                     event.event_id,
                     event.exchange,
                     event.market,
+                    event.venue or event.exchange,
+                    event.market_type or event.market,
+                    event.instrument_id or event.symbol,
                     event.symbol,
                     event.event_type.value,
                     event.source.value,
@@ -267,6 +295,9 @@ class MarketDataRepository(AITOSModule):
                 "event_id",
                 "exchange",
                 "market",
+                "venue",
+                "market_type",
+                "instrument_id",
                 "symbol",
                 "event_type",
                 "source",
@@ -275,6 +306,39 @@ class MarketDataRepository(AITOSModule):
                 "correlation_id",
                 "trace_id",
                 "payload_json",
+            ],
+        )
+        self._last_event_time = event.event_time.isoformat()
+
+    async def save_market_event_versioned(self, event: Any) -> None:
+        """Persist an immutable, revision-aware canonical event envelope."""
+        self._require_initialized()
+        await self._client.insert(
+            "market_event_versions",
+            [[
+                event.event_time,
+                event.ingest_time,
+                event.event_id,
+                event.event_revision,
+                event.exchange,
+                event.market,
+                event.venue or event.exchange,
+                event.market_type or event.market,
+                event.instrument_id or event.symbol,
+                event.symbol,
+                event.event_type.value,
+                event.source.value,
+                event.sequence,
+                event.schema_version,
+                event.correlation_id or event.event_id,
+                event.trace_id or event.event_id,
+                json.dumps(event.payload, sort_keys=True, default=str),
+            ]],
+            column_names=[
+                "event_time", "ingest_time", "event_id", "event_revision",
+                "exchange", "market", "venue", "market_type", "instrument_id",
+                "symbol", "event_type", "source", "sequence", "schema_version",
+                "correlation_id", "trace_id", "payload_json",
             ],
         )
         self._last_event_time = event.event_time.isoformat()
@@ -571,6 +635,55 @@ class MarketDataRepository(AITOSModule):
             ],
             settings={"insert_deduplication_token": str(record.experience_id)},
         )
+
+    async def load_versioned_market_events(
+        self,
+        *,
+        market_type: str,
+        instrument_id: str,
+        event_types: tuple[str, ...] = ("ticker",),
+        start_time: datetime,
+        end_time: datetime,
+        limit: int = 200_000,
+    ) -> list[dict[str, Any]]:
+        """Load point-in-time canonical events with explicit market identity."""
+        if not market_type or not instrument_id:
+            raise ValueError("market_type and instrument_id are required")
+        if start_time.tzinfo is None or end_time.tzinfo is None or end_time <= start_time:
+            raise ValueError("event history requires an ordered timezone-aware range")
+        if not event_types or limit < 1:
+            raise ValueError("event_types and a positive limit are required")
+        rows = await self._query(
+            """
+            SELECT event_time, ingest_time, event_id, event_revision,
+                   exchange, market, venue, market_type, instrument_id, symbol,
+                   event_type, source, sequence, schema_version,
+                   correlation_id, trace_id, payload_json
+            FROM market_event_versions FINAL
+            WHERE market_type = {market_type:String}
+              AND instrument_id = {instrument_id:String}
+              AND event_type IN {event_types:Array(String)}
+              AND event_time >= {start_time:DateTime64(3, 'UTC')}
+              AND event_time < {end_time:DateTime64(3, 'UTC')}
+            ORDER BY event_time ASC, event_id ASC
+            LIMIT {limit:UInt32}
+            """,
+            {
+                "market_type": market_type,
+                "instrument_id": instrument_id,
+                "event_types": list(event_types),
+                "start_time": start_time,
+                "end_time": end_time,
+                "limit": limit,
+            },
+        )
+        for row in rows:
+            payload_json = row.pop("payload_json", "{}")
+            try:
+                row["payload"] = json.loads(payload_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                row["payload"] = {}
+        return rows
 
     async def get_recent_klines(
         self, symbol: str, timeframe: str, limit: int = 500

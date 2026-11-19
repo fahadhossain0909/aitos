@@ -43,7 +43,12 @@ class CanonicalMarketDataPersistenceSink:
             MarketEventType.TRADE,
             MarketEventType.BOOK_DELTA,
             MarketEventType.BOOK_SNAPSHOT,
+            MarketEventType.TICKER,
+            MarketEventType.KLINE,
         ),
+        market_types: tuple[str, ...] | None = None,
+        canonical_only: bool = False,
+        shutdown_flush_seconds: float = 10.0,
     ) -> None:
         self._bus = MarketDataBus(event_bus)
         self._repository = repository
@@ -58,6 +63,14 @@ class CanonicalMarketDataPersistenceSink:
         self._batch_size = max(1, batch_size)
         self._batch_wait = max(0.0, batch_wait_seconds)
         self._persist_event_types = set(persist_event_types)
+        self._market_types = (
+            tuple(item.lower() for item in market_types)
+            if market_types is not None
+            else None
+        )
+        self._canonical_only = canonical_only
+        self._shutdown_flush_seconds = max(0.0, shutdown_flush_seconds)
+        self._shutdown_dropped = 0
         self._subscriptions: list[Subscription] = []
         self._workers: list[asyncio.Task] = []
         self._last_book_persist: dict[str, datetime] = {}
@@ -66,6 +79,7 @@ class CanonicalMarketDataPersistenceSink:
         self._rejected = 0
         self._filtered = 0
         self._batches = 0
+        self._versioned_events = 0
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -76,14 +90,17 @@ class CanonicalMarketDataPersistenceSink:
         for event_type in sorted(
             self._persist_event_types, key=lambda item: item.value
         ):
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    event_type,
-                    self._enqueue,
-                    group=GROUP_PERSISTENCE,
-                    live_only=True,
+            market_types = self._market_types or (None,)
+            for market_type in market_types:
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        event_type,
+                        self._enqueue,
+                        group=GROUP_PERSISTENCE,
+                        live_only=True,
+                        market_type=market_type,
+                    )
                 )
-            )
         self._workers = [
             asyncio.create_task(self._worker(i), name=f"market-data-persistence-{i}")
             for i in range(self._workers_count)
@@ -98,11 +115,27 @@ class CanonicalMarketDataPersistenceSink:
                 *(self._wait(s) for s in self._subscriptions), return_exceptions=True
             )
         self._subscriptions.clear()
+        if self._workers:
+            try:
+                await asyncio.wait_for(
+                    self._queue.join(), timeout=self._shutdown_flush_seconds
+                )
+            except asyncio.TimeoutError:
+                # A bounded shutdown is more important than hanging service teardown.
+                pass
         for worker in self._workers:
             worker.cancel()
         if self._workers:
             await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            else:
+                self._shutdown_dropped += 1
+                self._queue.task_done()
         self._initialized = False
 
     async def _wait(self, subscription: Subscription) -> None:
@@ -124,6 +157,10 @@ class CanonicalMarketDataPersistenceSink:
                 return
         elif event.event_type is MarketEventType.BOOK_DELTA:
             if event.symbol.upper() not in self._historical_books:
+                self._filtered += 1
+                return
+        elif event.event_type in {MarketEventType.TICKER, MarketEventType.KLINE}:
+            if event.symbol.upper() not in self._historical_trades:
                 self._filtered += 1
                 return
         elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
@@ -237,13 +274,31 @@ class CanonicalMarketDataPersistenceSink:
         for event in events:
             grouped[event.event_type].append(event)
 
-        trades = grouped.get(MarketEventType.TRADE, [])
+        versioned_writer = getattr(
+            self._repository, "save_market_event_versioned", None
+        )
+        if self._canonical_only and versioned_writer is None:
+            raise RuntimeError(
+                "canonical-only persistence requires save_market_event_versioned"
+            )
+        if versioned_writer is not None:
+            for event in events:
+                await versioned_writer(event)
+                self._versioned_events += 1
+
+        if self._canonical_only:
+            trades = []
+            deltas = []
+            books = []
+        else:
+            trades = grouped.get(MarketEventType.TRADE, [])
         if trades:
             await self._repository.save_trade_ticks(
                 [TradeTick.from_dict(dict(event.payload)) for event in trades]
             )
 
-        deltas = grouped.get(MarketEventType.BOOK_DELTA, [])
+        if not self._canonical_only:
+            deltas = grouped.get(MarketEventType.BOOK_DELTA, [])
         if deltas:
             await self._repository.save_depth_events(
                 [
@@ -256,7 +311,8 @@ class CanonicalMarketDataPersistenceSink:
                 ]
             )
 
-        books = grouped.get(MarketEventType.BOOK_SNAPSHOT, [])
+        if not self._canonical_only:
+            books = grouped.get(MarketEventType.BOOK_SNAPSHOT, [])
         if books:
             snapshots: list[OrderBookSnapshot] = []
             for event in books:
@@ -322,9 +378,14 @@ class CanonicalMarketDataPersistenceSink:
             "batch_size": self._batch_size,
             "batch_wait_seconds": self._batch_wait,
             "batches": self._batches,
+            "versioned_events": self._versioned_events,
             "persist_event_types": sorted(
                 item.value for item in self._persist_event_types
             ),
+            "market_types": list(self._market_types or ()),
+            "canonical_only": self._canonical_only,
+            "shutdown_flush_seconds": self._shutdown_flush_seconds,
+            "shutdown_dropped": self._shutdown_dropped,
             "historical_book_symbols": sorted(self._historical_books),
             "historical_orderbook_levels": self._historical_orderbook_levels,
             "historical_trade_symbols": sorted(self._historical_trades),

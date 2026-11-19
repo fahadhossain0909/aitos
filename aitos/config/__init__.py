@@ -4,6 +4,7 @@ from .settings import (
     ClickHouseSettings,
     Neo4jSettings,
     RedisSettings,
+    SpotSettings,
     get_settings,
 )
 from .tuning import (
@@ -25,6 +26,7 @@ __all__ = [
     "Neo4jSettings",
     "PositionTuning",
     "RedisSettings",
+    "SpotSettings",
     "RuntimeTuning",
     "ScannerTuning",
     "TuningSettings",

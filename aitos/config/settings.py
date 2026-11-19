@@ -16,7 +16,7 @@ _ENV_FILE = get_env_file()
 if _ENV_FILE.is_file():
     load_dotenv(_ENV_FILE)
 
-from pydantic import Field
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from aitos.config.tuning import TuningSettings, load_tuning_settings
@@ -76,6 +76,39 @@ class BinanceSettings(BaseSettings):
     hedge_mode: bool = False
 
 
+class SpotSettings(BaseSettings):
+    """Explicit opt-in policy for the isolated Binance Spot market."""
+
+    model_config = SettingsConfigDict(env_prefix="AITOS_SPOT_")
+
+    api_key: SecretStr = SecretStr("")
+    api_secret: SecretStr = SecretStr("")
+    enabled: bool = False
+    testnet: bool = True
+    execution_enabled: bool = False
+    allow_mainnet: bool = False
+    quote_asset: str = "USDT"
+    quote_to_usd_rate: float = Field(default=1.0, gt=0)
+    max_symbols: int = Field(default=20, ge=1, le=100)
+    min_quote_volume: float = Field(default=100000.0, ge=0)
+    max_spread_bps: float = Field(default=20.0, gt=0)
+    max_volatility_bps: float = Field(default=1500.0, gt=0)
+    fee_bps: float = Field(default=10.0, ge=0)
+    slippage_bps: float = Field(default=8.0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_execution_policy(self):
+        if self.execution_enabled and not self.enabled:
+            raise ValueError("Spot execution requires AITOS_SPOT_ENABLED=true")
+        if self.allow_mainnet and self.testnet:
+            raise ValueError("allow_mainnet cannot be combined with Spot testnet")
+        if self.quote_asset.upper() != "USDT":
+            raise ValueError(
+                "Spot capital authorization currently requires USDT quote pairs"
+            )
+        return self
+
+
 class StorageSettings(BaseSettings):
     """Runtime storage policy; adapters must prove capability parity before failover."""
 
@@ -107,6 +140,7 @@ class AITOSSettings(BaseSettings):
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
     binance: BinanceSettings = Field(default_factory=BinanceSettings)
+    spot: SpotSettings = Field(default_factory=SpotSettings)
     tuning: TuningSettings = Field(default_factory=load_tuning_settings)
 
 

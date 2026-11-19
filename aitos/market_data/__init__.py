@@ -29,6 +29,7 @@ from .venues import (
     VenueConfig,
 )
 
+
 __all__ = [
     "DEFAULT_VENUES",
     "BinanceCanonicalMarketDataAdapter",

@@ -10,22 +10,37 @@ CHANNEL_TRADE = "market.trade"
 CHANNEL_BOOK_DELTA = "market.book.delta"
 CHANNEL_BOOK_SNAPSHOT = "market.book.snapshot"
 CHANNEL_TICKER = "market.ticker"
+CHANNEL_KLINE = "market.kline"
 CHANNEL_FUNDING = "market.funding"
 CHANNEL_OPEN_INTEREST = "market.open_interest"
 CHANNEL_LIQUIDATION = "market.liquidation"
 CHANNEL_OPTIONS = "market.options"
 CHANNEL_INSTRUMENT = "market.instrument"
 
+# Spot is a separate event namespace so Futures-only consumers cannot mix
+# same-symbol Spot trades/books into Futures state.
+CHANNEL_SPOT_TRADE = "market.spot.trade"
+CHANNEL_SPOT_BOOK_DELTA = "market.spot.book.delta"
+CHANNEL_SPOT_BOOK_SNAPSHOT = "market.spot.book.snapshot"
+CHANNEL_SPOT_TICKER = "market.spot.ticker"
+CHANNEL_SPOT_KLINE = "market.spot.kline"
+
 ALL_CHANNELS = (
     CHANNEL_TRADE,
     CHANNEL_BOOK_DELTA,
     CHANNEL_BOOK_SNAPSHOT,
     CHANNEL_TICKER,
+    CHANNEL_KLINE,
     CHANNEL_FUNDING,
     CHANNEL_OPEN_INTEREST,
     CHANNEL_LIQUIDATION,
     CHANNEL_OPTIONS,
     CHANNEL_INSTRUMENT,
+    CHANNEL_SPOT_TRADE,
+    CHANNEL_SPOT_BOOK_DELTA,
+    CHANNEL_SPOT_BOOK_SNAPSHOT,
+    CHANNEL_SPOT_TICKER,
+    CHANNEL_SPOT_KLINE,
 )
 
 # Purpose-specific consumer names. A consumer group is stable across restarts;

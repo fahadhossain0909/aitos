@@ -32,12 +32,14 @@ def test_market_event_round_trip_preserves_identity_and_timing():
         correlation_id="corr-1",
         trace_id="trace-1",
         event_id="event-1",
+        event_revision=4,
         payload={"price": 100.0, "quantity": 0.5},
     )
 
     restored = market_event_from_wire(market_event_to_wire(event))
 
     assert restored == event
+    assert restored.event_revision == 4
     assert restored.source_age_seconds == 0.125
     assert restored.source_ts == source_ts
     assert restored.received_ts == received_ts

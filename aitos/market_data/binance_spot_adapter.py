@@ -1,0 +1,301 @@
+"""Canonical Binance Spot market-data adapter.
+
+It emits the same MarketEvent envelope as Futures while retaining a distinct
+binance:spot instrument identity. Combined WebSocket streams reduce socket
+count; depth snapshots are bridged to update IDs and fail closed on any gap.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+from typing import Any
+
+from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
+from aitos.market_data.venues import InstrumentKey, MarketType, Venue, VenueCapabilities
+from aitos.spot.binance import BinanceSpotAdapter
+from aitos.spot.websocket import BinanceSpotWebSocket, SpotOrderBookGap
+
+
+def _event_time(value: Any) -> datetime:
+    return datetime.fromtimestamp(float(value) / 1000.0, tz=timezone.utc)
+
+
+def _event(
+    symbol: str,
+    kind: MarketEventType,
+    event_time: datetime,
+    payload: dict[str, Any],
+    source: MarketSource,
+    sequence: int | None = None,
+    *,
+    event_id: str | None = None,
+    event_revision: int = 1,
+) -> MarketEvent:
+    key = InstrumentKey(Venue.BINANCE, MarketType.SPOT, symbol.upper())
+    event_token = (
+        str(sequence)
+        if sequence is not None
+        else str(int(event_time.timestamp() * 1000))
+    )
+    correlation_token = (
+        str(sequence) if sequence is not None else event_time.isoformat()
+    )
+    return MarketEvent(
+        event_type=kind,
+        exchange=Venue.BINANCE.value,
+        venue=Venue.BINANCE.value,
+        market=MarketType.SPOT.value,
+        market_type=MarketType.SPOT.value,
+        symbol=symbol.upper(),
+        instrument_id=key.value,
+        event_time=event_time,
+        payload=payload,
+        source=source,
+        sequence=sequence,
+        event_id=event_id or ":".join((key.value, kind.value, event_token)),
+        event_revision=event_revision,
+        correlation_id=":".join((key.value, kind.value, correlation_token)),
+    )
+
+
+def _stream_symbol(item: dict[str, Any], data: dict[str, Any]) -> str:
+    stream = str(item.get("stream", ""))
+    if "@" in stream:
+        return stream.split("@", 1)[0].upper()
+    return str(data.get("s", "")).upper()
+
+
+class BinanceSpotCanonicalMarketDataAdapter:
+    """Normalize Binance Spot REST/WebSocket data to canonical AITOS events."""
+
+    def __init__(
+        self,
+        rest: BinanceSpotAdapter | None = None,
+        websocket: BinanceSpotWebSocket | None = None,
+    ) -> None:
+        self.rest = rest or BinanceSpotAdapter(testnet=True)
+        self.websocket = websocket or BinanceSpotWebSocket(testnet=self.rest.testnet)
+
+    @property
+    def venue(self) -> Venue:
+        return Venue.BINANCE
+
+    @property
+    def market_type(self) -> MarketType:
+        return MarketType.SPOT
+
+    @property
+    def capabilities(self) -> VenueCapabilities:
+        return VenueCapabilities(
+            funding=False,
+            open_interest=False,
+            liquidations=False,
+            options=False,
+            trades=True,
+            order_book=True,
+            ticker=True,
+            klines=True,
+            instruments=True,
+            rest_recovery=True,
+        )
+
+    async def instruments(self, quote_asset: str = "USDT"):
+        return await self.rest.instruments(quote_asset)
+
+    async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
+        selected = _symbols(symbols)
+        streams = [f"{symbol.lower()}@trade" for symbol in selected]
+        async for item in self.websocket.stream_many(streams):
+            data = item["data"]
+            symbol = _stream_symbol(item, data)
+            yield _event(
+                symbol,
+                MarketEventType.TRADE,
+                _event_time(data["T"]),
+                {
+                    "trade_id": int(data["t"]),
+                    "price": str(data["p"]),
+                    "quantity": str(data["q"]),
+                    "buyer_is_maker": bool(data["m"]),
+                    "trade_time_ms": int(data["T"]),
+                },
+                MarketSource.WEBSOCKET,
+                int(data["t"]),
+            )
+
+    async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
+        selected = _symbols(symbols)
+        streams = [f"{symbol.lower()}@ticker" for symbol in selected]
+        async for item in self.websocket.stream_many(streams):
+            data = item["data"]
+            symbol = _stream_symbol(item, data)
+            event_ms = data.get("E")
+            if event_ms is None:
+                raise ValueError("Spot 24-hour ticker event is missing exchange time")
+            observed_at = _event_time(event_ms)
+            yield _event(
+                symbol,
+                MarketEventType.TICKER,
+                observed_at,
+                {
+                    "bid_price": str(data["b"]),
+                    "bid_quantity": str(data["B"]),
+                    "ask_price": str(data["a"]),
+                    "ask_quantity": str(data["A"]),
+                    "last_price": str(data["c"]),
+                    "quote_volume_24h": str(data["q"]),
+                    "price_change_percent_24h": str(data["P"]),
+                },
+                MarketSource.WEBSOCKET,
+                int(data.get("u", 0)) or None,
+            )
+
+    async def stream_klines(
+        self, symbols: list[str], timeframe: str = "1m"
+    ) -> AsyncIterator[MarketEvent]:
+        selected = _symbols(symbols)
+        streams = [f"{symbol.lower()}@kline_{timeframe}" for symbol in selected]
+        async for item in self.websocket.stream_many(streams):
+            data = item["data"]["k"]
+            if not bool(data["x"]):
+                continue
+            symbol = _stream_symbol(item, data)
+            yield _event(
+                symbol,
+                MarketEventType.KLINE,
+                _event_time(data["T"]),
+                {
+                    "timeframe": timeframe,
+                    "open_time_ms": int(data["t"]),
+                    "close_time_ms": int(data["T"]),
+                    "open": str(data["o"]),
+                    "high": str(data["h"]),
+                    "low": str(data["l"]),
+                    "close": str(data["c"]),
+                    "volume": str(data["v"]),
+                    "quote_volume": str(data["q"]),
+                    "trades": int(data["n"]),
+                    "taker_buy_base": str(data["V"]),
+                    "taker_buy_quote": str(data["Q"]),
+                    "is_closed": True,
+                },
+                MarketSource.WEBSOCKET,
+                int(data["T"]),
+                event_id=(f"binance:spot:{symbol}:kline:{timeframe}:{int(data['t'])}"),
+                event_revision=max(1, int(data.get("L", 1))),
+            )
+
+    async def stream_order_books(
+        self, symbols: list[str], levels: int = 20
+    ) -> AsyncIterator[MarketEvent]:
+        selected = _symbols(symbols)
+        depth_limit = _depth_limit(levels)
+        streams = [f"{symbol.lower()}@depth@100ms" for symbol in selected]
+        stream = self.websocket.stream_many(streams).__aiter__()
+        try:
+            # Connect and buffer at least one depth frame before REST snapshots.
+            # Frames received while REST is in flight stay in the WebSocket
+            # receive queue and are sequence-bridged after the snapshots.
+            first_item = await asyncio.wait_for(anext(stream), timeout=10.0)
+            snapshots = await asyncio.gather(
+                *(self.rest.depth(symbol, limit=depth_limit) for symbol in selected)
+            )
+            last_update_ids: dict[str, int] = {}
+            bridged: set[str] = set()
+            for symbol, snapshot in zip(selected, snapshots):
+                last_update_id = int(snapshot["lastUpdateId"])
+                last_update_ids[symbol] = last_update_id
+                yield _event(
+                    symbol,
+                    MarketEventType.BOOK_SNAPSHOT,
+                    datetime.now(timezone.utc),
+                    {
+                        "bids": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in snapshot["bids"]
+                        ],
+                        "asks": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in snapshot["asks"]
+                        ],
+                        "last_update_id": last_update_id,
+                    },
+                    MarketSource.REST,
+                    last_update_id,
+                )
+
+            async def buffered_events():
+                yield first_item
+                async for buffered_item in stream:
+                    yield buffered_item
+
+            async for item in buffered_events():
+                data = item["data"]
+                symbol = _stream_symbol(item, data)
+                if symbol not in last_update_ids:
+                    continue
+                first, final = int(data["U"]), int(data["u"])
+                previous_final = last_update_ids[symbol]
+                if final <= previous_final:
+                    continue
+                if symbol not in bridged:
+                    if first <= previous_final + 1 <= final:
+                        bridged.add(symbol)
+                    elif first > previous_final + 1:
+                        raise SpotOrderBookGap(
+                            f"{symbol} initial depth diff does not bridge snapshot"
+                        )
+                    else:
+                        continue
+                else:
+                    previous = data.get("pu")
+                    if previous is not None and int(previous) != previous_final:
+                        raise SpotOrderBookGap(f"{symbol} depth previous-update gap")
+                    if previous is None and first > previous_final + 1:
+                        raise SpotOrderBookGap(f"{symbol} depth sequence gap")
+                last_update_ids[symbol] = final
+                yield _event(
+                    symbol,
+                    MarketEventType.BOOK_DELTA,
+                    _event_time(data["E"]),
+                    {
+                        "first_update_id": first,
+                        "final_update_id": final,
+                        "previous_update_id": (
+                            int(data["pu"]) if data.get("pu") is not None else None
+                        ),
+                        "bids": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in data["b"]
+                        ],
+                        "asks": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in data["a"]
+                        ],
+                    },
+                    MarketSource.WEBSOCKET,
+                    final,
+                )
+        finally:
+            await stream.aclose()
+
+    async def close(self) -> None:
+        await self.rest.close()
+
+
+def _symbols(values: list[str]) -> list[str]:
+    result = list(dict.fromkeys(str(value).upper() for value in values if value))
+    if not result:
+        raise ValueError("at least one Spot symbol is required")
+    if len(result) > 100:
+        raise ValueError("Spot adapter subscription is limited to 100 symbols per call")
+    return result
+
+
+def _depth_limit(levels: int) -> int:
+    allowed = (5, 10, 20, 50, 100, 500, 1000, 5000)
+    if levels not in allowed:
+        raise ValueError(f"unsupported Spot depth limit: {levels}")
+    return levels

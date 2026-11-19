@@ -42,12 +42,27 @@ CREATE TABLE IF NOT EXISTS aitos.open_interest (
 CREATE TABLE IF NOT EXISTS aitos.market_events (
     event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
     event_id String, exchange LowCardinality(String), market LowCardinality(String),
-    symbol LowCardinality(String), event_type LowCardinality(String),
-    source LowCardinality(String), sequence Nullable(UInt64), schema_version UInt16,
+    venue LowCardinality(String), market_type LowCardinality(String),
+    instrument_id String, symbol LowCardinality(String),
+    event_type LowCardinality(String), source LowCardinality(String),
+    sequence Nullable(UInt64), schema_version UInt16,
     correlation_id String, trace_id String, payload_json String
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(event_time)
-ORDER BY (symbol, event_type, event_time, event_id);
+ORDER BY (instrument_id, event_type, event_time, event_id);
+
+CREATE TABLE IF NOT EXISTS aitos.market_event_versions (
+    event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
+    event_id String, event_revision UInt64,
+    exchange LowCardinality(String), market LowCardinality(String),
+    venue LowCardinality(String), market_type LowCardinality(String),
+    instrument_id String, symbol LowCardinality(String),
+    event_type LowCardinality(String), source LowCardinality(String),
+    sequence Nullable(UInt64), schema_version UInt16,
+    correlation_id String, trace_id String, payload_json String
+) ENGINE = ReplacingMergeTree(event_revision)
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (instrument_id, event_id);
 
 CREATE TABLE IF NOT EXISTS aitos.live_analytics_events (
     event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),

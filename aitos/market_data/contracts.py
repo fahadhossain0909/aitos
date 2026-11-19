@@ -92,6 +92,7 @@ class MarketEvent:
     ingest_time: datetime = field(default_factory=utc_now)
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     schema_version: int = 1
+    event_revision: int = 1
     venue: str | None = None
     market_type: str | None = None
     instrument_id: str | None = None
@@ -101,6 +102,10 @@ class MarketEvent:
     stage_timestamps: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.event_revision < 1:
+            raise ValueError("event_revision must be positive")
+        if self.schema_version < 1:
+            raise ValueError("schema_version must be positive")
         # Use one identity convention throughout adapters, Redis, and consumers.
         # Import lazily to keep the market contract lightweight at module import.
         if self.trace_id is None or self.trace_id == self.symbol:
