@@ -25,15 +25,37 @@ class FakeWebSocket:
 
     async def stream(self, symbol, *channels):
         if channels == ("@trade",):
-            yield {"data": {"T": 1700000000000, "t": 7, "p": "100",
-                            "q": "0.25", "m": False}}
+            yield {
+                "data": {
+                    "T": 1700000000000,
+                    "t": 7,
+                    "p": "100",
+                    "q": "0.25",
+                    "m": False,
+                }
+            }
         elif channels == ("@bookTicker",):
-            yield {"data": {"u": 99, "s": symbol, "b": "99.5", "B": "2",
-                            "a": "100.5", "A": "3"}}
+            yield {
+                "data": {
+                    "u": 99,
+                    "s": symbol,
+                    "b": "99.5",
+                    "B": "2",
+                    "a": "100.5",
+                    "A": "3",
+                }
+            }
         elif channels == ("@depth@100ms",):
             first = 14 if self.gap else 11
-            yield {"data": {"E": 1700000000100, "U": first, "u": first + 1,
-                            "b": [["99", "1"]], "a": [["101", "4"]]}}
+            yield {
+                "data": {
+                    "E": 1700000000100,
+                    "U": first,
+                    "u": first + 1,
+                    "b": [["99", "1"]],
+                    "a": [["101", "4"]],
+                }
+            }
 
 
 @pytest.mark.asyncio
@@ -42,18 +64,23 @@ async def test_spot_adapter_emits_canonical_market_identity_and_trade_events():
     events = [event async for event in adapter.stream_trades(["btcusdt", "ethusdt"])]
     assert {event.symbol for event in events} == {"BTCUSDT", "ETHUSDT"}
     assert all(event.market_type == MarketType.SPOT.value for event in events)
-    assert all(event.instrument_id == InstrumentKey(
-        Venue.BINANCE, MarketType.SPOT, event.symbol
-    ).value for event in events)
+    assert all(
+        event.instrument_id
+        == InstrumentKey(Venue.BINANCE, MarketType.SPOT, event.symbol).value
+        for event in events
+    )
     assert all(event.event_type is MarketEventType.TRADE for event in events)
 
 
 @pytest.mark.asyncio
 async def test_spot_orderbook_bootstraps_snapshot_then_sequence_checked_delta():
     adapter = BinanceSpotCanonicalMarketDataAdapter(FakeRest(), FakeWebSocket())
-    events = [event async for event in adapter.stream_order_books(["BTCUSDT"], levels=20)]
+    events = [
+        event async for event in adapter.stream_order_books(["BTCUSDT"], levels=20)
+    ]
     assert [event.event_type for event in events] == [
-        MarketEventType.BOOK_SNAPSHOT, MarketEventType.BOOK_DELTA
+        MarketEventType.BOOK_SNAPSHOT,
+        MarketEventType.BOOK_DELTA,
     ]
     assert events[0].source is MarketSource.REST
     assert events[0].payload["last_update_id"] == 10
@@ -64,14 +91,22 @@ async def test_spot_orderbook_bootstraps_snapshot_then_sequence_checked_delta():
 async def test_spot_orderbook_fails_closed_on_snapshot_sequence_gap():
     adapter = BinanceSpotCanonicalMarketDataAdapter(FakeRest(), FakeWebSocket(gap=True))
     with pytest.raises(SpotOrderBookGap):
-        _ = [event async for event in adapter.stream_order_books(["BTCUSDT"], levels=20)]
+        _ = [
+            event async for event in adapter.stream_order_books(["BTCUSDT"], levels=20)
+        ]
 
 
 def test_spot_market_event_round_trip_preserves_market_type_and_identity():
     from aitos.market_data.binance_spot_adapter import _event
-    event = _event("BTCUSDT", MarketEventType.TRADE,
-                   datetime.now(timezone.utc), {"price": "100"},
-                   MarketSource.REPLAY, 3)
+
+    event = _event(
+        "BTCUSDT",
+        MarketEventType.TRADE,
+        datetime.now(timezone.utc),
+        {"price": "100"},
+        MarketSource.REPLAY,
+        3,
+    )
     restored = market_event_from_wire(market_event_to_wire(event))
     assert restored.market_type == "spot"
     assert restored.instrument_id == "binance:spot:BTCUSDT"
