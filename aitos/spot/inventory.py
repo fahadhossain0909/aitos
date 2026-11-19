@@ -32,7 +32,8 @@ class InventoryLedger:
         self._lock = RLock()
         self._db = sqlite3.connect(str(database), check_same_thread=False)
         self._db.execute("PRAGMA foreign_keys=ON")
-        self._db.execute("""
+        self._db.execute(
+            """
             CREATE TABLE IF NOT EXISTS spot_fills (
               fill_key TEXT PRIMARY KEY, symbol TEXT NOT NULL,
               base_asset TEXT NOT NULL, quote_asset TEXT NOT NULL,
@@ -40,8 +41,10 @@ class InventoryLedger:
               commission TEXT NOT NULL, commission_asset TEXT NOT NULL,
               quote_value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        self._db.execute("""
+        """
+        )
+        self._db.execute(
+            """
             CREATE TABLE IF NOT EXISTS spot_order_intents (
               client_order_id TEXT PRIMARY KEY, symbol TEXT NOT NULL,
               side TEXT NOT NULL, order_type TEXT NOT NULL,
@@ -50,20 +53,30 @@ class InventoryLedger:
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        """
+        )
         self._db.commit()
 
-    def record_order_intent(self, *, client_order_id: str, symbol: str,
-                            side: str, order_type: str,
-                            quantity: Decimal | None = None,
-                            quote_order_quantity: Decimal | None = None) -> None:
+    def record_order_intent(
+        self,
+        *,
+        client_order_id: str,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: Decimal | None = None,
+        quote_order_quantity: Decimal | None = None,
+    ) -> None:
         """Persist the client order ID before any exchange POST is attempted."""
         if not client_order_id or len(client_order_id) > 36:
             raise ValueError("valid client order ID is required")
         if (quantity is None) == (quote_order_quantity is None):
             raise ValueError("exactly one order quantity mode is required")
         values = (
-            client_order_id, symbol.upper(), side.upper(), order_type.upper(),
+            client_order_id,
+            symbol.upper(),
+            side.upper(),
+            order_type.upper(),
             str(quantity) if quantity is not None else None,
             str(quote_order_quantity) if quote_order_quantity is not None else None,
         )
@@ -75,7 +88,9 @@ class InventoryLedger:
             ).fetchone()
             if row is not None:
                 if tuple(row) != values[1:]:
-                    raise ValueError("client order ID already belongs to a different intent")
+                    raise ValueError(
+                        "client order ID already belongs to a different intent"
+                    )
                 return
             self._db.execute(
                 """INSERT INTO spot_order_intents
@@ -85,8 +100,9 @@ class InventoryLedger:
             )
             self._db.commit()
 
-    def update_order_intent(self, client_order_id: str, *, status: str,
-                            exchange_order_id: int | None = None) -> None:
+    def update_order_intent(
+        self, client_order_id: str, *, status: str, exchange_order_id: int | None = None
+    ) -> None:
         with self._lock:
             cursor = self._db.execute(
                 """UPDATE spot_order_intents
@@ -108,7 +124,6 @@ class InventoryLedger:
                    WHERE status NOT IN ('FILLED','CANCELED','REJECTED','EXPIRED')
                    ORDER BY created_at"""
             ).fetchall()
-        keys = ("client_order_id","symbol","side","order_type","quantity",
                 "quote_order_quantity","status","exchange_order_id")
         return [dict(zip(keys, row)) for row in rows]
 
@@ -132,13 +147,24 @@ class InventoryLedger:
             cur = self._db.cursor()
             cur.execute("BEGIN IMMEDIATE")
             try:
-                cur.execute("""INSERT OR IGNORE INTO spot_fills
+                cur.execute(
+                    """INSERT OR IGNORE INTO spot_fills
                     (fill_key,symbol,base_asset,quote_asset,side,quantity,price,
                      commission,commission_asset,quote_value)
                     VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (fill_key, symbol.upper(), base_asset, quote_asset, side,
-                     str(quantity), str(price), str(commission), commission_asset,
-                     str(quote_value)))
+                    (
+                        fill_key,
+                        symbol.upper(),
+                        base_asset,
+                        quote_asset,
+                        side,
+                        str(quantity),
+                        str(price),
+                        str(commission),
+                        commission_asset,
+                        str(quote_value),
+                    ),
+                )
                 inserted = cur.rowcount == 1
                 if inserted:
                     position = self._position_from_cursor(cur, symbol.upper())
@@ -152,9 +178,11 @@ class InventoryLedger:
 
     @staticmethod
     def _position_from_cursor(cur: sqlite3.Cursor, symbol: str) -> InventoryPosition:
-        rows = cur.execute("""SELECT base_asset,quote_asset,side,quantity,price,
+        rows = cur.execute(
+            """SELECT base_asset,quote_asset,side,quantity,price,
             commission,commission_asset FROM spot_fills WHERE symbol=? ORDER BY rowid""",
-            (symbol,)).fetchall()
+            (symbol,),
+        ).fetchall()
         base = quote = ""
         qty = cost = realized = Decimal("0")
         fee_conversion_pending = False
@@ -186,8 +214,9 @@ class InventoryLedger:
                 cost -= avg * debit_quantity
                 qty -= debit_quantity
                 realized += proceeds - avg * debit_quantity
-        return InventoryPosition(symbol, base, quote, qty, cost, realized,
-                                 fee_conversion_pending)
+        return InventoryPosition(
+            symbol, base, quote, qty, cost, realized, fee_conversion_pending
+        )
 
     def get_position(self, symbol: str) -> InventoryPosition | None:
         with self._lock:
