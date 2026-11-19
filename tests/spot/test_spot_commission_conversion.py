@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,7 +9,7 @@ from aitos.spot.inventory import InventoryLedger
 
 class HistoricalFeeAdapter:
     async def exchange_info(self):
-        return {"BNBUSDT": object()}
+        return {"BNBUSDT": SimpleNamespace(status="TRADING", is_spot_trading_allowed=True)}
 
     async def agg_trades(self, symbol, *, start_time_ms, end_time_ms, limit):
         assert symbol == "BNBUSDT"
