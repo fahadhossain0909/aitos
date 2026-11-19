@@ -71,8 +71,7 @@ def score_position_risk(
     for order in portfolio.pending_orders:
         symbol = order.symbol.upper()
         projected_notional_by_symbol[symbol] = (
-            projected_notional_by_symbol.get(symbol, 0.0)
-            + order.remaining_notional_usd
+            projected_notional_by_symbol.get(symbol, 0.0) + order.remaining_notional_usd
         )
     concentration_score = _pct_of_limit(
         portfolio.projected_open_position_count, limits.max_open_positions
