@@ -218,8 +218,7 @@ def build_resource_budget(
     usable_memory = max(0, resources.memory_limit_mb * (100 - memory_reserve_pct) // 100)
     # Do not budget more than currently available memory. A low available-memory
     # reading is treated conservatively rather than assuming reclaim will succeed.
-    if resources.memory_available_mb:
-        usable_memory = min(usable_memory, resources.memory_available_mb)
+    usable_memory = min(usable_memory, resources.memory_available_mb)
     return ResourceBudget(
         cpu_workers=workers,
         memory_budget_mb=usable_memory,
@@ -247,7 +246,11 @@ def plan_symbol_capacity(
     for item in workloads:
         key = item.symbol.strip().upper()
         previous = unique.get(key)
-        if previous is None or item.protected or (
+        if previous is None:
+            unique[key] = item
+        elif item.protected and not previous.protected:
+            unique[key] = item
+        elif item.protected == previous.protected and (
             item.opportunity_score, item.liquidity_score
         ) > (previous.opportunity_score, previous.liquidity_score):
             unique[key] = item
