@@ -68,12 +68,23 @@ class ComputeAwareScheduler:
         *,
         max_pending: int = 1024,
         capacity_units: int = 32,
-        position_reserve_units: int = 8,
-        market_reserve_units: int = 8,
+        position_reserve_units: int | None = None,
+        market_reserve_units: int | None = None,
         aging_seconds: float = 30.0,
     ) -> None:
         if max_pending < 1 or capacity_units < 1:
             raise ValueError("queue and capacity must be positive")
+        # Scale implicit reserves for small test/dev budgets while retaining
+        # the established 8+8 reservation at the default 32-unit capacity.
+        default_reserve = min(8, capacity_units // 4)
+        position_reserve_units = (
+            default_reserve
+            if position_reserve_units is None
+            else position_reserve_units
+        )
+        market_reserve_units = (
+            default_reserve if market_reserve_units is None else market_reserve_units
+        )
         if min(position_reserve_units, market_reserve_units) < 0:
             raise ValueError("reserved capacity cannot be negative")
         if position_reserve_units + market_reserve_units > capacity_units:
