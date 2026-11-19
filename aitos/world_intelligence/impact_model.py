@@ -60,7 +60,6 @@ class EventImpactTrainingRow:
             "source_reliability": (0.0, 1.0),
             "age_hours": (0.0, 24.0 * 365.0),
             "beta": (-2.0, 2.0),
-            "forward_return": (-1.0, 1.0),
         }
         for name, (lower, upper) in bounds.items():
             number = float(getattr(self, name))
@@ -69,6 +68,10 @@ class EventImpactTrainingRow:
                     f"{name} must be finite and within [{lower}, {upper}]"
                 )
             object.__setattr__(self, name, number)
+        forward_return = float(self.forward_return)
+        if not isfinite(forward_return) or forward_return < -1.0:
+            raise ValueError("forward_return must be finite and at least -1")
+        object.__setattr__(self, "forward_return", forward_return)
 
 
 @dataclass(frozen=True, slots=True)
