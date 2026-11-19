@@ -239,3 +239,12 @@ Every migration must be additive first, support old readers during transition, i
 - Source contracts inspected: `aitos/markets/contracts.py`, `aitos/markets/state.py`, `aitos/markets/portfolio.py`, `aitos/markets/risk.py`, `aitos/decision/types.py`, `aitos/strategy/contracts.py`.
 - Phase 1 semantic contract and provisional financial-authority audit: `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`.
 - CI was run for the initial docs head; formatting failed on three unrelated Spot files, subsequently corrected with formatting-only changes in this branch. Latest CI must be rechecked before claiming pass. Runtime checks and production latency remain NOT TESTED / NOT MEASURED.
+
+
+## Additional Phase 3/4 implementation — pending exposure and protection inventory
+
+The branch now contains a pure Binance USD-M open-order projection adapter at `aitos/exchange/binance_pending_exposure.py`. It uses only remaining quantity after partial fills, classifies one-way and hedge-mode entry/closing sides, excludes reduce-only/close-position/hedge-closing orders, and requires mark price, protective stop and leverage inputs. Both the open-order snapshot and risk-input snapshot must be timezone-aware, no older than five seconds, and within two seconds of each other. The adapter is linear USD-M only; inverse/coin-margined contracts need a separate valuation adapter. Missing or incoherent inputs fail closed. It returns a new `PortfolioState`; it is not silently wired to a runtime provider because the authoritative account snapshot lifecycle owner is not yet certified.
+
+`BinanceFuturesOrderExecutor` now exposes authenticated read-only `get_open_orders` and `get_open_algo_orders` inventory readers. `aitos/execution/protection_reconciliation.py` joins the scoped local intent journal with the authenticated open-algo inventory and reuses the offline audit rules. A match remains observational: no journal state is cleared, no capital is released, no order is retried/canceled/replaced, and account positions plus terminal algo/child-fill history remain independent evidence. This is not a complete protective POST-to-ACK crash-recovery protocol.
+
+Regression coverage includes partial fills, hedge-mode closing legs, reduce-only exclusion, stale/incoherent snapshots, missing stop/leverage/mark inputs, duplicate identities, malformed exchange inventory, scope mismatch and the invariant that a matching open protection order cannot authorize resume.
