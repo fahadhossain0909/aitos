@@ -218,7 +218,7 @@ class ExecutionIntentStore:
         """Read all non-rejected protective intent states for audit only."""
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT client_id,symbol,state,request_json,result_json "
+                "SELECT client_id,symbol,state,request_json,result_json,trade_id "
                 "FROM execution_intents WHERE scope=? "
                 "AND state IN ('SUBMITTING','PROTECTED','APPLIED') "
                 "ORDER BY client_id",
