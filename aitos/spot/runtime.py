@@ -92,7 +92,7 @@ class SpotRuntime:
         quote_order_quantity_for: Callable[
             [RankedSpotCandidate], Decimal | Awaitable[Decimal]
         ],
-        max_candidates: int = 2,
+        max_candidates: int = 5,
     ) -> SpotScanCycleResult:
         """Rank Spot instruments, apply shared Kernel, rotate rejected candidates."""
         if max_candidates < 1:
