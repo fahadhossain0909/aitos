@@ -17,6 +17,26 @@ class SpotCandidate:
     trading_enabled: bool = True
     data_fresh: bool = True
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "symbol", self.symbol.upper())
+        fields = (
+            "quote_volume", "relative_volume", "spread_bps",
+            "volatility_bps", "momentum_bps", "order_book_imbalance",
+        )
+        for name in fields:
+            value = getattr(self, name)
+            if not isinstance(value, Decimal):
+                value = Decimal(str(value))
+                object.__setattr__(self, name, value)
+            if not value.is_finite():
+                raise ValueError(f"{name} must be finite")
+        if self.quote_volume < 0 or self.relative_volume < 0:
+            raise ValueError("volume values cannot be negative")
+        if self.spread_bps < 0 or self.volatility_bps < 0:
+            raise ValueError("spread and volatility cannot be negative")
+        if abs(self.order_book_imbalance) > 1:
+            raise ValueError("order book imbalance must be in [-1, 1]")
+
 
 @dataclass(frozen=True, slots=True)
 class RankedSpotCandidate:
