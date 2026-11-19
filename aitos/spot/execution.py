@@ -22,12 +22,14 @@ class SpotOrderExecutor:
         *,
         enabled: bool = False,
         allow_mainnet: bool = False,
+        mainnet_approved: bool = False,
         quote_asset: str = "USDT",
         symbol_filters: dict[str, SpotSymbolFilters] | None = None,
     ) -> None:
         self.adapter = adapter
         self.enabled = enabled
         self.allow_mainnet = allow_mainnet
+        self.mainnet_approved = mainnet_approved
         self.quote_asset = quote_asset.upper()
         self.filters = dict(symbol_filters or {})
 
@@ -36,9 +38,11 @@ class SpotOrderExecutor:
             raise SpotExecutionDisabled(
                 "Spot execution is disabled; explicitly enable it after approval"
             )
-        if not self.adapter.testnet and not self.allow_mainnet:
+        if not self.adapter.testnet and not (
+            self.allow_mainnet and self.mainnet_approved
+        ):
             raise SpotExecutionDisabled(
-                "mainnet Spot orders require allow_mainnet=True"
+                "mainnet Spot orders require allow_mainnet and mainnet_approved"
             )
         if not request.client_order_id:
             request = SpotOrderRequest(
