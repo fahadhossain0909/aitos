@@ -60,9 +60,9 @@ def test_embargo_removes_overlapping_training_labels():
     assert report.folds
     for fold in report.folds:
         assert fold.training_as_of == fold.test_start - timedelta(hours=2)
-        expected_matured_history = int(
-            (fold.test_start - BASE).total_seconds() // 3600
-        ) - 2
+        expected_matured_history = (
+            int((fold.test_start - BASE).total_seconds() // 3600) - 2
+        )
         assert fold.training_count == expected_matured_history
 
 
