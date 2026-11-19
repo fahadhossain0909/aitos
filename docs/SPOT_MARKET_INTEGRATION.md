@@ -103,9 +103,13 @@ AITOS_SPOT_QUOTE_ASSET=USDT
 AITOS_SPOT_MAX_SYMBOLS=20
 ```
 
-Construct the runtime explicitly with `build_spot_runtime()`, then pass its
-canonical adapter events through the existing `MarketDataBus` publisher
-methods. The Futures runner does not call this factory automatically.
+Construct the runtime explicitly with `build_spot_runtime()`, then call
+`await runtime.start_market_data(market_bus)`. It discovers the highest-turnover
+eligible USDT Spot symbols and starts supervised trade/ticker subscriptions
+for the bounded universe plus book/kline subscriptions for the top five.
+Call `await runtime.stop_market_data()` before shutdown, or
+`await runtime.close()` to stop streams and close durable stores. The Futures
+runner does not call this factory automatically.
 
 ## Testnet execution
 
