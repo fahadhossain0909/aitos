@@ -7,6 +7,7 @@ import pytest
 from aitos.config.settings import SpotSettings
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
+from aitos.spot.execution import SpotExecutionDisabled
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.models import (
     SpotOrderRequest,
@@ -202,7 +203,7 @@ async def test_disabled_spot_execution_does_not_reserve_or_journal():
         SpotOrderType.MARKET,
         quote_order_quantity=Decimal("10"),
     )
-    with pytest.raises(Exception, match="Spot execution is disabled"):
+    with pytest.raises(SpotExecutionDisabled, match="Spot execution is disabled"):
         await coordinator.submit_entry(
             equity_quote=1000, opportunity=_opportunity(), request=request
         )
