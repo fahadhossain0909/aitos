@@ -451,3 +451,67 @@ async def test_terminal_protection_is_not_expected_in_open_inventory(
     assert report["findings"] == []
     assert report["account_exposure_verified"] is True
     assert protected_intent.protection_intents()[0]["state"] == "TERMINAL"
+
+
+
+@pytest.mark.asyncio
+async def test_live_account_audit_requires_stop_identity_for_every_open_trade(
+    protected_intent,
+):
+    executor = ReadOnlyExecutor("paper-account", [])
+    executor.get_position_risk = AsyncMock(
+        return_value=[
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "BOTH",
+                "positionAmt": "1.0",
+            }
+        ]
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-without-stop",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+    )
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[trade]
+    )
+
+    assert any(
+        finding["status"] == "local_position_missing_stop_id"
+        for finding in report["findings"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_account_audit_requires_local_stop_in_authenticated_inventory(
+    protected_intent,
+):
+    executor = ReadOnlyExecutor("paper-account", [])
+    executor.get_position_risk = AsyncMock(
+        return_value=[
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "BOTH",
+                "positionAmt": "1.0",
+            }
+        ]
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-with-missing-stop",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:999",
+    )
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[trade]
+    )
+
+    assert any(
+        finding["status"] == "local_stop_missing_from_venue_inventory"
+        for finding in report["findings"]
+    )
