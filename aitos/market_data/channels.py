@@ -10,6 +10,7 @@ CHANNEL_TRADE = "market.trade"
 CHANNEL_BOOK_DELTA = "market.book.delta"
 CHANNEL_BOOK_SNAPSHOT = "market.book.snapshot"
 CHANNEL_TICKER = "market.ticker"
+CHANNEL_KLINE = "market.kline"
 CHANNEL_FUNDING = "market.funding"
 CHANNEL_OPEN_INTEREST = "market.open_interest"
 CHANNEL_LIQUIDATION = "market.liquidation"
@@ -21,6 +22,7 @@ ALL_CHANNELS = (
     CHANNEL_BOOK_DELTA,
     CHANNEL_BOOK_SNAPSHOT,
     CHANNEL_TICKER,
+    CHANNEL_KLINE,
     CHANNEL_FUNDING,
     CHANNEL_OPEN_INTEREST,
     CHANNEL_LIQUIDATION,
