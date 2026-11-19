@@ -52,6 +52,11 @@ def market_data_event_to_domain(
     event_venue = str(event.venue or event.exchange).strip().lower()
     if event_venue != instrument.venue.strip().lower():
         raise ValueError("resolved instrument venue does not match market event")
+    source_market_type = str(event.market_type or event.market).strip().lower()
+    if not instrument.market_type:
+        raise ValueError("resolved instrument market_type is required")
+    if source_market_type != instrument.market_type.strip().lower():
+        raise ValueError("resolved instrument market_type does not match market event")
 
     source_event_type = event.event_type.value
     try:
