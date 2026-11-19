@@ -5,16 +5,16 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.core.immutable import FrozenDict, FrozenList, freeze_value
+from aitos.market_data.contracts import (
+    MarketEvent,
+    MarketEventType,
+    MarketSource,
+)
 from aitos.markets.contracts import (
     AssetClass,
     Instrument,
     MarketEvent as DomainMarketEvent,
     MarketEventType as DomainMarketEventType,
-)
-from aitos.market_data.contracts import (
-    MarketEvent,
-    MarketEventType,
-    MarketSource,
 )
 from aitos.markets.state import GlobalMarketState
 
