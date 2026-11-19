@@ -16,7 +16,13 @@ from aitos.market_data.venues import InstrumentKey, MarketType, Venue
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.inventory import InventoryLedger
-from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
+from aitos.spot.models import (
+    SpotOrder,
+    SpotOrderRequest,
+    SpotOrderSide,
+    SpotOrderStatus,
+    SpotOrderType,
+)
 
 
 class SpotAuthorizationRejected(RuntimeError):
@@ -149,6 +155,15 @@ class SpotTradingCoordinator:
         self.inventory.update_order_intent(
             client_order_id, status=order.status.value, exchange_order_id=order.order_id
         )
+        if (
+            order.status in {
+                SpotOrderStatus.REJECTED,
+                SpotOrderStatus.CANCELED,
+                SpotOrderStatus.EXPIRED,
+            }
+            and order.executed_quantity == 0
+        ):
+            self.capital_gateway.release(key.value)
         return order
 
     async def reconcile(self, symbol: str, client_order_id: str) -> SpotOrder:
@@ -158,6 +173,12 @@ class SpotTradingCoordinator:
         self.inventory.update_order_intent(
             client_order_id, status=order.status.value, exchange_order_id=order.order_id
         )
+        if order.status in {
+            SpotOrderStatus.REJECTED,
+            SpotOrderStatus.CANCELED,
+            SpotOrderStatus.EXPIRED,
+        } and order.executed_quantity == 0:
+            self.release_after_confirmed_flat(symbol)
         return order
 
     def release_after_confirmed_flat(self, symbol: str) -> bool:
