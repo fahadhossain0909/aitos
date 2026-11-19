@@ -41,7 +41,10 @@ class InventoryLedger:
               side TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
               commission TEXT NOT NULL, commission_asset TEXT NOT NULL,
               quote_value TEXT NOT NULL, commission_quote_value TEXT,
-              fill_time_ms INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+              fill_time_ms INTEGER, commission_conversion_symbol TEXT,
+              commission_conversion_price TEXT, commission_conversion_trade_id INTEGER,
+              commission_conversion_time_ms INTEGER, commission_conversion_source TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """
         )
@@ -65,14 +68,31 @@ class InventoryLedger:
             self._db.execute(
                 "ALTER TABLE spot_fills ADD COLUMN commission_quote_value TEXT"
             )
-        if "fill_time_ms" not in columns:
-            self._db.execute(
-                "ALTER TABLE spot_fills ADD COLUMN fill_time_ms INTEGER"
-            )
+        migrations = {
+            "fill_time_ms": "INTEGER",
+            "commission_conversion_symbol": "TEXT",
+            "commission_conversion_price": "TEXT",
+            "commission_conversion_trade_id": "INTEGER",
+            "commission_conversion_time_ms": "INTEGER",
+            "commission_conversion_source": "TEXT",
+        }
+        for name, sql_type in migrations.items():
+            if name not in columns:
+                self._db.execute(
+                    f"ALTER TABLE spot_fills ADD COLUMN {name} {sql_type}"
+                )
         self._db.commit()
 
     def resolve_commission_conversion(
-        self, fill_key: str, quote_value: Decimal
+        self,
+        fill_key: str,
+        quote_value: Decimal,
+        *,
+        conversion_symbol: str | None = None,
+        conversion_price: Decimal | None = None,
+        conversion_trade_id: int | None = None,
+        conversion_time_ms: int | None = None,
+        conversion_source: str | None = None,
     ) -> None:
         """Resolve a third-asset fee using its point-in-time quote valuation.
 
@@ -83,20 +103,51 @@ class InventoryLedger:
             raise ValueError("commission quote value must be positive")
         with self._lock:
             cursor = self._db.execute(
-                """UPDATE spot_fills SET commission_quote_value=?
+                """UPDATE spot_fills SET commission_quote_value=?,
+                   commission_conversion_symbol=?,
+                   commission_conversion_price=?,
+                   commission_conversion_trade_id=?,
+                   commission_conversion_time_ms=?,
+                   commission_conversion_source=?
                    WHERE fill_key=? AND commission_quote_value IS NULL
                      AND commission_asset NOT IN (
                        SELECT base_asset FROM spot_fills WHERE fill_key=?
                    ) AND commission_asset NOT IN (
                        SELECT quote_asset FROM spot_fills WHERE fill_key=?
                    )""",
-                (str(quote_value), fill_key, fill_key, fill_key),
+                (
+                    str(quote_value),
+                    conversion_symbol,
+                    str(conversion_price) if conversion_price is not None else None,
+                    conversion_trade_id,
+                    conversion_time_ms,
+                    conversion_source,
+                    fill_key,
+                    fill_key,
+                    fill_key,
+                ),
             )
             self._db.commit()
             if cursor.rowcount != 1:
                 raise KeyError(
                     f"unknown fill or fee is not third-asset commission: {fill_key}"
                 )
+
+    def commission_conversion_provenance(
+        self, fill_key: str
+    ) -> dict[str, str | int | None] | None:
+        with self._lock:
+            row = self._db.execute(
+                """SELECT commission_quote_value,commission_conversion_symbol,
+                          commission_conversion_price,commission_conversion_trade_id,
+                          commission_conversion_time_ms,commission_conversion_source
+                   FROM spot_fills WHERE fill_key=?""",
+                (fill_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        keys = ("quote_value", "symbol", "price", "trade_id", "time_ms", "source")
+        return dict(zip(keys, row))
 
     def managed_symbols(self) -> list[dict[str, str]]:
         """Return symbols represented by durable fill history."""
