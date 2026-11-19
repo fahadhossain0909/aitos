@@ -7,6 +7,11 @@ shared capital-protection boundary. It does not reuse the Futures order adapter,
 leverage, funding, liquidation or reduce-only assumptions. Options remain a
 market-identity extension point only; no Options strategy or execution exists.
 
+Capital authorization currently uses the USD numeraire, so the first Spot rollout
+accepts USDT-quoted instruments only. USDC, BTC-quoted and other quote assets
+must wait until point-in-time FX conversion is included in portfolio equity,
+risk and execution-cost accounting.
+
 The Spot runtime is opt-in. Defaults are:
 
 - `AITOS_SPOT_ENABLED=false`
@@ -33,8 +38,11 @@ first diff event to `lastUpdateId`, checks subsequent `pu`/update continuity,
 and raises `SpotOrderBookGap` on a gap. A consumer must discard the affected
 book and resnapshot; it must never continue with a silently stale book.
 
-The runtime exposes explicit publishers into the existing `MarketDataBus`.
-It does not start subscriptions by importing the package.
+The runtime exposes explicit publishers into the existing `MarketDataBus`,
+including a registered canonical `market.kline` channel. It does not start
+subscriptions by importing the package. The runtime's
+`submit_opportunity()` port accepts the shared Strategy `Opportunity` contract
+and routes it through the Spot coordinator and shared CapitalGateway.
 
 ### Discovery and intelligence
 
