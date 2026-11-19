@@ -174,6 +174,9 @@ class MarketDataShadowConsumer:
                 self._queue.task_done()
 
     def _process(self, event: CanonicalMarketEvent) -> None:
+        if str(event.market_type or event.market).strip().lower() not in self._market_types:
+            self._counts["rejected_unresolved"] += 1
+            return
         if event.event_id in self._seen:
             self._counts["duplicate_events"] += 1
             return
@@ -182,11 +185,10 @@ class MarketDataShadowConsumer:
         if instrument is None:
             self._counts["rejected_unresolved"] += 1
             return
-        if instrument.id not in self._instrument_ids:
-            if len(self._instrument_ids) >= self._max_instruments:
-                self._counts["rejected_unresolved"] += 1
-                return
-            self._instrument_ids.add(instrument.id)
+        is_new_instrument = instrument.id not in self._instrument_ids
+        if is_new_instrument and len(self._instrument_ids) >= self._max_instruments:
+            self._counts["rejected_unresolved"] += 1
+            return
 
         previous = self._latest_event_time.get(instrument.id)
         if previous is not None and event.event_time <= previous:
@@ -204,6 +206,8 @@ class MarketDataShadowConsumer:
             self._counts["rejected_unresolved"] += 1
             return
         self._engine.ingest_price(domain_event, price)
+        if is_new_instrument:
+            self._instrument_ids.add(instrument.id)
         self._latest_event_time[instrument.id] = event.event_time
         self._seen[event.event_id] = None
         self._seen.move_to_end(event.event_id)
