@@ -135,7 +135,7 @@ def pending_exposures_from_open_orders(
 
         direction = (
             "LONG"
-            if (position_side == "LONG" or (position_side == "BOTH" and side == "BUY"))
+            if position_side == "LONG" or (position_side == "BOTH" and side == "BUY")
             else "SHORT"
         )
         try:
@@ -158,7 +158,9 @@ def pending_exposures_from_open_orders(
             stop = _decimal(stop_prices[(symbol, direction)], f"stop for {symbol}")
             leverage = _decimal(leverage_by_symbol[symbol], f"leverage for {symbol}")
         except KeyError as exc:
-            raise ValueError(f"missing authoritative risk input: {exc.args[0]}") from None
+            raise ValueError(
+                f"missing authoritative risk input: {exc.args[0]}"
+            ) from None
         if (direction == "LONG" and stop >= mark) or (
             direction == "SHORT" and stop <= mark
         ):
@@ -171,7 +173,10 @@ def pending_exposures_from_open_orders(
             float(risk),
             float(leverage),
         )
-        if not all(isfinite(value) for value in (notional_float, risk_float, leverage_float)):
+        if not all(
+            isfinite(value)
+            for value in (notional_float, risk_float, leverage_float)
+        ):
             raise ValueError("projected pending exposure exceeds finite numeric range")
         result.append(
             PendingOrderExposure(
