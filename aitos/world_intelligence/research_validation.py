@@ -61,9 +61,15 @@ def _mean(values):
 
 def _bootstrap_mean_ci(values, *, seed, iterations, confidence):
     rng = random.Random(seed)
-    samples = sorted(_mean([values[rng.randrange(len(values))] for _ in values]) for _ in range(iterations))
+    samples = sorted(
+        _mean([values[rng.randrange(len(values))] for _ in values])
+        for _ in range(iterations)
+    )
     alpha = (1 - confidence) / 2
-    return samples[int(alpha * (iterations - 1))], samples[int((1 - alpha) * (iterations - 1))]
+    return (
+        samples[int(alpha * (iterations - 1))],
+        samples[int((1 - alpha) * (iterations - 1))],
+    )
 
 
 def _wilson(successes, count, z=1.959963984540054):
@@ -111,19 +117,39 @@ def evaluate_regime_oos(
     for regime, rows in sorted(grouped.items()):
         if len(rows) < min_samples:
             continue
-        candidate_losses = [(p.candidate_probability - float(p.label_up)) ** 2 for p in rows]
-        benchmark_losses = [(p.benchmark_probability - float(p.label_up)) ** 2 for p in rows]
+        candidate_losses = [
+            (p.candidate_probability - float(p.label_up)) ** 2 for p in rows
+        ]
+        benchmark_losses = [
+            (p.benchmark_probability - float(p.label_up)) ** 2 for p in rows
+        ]
         improvements = [b - c for b, c in zip(benchmark_losses, candidate_losses)]
         correct = sum((p.candidate_probability >= 0.5) == p.label_up for p in rows)
-        reports.append(OOSRegimeReport(
-            regime=regime, sample_count=len(rows),
-            candidate_brier=_mean(candidate_losses), benchmark_brier=_mean(benchmark_losses),
-            paired_brier_improvement=_mean(improvements),
-            paired_improvement_ci=_bootstrap_mean_ci(improvements, seed=seed, iterations=iterations, confidence=confidence),
-            candidate_directional_accuracy=correct / len(rows),
-            directional_accuracy_ci=_wilson(correct, len(rows)),
-        ))
-    return OOSValidationReport(as_of.astimezone(timezone.utc), tuple(reports), excluded, 0)
+        reports.append(
+            OOSRegimeReport(
+                regime=regime,
+                sample_count=len(rows),
+                candidate_brier=_mean(candidate_losses),
+                benchmark_brier=_mean(benchmark_losses),
+                paired_brier_improvement=_mean(improvements),
+                paired_improvement_ci=_bootstrap_mean_ci(
+                    improvements,
+                    seed=seed,
+                    iterations=iterations,
+                    confidence=confidence,
+                ),
+                candidate_directional_accuracy=correct / len(rows),
+                directional_accuracy_ci=_wilson(correct, len(rows)),
+            )
+        )
+    return OOSValidationReport(
+        as_of.astimezone(timezone.utc), tuple(reports), excluded, 0
+    )
 
 
-__all__ = ["OOSPrediction", "OOSRegimeReport", "OOSValidationReport", "evaluate_regime_oos"]
+__all__ = [
+    "OOSPrediction",
+    "OOSRegimeReport",
+    "OOSValidationReport",
+    "evaluate_regime_oos",
+]

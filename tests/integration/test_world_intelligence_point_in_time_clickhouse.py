@@ -55,9 +55,7 @@ async def test_clickhouse_point_in_time_revisions_round_trip():
         await store.ensure_schema()
         assert await store.append_event_revisions([event]) == 1
         assert await store.append_market_bar_revisions([bar]) == 1
-        events, bars = await store.load_revisions(
-            as_of=now + timedelta(minutes=2)
-        )
+        events, bars = await store.load_revisions(as_of=now + timedelta(minutes=2))
         assert event in events
         assert bar in bars
     finally:

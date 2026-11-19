@@ -32,11 +32,23 @@ class ReplayBookSnapshot:
     def __post_init__(self):
         if self.timestamp.tzinfo is None:
             raise ValueError("book timestamp must be timezone-aware")
-        if any(not isfinite(v) or v < 0 for v in (self.maker_bid_fillable_qty, self.maker_ask_fillable_qty)):
-            raise ValueError("maker fillable quantities must be finite and non-negative")
+        if any(
+            not isfinite(v) or v < 0
+            for v in (self.maker_bid_fillable_qty, self.maker_ask_fillable_qty)
+        ):
+            raise ValueError(
+                "maker fillable quantities must be finite and non-negative"
+            )
         for level in (*self.bids, *self.asks):
-            if not isfinite(level.price) or not isfinite(level.quantity) or level.price <= 0 or level.quantity < 0:
-                raise ValueError("book levels must have positive prices and non-negative quantities")
+            if (
+                not isfinite(level.price)
+                or not isfinite(level.quantity)
+                or level.price <= 0
+                or level.quantity < 0
+            ):
+                raise ValueError(
+                    "book levels must have positive prices and non-negative quantities"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,14 +129,21 @@ class ExecutionReplayConfig:
     def __post_init__(self):
         if self.latency < timedelta(0) or self.max_levels < 1:
             raise ValueError("latency must be non-negative and max_levels positive")
-        for value in (self.maker_fee_rate, self.taker_fee_rate, self.impact_coefficient_bps):
+        for value in (
+            self.maker_fee_rate,
+            self.taker_fee_rate,
+            self.impact_coefficient_bps,
+        ):
             if not isfinite(value) or value < 0:
                 raise ValueError("execution costs must be finite and non-negative")
 
 
 def replay_execution(
-    orders: Sequence[ReplayOrder], books: Sequence[ReplayBookSnapshot], *,
-    funding: Sequence[FundingObservation] = (), config: ExecutionReplayConfig = ExecutionReplayConfig(),
+    orders: Sequence[ReplayOrder],
+    books: Sequence[ReplayBookSnapshot],
+    *,
+    funding: Sequence[FundingObservation] = (),
+    config: ExecutionReplayConfig = ExecutionReplayConfig(),
 ) -> ExecutionReplayReport:
     if len({o.order_id for o in orders}) != len(orders):
         raise ValueError("duplicate replay order id")
@@ -218,19 +237,35 @@ def replay_execution(
         for observation in ordered_funding:
             if observation.timestamp < fill.timestamp:
                 continue
-            if order.position_end_at is not None and observation.timestamp > order.position_end_at:
+            if (
+                order.position_end_at is not None
+                and observation.timestamp > order.position_end_at
+            ):
                 continue
             signed_rate = observation.rate if order.side == "buy" else -observation.rate
             funding_paid += fill.quantity * fill.price * signed_rate
     return ExecutionReplayReport(
-        order_count=len(orders), fill_count=len(fills), requested_quantity=requested,
-        filled_quantity=filled, unfilled_quantity=unfilled,
+        order_count=len(orders),
+        fill_count=len(fills),
+        requested_quantity=requested,
+        filled_quantity=filled,
+        unfilled_quantity=unfilled,
         fill_ratio=filled / requested if requested else 1.0,
         average_fill_price=notional / filled if filled else None,
-        fees_paid=fees, funding_paid=funding_paid,
-        estimated_market_impact=impact_total, fills=tuple(fills),
+        fees_paid=fees,
+        funding_paid=funding_paid,
+        estimated_market_impact=impact_total,
+        fills=tuple(fills),
     )
 
 
-__all__ = ["ExecutionReplayConfig", "ExecutionReplayReport", "FundingObservation",
-           "ReplayBookLevel", "ReplayBookSnapshot", "ReplayFill", "ReplayOrder", "replay_execution"]
+__all__ = [
+    "ExecutionReplayConfig",
+    "ExecutionReplayReport",
+    "FundingObservation",
+    "ReplayBookLevel",
+    "ReplayBookSnapshot",
+    "ReplayFill",
+    "ReplayOrder",
+    "replay_execution",
+]

@@ -49,9 +49,19 @@ def test_oos_reports_candidate_vs_benchmark_with_regime_confidence_intervals():
 def test_oos_validation_rejects_in_sample_or_duplicate_predictions():
     row = make_rows(4)[0]
     with pytest.raises(ValueError, match="strictly after"):
-        evaluate_regime_oos([row], as_of=BASE + timedelta(days=2),
-                            training_cutoff=row.event_time, min_samples=3, iterations=100)
+        evaluate_regime_oos(
+            [row],
+            as_of=BASE + timedelta(days=2),
+            training_cutoff=row.event_time,
+            min_samples=3,
+            iterations=100,
+        )
     rows = make_rows(4)
     with pytest.raises(ValueError, match="duplicate"):
-        evaluate_regime_oos([rows[0], rows[0]], as_of=BASE + timedelta(days=2),
-                            training_cutoff=BASE, min_samples=3, iterations=100)
+        evaluate_regime_oos(
+            [rows[0], rows[0]],
+            as_of=BASE + timedelta(days=2),
+            training_cutoff=BASE,
+            min_samples=3,
+            iterations=100,
+        )

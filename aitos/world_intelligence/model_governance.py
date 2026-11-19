@@ -12,6 +12,9 @@ from typing import Mapping, Any
 
 from aitos.statistics.governance import (
     PromotionDecision,
+    PromotionEvidence,
+    PromotionPolicy,
+)
 from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
 from aitos.statistics.registry import ModelArtifact, StatisticalModelRegistry
 
@@ -59,10 +62,16 @@ class EventImpactModelGovernance:
     def evaluate(self, evidence: PromotionEvidence) -> PromotionDecision:
         return self.runtime.evaluate_challenger(evidence)
 
-    def promote(self, evidence: PromotionEvidence, *, operator_approved: bool = False) -> PromotionDecision:
-        return self.runtime.promote_challenger(evidence, operator_approved=operator_approved)
+    def promote(
+        self, evidence: PromotionEvidence, *, operator_approved: bool = False
+    ) -> PromotionDecision:
+        return self.runtime.promote_challenger(
+            evidence, operator_approved=operator_approved
+        )
 
-    def rollback(self, model_id: str, target_version: str, *, operator_approved: bool = False) -> ModelArtifact:
+    def rollback(
+        self, model_id: str, target_version: str, *, operator_approved: bool = False
+    ) -> ModelArtifact:
         if not operator_approved:
             raise PermissionError("explicit operator approval is required for rollback")
         return self.runtime.rollback(model_id, target_version, operator_approved=True)

@@ -22,11 +22,15 @@ def test_execution_replay_models_latency_partial_fills_fees_impact_and_funding()
         "o1", "buy", 1.0, NOW, position_end_at=NOW + timedelta(seconds=4)
     )
     report = replay_execution(
-        [order], [book],
-        funding=[FundingObservation(NOW + timedelta(seconds=2), 0.001),
-                 FundingObservation(NOW + timedelta(seconds=5), 0.001)],
+        [order],
+        [book],
+        funding=[
+            FundingObservation(NOW + timedelta(seconds=2), 0.001),
+            FundingObservation(NOW + timedelta(seconds=5), 0.001),
+        ],
         config=ExecutionReplayConfig(
-            latency=timedelta(milliseconds=500), taker_fee_rate=0.001,
+            latency=timedelta(milliseconds=500),
+            taker_fee_rate=0.001,
             impact_coefficient_bps=2,
         ),
     )

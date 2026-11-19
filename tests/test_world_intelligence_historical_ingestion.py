@@ -43,9 +43,44 @@ class Provider:
         self.page = HistoricalProviderPage(
             source_id=self.source_id,
             next_cursor="next-page",
-                raw_payload=json.dumps({"headline":"macro"}).encode(),
-                metadata={"provider_revision":"v2"},
-            ),),
+            event_revisions=(
+                EventRevision(
+                    event_id="e1",
+                    revision_id="r1",
+                    asset="BTCUSDT",
+                    event_type="macro",
+                    published_at=NOW - timedelta(minutes=2),
+                    known_at=NOW - timedelta(minutes=1),
+                    sentiment=0.2,
+                    severity=0.7,
+                    novelty=0.5,
+                    confidence=0.8,
+                    source_reliability=0.9,
+                ),
+            ),
+            market_bar_revisions=(
+                MarketBarRevision(
+                    asset="BTCUSDT",
+                    revision_id="b1",
+                    open_time=NOW,
+                    close_time=NOW + timedelta(minutes=1),
+                    available_at=NOW + timedelta(minutes=1),
+                    open_price=90000,
+                    close_price=90100,
+                ),
+            ),
+            provenance=(
+                SourceProvenance(
+                    source_id=self.source_id,
+                    source_kind="official",
+                    record_id="record-1",
+                    uri="https://example.test/story?token=secret",
+                    published_at=NOW - timedelta(minutes=2),
+                    known_at=NOW - timedelta(minutes=1),
+                    raw_payload=json.dumps({"headline": "macro"}).encode(),
+                    metadata={"provider_revision": "v2"},
+                ),
+            ),
         )
 
     async def fetch_page(self, *, cursor):

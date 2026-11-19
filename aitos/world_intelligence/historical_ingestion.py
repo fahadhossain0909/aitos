@@ -73,7 +73,9 @@ class NormalizedProviderHistoryAdapter:
     directly and supply that response in SourceProvenance.raw_payload.
     """
 
-    def __init__(self, source, bar_provider: HistoricalBarProvider, *, asset_resolver, clock=None):
+    def __init__(
+        self, source, bar_provider: HistoricalBarProvider, *, asset_resolver, clock=None
+    ):
         self.source = source
         self.bar_provider = bar_provider
         self.asset_resolver = asset_resolver
@@ -157,7 +159,8 @@ class HistoricalIngestionStore:
 
     async def ensure_schema(self):
         await self.revisions.ensure_schema()
-        await self.client.command(f"""
+        await self.client.command(
+            f"""
             CREATE TABLE IF NOT EXISTS {self.cursors_table} (
                 source_id LowCardinality(String),
                 cursor String,
@@ -165,8 +168,10 @@ class HistoricalIngestionStore:
             )
             ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY source_id
-        """)
-        await self.client.command(f"""
+        """
+        )
+        await self.client.command(
+            f"""
             CREATE TABLE IF NOT EXISTS {self.table} (
                 source_id LowCardinality(String),
                 source_kind LowCardinality(String),
@@ -258,6 +263,7 @@ class HistoricalIngestionStore:
             if cursor == previous:
                 raise RuntimeError("historical provider cursor did not advance")
         raise RuntimeError("historical backfill page limit reached before exhaustion")
+
     async def load_cursor(self, source_id: str) -> str | None:
         result = await self.client.query(
             f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "

@@ -125,8 +125,13 @@ class ClickHousePointInTimeStore:
                 self.event_revisions_table,
                 rows,
                 column_names=[
-                    "event_id", "revision_id", "asset", "published_at",
-                    "known_at", "ingested_at", "payload_json",
+                    "event_id",
+                    "revision_id",
+                    "asset",
+                    "published_at",
+                    "known_at",
+                    "ingested_at",
+                    "payload_json",
                 ],
             )
         return len(rows)

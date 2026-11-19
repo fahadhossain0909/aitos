@@ -25,9 +25,10 @@ class PropagationSample:
     lag_seconds: float
 
     def __post_init__(self):
-        if not all(isinstance(v, str) and v.strip() for v in (
-            self.event_id, self.source_asset, self.target_asset, self.regime
-        )):
+        if not all(
+            isinstance(v, str) and v.strip()
+            for v in (self.event_id, self.source_asset, self.target_asset, self.regime)
+        ):
             raise ValueError("event, asset and regime identities are required")
         if self.source_asset.upper() == self.target_asset.upper():
             raise ValueError("source and target assets must differ")
