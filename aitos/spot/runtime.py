@@ -17,6 +17,8 @@ from aitos.intelligence.capital_protection import CapitalReservation
 from aitos.intelligence.exit_intelligence.models import ExitDecision
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
+from aitos.data.repository import MarketDataRepository
+from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.commission import SpotCommissionConversionService
@@ -604,6 +606,21 @@ class SpotRuntime:
         await self.lead_lag.start(market_bus)
         book_symbols = symbols[:5]
         kline_symbols = symbols[:5]
+        if self.repository is not None:
+            event_bus = getattr(market_bus, "event_bus", None)
+            if event_bus is None:
+                raise RuntimeError(
+                    "Spot durable persistence requires the canonical MarketDataBus"
+                )
+            self._persistence_sink = CanonicalMarketDataPersistenceSink(
+                event_bus,
+                self.repository,
+                historical_book_symbols=tuple(book_symbols),
+                historical_trade_symbols=tuple(symbols),
+                market_types=("spot",),
+                canonical_only=True,
+            )
+            await self._persistence_sink.initialize()
         self._market_stream_health.clear()
         self._market_tasks = [
             asyncio.create_task(
@@ -685,6 +702,9 @@ class SpotRuntime:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.market_consumer.stop()
         await self.lead_lag.stop()
+        sink, self._persistence_sink = self._persistence_sink, None
+        if sink is not None:
+            await sink.shutdown()
 
     def market_data_task_status(self) -> dict[str, str]:
         return {
@@ -717,6 +737,7 @@ def build_spot_runtime(
     mainnet_approved: bool = False,
     symbol_filters: dict[str, SpotSymbolFilters] | None = None,
     futures_spot_symbol_aliases: dict[str, str] | None = None,
+    repository: MarketDataRepository | None = None,
 ) -> SpotRuntime:
     """Construct Spot components only when the operator explicitly enables them.
 
@@ -815,4 +836,5 @@ def build_spot_runtime(
         owns_capital_gateway=owns_capital_gateway,
         commission_service=commission_service,
         portfolio_valuator=portfolio_valuator,
+        repository=repository,
     )
