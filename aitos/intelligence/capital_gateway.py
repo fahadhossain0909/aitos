@@ -352,7 +352,9 @@ class CapitalGateway:
 
             if self.reservation.reserve(
                 Reservation(
-                    candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd
+                    candidate.symbol,
+                    candidate.capital_usd,
+                    candidate.risk_budget_usd,
                 ),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
