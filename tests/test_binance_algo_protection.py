@@ -192,3 +192,65 @@ async def test_open_algo_inventory_rejects_duplicate_identities():
 
     with pytest.raises(ValueError, match="duplicate"):
         await value.get_open_algo_orders()
+
+
+async def test_open_order_inventory_is_read_only_and_symbol_scoped():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        orderId=456,
+        symbol="BTCUSDT",
+        status="PARTIALLY_FILLED",
+        side="BUY",
+        positionSide="BOTH",
+        type="LIMIT",
+        origQty="2.0",
+        executedQty="0.5",
+        reduceOnly=False,
+        closePosition=False,
+    )
+    value._signed_request = AsyncMock(return_value=[row])
+
+    result = await value.get_open_orders("btcusdt")
+
+    assert result == [row] and result[0] is not row
+    assert value._signed_request.call_args.args == (
+        "GET",
+        "/fapi/v1/openOrders",
+        {"symbol": "BTCUSDT"},
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"orderId": 0},
+        {"symbol": "ETHUSDT"},
+        {"status": "FILLED"},
+        {"side": "UNKNOWN"},
+        {"positionSide": "UNKNOWN"},
+        {"type": "UNKNOWN"},
+        {"origQty": "NaN"},
+        {"executedQty": "3"},
+        {"reduceOnly": "unknown"},
+        {"closePosition": None},
+    ],
+)
+async def test_open_order_inventory_rejects_invalid_rows(override):
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        orderId=456,
+        symbol="BTCUSDT",
+        status="NEW",
+        side="BUY",
+        positionSide="BOTH",
+        type="LIMIT",
+        origQty="2.0",
+        executedQty="0.0",
+        reduceOnly=False,
+        closePosition=False,
+    )
+    row.update(override)
+    value._signed_request = AsyncMock(return_value=[row])
+
+    with pytest.raises(ValueError):
+        await value.get_open_orders("BTCUSDT")
