@@ -57,6 +57,11 @@ class SpotBalance:
     free: Decimal
     locked: Decimal
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "asset", self.asset.upper())
+        if self.free < 0 or self.locked < 0:
+            raise ValueError("balance amounts cannot be negative")
+
     @property
     def total(self) -> Decimal:
         return self.free + self.locked
@@ -81,7 +86,11 @@ class SpotOrderRequest:
             raise ValueError("quantity must be positive")
         if self.quote_order_quantity is not None and self.quote_order_quantity <= 0:
             raise ValueError("quote_order_quantity must be positive")
+        if self.client_order_id and len(self.client_order_id) > 36:
+            raise ValueError("client_order_id must not exceed 36 characters")
         if self.order_type is SpotOrderType.LIMIT:
+            if self.quote_order_quantity is not None:
+                raise ValueError("LIMIT orders require base quantity")
             if self.price is None or self.price <= 0:
                 raise ValueError("LIMIT orders require a positive price")
             if self.time_in_force not in {"GTC", "IOC", "FOK"}:
