@@ -25,5 +25,17 @@ from aitos.spot.scanner import (
 __all__ = [
     "InventoryLedger",
     "InventoryPosition",
+    "RankedSpotCandidate",
+    "SpotBalance",
+    "SpotCandidate",
+    "SpotFill",
+    "SpotInstrument",
+    "SpotOrder",
+    "SpotOrderRequest",
+    "SpotOrderSide",
+    "SpotOrderStatus",
+    "SpotOrderType",
+    "SpotOpportunityScanner",
+    "SpotSymbolFilters",
     "parse_spot_exchange_info",
 ]
