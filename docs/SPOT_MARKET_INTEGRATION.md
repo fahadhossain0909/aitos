@@ -84,9 +84,11 @@ External wallet holdings are never adopted as strategy-owned inventory.
 
 The SQLite inventory ledger is durable, fill-idempotent and records commission
 asset. Base-asset and quote-asset commissions are reflected in quantity/cost
-basis; third-asset fees are flagged for conversion accounting rather than
-silently treated as zero. Reconciliation uses exchange trade IDs as idempotency
-keys. Client order IDs and order intents are journaled before exchange
+basis. Third-asset fees remain explicitly pending until a caller supplies their
+point-in-time quote-currency valuation through
+`resolve_commission_conversion()`; the ledger never substitutes a current
+price for a historical fee. Pending conversions are queryable and survive
+process restart. Reconciliation uses exchange trade IDs as idempotency keys. Client order IDs and order intents are journaled before exchange
 submission. Ambiguous submissions remain unresolved in that journal across
 process restarts. The default Spot runtime also uses a durable capital
 reservation database with a stable owner identity so pinned exposure can be
@@ -180,10 +182,10 @@ fees and execution-cost replay have passed operator review.
   do not report final net PnL while conversion is pending.
 - Extend execution replay with Spot maker/taker fees, spread crossing,
   partial fills, market impact and latency; validate by symbol and regime OOS.
-- Extend the historical repository schema and persistence sink with
-  `instrument_id/market_type` before persisting Spot events; the existing
-  historical writer intentionally remains on Futures channels to avoid
-  same-symbol database collisions.
+- Wire a point-in-time third-asset fee-price source into the pending fee-conversion
+  ledger; until resolved, net PnL remains provisional for affected fills.
+- Extend execution replay with Spot maker/taker fees, spread crossing,
+  partial fills, market impact and latency; validate by symbol and regime OOS.
 - Verify the existing portfolio mark-to-market aggregates Spot inventory,
   quote cash and Futures margin without double-counting shared quote assets.
 
