@@ -8,6 +8,7 @@ from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.order_executor import OrderRequest, OrderResult
 from aitos.execution.protection_reconciliation import (
     audit_exchange_protection_inventory,
+    require_live_account_exposure_reconciled,
 )
 from aitos.models.trade import TradeSide
 
@@ -319,3 +320,119 @@ async def test_reduce_only_and_hedge_closing_orders_do_not_count_as_entry_exposu
 
     assert report["account_exposure_verified"] is True
     assert report["pending_entry_orders"] == []
+
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_protection_history_does_not_require_resting_order(
+    protected_intent,
+):
+    protected_intent.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    protected_intent.mark_applied("aitos-protection-1", "closed-trade-1")
+    executor = ReadOnlyExecutor("paper-account", [])
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[]
+    )
+
+    assert report["findings"] == []
+    assert report["account_exposure_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_with_orphaned_resting_protection_is_reported(
+    protected_intent,
+):
+    protected_intent.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    protected_intent.mark_applied("aitos-protection-1", "closed-trade-1")
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[]
+    )
+
+    assert report["findings"][0]["status"] == "unowned_order"
+    assert report["account_exposure_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_live_guard_accepts_only_reconciled_account_and_owned_protection(
+    protected_intent,
+):
+    protected_intent.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    protected_intent.mark_applied("aitos-protection-1", "open-trade-1")
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="open-trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+    )
+    executor.get_position_risk = AsyncMock(
+        return_value=[
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "BOTH",
+                "positionAmt": "1.0",
+            }
+        ]
+    )
+
+    report = await require_live_account_exposure_reconciled(
+        executor, protected_intent, [trade], now=NOW
+    )
+
+    assert report["account_exposure_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_live_guard_blocks_unpriced_pending_entry_order(protected_intent):
+    executor = ReadOnlyExecutor("paper-account", [])
+    executor.get_open_orders = AsyncMock(
+        return_value=[
+            {
+                "orderId": 777,
+                "symbol": "ETHUSDT",
+                "side": "BUY",
+                "positionSide": "BOTH",
+                "status": "NEW",
+                "reduceOnly": False,
+                "closePosition": False,
+            }
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="pending_entry_orders=1"):
+        await require_live_account_exposure_reconciled(
+            executor, protected_intent, [], now=NOW
+        )
