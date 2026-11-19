@@ -6,7 +6,12 @@ from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDat
 from aitos.market_data.bus import market_event_from_wire, market_event_to_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
 from aitos.market_data.bus import channel_for
-from aitos.market_data.channels import ALL_CHANNELS, CHANNEL_KLINE
+from aitos.market_data.channels import (
+    ALL_CHANNELS,
+    CHANNEL_KLINE,
+    CHANNEL_SPOT_KLINE,
+    CHANNEL_SPOT_TRADE,
+)
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.spot.websocket import SpotOrderBookGap
@@ -136,6 +141,10 @@ async def test_spot_ticker_stream_handles_book_ticker_without_exchange_time():
 def test_spot_kline_uses_registered_canonical_event_channel():
     assert channel_for(MarketEventType.KLINE) == CHANNEL_KLINE
     assert CHANNEL_KLINE in ALL_CHANNELS
+    assert channel_for(MarketEventType.KLINE, market_type="spot") == CHANNEL_SPOT_KLINE
+    assert channel_for(MarketEventType.TRADE, market_type="spot") == CHANNEL_SPOT_TRADE
+    assert CHANNEL_SPOT_KLINE in ALL_CHANNELS
+    assert CHANNEL_SPOT_TRADE in ALL_CHANNELS
 
 
 @pytest.mark.asyncio
