@@ -161,7 +161,8 @@ def build_spot_runtime(
     executor = SpotOrderExecutor(
         rest,
         enabled=policy.execution_enabled,
-        allow_mainnet=bool(policy.allow_mainnet and mainnet_approved),
+        allow_mainnet=policy.allow_mainnet,
+        mainnet_approved=mainnet_approved,
         quote_asset=policy.quote_asset,
         symbol_filters=symbol_filters,
     )
