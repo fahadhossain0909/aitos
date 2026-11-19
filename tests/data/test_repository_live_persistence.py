@@ -60,7 +60,10 @@ def test_live_persistence_schema_contains_required_contracts():
     assert "payload_json String" in CREATE_MARKET_EVENTS
     assert "market_type LowCardinality(String)" in CREATE_MARKET_EVENTS
     assert "instrument_id String" in CREATE_MARKET_EVENTS
-    assert "ORDER BY (instrument_id, event_type, event_time, event_id)" in CREATE_MARKET_EVENTS
+    assert (
+        "ORDER BY (instrument_id, event_type, event_time, event_id)"
+        in CREATE_MARKET_EVENTS
+    )
     assert "category LowCardinality(String)" in CREATE_LIVE_ANALYTICS_EVENTS
     assert "source_module LowCardinality(String)" in CREATE_LIVE_ANALYTICS_EVENTS
     assert "payload_json String" in CREATE_LIVE_ANALYTICS_EVENTS
