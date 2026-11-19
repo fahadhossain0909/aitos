@@ -1,8 +1,14 @@
 """Read-only shadow adapter for compute-aware task scheduling."""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
-from aitos.intelligence.compute_scheduler import AnalysisTask, ComputeAwareScheduler, SchedulerSnapshot
+from aitos.intelligence.compute_scheduler import (
+    AnalysisTask,
+    ComputeAwareScheduler,
+    SchedulerSnapshot,
+)
+
 
 @dataclass(frozen=True)
 class ShadowDecision:
@@ -10,9 +16,13 @@ class ShadowDecision:
     proposed_dispatch_ids: tuple[str, ...]
     snapshot: SchedulerSnapshot
 
+
 class ComputeSchedulerShadow:
     """Observe policy decisions without controlling existing execution."""
-    def __init__(self, scheduler=None, observer: Callable[[ShadowDecision], None] | None = None):
+
+    def __init__(
+        self, scheduler=None, observer: Callable[[ShadowDecision], None] | None = None
+    ):
         self.scheduler = scheduler or ComputeAwareScheduler()
         self.observer = observer
         self._sequence = 0
@@ -23,9 +33,12 @@ class ComputeSchedulerShadow:
         self._sequence += 1
         observed = AnalysisTask(
             task_id=f"shadow:{self._sequence}:{task.task_id}",
-            priority=task.priority, cost_units=task.cost_units,
-            submitted_at=task.submitted_at, payload=task.payload,
-            coalesce_key=task.coalesce_key, replaceable=task.replaceable,
+            priority=task.priority,
+            cost_units=task.cost_units,
+            submitted_at=task.submitted_at,
+            payload=task.payload,
+            coalesce_key=task.coalesce_key,
+            replaceable=task.replaceable,
         )
         self._observed.append(task.task_id)
         try:
@@ -34,7 +47,8 @@ class ComputeSchedulerShadow:
             # Invalid/over-budget policy admission is telemetry-only in shadow.
             pass
         decision = ShadowDecision(
-            observed_task_ids=(task.task_id,), proposed_dispatch_ids=(),
+            observed_task_ids=(task.task_id,),
+            proposed_dispatch_ids=(),
             snapshot=self.scheduler.snapshot(),
         )
         if self.observer:
