@@ -4,6 +4,7 @@ Subscriptions use market.spot.* channels, so this consumer cannot ingest
 same-symbol Futures events. It builds observable pre-filter candidates; it does
 not create trade signals or bypass the shared Strategy/Capital/EIE authorities.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -104,10 +105,7 @@ class SpotMarketDataConsumer:
         subscriptions, self._subscriptions = self._subscriptions, []
         for subscription in subscriptions:
             subscription.cancel()
-        tasks = [
-            getattr(subscription, "_task", None)
-            for subscription in subscriptions
-        ]
+        tasks = [getattr(subscription, "_task", None) for subscription in subscriptions]
         await asyncio.gather(
             *(task for task in tasks if task is not None),
             return_exceptions=True,
@@ -162,14 +160,12 @@ class SpotMarketDataConsumer:
         bids = {
             Decimal(str(level["price"])): Decimal(str(level["quantity"]))
             for level in event.payload.get("bids", [])
-            if Decimal(str(level["price"])) > 0
-            and Decimal(str(level["quantity"])) > 0
+            if Decimal(str(level["price"])) > 0 and Decimal(str(level["quantity"])) > 0
         }
         asks = {
             Decimal(str(level["price"])): Decimal(str(level["quantity"]))
             for level in event.payload.get("asks", [])
-            if Decimal(str(level["price"])) > 0
-            and Decimal(str(level["quantity"])) > 0
+            if Decimal(str(level["price"])) > 0 and Decimal(str(level["quantity"])) > 0
         }
         if not bids or not asks or max(bids) >= min(asks):
             state.book_valid = False
@@ -194,9 +190,8 @@ class SpotMarketDataConsumer:
         previous = payload.get("previous_update_id")
         if final <= state.last_update_id:
             return
-        if (
-            (previous is not None and int(previous) != state.last_update_id)
-            or (previous is None and first > state.last_update_id + 1)
+        if (previous is not None and int(previous) != state.last_update_id) or (
+            previous is None and first > state.last_update_id + 1
         ):
             state.book_valid = False
             state.sequence_gaps += 1
@@ -281,12 +276,8 @@ class SpotMarketDataConsumer:
         ]
         volatility_bps = Decimal(str(pstdev(returns) * 10000.0))
         momentum_bps = Decimal(str((closes[-1] / closes[-6] - 1.0) * 10000.0))
-        previous_volumes = [
-            row["quote_volume"] for row in candles[-21:-1]
-        ]
-        baseline = sum(previous_volumes, Decimal("0")) / Decimal(
-            len(previous_volumes)
-        )
+        previous_volumes = [row["quote_volume"] for row in candles[-21:-1]]
+        baseline = sum(previous_volumes, Decimal("0")) / Decimal(len(previous_volumes))
         if baseline <= 0:
             return None
         relative_volume = candles[-1]["quote_volume"] / baseline
