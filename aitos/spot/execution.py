@@ -45,9 +45,12 @@ class SpotOrderExecutor:
         if request.quote_order_quantity is not None:
             if request.order_type is not SpotOrderType.MARKET or not filters.quote_order_qty_market_allowed:
                 raise ValueError("quoteOrderQty is not supported for this symbol/order type")
-            if filters.min_notional > 0 and request.quote_order_quantity < filters.min_notional:
+            if (filters.min_notional > 0 and filters.apply_min_to_market
+                    and request.quote_order_quantity < filters.min_notional):
                 raise ValueError("quoteOrderQty violates minimum notional")
-            if filters.max_notional and filters.max_notional > 0 and request.quote_order_quantity > filters.max_notional:
+            if (filters.max_notional and filters.max_notional > 0
+                    and filters.apply_max_to_market
+                    and request.quote_order_quantity > filters.max_notional):
                 raise ValueError("quoteOrderQty exceeds maximum notional")
         elif request.quantity is not None:
             price = request.price
