@@ -6,7 +6,8 @@ from decimal import Decimal
 
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.filters import SpotSymbolFilters
-from aitos.spot.inventory import InventoryLedger\nfrom aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderType
+from aitos.spot.inventory import InventoryLedger
+from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderType
 
 
 class SpotExecutionDisabled(RuntimeError):
