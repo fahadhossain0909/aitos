@@ -23,6 +23,7 @@ from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
 from aitos.statistics.feedback import AStatFeedbackLoop
+from aitos.statistics.governance_runtime import DriftMonitorScheduler
 
 # Keep model persistence independent of any developer-specific host path.
 # MODEL_DATA_DIR is already part of the deployment environment contract;
@@ -89,6 +90,12 @@ class SystemComponents:
     correlation_updater: SymbolCorrelationUpdater | None = None
     _price_feed_subscriptions: list[SubscriptionProtocol] = field(default_factory=list)
     market_shadow_consumer: MarketDataShadowConsumer | None = None
+    governance_drift_scheduler: DriftMonitorScheduler | None = None
+    governance_drift_batch_provider: Callable[[], Any] | None = None
+    _governance_drift_stop_event: asyncio.Event | None = field(
+        default=None, repr=False
+    )
+    _governance_drift_task: asyncio.Task | None = field(default=None, repr=False)
 
     def reload_runtime_tuning(self) -> dict[str, object]:
         """Reload tunings that can be changed without rebuilding infrastructure.
@@ -177,7 +184,15 @@ async def build_system(
     position_switching_factory: PositionSwitchingFactory | None = None,
     world_intelligence_provider: Any | None = None,
     market_shadow_consumer: MarketDataShadowConsumer | None = None,
+    governance_drift_scheduler: DriftMonitorScheduler | None = None,
+    governance_drift_batch_provider: Callable[[], Any] | None = None,
 ) -> SystemComponents:
+    if (governance_drift_scheduler is None) != (
+        governance_drift_batch_provider is None
+    ):
+        raise ValueError(
+            "governance drift scheduler and batch provider must be configured together"
+        )
     settings = get_settings()
     tuning = settings.tuning
     tuning_report = effective_tuning_report(tuning)
@@ -426,6 +441,8 @@ async def build_system(
         knowledge_graph=knowledge_graph,
         correlation_updater=correlation_updater,
         market_shadow_consumer=market_shadow_consumer,
+        governance_drift_scheduler=governance_drift_scheduler,
+        governance_drift_batch_provider=governance_drift_batch_provider,
     )
 
 
@@ -505,6 +522,19 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
                 "market shadow consumer requires canonical market-data ingestion"
             )
         await shadow_consumer.start(market_bus)
+    drift_scheduler = getattr(components, "governance_drift_scheduler", None)
+    drift_provider = getattr(components, "governance_drift_batch_provider", None)
+    if drift_scheduler is not None:
+        if drift_provider is None:
+            raise RuntimeError("governance drift batch provider is required")
+        drift_task = getattr(components, "_governance_drift_task", None)
+        if drift_task is None or drift_task.done():
+            stop_event = asyncio.Event()
+            components._governance_drift_stop_event = stop_event
+            components._governance_drift_task = asyncio.create_task(
+                drift_scheduler.run_forever(stop_event, drift_provider),
+                name="aitos-statistical-drift-monitor",
+            )
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         statuses = [await _health_status(module) for module in components.all_modules()]
@@ -526,6 +556,30 @@ async def shutdown_all(
                 "market shadow consumer shutdown failed",
                 extra={"aitos_extra": {"error": str(exc)}},
             )
+    drift_stop_event = getattr(components, "_governance_drift_stop_event", None)
+    drift_task = getattr(components, "_governance_drift_task", None)
+    if drift_stop_event is not None:
+        drift_stop_event.set()
+    if drift_task is not None:
+        try:
+            await asyncio.wait_for(
+                drift_task, timeout=max(1.0, float(grace_period_seconds))
+            )
+        except asyncio.TimeoutError:
+            drift_task.cancel()
+            try:
+                await drift_task
+            except asyncio.CancelledError:
+                pass
+            logger.error("statistical drift monitor exceeded shutdown grace period")
+        except Exception as exc:
+            logger.error(
+                "statistical drift monitor shutdown failed",
+                extra={"aitos_extra": {"error": type(exc).__name__}},
+            )
+        finally:
+            components._governance_drift_task = None
+            components._governance_drift_stop_event = None
     for sub in components._price_feed_subscriptions:
         sub.cancel()
     for module in reversed(components.all_modules()):
