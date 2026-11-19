@@ -130,5 +130,8 @@ acceptance gates are maintained in
 [`engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md`](ARCHITECTURE_EVOLUTION_PROGRAM.md).
 That program records existing `GlobalMarketState`, market/decision/strategy
 contracts, portfolio/risk primitives and execution-recovery capabilities so new
-work does not duplicate them. Runtime health and production latency remain
-unverified unless a dated evidence record says otherwise.
+work does not duplicate them. The Phase 1 semantic contract and provisional
+financial-authority audit is maintained in
+[`engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`](AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md).
+Runtime health and production latency remain unverified unless a dated evidence
+record says otherwise.
