@@ -6,6 +6,7 @@ without changing strategy or risk code.
 """
 
 from .adapters import ExecutionAdapter, ExecutionIntent, MarketDataAdapter
+from .bridges import market_data_event_to_domain
 from .calendar import MacroEvent, MarketSession, TradingCalendar
 from .contracts import AssetClass, Instrument, MarketEvent, MarketEventType
 from .engine import CrossMarketIntelligenceEngine, LeadLagResult
@@ -23,6 +24,7 @@ __all__ = [
     "LeadLagResult",
     "MacroEvent",
     "MarketDataAdapter",
+    "market_data_event_to_domain",
     "MarketEvent",
     "MarketEventType",
     "MarketRegime",
