@@ -153,9 +153,11 @@ def test_spot_replay_uses_first_book_after_order_latency():
 def test_spot_portfolio_quote_conversion_is_explicit():
     from aitos.spot.portfolio import SpotPortfolioValuator
 
+    ledger = InventoryLedger()
     valuator = SpotPortfolioValuator(
-        InventoryLedger(),
+        ledger,
         quote_asset="USDT",
         quote_to_usd_rate=Decimal("0.998"),
     )
     assert valuator.quote_to_usd_rate == Decimal("0.998")
+    ledger.close()
