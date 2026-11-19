@@ -1,4 +1,5 @@
 """Binance Spot market WebSocket streams with explicit sequence-gap detection."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,14 +18,22 @@ class SpotOrderBookGap(RuntimeError):
 class BinanceSpotWebSocket:
     BASE_URL = "wss://stream.binance.com:9443"
 
-    def __init__(self, *, testnet: bool = True, reconnect: bool = True,
-                 max_backoff_seconds: float = 30.0) -> None:
-        self.base_url = ("wss://stream.testnet.binance.vision"
-                         if testnet else self.BASE_URL)
+    def __init__(
+        self,
+        *,
+        testnet: bool = True,
+        reconnect: bool = True,
+        max_backoff_seconds: float = 30.0,
+    ) -> None:
+        self.base_url = (
+            "wss://stream.testnet.binance.vision" if testnet else self.BASE_URL
+        )
         self.reconnect = reconnect
         self.max_backoff_seconds = max_backoff_seconds
 
-    async def stream(self, symbol: str, *channels: str) -> AsyncIterator[dict[str, Any]]:
+    async def stream(
+        self, symbol: str, *channels: str
+    ) -> AsyncIterator[dict[str, Any]]:
         """Yield decoded combined-stream events; channels e.g. @trade/@depth@100ms."""
         if not channels:
             raise ValueError("at least one stream channel is required")
@@ -33,8 +42,13 @@ class BinanceSpotWebSocket:
         delay = 0.5
         while True:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20,
-                                              open_timeout=10, close_timeout=5) as ws:
+                async with websockets.connect(
+                    url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    open_timeout=10,
+                    close_timeout=5,
+                ) as ws:
                     delay = 0.5
                     async for message in ws:
                         payload = json.loads(message)
@@ -60,8 +74,13 @@ class BinanceSpotWebSocket:
         delay = 0.5
         while True:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20,
-                                              open_timeout=10, close_timeout=5) as ws:
+                async with websockets.connect(
+                    url,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    open_timeout=10,
+                    close_timeout=5,
+                ) as ws:
                     delay = 0.5
                     async for message in ws:
                         yield json.loads(message)
