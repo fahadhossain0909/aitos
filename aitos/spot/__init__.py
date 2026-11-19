@@ -1,25 +1,20 @@
-"""Opt-in Binance Spot market integration.
+"""Binance Spot domain package.
 
-The package is deliberately isolated from Futures execution. Importing it never
-enables trading; callers must explicitly construct an executor with credentials
-and an explicit environment selection.
+Keep package import side effects minimal: transport, orchestration and runtime
+components are imported explicitly from their submodules.
 """
-from aitos.spot.binance import BinanceSpotAdapter
-from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
-from aitos.spot.execution import SpotExecutionDisabled, SpotOrderExecutor
-from aitos.spot.websocket import BinanceSpotWebSocket, SpotOrderBookGap
 from aitos.spot.filters import SpotSymbolFilters, parse_spot_exchange_info
+from aitos.spot.inventory import InventoryLedger, InventoryPosition
 from aitos.spot.models import (
     SpotBalance, SpotFill, SpotInstrument, SpotOrder, SpotOrderRequest,
     SpotOrderSide, SpotOrderStatus, SpotOrderType,
 )
-from aitos.spot.inventory import InventoryLedger, InventoryPosition
-from aitos.spot.scanner import SpotCandidate, SpotOpportunityScanner
+from aitos.spot.scanner import RankedSpotCandidate, SpotCandidate, SpotOpportunityScanner
 
 __all__ = [
-    "SpotAuthorizationRejected", "SpotTradingCoordinator", "BinanceSpotAdapter", "BinanceSpotWebSocket", "SpotExecutionDisabled",
-    "SpotOrderBookGap", "SpotOrderExecutor", "SpotBalance", "SpotCandidate", "SpotFill", "SpotInstrument",
+    "InventoryLedger", "InventoryPosition", "RankedSpotCandidate",
+    "SpotBalance", "SpotCandidate", "SpotFill", "SpotInstrument",
     "SpotOrder", "SpotOrderRequest", "SpotOrderSide", "SpotOrderStatus",
-    "SpotOrderType", "SpotSymbolFilters", "InventoryLedger",
-    "InventoryPosition", "SpotOpportunityScanner", "parse_spot_exchange_info",
+    "SpotOrderType", "SpotOpportunityScanner", "SpotSymbolFilters",
+    "parse_spot_exchange_info",
 ]
