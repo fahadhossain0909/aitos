@@ -320,18 +320,21 @@ class SpotRuntime:
                 if inspect.isawaitable(result):
                     await result
 
-        await self.recover_unresolved_orders()
-        try:
-            await self.resolve_pending_commissions()
-        except Exception as exc:
-            logger.warning(
-                "Spot historical commission conversion deferred",
-                extra={"aitos_extra": {"error": str(exc)}},
-            )
+        async def recover_private_state() -> None:
+            await self.recover_unresolved_orders()
+            try:
+                await self.resolve_pending_commissions()
+            except Exception as exc:
+                logger.warning(
+                    "Spot historical commission conversion deferred",
+                    extra={"aitos_extra": {"error": str(exc)}},
+                )
+
         self._user_stream = SpotUserDataStreamSupervisor(
             adapter=self.market_data.rest,
             websocket=self.market_data.websocket,
             on_event=handle,
+            on_connect=recover_private_state,
             keepalive_seconds=keepalive_seconds,
         )
         await self._user_stream.start()
