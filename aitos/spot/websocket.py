@@ -33,9 +33,7 @@ class BinanceSpotWebSocket:
         self.reconnect = reconnect
         self.max_backoff_seconds = max_backoff_seconds
 
-    async def stream_many(
-        self, streams: list[str]
-    ) -> AsyncIterator[dict[str, Any]]:
+    async def stream_many(self, streams: list[str]) -> AsyncIterator[dict[str, Any]]:
         """Multiplex up to 1024 Binance streams over one WebSocket connection."""
         normalized = list(dict.fromkeys(stream for stream in streams))
         if not normalized or len(normalized) > 1024:
