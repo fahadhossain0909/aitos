@@ -3,10 +3,10 @@ name: Native Rust Core
 on:
   pull_request:
     branches: [main, master, develop]
-    paths: ["native/rust/**", "aitos/native_core.py", "native/python_tests/test_native_core.py", "native/python_tests/test_native_orderbook_parity.py", "benchmarks/native_core_benchmark.py", ".github/workflows/native-rust.yml"]
+    paths: ["native/rust/**", "aitos/native_core.py", "native/python_tests/test_native_core.py", "native/python_tests/test_native_orderbook_parity.py", "benchmarks/native_core_benchmark.py", "benchmarks/native_core_burst_benchmark.py", ".github/workflows/native-rust.yml"]
   push:
     branches: [main]
-    paths: ["native/rust/**", "aitos/native_core.py", "native/python_tests/test_native_core.py", "native/python_tests/test_native_orderbook_parity.py", "benchmarks/native_core_benchmark.py", ".github/workflows/native-rust.yml"]
+    paths: ["native/rust/**", "aitos/native_core.py", "native/python_tests/test_native_core.py", "native/python_tests/test_native_orderbook_parity.py", "benchmarks/native_core_benchmark.py", "benchmarks/native_core_burst_benchmark.py", ".github/workflows/native-rust.yml"]
   workflow_dispatch:
 
 permissions:
