@@ -565,6 +565,64 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 return None
             raise
 
+    async def get_algo_order_by_client_id(
+        self, symbol: str, client_algo_id: str
+    ) -> dict[str, Any] | None:
+        """Read-only lookup for protective POST-to-ACK crash recovery.
+
+        Binance accepts either algoId or clientAlgoId for this USER_DATA query.
+        Only the explicit venue not-found response returns None; transport and
+        other API failures remain errors and must not release local quarantine.
+        """
+        normalized_symbol = str(symbol).strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
+            raise ValueError("invalid symbol for algo client-id lookup")
+        if not isinstance(client_algo_id, str) or not client_algo_id.strip():
+            raise ValueError("client algo identity is required")
+        try:
+            response = await self._signed_request(
+                "GET",
+                "/fapi/v1/algoOrder",
+                {"clientAlgoId": client_algo_id},
+            )
+        except BinanceAPIError as exc:
+            if exc.code == -2013:
+                return None
+            raise
+        if not isinstance(response, dict):
+            raise ExecutionUncertainError(
+                normalized_symbol,
+                client_algo_id,
+                "algo client-id lookup returned malformed evidence",
+            )
+        algo_id = response.get("algoId")
+        if (
+            isinstance(algo_id, bool)
+            or not str(algo_id or "").isdigit()
+            or int(algo_id) <= 0
+            or response.get("clientAlgoId") != client_algo_id
+            or response.get("symbol") != normalized_symbol
+            or response.get("algoType") != "CONDITIONAL"
+            or response.get("orderType")
+            not in {
+                "STOP_MARKET",
+                "TAKE_PROFIT_MARKET",
+                "STOP",
+                "TAKE_PROFIT",
+                "TRAILING_STOP_MARKET",
+            }
+            or response.get("side") not in {"BUY", "SELL"}
+            or response.get("positionSide") not in {"BOTH", "LONG", "SHORT"}
+            or response.get("algoStatus")
+            not in {"NEW", "CANCELED", "EXPIRED", "REJECTED", "TRIGGERED", "FINISHED"}
+        ):
+            raise ExecutionUncertainError(
+                normalized_symbol,
+                client_algo_id,
+                "algo client-id lookup identity mismatch",
+            )
+        return dict(response)
+
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         if order_id.startswith("algo:"):
             algo_id = order_id.removeprefix("algo:")
