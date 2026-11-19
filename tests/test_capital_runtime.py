@@ -53,6 +53,44 @@ def make_opportunity(**overrides) -> Opportunity:
     return Opportunity(**values)
 
 
+def test_gateway_reservation_coverage_requires_owned_full_open_exposure():
+    ledger = CapitalReservation()
+    gateway = CapitalGateway(reservation=ledger)
+    required = Reservation("BTCUSDT", 100.0, 5.0)
+
+    with pytest.raises(RuntimeError, match="no owned reservation"):
+        gateway.assert_reservations_cover([required])
+
+    ledger.restore_confirmed_exposure(Reservation("BTCUSDT", 120.0, 6.0))
+    assert gateway.assert_reservations_cover([required]) == {
+        "BTCUSDT": Reservation("BTCUSDT", 120.0, 6.0)
+    }
+
+
+def test_gateway_reservation_coverage_rejects_under_reserved_open_exposure():
+    ledger = CapitalReservation()
+    gateway = CapitalGateway(reservation=ledger)
+    assert ledger.reserve(
+        Reservation("BTCUSDT", 90.0, 4.0),
+        available_capital_usd=100.0,
+        available_risk_usd=10.0,
+    )
+
+    with pytest.raises(RuntimeError, match="under-covers"):
+        gateway.assert_reservations_cover([Reservation("BTCUSDT", 100.0, 5.0)])
+
+
+def test_gateway_reservation_coverage_rejects_duplicate_symbols():
+    gateway = CapitalGateway(reservation=CapitalReservation())
+    with pytest.raises(ValueError, match="symbols must be unique"):
+        gateway.assert_reservations_cover(
+            [
+                Reservation("BTCUSDT", 10.0, 1.0),
+                Reservation("BTCUSDT", 20.0, 2.0),
+            ]
+        )
+
+
 def test_gateway_uses_nearest_target_and_execution_costs():
     estimate = CapitalGateway().estimate_opportunity(
         make_opportunity(take_profit_levels=[103.0, 110.0]),
