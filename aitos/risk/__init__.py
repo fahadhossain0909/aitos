@@ -2,6 +2,7 @@ from .circuit_breaker import CircuitBreaker, CircuitBreakerEvent
 from .models import (
     CircuitBreakerState,
     LimitBreach,
+    PendingOrderExposure,
     PortfolioState,
     PositionExposure,
     PositionSizeResult,
@@ -21,6 +22,7 @@ __all__ = [
     "CircuitBreakerEvent",
     "CircuitBreakerState",
     "LimitBreach",
+    "PendingOrderExposure",
     "PortfolioState",
     "PositionExposure",
     "PositionSizeResult",
