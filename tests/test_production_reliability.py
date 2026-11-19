@@ -442,19 +442,22 @@ async def test_order_record_rejects_conflicting_latest_timestamp_versions():
 async def test_pending_order_intent_loader_fails_closed_on_latest_timestamp_tie():
     class QueryResult:
         result_rows = [
-        (
-            "client-1",
-            [
-                ("BTCUSDT", "SUBMITTING", '{"symbol":"BTCUSDT"}', ""),
-                ("BTCUSDT", "ACKNOWLEDGED", '{"symbol":"BTCUSDT"}', "{}"),
-            ],
-        )
-    ]
+            (
+                "client-1",
+                [
+                    ("BTCUSDT", "SUBMITTING", '{"symbol":"BTCUSDT"}', ""),
+                    ("BTCUSDT", "ACKNOWLEDGED", '{"symbol":"BTCUSDT"}', "{}"),
+                ],
+            )
+        ]
 
     class ClickHouseClient:
         async def query(self, query, parameters=None):
             assert "latest_versions" in query
-            assert "groupUniqArray(tuple(symbol, state, request_json, result_json))" in query
+            assert (
+                "groupUniqArray(tuple(symbol, state, request_json, result_json))"
+                in query
+            )
             assert "any(state)" not in query
             return QueryResult()
 
