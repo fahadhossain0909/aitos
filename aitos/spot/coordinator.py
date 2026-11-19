@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import Decimal
+import uuid
 
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
@@ -86,14 +87,31 @@ class SpotTradingCoordinator:
             raise SpotAuthorizationRejected(
                 "sell exceeds AITOS-managed Spot inventory"
             )
+        client_order_id = client_order_id or "aitos-" + uuid.uuid4().hex[:28]
         request = SpotOrderRequest(
             symbol=symbol, side=SpotOrderSide.SELL, order_type=SpotOrderType.MARKET,
             quantity=quantity, client_order_id=client_order_id,
         )
-        return await self.executor.submit(request)
+        self.inventory.record_order_intent(
+            client_order_id=client_order_id, symbol=symbol, side="SELL",
+            order_type="MARKET", quantity=quantity,
+        )
+        try:
+            order = await self.executor.submit(request)
+        except Exception:
+            self.inventory.update_order_intent(client_order_id, status="UNKNOWN")
+            raise
+        self.inventory.update_order_intent(
+            client_order_id, status=order.status.value, exchange_order_id=order.order_id
+        )
+        return order
 
     async def reconcile(self, symbol: str, client_order_id: str) -> SpotOrder:
-        return await self.executor.reconcile_order(symbol, client_order_id, self.inventory)
+        order = await self.executor.reconcile_order(symbol, client_order_id, self.inventory)
+        self.inventory.update_order_intent(
+            client_order_id, status=order.status.value, exchange_order_id=order.order_id
+        )
+        return order
 
     def release_after_confirmed_flat(self, symbol: str) -> bool:
         key = InstrumentKey(Venue.BINANCE, MarketType.SPOT, symbol)
