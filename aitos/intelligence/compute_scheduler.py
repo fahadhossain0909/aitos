@@ -86,6 +86,8 @@ class ComputeAwareScheduler:
     def submit(self, task: AnalysisTask, *, now: float) -> bool:
         if task.submitted_at > now:
             raise ValueError("submitted_at cannot be in the future")
+        if task.cost_units > self.capacity_units:
+            raise ValueError("task cost exceeds one-cycle compute capacity")
         if any(item.task_id == task.task_id for item in self._pending):
             raise ValueError("task_id must be unique while a task is pending")
         if task.coalesce_key:
