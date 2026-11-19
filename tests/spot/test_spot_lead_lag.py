@@ -99,3 +99,13 @@ def test_futures_spot_synchronous_correlation_is_not_misreported_as_lead():
     assert estimate.status == "synchronous"
     assert estimate.leader is None
     assert estimate.lag_seconds is None
+
+
+
+def test_futures_spot_lead_lag_is_scoped_to_discovered_spot_universe():
+    analyzer = FuturesSpotLeadLagAnalyzer()
+    analyzer.set_symbols(["BTCUSDT"])
+    now = datetime.now(timezone.utc)
+    assert analyzer.ingest(_ticker("usd_m_futures", "ETHUSDT", 100, now)) is None
+    assert analyzer.ingest(_ticker("usd_m_futures", "BTCUSDT", 100, now)) is not None
+    assert set(analyzer._pairs) == {"BTCUSDT"}
