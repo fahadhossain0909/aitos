@@ -18,6 +18,7 @@ from aitos.models.trade import Opportunity
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.coordinator import SpotTradingCoordinator
+from aitos.spot.commission import SpotCommissionConversionService
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
@@ -46,6 +47,7 @@ class SpotRuntime:
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     _user_stream: SpotUserDataStreamSupervisor | None = field(default=None, repr=False)
+    commission_service: SpotCommissionConversionService | None = field(default=None, repr=False)
     quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
     _market_stream_health: dict[str, dict[str, object]] = field(
         default_factory=dict, repr=False
@@ -197,6 +199,7 @@ class SpotRuntime:
                 if symbol and client_id in known:
                     try:
                         await self.coordinator.reconcile(symbol, client_id)
+                        await self.resolve_pending_commissions()
                     except Exception as exc:
                         logger.warning(
                             "Spot private event reconciliation deferred to recovery",
@@ -207,6 +210,7 @@ class SpotRuntime:
                 if asyncio.iscoroutine(result):
                     await result
 
+        await self.recover_unresolved_orders()
         self._user_stream = SpotUserDataStreamSupervisor(
             adapter=self.market_data.rest,
             websocket=self.market_data.websocket,
@@ -214,6 +218,45 @@ class SpotRuntime:
             keepalive_seconds=keepalive_seconds,
         )
         await self._user_stream.start()
+
+    async def resolve_pending_commissions(self) -> dict[str, int]:
+        if self.commission_service is None:
+            self.commission_service = SpotCommissionConversionService(
+                adapter=self.market_data.rest,
+                inventory=self.inventory,
+            )
+        return await self.commission_service.resolve_pending()
+
+    async def recover_unresolved_orders(self) -> dict[str, int]:
+        """Reconcile durable client IDs after restart; never resubmit uncertain POSTs."""
+        recovered = deferred = 0
+        for item in self.inventory.unresolved_order_intents():
+            try:
+                await self.coordinator.reconcile(
+                    str(item["symbol"]), str(item["client_order_id"])
+                )
+                recovered += 1
+            except Exception as exc:
+                deferred += 1
+                logger.warning(
+                    "Spot order recovery remains unresolved",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": item["symbol"],
+                            "client_order_id": item["client_order_id"],
+                            "error": str(exc),
+                        }
+                    },
+                )
+        if recovered:
+            try:
+                await self.resolve_pending_commissions()
+            except Exception as exc:
+                logger.warning(
+                    "Spot historical commission conversion deferred",
+                    extra={"aitos_extra": {"error": str(exc)}},
+                )
+        return {"recovered": recovered, "deferred": deferred}
 
     async def stop_user_data_stream(self) -> None:
         stream, self._user_stream = self._user_stream, None
@@ -474,6 +517,10 @@ def build_spot_runtime(
         fee_bps=policy.fee_bps,
         slippage_bps=policy.slippage_bps,
     )
+    commission_service = SpotCommissionConversionService(
+        adapter=rest,
+        inventory=inventory,
+    )
     market_consumer = SpotMarketDataConsumer(
         scanner,
         max_symbols=policy.max_symbols,
@@ -491,4 +538,5 @@ def build_spot_runtime(
         max_symbols=policy.max_symbols,
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
         owns_capital_gateway=owns_capital_gateway,
+        commission_service=commission_service,
     )
