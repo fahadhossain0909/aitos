@@ -1,10 +1,16 @@
-"""Event-time execution replay using historical top-of-book snapshots."""
+"""Event-time L1 execution replay using historical top-of-book snapshots.
+
+This is a scenario/research model, not an exchange fill guarantee. Remaining
+quantity is carried across eligible snapshots as an unfilled child; it does not
+model queue priority, order cancellation, price limits or IOC semantics.
+"""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+from numbers import Real
 
 
 @dataclass(frozen=True)
@@ -15,12 +21,26 @@ class BookSnapshot:
     bid_size: float
     ask_size: float
 
-    def __post_init__(self):
-        values = (self.bid, self.ask, self.bid_size, self.ask_size)
-        if self.timestamp_ms < 0 or any(not math.isfinite(float(x)) for x in values):
-            raise ValueError(
-                "book snapshot values must be finite and timestamp non-negative"
-            )
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.timestamp_ms, bool)
+            or not isinstance(self.timestamp_ms, int)
+            or self.timestamp_ms < 0
+        ):
+            raise ValueError("book timestamp must be a non-negative integer")
+        values = {
+            "bid": self.bid,
+            "ask": self.ask,
+            "bid_size": self.bid_size,
+            "ask_size": self.ask_size,
+        }
+        for name, value in values.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(float(value))
+            ):
+                raise ValueError(f"book {name} must be finite numeric evidence")
         if (
             self.bid <= 0
             or self.ask < self.bid
@@ -28,6 +48,34 @@ class BookSnapshot:
             or self.ask_size < 0
         ):
             raise ValueError("invalid top-of-book quote or displayed size")
+
+
+@dataclass(frozen=True)
+class ReplayFill:
+    timestamp_ms: int
+    quantity: float
+    quote_price: float
+    fill_price: float
+    fee: float
+    slippage_cost: float
+
+
+@dataclass(frozen=True)
+class ExecutionReplayResult:
+    side: str
+    requested_quantity: float
+    filled_quantity: float
+    remaining_quantity: float
+    average_fill_price: float | None
+    fees: float
+    slippage_cost: float
+    spread_cost: float
+    funding_cost: float
+    borrow_cost: float
+    total_cost: float
+    fills: tuple[ReplayFill, ...]
+    latency_ms: int
+    complete: bool
 
 
 def replay_historical_order(
@@ -44,18 +92,21 @@ def replay_historical_order(
     holding_hours: float = 0.0,
     funding_interval_hours: float = 8.0,
 ) -> ExecutionReplayResult:
-    """Replay a marketable order against time-ordered historical L1 liquidity.
+    """Replay an order over chronological L1 quotes after modeled latency.
 
-    Displayed top-of-book size bounds each partial fill. Fees apply only to
-    executed notional; spread and adverse slippage are separated. Funding is
-    signed from the position perspective, so negative rates are credits.
+    Displayed top-of-book size bounds each partial fill. The unfilled remainder
+    remains eligible at later snapshots; callers must not interpret this as IOC
+    or passive queue execution. Spread is measured from midpoint to executable
+    bid/ask, additional slippage is applied adversely, and fees apply only to
+    executed notional. Funding basis points are signed from the position
+    perspective: negative values represent credits. Funding/borrow costs use
+    executed notional and the supplied holding horizon. This is not full-depth
+    market impact.
     """
-    if not isinstance(side, str):
+    if not isinstance(side, str) or side.upper() not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
     direction = side.upper()
-    if direction not in {"BUY", "SELL"}:
-        raise ValueError("side must be BUY or SELL")
-    values = {
+    numeric = {
         "quantity": quantity,
         "taker_fee_bps": taker_fee_bps,
         "slippage_bps": slippage_bps,
@@ -64,9 +115,7 @@ def replay_historical_order(
         "holding_hours": holding_hours,
         "funding_interval_hours": funding_interval_hours,
     }
-    from numbers import Real
-
-    for name, value in values.items():
+    for name, value in numeric.items():
         if isinstance(value, bool) or not isinstance(value, Real):
             raise ValueError(f"{name} must be a finite numeric value")
         if not math.isfinite(float(value)):
@@ -80,7 +129,7 @@ def replay_historical_order(
         or holding_hours < 0
         or funding_interval_hours <= 0
     ):
-        raise ValueError("invalid replay quantity, cost or holding horizon")
+        raise ValueError("invalid quantity, fee, slippage or holding horizon")
     if (
         isinstance(submitted_at_ms, bool)
         or not isinstance(submitted_at_ms, int)
@@ -90,12 +139,13 @@ def replay_historical_order(
         or latency_ms < 0
     ):
         raise ValueError("timestamps and latency must be non-negative integers")
+
     ordered = tuple(snapshots)
-    if any(not isinstance(snapshot, BookSnapshot) for snapshot in ordered):
+    if any(not isinstance(quote, BookSnapshot) for quote in ordered):
         raise TypeError("L1 replay requires BookSnapshot records")
     if any(
-        ordered[index].timestamp_ms >= ordered[index + 1].timestamp_ms
-        for index in range(len(ordered) - 1)
+        left.timestamp_ms >= right.timestamp_ms
+        for left, right in zip(ordered, ordered[1:])
     ):
         raise ValueError("book snapshots must be strictly chronological")
 
@@ -135,20 +185,25 @@ def replay_historical_order(
         slippage += slippage_cost
         spread += spread_cost
         remaining -= fill_quantity
+
     filled = float(quantity) - remaining
-    notional = sum(fill.quantity * fill.fill_price for fill in fills)
-    average = notional / filled if filled > 0 else None
+    executed_notional = sum(fill.quantity * fill.fill_price for fill in fills)
+    average_fill_price = executed_notional / filled if filled > 0 else None
     funding = (
-        notional * funding_bps / 10000.0 * holding_hours / funding_interval_hours
+        executed_notional
+        * funding_bps
+        / 10000.0
+        * holding_hours
+        / funding_interval_hours
     )
-    borrow = notional * borrow_bps / 10000.0 * holding_hours / 24.0
+    borrow = executed_notional * borrow_bps / 10000.0 * holding_hours / 24.0
     total = fees + slippage + spread + funding + borrow
     return ExecutionReplayResult(
         direction,
         float(quantity),
         filled,
         remaining,
-        average,
+        average_fill_price,
         fees,
         slippage,
         spread,
@@ -159,31 +214,3 @@ def replay_historical_order(
         latency_ms,
         remaining <= 1e-12,
     )
-
-
-@dataclass(frozen=True)
-class ReplayFill:
-    timestamp_ms: int
-    quantity: float
-    quote_price: float
-    fill_price: float
-    fee: float
-    slippage_cost: float
-
-
-@dataclass(frozen=True)
-class ExecutionReplayResult:
-    side: str
-    requested_quantity: float
-    filled_quantity: float
-    remaining_quantity: float
-    average_fill_price: float | None
-    fees: float
-    slippage_cost: float
-    spread_cost: float
-    funding_cost: float
-    borrow_cost: float
-    total_cost: float
-    fills: tuple[ReplayFill, ...]
-    latency_ms: int
-    complete: bool
