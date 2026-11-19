@@ -103,14 +103,18 @@ class SpotTradingCoordinator:
 
         client_order_id = request.client_order_id or ("aitos-" + uuid.uuid4().hex[:28])
         request = replace(request, client_order_id=client_order_id)
-        self.inventory.record_order_intent(
-            client_order_id=client_order_id,
-            symbol=request.symbol,
-            side=request.side.value,
-            order_type=request.order_type.value,
-            quantity=request.quantity,
-            quote_order_quantity=request.quote_order_quantity,
-        )
+        try:
+            self.inventory.record_order_intent(
+                client_order_id=client_order_id,
+                symbol=request.symbol,
+                side=request.side.value,
+                order_type=request.order_type.value,
+                quantity=request.quantity,
+                quote_order_quantity=request.quote_order_quantity,
+            )
+        except Exception:
+            self.capital_gateway.release(key.value)
+            raise
 
         # Pin before network submission. A timeout is ambiguous; keep the
         # reservation until exchange query and fill reconciliation complete.
