@@ -26,23 +26,23 @@ The Futures live runner does not construct or start Spot components.
 ### Market data
 
 `BinanceSpotCanonicalMarketDataAdapter` implements the canonical AITOS
-`MarketEvent` envelope and emits the same semantic channels consumed by the
-market-data plane: trades, closed klines, bookTicker, order-book snapshots and
-depth deltas. Every event carries `market_type=spot` and a distinct
+`MarketEvent` envelope and emits canonical trades, exchange-timestamped 24-hour ticker updates, closed
+klines, order-book snapshots and depth deltas. Every event carries `market_type=spot` and a distinct
 `binance:spot:SYMBOL` instrument identity. Spot events publish on isolated
 `market.spot.*` channels; existing Futures consumers remain subscribed to
 `market.*` and cannot accidentally mix same-symbol Spot data into Futures
 features. A Spot consumer subscribes through
 `MarketDataBus.subscribe(..., market_type="spot")`.
 
-Trade, ticker, kline and depth subscriptions are multiplexed over bounded
-per-symbol tasks. The order-book path seeds from `/api/v3/depth`, bridges the
-first diff event to `lastUpdateId`, checks subsequent `pu`/update continuity,
-and raises `SpotOrderBookGap` on a gap. A consumer must discard the affected
-book and resnapshot; it must never continue with a silently stale book.
+Trade, ticker, kline and depth symbols are multiplexed over four bounded
+combined-stream connections. The order-book path opens the depth WebSocket and
+buffers its first frame before fetching `/api/v3/depth`, bridges buffered diffs
+to `lastUpdateId`, checks subsequent `pu`/update continuity, and raises
+`SpotOrderBookGap` on a gap. The runtime supervisor restarts that stream and
+rebootstraps snapshots; a consumer never continues with a silently stale book.
 
 The runtime exposes explicit publishers into the existing `MarketDataBus`,
-including a registered canonical `market.kline` channel. It does not start
+including isolated `market.spot.*` channels. It does not start
 subscriptions by importing the package. The runtime's
 `submit_opportunity()` port accepts the shared Strategy `Opportunity` contract
 and routes it through the Spot coordinator and shared CapitalGateway.
@@ -137,10 +137,10 @@ These values are attached to ranked Spot pre-filter candidates as
 score, create a trade signal, override the shared Strategy/HTF/CVD/flow gates,
 or authorize an order. A Futures lead can be a price-discovery confirmation;
 a Spot lead can indicate Spot-originated flow; disagreement or unstable
-correlation is a caution/uncertainty signal. Strategy weighting must wait for
-historical replay, fees/slippage-aware execution tests, autocorrelation-aware
-confidence calibration, and symbol/regime out-of-sample validation. The analyzer is observational
-telemetry until those gates pass.
+correlation is a caution/uncertainty signal. Strategy weighting must wait for historical replay, fees/slippage-aware
+execution tests, autocorrelation-aware confidence calibration, and
+symbol/regime out-of-sample validation. The analyzer is observational telemetry
+until those gates pass.
 
 ## Testnet execution
 
