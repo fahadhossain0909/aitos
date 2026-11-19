@@ -79,8 +79,10 @@ def replay_spot_market_order(
         key=lambda x: x.price,
         reverse=side == "SELL",
     )
-    if not levels:
-        raise ValueError("replay requires executable book depth")
+    if not levels or not bids or not asks:
+        raise ValueError("replay requires both sides of executable book depth")
+    best_bid = max(level.price for level in bids)
+    best_ask = min(level.price for level in asks)
     visible = sum((level.quantity for level in levels), Decimal("0"))
     remaining = quantity
     raw_fills: list[tuple[Decimal, Decimal]] = []
@@ -94,9 +96,9 @@ def replay_spot_market_order(
     filled = quantity - remaining
     gross = sum((price * qty for price, qty in raw_fills), Decimal("0"))
     average = gross / filled if filled else None
-    mid = reference_mid or ((bids[0].price + asks[0].price) / 2)
-    if mid <= 0:
-        raise ValueError("reference mid must be positive")
+    mid = reference_mid or ((best_bid + best_ask) / 2)
+    if mid <= 0 or best_bid > best_ask:
+        raise ValueError("reference book is crossed or mid is non-positive")
     impact = (
         (filled / visible) * impact_bps_per_1pct_depth * Decimal("100")
         if visible > 0
@@ -107,24 +109,25 @@ def replay_spot_market_order(
         average * adverse if side == "BUY" else average / adverse
     ) if average is not None else None
     fees_rate = maker_fee_bps if maker else taker_fee_bps
-    fees = sum(
-        (price * qty * fees_rate / Decimal("10000") for price, qty in raw_fills),
-        Decimal("0"),
+    fills = tuple(
+        ReplayFill(
+            price=(price * adverse if side == "BUY" else price / adverse),
+            quantity=qty,
+            fee_quote=(
+                (price * adverse if side == "BUY" else price / adverse)
+                * qty * fees_rate / Decimal("10000")
+            ),
+            maker=False,
+        )
+        for price, qty in raw_fills
     )
+    gross = sum((fill.price * fill.quantity for fill in fills), Decimal("0"))
+    fees = sum((fill.fee_quote for fill in fills), Decimal("0"))
     slippage = (
         ((adjusted_average - mid) if side == "BUY" else (mid - adjusted_average))
         / mid * Decimal("10000")
         if adjusted_average is not None
         else Decimal("0")
-    )
-    fills = tuple(
-        ReplayFill(
-            price=(price * adverse if side == "BUY" else price / adverse),
-            quantity=qty,
-            fee_quote=price * qty * fees_rate / Decimal("10000"),
-            maker=False,
-        )
-        for price, qty in raw_fills
     )
     return SpotExecutionReplayResult(
         side=side,
