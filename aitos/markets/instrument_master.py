@@ -77,9 +77,7 @@ class InstrumentMaster:
             raise TypeError("canonical market-data event required")
         venue = event.venue or event.exchange
         market_type = event.market_type or event.market
-        return self.resolve(
-            venue=venue, market_type=market_type, symbol=event.symbol
-        )
+        return self.resolve(venue=venue, market_type=market_type, symbol=event.symbol)
 
     def __call__(self, event: CanonicalMarketDataEvent) -> Instrument | None:
         """Callable adapter for MarketDataShadowConsumer.instrument_resolver."""
