@@ -40,10 +40,12 @@ async def test_user_stream_renews_key_and_reconnects_after_keepalive_failure():
     adapter = FakeAdapter()
     websocket = FakeWebSocket()
     received = []
+    reconciliations = []
     supervisor = SpotUserDataStreamSupervisor(
         adapter=adapter,
         websocket=websocket,
         on_event=received.append,
+        on_connect=lambda: reconciliations.append("reconciled"),
         keepalive_seconds=0.01,
         reconnect_seconds=0.001,
         max_reconnect_seconds=0.01,
@@ -55,6 +57,7 @@ async def test_user_stream_renews_key_and_reconnects_after_keepalive_failure():
         assert "listen-1" in adapter.closed
         assert any(item["key"] == "listen-2" for item in received)
         assert supervisor.health["restarts"] >= 1
+        assert len(reconciliations) >= 2
     finally:
         await supervisor.stop()
     assert not supervisor.health["running"]
