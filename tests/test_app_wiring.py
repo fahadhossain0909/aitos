@@ -652,3 +652,10 @@ async def test_live_portfolio_tracker_fails_closed_on_stale_pending_risk():
     with pytest.raises(ValueError, match="stale or incoherent"):
         await tracker.refresh_equity()
 
+    class EmptyLifecycle:
+        def get_open_trades(self):
+            return []
+
+    with pytest.raises(RuntimeError, match="fresh validated pending-order snapshot"):
+        tracker.build_portfolio_state(EmptyLifecycle())
+
