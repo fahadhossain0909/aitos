@@ -80,7 +80,7 @@ def test_portfolio_state_projects_pending_order_notional_leverage_and_sector():
         peak_equity_usd=10_000.0,
         positions=(
             PositionExposure(
-                symbol="BTCUSDT",
+                symbol="btcusdt",
                 notional_usd=1_000.0,
                 leverage=3.0,
                 sector="crypto-major",
@@ -98,6 +98,7 @@ def test_portfolio_state_projects_pending_order_notional_leverage_and_sector():
         ),
     )
 
+    assert portfolio.pending_orders[0].symbol == "BTCUSDT"
     assert portfolio.gross_exposure_usd == pytest.approx(3_500.0)
     assert portfolio.max_position_leverage == pytest.approx(4.0)
     assert portfolio.projected_open_position_count == 1
