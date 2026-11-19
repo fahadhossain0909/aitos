@@ -87,6 +87,7 @@ def test_market_domain_event_payload_is_deeply_immutable():
     with pytest.raises(TypeError, match="immutable"):
         event.payload["levels"][0]["price"] = 99.0
 
+
 def test_immutable_canonical_event_round_trips_through_existing_wire_format():
     event = MarketEvent(
         event_type=MarketEventType.TICKER,
