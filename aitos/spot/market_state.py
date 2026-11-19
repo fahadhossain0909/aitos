@@ -206,6 +206,8 @@ class SpotMarketDataConsumer:
             return
         self._apply_levels(state.bids, payload.get("bids", []))
         self._apply_levels(state.asks, payload.get("asks", []))
+        state.bids = dict(sorted(state.bids.items(), reverse=True)[:100])
+        state.asks = dict(sorted(state.asks.items())[:100])
         if not state.bids or not state.asks or max(state.bids) >= min(state.asks):
             state.book_valid = False
             state.sequence_gaps += 1
