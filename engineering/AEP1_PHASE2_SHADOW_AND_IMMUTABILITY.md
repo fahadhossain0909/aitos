@@ -126,3 +126,9 @@ Added tests cover:
 CI must pass on the final commit before this tranche is marked verified.
 No paper soak, production resolver integration, durable replay guarantee,
 exchange calibration, latency percentile or live execution claim is made.
+
+## 6. Runtime integration update — 2026-11-19
+
+The consumer is no longer wholly disconnected from the application composition root: an explicitly supplied `market_shadow_consumer` is now owned by `initialize_all` / `shutdown_all`, and receives the canonical bus exposed by `DataIngestionService.market_data_bus`. This remains opt-in; standard paper/live entrypoints do not construct or start it. The explicit `InstrumentMaster` is immutable and versioned, with exact venue + market-type + symbol resolution and no guessing.
+
+The scanner health contract now exposes actual candidate symbols, and the paper canary validates coverage against those symbols rather than inferring non-BTC candidates from a count. See `engineering/AEP1_PHASE3_RUNTIME_INTEGRATION_ADDENDUM.md` for the full status and remaining gates.
