@@ -190,7 +190,6 @@ async def test_spot_events_never_enter_futures_live_scanner_cache():
     assert cache.snapshot("BTCUSDT") is None
 
 
-
 @pytest.mark.asyncio
 async def test_spot_closed_kline_has_stable_identity_and_increasing_revision():
     adapter = BinanceSpotCanonicalMarketDataAdapter(FakeRest(), FakeWebSocket())
