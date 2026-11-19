@@ -110,7 +110,6 @@ def test_futures_spot_lead_lag_is_scoped_to_discovered_spot_universe():
     assert set(analyzer._pairs) == {"BTCUSDT"}
 
 
-
 def test_futures_spot_lead_lag_does_not_overwrite_newer_bucket_sample():
     analyzer = FuturesSpotLeadLagAnalyzer()
     at = datetime(2026, 1, 1, tzinfo=timezone.utc)
