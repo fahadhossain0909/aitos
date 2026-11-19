@@ -50,7 +50,7 @@ Static inspection does not prove process health, exchange correctness, durabilit
 
 ### AEP-001 — Canonical contracts have overlapping definitions
 
-Source inspection found multiple similarly named contracts:
+Source inspection found multiple similarly named contracts. The Phase 1 consumer/semantic audit now shows these are distinct bounded-context contracts, not proven accidental duplicates:
 - `aitos/decision/types.py::MarketSnapshot`;
 - `aitos/strategy/contracts.py::MarketSnapshot`;
 - `aitos/strategy/contracts.py::ExecutionIntent`;
@@ -65,7 +65,7 @@ The market-domain contract already provides `Instrument` and `MarketEvent`, whil
 
 `GlobalMarketState` is immutable and `decision.MarketSnapshot` already carries a timestamp and source-version mapping. The market-domain event also carries source, event/receive timestamps, event ID and schema version.
 
-The remaining architecture task is to prove and standardize the lineage between these existing types rather than invent another `MarketState` class.
+The remaining architecture task is to prove and standardize lineage between these existing types rather than invent another `MarketState` class. See `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md` for the consumer boundary and immutability observations.
 
 **Target requirements:** stable snapshot ID; instrument identity; event-time and observation-time semantics; per-source freshness/quality; feature/model/config versions; missing/degraded-input reasons; deterministic serialization; bounded provenance references. Never place raw unbounded payloads in the hot decision object. The builder must fail closed or explicitly degrade according to a documented per-feature policy.
 
@@ -155,14 +155,14 @@ Control plane (configuration, identity, secrets, observability, CI/CD, incident 
 
 **Exit:** this baseline document, architecture map pointer, branch/PR handoff and explicit blockers.
 
-### Phase 1 — Contract and ownership audit (next)
+### Phase 1 — Contract and ownership audit (source-level audit completed; runtime gates remain)
 - Generate module/import/dependency inventory from source.
 - Map every `MarketSnapshot`, `ExecutionIntent`, `MarketEvent`, portfolio and risk contract and all serialization/persistence consumers.
 - Publish data authority matrix and per-aggregate recovery ownership.
 - Trace every entry/exit/reduce-only path to the authoritative risk and execution gates.
 - Coordinate with open PR #246 and #250; do not duplicate or rebase their work without review.
 
-**Exit:** no unresolved duplicate-authority path for the audited domains; compatibility plan and tests accepted.
+**Exit:** semantic inventory and provisional authority matrix recorded in `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`. Runtime writer coverage, full call-site graph, compatibility tests and paper fault matrix remain open.
 
 ### Phase 2 — Canonical market context (approval required before active wiring)
 - Extend existing contracts only where the inventory demonstrates missing fields.
@@ -221,8 +221,7 @@ Every migration must be additive first, support old readers during transition, i
 
 ## Current blockers and coordination
 
-- **PR #246** is an open Draft with broad quantitative/statistical, financial-ML, drift/governance and storage-reliability changes. Its description explicitly says not to merge it as part of another task. Shared files in these domains are therefore out of scope until the branch is independently reviewed and reconciled.
-- **PR #250** contains on-demand historical market intelligence and cache/request-budget changes. Do not duplicate or modify its scanner/history budget files in this tranche.
+- **PR #246** (quantitative intelligence foundations) and **PR #250** (on-demand historical market intelligence) were confirmed merged before this Phase 1 audit. Their current main-branch implementations are treated as existing platform capabilities; do not recreate their modules or overwrite their accepted behavior.
 - PR #244/#215 concern Binance testnet routing; testnet routing is not equivalent to simulated paper or live readiness.
 - Runtime access and current local process/position state were not available in this GitHub-only tranche. Runtime, exchange, service-backed and latency checks are NOT TESTED / NOT MEASURED.
 
@@ -231,5 +230,5 @@ Every migration must be additive first, support old readers during transition, i
 - Repository instructions `AGENTS.md`, `skills/aitos-skill.md` and `engineering/AGENT_OPERATING_MODEL.md` reviewed.
 - Architecture, market-data, multi-market, freshness, compute-aware intelligence, execution recovery, quantitative intelligence, module inventory, latency baseline and backend-first roadmap reviewed.
 - Source contracts inspected: `aitos/markets/contracts.py`, `aitos/markets/state.py`, `aitos/markets/portfolio.py`, `aitos/markets/risk.py`, `aitos/decision/types.py`, `aitos/strategy/contracts.py`.
-- Source-level duplicate contract names identified; full consumer/serialization migration inventory remains Phase 1.
-- Tests and CI were not run in this documentation-only tranche. Runtime checks and production latency remain NOT TESTED / NOT MEASURED.
+- Phase 1 semantic contract and provisional financial-authority audit: `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`.
+- CI was run for the initial docs head; formatting failed on three unrelated Spot files, subsequently corrected with formatting-only changes in this branch. Latest CI must be rechecked before claiming pass. Runtime checks and production latency remain NOT TESTED / NOT MEASURED.
