@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
+from aitos.risk.models import (
+    PendingOrderExposure,
+    PortfolioState,
+    PositionExposure,
+    RiskLimits,
+)
 
 
 def test_risk_limits_defaults_match_spec_table():
@@ -67,3 +72,34 @@ def test_portfolio_state_sector_exposure_pct():
     exposures = portfolio.sector_exposure_pct
     assert exposures["crypto-major"] == pytest.approx(20.0)
     assert exposures["crypto-alt"] == pytest.approx(10.0)
+
+
+
+def test_portfolio_state_projects_pending_order_notional_leverage_and_sector():
+    portfolio = PortfolioState(
+        equity_usd=10_000.0,
+        peak_equity_usd=10_000.0,
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=1_000.0,
+                leverage=3.0,
+                sector="crypto-major",
+            ),
+        ),
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="btc-entry-2",
+                symbol="BTCUSDT",
+                side="LONG",
+                remaining_notional_usd=2_500.0,
+                risk_amount_usd=50.0,
+                leverage=4.0,
+            ),
+        ),
+    )
+
+    assert portfolio.gross_exposure_usd == pytest.approx(3_500.0)
+    assert portfolio.max_position_leverage == pytest.approx(4.0)
+    assert portfolio.projected_open_position_count == 1
+    assert portfolio.sector_exposure_pct["crypto-major"] == pytest.approx(35.0)
