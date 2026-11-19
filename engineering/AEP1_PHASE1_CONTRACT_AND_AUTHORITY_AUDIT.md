@@ -204,3 +204,9 @@ is lossy/at-most-once after the bus callback returns and is not a durable consum
 The generic CrossMarketIntelligenceEngine's arrival-ordered samples are not
 causal lead-lag evidence; the existing timestamp-bucketed FuturesSpot analyzer
 remains the correct causal diagnostic.
+
+## 10. Runtime integration update — 2026-11-19
+
+The authoritative instrument resolver groundwork is now present as the immutable, versioned `InstrumentMaster` (`aitos/markets/instrument_master.py`). It requires explicit venue, market type and symbol identity; it does not infer aliases or cross-market equivalence. The opt-in `MarketDataShadowConsumer` is now injectable through `build_system` and is started/stopped under `initialize_all` / `shutdown_all` ownership. This is a composition-root integration only: standard entrypoints remain default-off and no shadow consumer is automatically instantiated.
+
+See `engineering/AEP1_PHASE3_RUNTIME_INTEGRATION_ADDENDUM.md` for candidate identity telemetry, candidate-scoped canary validation and current acceptance gates.
