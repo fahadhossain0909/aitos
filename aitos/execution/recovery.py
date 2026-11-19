@@ -26,7 +26,9 @@ def read_recovery_inventory(database: str | Path, scope: str) -> dict:
     finally:
         conn.close()
     unresolved = [
-        dict(row) for row in rows if row["state"] not in {"APPLIED", "REJECTED", "TERMINAL"}
+        dict(row)
+        for row in rows
+        if row["state"] not in {"APPLIED", "REJECTED", "TERMINAL"}
     ]
     return {
         "evidence": "LOCAL_JOURNAL_ONLY",
