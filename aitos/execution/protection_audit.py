@@ -95,7 +95,7 @@ def audit_protection_inventory(
         request = _object(row.get("request_json", {}))
         if (
             request.get("order_type") not in PROTECTION_TYPES
-            or row.get("state") == "REJECTED"
+            or row.get("state") in {"REJECTED", "TERMINAL"}
         ):
             continue
         if (
