@@ -2,7 +2,7 @@
 
 Date: 2026-11-19  
 Baseline: `main` at the branch point used for `feat/architecture-evolution-baseline`.  
-Status: Phase 0 architecture baseline and migration contract. This document does not certify runtime or production readiness.
+Status: Phase 0 baseline complete; Phase 1 source audit and additive Phase 2 shadow/immutability primitives implemented. Runtime activation and full acceptance gates remain open.
 
 ## Executive decision
 
@@ -60,7 +60,7 @@ Source inspection found multiple similarly named contracts. The Phase 1 consumer
 
 The market-domain contract already provides `Instrument` and `MarketEvent`, while `GlobalMarketState` is a separate aggregate. This is not proof that all duplicates are currently incompatible, but it is a concrete contract-drift risk.
 
-**Decision:** do not rename or delete these contracts in bulk. The two snapshot types and three intent types have distinct bounded-context semantics. The market-data and universal-market event envelopes are separate; the former is the live bus contract, while a a pure provenance-preserving converter has now been added in `aitos/markets/bridges.py`, but production runtime wiring remains absent (the cross-market engine's only direct constructor hit was its test). An additive, instrument-resolved, provenance-preserving pure bridge now exists; do not claim universal market context is fed by the canonical bus until its read-only/shadow runtime consumer is wired and validated. The statistics event is a research sample, not a transport contract. Preserve serialized compatibility and test old/new round trips.
+**Decision:** do not rename or delete these contracts in bulk. The two snapshot types and three intent types have distinct bounded-context semantics. The market-data and universal-market event envelopes are separate; the former is the live bus contract, while a pure provenance-preserving converter has now been added in `aitos/markets/bridges.py`, but production runtime wiring remains absent (the cross-market engine's only direct constructor hit was its test). An additive, instrument-resolved, provenance-preserving pure bridge now exists; do not claim universal market context is fed by the canonical bus until its read-only/shadow runtime consumer is wired and validated. The statistics event is a research sample, not a transport contract. Preserve serialized compatibility and test old/new round trips.
 
 ### AEP-002 — Market state is present, but end-to-end provenance is not yet one contract
 
@@ -159,17 +159,18 @@ Control plane (configuration, identity, secrets, observability, CI/CD, incident 
 ### Phase 1 — Contract and ownership audit (source-level audit completed; runtime gates remain)
 - Generate module/import/dependency inventory from source.
 - Map every `MarketSnapshot`, `ExecutionIntent`, `MarketEvent`, portfolio and risk contract and all serialization/persistence consumers.
-- Validate the new pure canonical MarketDataBus → universal market-domain converter and add an opt-in read-only/shadow runtime consumer with resolved Instrument metadata, bounded backpressure and preserved sequence/revision/trace lineage.
+- Validate the new pure canonical MarketDataBus → universal market-domain converter. An opt-in bounded read-only `MarketDataShadowConsumer` class now exists with explicit instrument resolution, freshness, dedupe, overload accounting and preserved sequence/revision/trace lineage; it is deliberately not wired into an application entrypoint because a single authoritative multi-market instrument resolver has not been proven.
 - Publish data authority matrix and per-aggregate recovery ownership.
 - Trace every entry/exit/reduce-only path to the authoritative risk and execution gates.
 - Coordinate with open PR #246 and #250; do not duplicate or rebase their work without review.
 
-**Exit:** semantic inventory and provisional authority matrix recorded in `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`. Runtime writer coverage, full call-site graph, compatibility tests and paper fault matrix remain open.
+**Exit:** semantic inventory and provisional authority matrix recorded in `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`; pure bridge and shadow-consumer unit coverage added. Runtime writer coverage, full call-site graph, authoritative instrument-master integration and paper fault matrix remain open.
 
 ### Phase 2 — Canonical market context (approval required before active wiring)
 - Extend existing contracts only where the inventory demonstrates missing fields.
 - Add stable snapshot/version/lineage references and explicit quality/freshness states.
 - Add deterministic serialization, compatibility tests and replay fixtures.
+- Deeply immutable JSON-compatible event/state mappings now exist for canonical and market-domain event payloads, stage timestamps and GlobalMarketState features; JSON/asdict and mutation tests are added.
 - Shadow-compare new context against existing consumers before cutover.
 
 **Exit:** old/new parity, stale/degraded handling tests, replay reproducibility and explicit operator approval for cutover.
