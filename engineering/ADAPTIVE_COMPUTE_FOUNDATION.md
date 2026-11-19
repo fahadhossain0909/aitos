@@ -73,3 +73,13 @@ data sequence integrity, order updates, open-position monitoring, risk checks,
 and execution recovery must remain protected regardless of pressure. Runtime
 admission requires telemetry-calibrated workload costs, observability, and
 service-level ownership before enabling the switch in paper environments.
+
+## Telemetry-based workload estimation
+
+A separate estimator now converts per-symbol p95 event rate, order-book depth,
+and analysis frequency into CPU/memory cost hints. Estimates are marked
+uncalibrated until the configured minimum sample count is met; unknown symbols
+receive conservative fallback costs instead of optimistic zero-cost admission.
+The cost coefficients remain explicit calibration parameters and must be
+benchmarked against production-like telemetry before scanner admission uses
+them.
