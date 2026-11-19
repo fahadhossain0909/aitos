@@ -300,6 +300,7 @@ def build_spot_runtime(
     database_path: str | Path | None = None,
     mainnet_approved: bool = False,
     symbol_filters: dict[str, SpotSymbolFilters] | None = None,
+    futures_spot_symbol_aliases: dict[str, str] | None = None,
 ) -> SpotRuntime:
     """Construct Spot components only when the operator explicitly enables them.
 
@@ -373,7 +374,9 @@ def build_spot_runtime(
         scanner,
         max_symbols=policy.max_symbols,
     )
-    lead_lag = FuturesSpotLeadLagAnalyzer()
+    lead_lag = FuturesSpotLeadLagAnalyzer(
+        symbol_aliases=futures_spot_symbol_aliases
+    )
     return SpotRuntime(
         market_data,
         executor,
