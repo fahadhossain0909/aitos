@@ -73,7 +73,12 @@ The SQLite inventory ledger is durable, fill-idempotent and records commission
 asset. Base-asset and quote-asset commissions are reflected in quantity/cost
 basis; third-asset fees are flagged for conversion accounting rather than
 silently treated as zero. Reconciliation uses exchange trade IDs as idempotency
-keys.
+keys. Client order IDs and order intents are journaled before exchange
+submission. Ambiguous submissions remain unresolved in that journal across
+process restarts. The default Spot runtime also uses a durable capital
+reservation database with a stable owner identity so pinned exposure can be
+reconciled after restart. REST calls share a weighted token-bucket limiter and
+signed requests support explicit server-time offset synchronization.
 
 ## Enabling read-only Spot market data
 
