@@ -504,9 +504,7 @@ def test_terminal_protection_does_not_release_unrelated_intent(tmp_path):
 def test_nonterminal_protection_cannot_be_marked_terminal(tmp_path, status):
     journal = store(tmp_path)
     with pytest.raises(ValueError):
-        journal.mark_protection_terminal(
-            "algo:123", symbol="BTCUSDT", status=status
-        )
+        journal.mark_protection_terminal("algo:123", symbol="BTCUSDT", status=status)
 
 
 async def test_confirmed_binance_algo_cancel_updates_protection_journal(tmp_path):
@@ -530,9 +528,7 @@ async def test_confirmed_binance_algo_cancel_updates_protection_journal(tmp_path
         ),
     )
     journal.mark_applied("intent-one", "trade-one")
-    executor = BinanceFuturesOrderExecutor(
-        "dummy", "dummy", intent_store=journal
-    )
+    executor = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=journal)
     executor._signed_request = AsyncMock(
         side_effect=[
             {"algoId": 123, "algoStatus": "CANCELED"},
