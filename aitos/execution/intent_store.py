@@ -146,7 +146,8 @@ class ExecutionIntentStore:
             )
         ):
             raise ValueError(
-                "protection acceptance requires valid identity and an unfilled resting order"
+                "protection acceptance requires valid identity and "
+                "an unfilled resting order"
             )
         payload = json.dumps(asdict(result), sort_keys=True, allow_nan=False)
         with self._connection() as conn:
@@ -181,7 +182,8 @@ class ExecutionIntentStore:
                 )
             ):
                 raise ValueError(
-                    "protection result does not match preclaim identity or trigger price"
+                    "protection result does not match preclaim identity "
+                    "or trigger price"
                 )
             cursor = conn.execute(
                 "UPDATE execution_intents SET state='PROTECTED',result_json=?,updated_at=CURRENT_TIMESTAMP "
@@ -189,7 +191,9 @@ class ExecutionIntentStore:
                 (payload, self.scope, client_id),
             )
             if cursor.rowcount != 1:
-                raise ValueError("protection preclaim changed before durable acceptance")
+                raise ValueError(
+                    "protection preclaim changed before durable acceptance"
+                )
 
     def mark_applied(self, client_id: str, trade_id: str) -> None:
         if not trade_id:
