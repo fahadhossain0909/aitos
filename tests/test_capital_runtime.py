@@ -376,3 +376,23 @@ def test_gateway_includes_other_in_flight_reservations_in_correlation_projection
     assert protection.snapshot is not None
     assert protection.snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(2.0)
     assert "BTCUSDT" not in (protection.snapshot.position_sides or {})
+
+def test_gateway_does_not_double_count_reservation_already_in_live_positions():
+    reservation = CapitalReservation()
+    assert reservation.reserve(
+        Reservation("BTCUSDT", 1_000.0, 200.0),
+        available_capital_usd=10_000.0,
+        available_risk_usd=500.0,
+    )
+    gateway = CapitalGateway(reservation=reservation)
+    estimate = gateway.estimate_opportunity(
+        make_opportunity(
+            symbol="ETHUSDT",
+            agent_consensus={"position_risk_pct": {"BTCUSDT": 1.5}},
+        )
+    )
+    snapshot = gateway._include_in_flight_reservations(
+        gateway._snapshot(10_000.0, estimate),
+        equity_usd=10_000.0,
+    )
+    assert snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(1.5)
