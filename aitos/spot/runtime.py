@@ -45,7 +45,9 @@ class SpotRuntime:
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
-    _market_stream_health: dict[str, dict[str, object]] = field(default_factory=dict, repr=False)
+    _market_stream_health: dict[str, dict[str, object]] = field(
+        default_factory=dict, repr=False
+    )
 
     async def eligible_instruments(self):
         """Return the highest-turnover supported Spot symbols for this runtime."""
