@@ -1,4 +1,5 @@
 """Supervised Binance Spot private User Data Stream lifecycle."""
+
 from __future__ import annotations
 
 import asyncio
