@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.filters import SpotSymbolFilters
-from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderType
+from aitos.spot.inventory import InventoryLedger\nfrom aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderType
 
 
 class SpotExecutionDisabled(RuntimeError):
@@ -56,3 +56,37 @@ class SpotOrderExecutor:
                 price = Decimal(str(ticker["price"]))
             filters.validate(request.quantity, price, market=request.order_type is SpotOrderType.MARKET)
         return await self.adapter.place_order(request)
+
+    async def reconcile_order(self, symbol: str, client_order_id: str,
+                              ledger: InventoryLedger) -> SpotOrder:
+        """Query order and ingest authoritative trade fills exactly once.
+
+        This is the recovery path after process restart or an ambiguous network
+        response. The client order ID is queried; an uncertain POST is never
+        blindly resubmitted.
+        """
+        order = await self.adapter.query_order(
+            symbol, client_order_id=client_order_id
+        )
+        filters = self.filters.get(symbol.upper())
+        if filters is None:
+            filters = (await self.adapter.exchange_info()).get(symbol.upper())
+        if filters is None:
+            raise ValueError("symbol filters unavailable during fill reconciliation")
+        trades = await self.adapter.my_trades(symbol, order_id=order.order_id)
+        for trade in trades:
+            trade_side = "BUY" if bool(trade.get("isBuyer")) else "SELL"
+            if trade_side != order.side.value:
+                raise ValueError("trade side does not match queried order")
+            ledger.record_fill(
+                fill_key=f"{symbol.upper()}:{int(trade['id'])}",
+                symbol=symbol,
+                base_asset=filters.base_asset,
+                quote_asset=filters.quote_asset,
+                side=trade_side,
+                quantity=Decimal(str(trade["qty"])),
+                price=Decimal(str(trade["price"])),
+                commission=Decimal(str(trade.get("commission", "0"))),
+                commission_asset=str(trade.get("commissionAsset", "")),
+            )
+        return order
