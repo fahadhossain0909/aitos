@@ -64,9 +64,7 @@ class EventImpactTrainingRow:
         for name, (lower, upper) in bounds.items():
             number = float(getattr(self, name))
             if not isfinite(number) or not lower <= number <= upper:
-                raise ValueError(
-                    f"{name} must be finite and within [{lower}, {upper}]"
-                )
+                raise ValueError(f"{name} must be finite and within [{lower}, {upper}]")
             object.__setattr__(self, name, number)
         forward_return = float(self.forward_return)
         if not isfinite(forward_return) or forward_return < -1.0:
@@ -106,9 +104,7 @@ class EventImpactFeatures:
         for name, (lower, upper) in bounds.items():
             number = float(getattr(self, name))
             if not isfinite(number) or not lower <= number <= upper:
-                raise ValueError(
-                    f"{name} must be finite and within [{lower}, {upper}]"
-                )
+                raise ValueError(f"{name} must be finite and within [{lower}, {upper}]")
             object.__setattr__(self, name, number)
 
 
