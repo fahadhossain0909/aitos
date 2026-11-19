@@ -114,6 +114,34 @@ Call `await runtime.stop_market_data()` before shutdown, or
 `await runtime.close()` to stop streams and close durable stores. The Futures
 runner does not call this factory automatically.
 
+## Futures↔Spot lead-lag intelligence
+
+The Spot runtime also starts a read-only `FuturesSpotLeadLagAnalyzer`. It
+subscribes to the existing USD-M Futures ticker channel and the isolated Spot
+ticker channel, maps the same underlying symbol, and aligns exchange event
+timestamps into one-second buckets. Spot uses Binance's exchange-timestamped
+24-hour ticker stream (best bid/ask plus last price), rather than receipt-time
+bookTicker timestamps, so lead-lag estimates are not based on local arrival
+order.
+
+The analyzer computes log-return correlations in both directions over a
+rolling 15-minute window and tests lead horizons from zero to five seconds.
+It reports the leading market, lag, signed correlation, 95% Fisher confidence
+interval, and aligned observation count. It explicitly reports insufficient
+data, low confidence, ambiguous leadership, or no material lead rather than
+forcing a direction. Symbol aliases are explicit configuration; no guessed
+contract-to-spot mapping is applied.
+
+These values are attached to ranked Spot pre-filter candidates as
+`futures_spot_lead_lag_*` diagnostics. They do **not** change the scanner
+score, create a trade signal, override the shared Strategy/HTF/CVD/flow gates,
+or authorize an order. A Futures lead can be a price-discovery confirmation;
+a Spot lead can indicate Spot-originated flow; disagreement or unstable
+correlation is a caution/uncertainty signal. Strategy weighting must wait for
+historical replay, fees/slippage-aware execution tests, confidence calibration,
+and symbol/regime out-of-sample validation. The analyzer is observational
+telemetry until those gates pass.
+
 ## Testnet execution
 
 Only after unit/CI checks pass, configure a dedicated Binance Spot Testnet API
