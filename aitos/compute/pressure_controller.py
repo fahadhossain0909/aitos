@@ -7,6 +7,7 @@ optional/background work; it does not resize trading risk or mutate strategy.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from aitos.compute.resource_governor import PressureLevel, classify_pressure
 
@@ -25,7 +26,7 @@ class PressurePolicy:
             self.recovery_hold_seconds,
             self.minimum_transition_interval_seconds,
         )
-        if any(value < 0 for value in values):
+        if any(not isfinite(value) or value < 0 for value in values):
             raise ValueError("pressure policy durations must be non-negative")
 
 
@@ -62,8 +63,6 @@ class ResourcePressureController:
         queue_lag_seconds: float,
     ) -> PressureDecision:
         """Observe pressure; CRITICAL is immediate, recovery is deliberately slow."""
-        from math import isfinite
-
         if not isfinite(now_seconds) or now_seconds < 0:
             raise ValueError("now_seconds must be finite and non-negative")
         if self._last_observed_at is not None and now_seconds < self._last_observed_at:
@@ -88,7 +87,11 @@ class ResourcePressureController:
             if self._candidate != observed:
                 self._candidate = observed
                 self._candidate_since = now_seconds
-            elapsed = now_seconds - (self._candidate_since or now_seconds)
+            elapsed = now_seconds - (
+                self._candidate_since
+                if self._candidate_since is not None
+                else now_seconds
+            )
             cooldown_ok = (
                 self._last_transition is None
                 or now_seconds - self._last_transition
