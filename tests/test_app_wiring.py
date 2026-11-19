@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.app import (
+    LivePortfolioTracker,
     PaperPortfolioTracker,
     build_system,
     initialize_all,
@@ -32,6 +33,22 @@ def isolate_app_wiring_capital_ledger(tmp_path, monkeypatch):
         "get_model_data_dir",
         lambda: tmp_path,
     )
+
+
+@pytest.mark.asyncio
+async def test_live_portfolio_tracker_prefers_total_margin_equity():
+    class EquityAwareExecutor:
+        async def get_account_equity(self, asset):
+            assert asset == "USDT"
+            return 1_250.0
+
+        async def get_account_balance(self, asset):
+            return 200.0
+
+    tracker = LivePortfolioTracker(EquityAwareExecutor())
+
+    assert await tracker.refresh_equity() == 1_250.0
+    assert tracker._last_known_equity_usd == 1_250.0
 
 
 async def _wait_for(predicate, timeout=3.0, interval=0.05):
