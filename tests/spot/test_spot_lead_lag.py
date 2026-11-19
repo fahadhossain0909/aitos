@@ -122,7 +122,6 @@ def test_futures_spot_lead_lag_does_not_overwrite_newer_bucket_sample():
     assert analyzer.snapshot()["rejected_events"] == 1
 
 
-
 def test_futures_spot_lead_lag_estimates_expire_when_market_feed_stales():
     from aitos.spot.lead_lag import LeadLagEstimate
 
