@@ -177,3 +177,24 @@ def test_high_scoring_duplicate_cannot_replace_protected_symbol():
     )
     assert plan.protected_symbols == ("BTCUSDT",)
     assert plan.selected_symbols == ("BTCUSDT",)
+
+
+
+def test_non_finite_workload_and_pressure_values_are_rejected():
+    try:
+        SymbolWorkload("NAN", cpu_cost_units=float("nan"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite workload cost must be rejected")
+
+    try:
+        classify_pressure(
+            cpu_utilization_pct=float("nan"),
+            memory_utilization_pct=0,
+            queue_lag_seconds=0,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite pressure metrics must be rejected")
