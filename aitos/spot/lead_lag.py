@@ -166,7 +166,7 @@ class FuturesSpotLeadLagAnalyzer:
                 futures_returns, spot_returns, lag
             )
             if corr is not None and count >= self.min_observations:
-                candidates.append((abs(corr), "futures", lag, count))
+                candidates.append((abs(corr), "synchronous" if lag == 0 else "futures", lag, count))
             if lag:
                 corr, count = self._lag_correlation(
                     spot_returns, futures_returns, lag
@@ -190,6 +190,8 @@ class FuturesSpotLeadLagAnalyzer:
         runner_up = candidates[1][0] if len(candidates) > 1 else 0.0
         if strength < self.min_abs_correlation:
             status, leader_value, lag_value = "no_material_lead", None, None
+        elif leader == "synchronous":
+            status, leader_value, lag_value = "synchronous", None, None
         elif low <= 0 <= high:
             status, leader_value, lag_value = "low_confidence", None, None
         elif strength - runner_up < self.min_lead_advantage:
