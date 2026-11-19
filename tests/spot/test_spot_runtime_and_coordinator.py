@@ -1,10 +1,12 @@
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
 from aitos.config.settings import SpotSettings
+from aitos.intelligence.exit_intelligence.models import ExitAction, ExitDecision
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.execution import SpotExecutionDisabled
@@ -71,6 +73,19 @@ class FakeExecutor:
             status=SpotOrderStatus.NEW,
             order_id=123,
         )
+
+
+def _exit_decision(action=ExitAction.EXIT, fraction=1.0):
+    return ExitDecision(
+        symbol="BTCUSDT",
+        side="LONG",
+        action=action,
+        exit_score=0.9,
+        expected_remaining_edge=-0.1,
+        reasons=(),
+        suggested_reduce_fraction=fraction,
+        as_of=datetime.now(timezone.utc),
+    )
 
 
 def _opportunity(side=TradeSide.LONG):
@@ -166,18 +181,18 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
         await coordinator.submit_exit(
             symbol="BTCUSDT",
             quantity=Decimal("0.5"),
-            exit_authorized=False,
+            authorization=_exit_decision(ExitAction.HOLD),
         )
     with pytest.raises(SpotAuthorizationRejected, match="managed Spot inventory"):
         await coordinator.submit_exit(
             symbol="BTCUSDT",
             quantity=Decimal("2"),
-            exit_authorized=True,
+            authorization=_exit_decision(),
         )
     result = await coordinator.submit_exit(
         symbol="BTCUSDT",
         quantity=Decimal("0.5"),
-        exit_authorized=True,
+        authorization=_exit_decision(),
     )
     assert result.side is SpotOrderSide.SELL
 
