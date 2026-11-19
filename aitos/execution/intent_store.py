@@ -88,7 +88,7 @@ class ExecutionIntentStore:
                 not request.reduce_only
                 and conn.execute(
                     "SELECT 1 FROM execution_intents WHERE scope=? "
-                    "AND state NOT IN ('APPLIED','REJECTED') LIMIT 1",
+                    "AND state NOT IN ('APPLIED','REJECTED','TERMINAL') LIMIT 1",
                     (self.scope,),
                 ).fetchone()
             ):
