@@ -19,11 +19,7 @@ class ReadOnlyExecutor:
         self.get_open_algo_orders = AsyncMock(return_value=orders)
         self.get_algo_order_by_client_id = AsyncMock(
             side_effect=lambda symbol, client_id: next(
-                (
-                    dict(row)
-                    for row in orders
-                    if row.get("clientAlgoId") == client_id
-                ),
+                (dict(row) for row in orders if row.get("clientAlgoId") == client_id),
                 None,
             )
         )
