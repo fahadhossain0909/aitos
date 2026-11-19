@@ -57,9 +57,11 @@ was added as a runtime dependency.
 Protective replacement keeps the existing SL until its replacement is accepted and
 durably recorded. Old SL IDs awaiting verified cancellation are retained in
 `agent_consensus._pending_stop_cancellations`; such unresolved state blocks fresh
-entries. Market-order journal coverage is not a complete durable protective-order
-intent ledger: a crash between a protective POST and its ID write still requires
-an open-algo-order inventory/reconciliation extension before live readiness.
+entries. Confirmed terminal venue evidence now transitions the matching protective
+journal row to `TERMINAL`, retaining terminal status and executed quantity. This
+prevents a successfully replaced/canceled old stop from being mistaken for a
+currently resting order. Terminal state is recorded only after a signed venue status
+response; an ambiguous cancellation remains unresolved.
 
 ## Protective acceptance identity binding
 
@@ -71,11 +73,14 @@ trigger price equal to the claimed trigger, and zero filled quantity. The update
 conditional on the row still being `SUBMITTING` and verifies exactly one row changed.
 A mismatched or repeated acknowledgement leaves the original intent unresolved.
 
-This closes a local evidence-integrity gap; it does **not** discover an algo order
-after a process dies between the exchange POST and the local acknowledgement write.
-That interval still requires an independently exported, complete, fresh venue
-inventory plus terminal/child-order and account-position reconciliation. The
-read-only inventory auditor cannot authorize resume or clear quarantine.
+This closes a local evidence-integrity gap; it does **not** automatically resume a
+process that died between the exchange POST and the local acknowledgement write.
+A signed `clientAlgoId` lookup is now available to the read-only diagnostic path,
+including child-order status/fill lookup when Binance returns an actual child ID.
+The next startup still fails closed at the durable `assert_ready()` boundary until
+an operator has reconciled the preclaim; the diagnostic never changes journal state
+or authorizes resume. Terminal/child-order and account-position reconciliation
+remain independent requirements.
 
 ## Inspect quarantine without exchange access
 
@@ -177,14 +182,17 @@ it may require querying terminal algo state and the actual child fill. Historica
 APPLIED orders can legitimately be absent after fills/cancellation; the report
 does not infer that lifecycle context from an open-order snapshot.
 
-This analyzer currently targets modern algo exports, not a certified legacy/broker
-inventory adapter. It does not fetch an export, independently authenticate its
-completeness/account, verify positions, reconcile child fills, acknowledge IDs,
-clear intents, release capital or submit/cancel replacements. Its result always
-has `safe_to_resume: false`. When a protection audit is requested the CLI exits 1
-rather than signaling a successful readiness certificate, even for matching rows.
-Use the existing approved recovery process; do not bypass quarantine based on a
-report or a model recommendation.
+The offline analyzer targets modern algo exports, not a certified legacy/broker
+inventory adapter. The authenticated runtime diagnostic additionally reads the
+full position snapshot and ordinary open-order inventory, checks every active local
+trade has its matching algo stop in the venue inventory, and blocks live scans when
+positions differ, an entry order lacks a validated stop-risk projection, or a
+protective identity is missing/orphaned. This check runs at live startup and before
+each scan. It does not repair or acknowledge intents, release capital, or submit,
+cancel or replace orders. The report always has `safe_to_resume: false`; the live
+guard uses only explicit reconciliation invariants, not that report field, and
+never performs an automatic recovery action. Use the approved recovery process;
+do not bypass quarantine based on a report or a model recommendation.
 
 ## Closed-ledger integrity and SQL verification (2026-11-07)
 
