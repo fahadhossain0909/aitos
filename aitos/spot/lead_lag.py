@@ -6,9 +6,7 @@ both lead directions, and exposes sample counts and Fisher confidence intervals.
 """
 from __future__ import annotations
 
-import asyncio
 import math
-from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
