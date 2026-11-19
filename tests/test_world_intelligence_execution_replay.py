@@ -55,5 +55,6 @@ def test_maker_orders_need_queue_adjusted_fill_evidence_and_short_funding_sign()
     short_report = replay_execution(
         [short], [ReplayBookSnapshot(NOW, (ReplayBookLevel(100, 2),), (ReplayBookLevel(101, 2),))],
         funding=[FundingObservation(NOW + timedelta(seconds=1), 0.01)],
+        config=ExecutionReplayConfig(latency=timedelta(0)),
     )
     assert short_report.funding_paid < 0
