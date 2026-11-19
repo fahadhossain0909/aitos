@@ -62,11 +62,21 @@ class SpotCommissionConversionService:
             direct = f"{fee_asset}{quote_asset}"
             inverse = f"{quote_asset}{fee_asset}"
             conversion = None
-            if direct in filters:
+            direct_filter = filters.get(direct)
+            inverse_filter = filters.get(inverse)
+            if (
+                direct_filter is not None
+                and direct_filter.status == "TRADING"
+                and direct_filter.is_spot_trading_allowed
+            ):
                 price = await self._historical_price(direct, int(fill_time))
                 if price is not None:
                     conversion = commission * price
-            elif inverse in filters:
+            elif (
+                inverse_filter is not None
+                and inverse_filter.status == "TRADING"
+                and inverse_filter.is_spot_trading_allowed
+            ):
                 price = await self._historical_price(inverse, int(fill_time))
                 if price is not None:
                     conversion = commission / price
