@@ -8,8 +8,8 @@ import uuid
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
-from typing import Callable
 from threading import RLock
+from typing import Callable
 
 
 @dataclass(frozen=True)
