@@ -91,7 +91,11 @@ class CrossMarketIntelligenceEngine:
         preceding bucket are included. This avoids silently bridging data gaps
         or aligning asynchronous instruments by array index.
         """
-        if isinstance(bucket_seconds, bool) or not isfinite(bucket_seconds) or bucket_seconds <= 0:
+        if (
+            isinstance(bucket_seconds, bool)
+            or not isfinite(bucket_seconds)
+            or bucket_seconds <= 0
+        ):
             raise ValueError("bucket_seconds must be finite and positive")
         bucket_prices: dict[int, float] = {}
         for event_time, price in self._timed_series[instrument_id]:
