@@ -47,7 +47,7 @@ async def test_save_market_event_persists_canonical_envelope():
     assert rows[0][2] == event.event_id
     assert rows[0][5] == "binance"
     assert rows[0][6] == "usd_m_futures"
-    assert rows[0][7] == "binance:usd_m_futures:BTCUSDT"
+    assert rows[0][7] == "BTCUSDT"
     assert rows[0][8] == "BTCUSDT"
     assert rows[0][9] == "ticker"
     assert "payload_json" in columns
