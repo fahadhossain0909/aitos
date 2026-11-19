@@ -1,3 +1,4 @@
+from dataclasses import replace
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -96,8 +97,10 @@ async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
         SpotOrderType.MARKET,
         quote_order_quantity=Decimal("50"),
     )
-    opportunity = _opportunity()
-    opportunity.agent_consensus = {"leverage": 20.0, "funding_bps": 30.0}
+    opportunity = replace(
+        _opportunity(),
+        agent_consensus={"leverage": 20.0, "funding_bps": 30.0},
+    )
     result = await coordinator.submit_entry(
         equity_quote=1000,
         opportunity=opportunity,
