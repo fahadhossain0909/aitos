@@ -126,11 +126,9 @@ async def test_spot_ticker_stream_handles_book_ticker_without_exchange_time():
     assert events[0].payload["ask_price"] == "100.5"
 
 
-
 def test_spot_kline_uses_registered_canonical_event_channel():
     assert channel_for(MarketEventType.KLINE) == CHANNEL_KLINE
     assert CHANNEL_KLINE in ALL_CHANNELS
-
 
 
 @pytest.mark.asyncio
