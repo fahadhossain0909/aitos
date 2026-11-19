@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from aitos.execution.intent_store import ExecutionUncertainError
+from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.protection_audit import audit_protection_inventory
 
 
@@ -140,12 +142,105 @@ async def query_ambiguous_protection_submissions(
     return sorted(findings, key=lambda item: item["client_id"])
 
 
+def _exchange_flag(value: Any, field: str) -> bool:
+    if value is True or value == "true":
+        return True
+    if value is False or value == "false":
+        return False
+    raise ValueError(f"invalid {field} in authenticated open-order evidence")
+
+
+async def _audit_account_exposure(
+    executor: Any, trades: Iterable[Any] | None
+) -> dict[str, Any]:
+    if trades is None:
+        return {
+            "position_snapshot_verified": False,
+            "position_snapshot_error": "local trade snapshot was not supplied",
+            "pending_entry_orders": [],
+            "account_exposure_verified": False,
+        }
+    position_reader = getattr(executor, "get_position_risk", None)
+    order_reader = getattr(executor, "get_open_orders", None)
+    if not callable(position_reader) or not callable(order_reader):
+        raise TypeError("full-account position and open-order readers are required")
+    local_trades = tuple(trades)
+    position_rows = await position_reader()
+    position_error = None
+    try:
+        assert_position_snapshot_matches(
+            local_trades, position_rows, hedge_mode=bool(executor.hedge_mode)
+        )
+    except (TypeError, ValueError) as exc:
+        position_error = str(exc)
+
+    orders = await order_reader()
+    if not isinstance(orders, list) or len(orders) > 10000:
+        raise ValueError("complete bounded ordinary open-order inventory required")
+    local_sides: dict[str, set[str]] = {}
+    for trade in local_trades:
+        side = str(getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", ""))).upper()
+        symbol = str(getattr(trade, "symbol", "")).strip().upper()
+        if symbol and side in {"LONG", "SHORT"}:
+            local_sides.setdefault(symbol, set()).add(side)
+
+    pending_entries = []
+    for order in orders:
+        if not isinstance(order, dict):
+            raise ValueError("malformed ordinary open-order evidence")
+        symbol = order.get("symbol")
+        side = order.get("side")
+        position_side = order.get("positionSide")
+        if (
+            not isinstance(symbol, str)
+            or not symbol
+            or side not in {"BUY", "SELL"}
+            or position_side not in {"BOTH", "LONG", "SHORT"}
+        ):
+            raise ValueError("invalid ordinary open-order identity")
+        reduce_only = _exchange_flag(order.get("reduceOnly", False), "reduceOnly")
+        close_position = _exchange_flag(
+            order.get("closePosition", False), "closePosition"
+        )
+        hedge_close = (position_side == "LONG" and side == "SELL") or (
+            position_side == "SHORT" and side == "BUY"
+        )
+        if reduce_only or close_position or hedge_close:
+            continue
+        # In one-way mode an opposite-side order can reduce or reverse a
+        # position. Without reduceOnly=true it is deliberately treated as
+        # unverified entry exposure, never silently netted against the position.
+        direction = (
+            "LONG"
+            if position_side == "LONG" or (position_side == "BOTH" and side == "BUY")
+            else "SHORT"
+        )
+        pending_entries.append(
+            {
+                "order_id": str(order.get("orderId", "")),
+                "symbol": symbol,
+                "side": direction,
+                "status": str(order.get("status", "")),
+                "reason": "entry order lacks a validated stop-risk projection",
+            }
+        )
+    return {
+        "position_snapshot_verified": position_error is None,
+        "position_snapshot_error": position_error,
+        "pending_entry_orders": sorted(
+            pending_entries, key=lambda item: (item["symbol"], item["order_id"])
+        ),
+        "account_exposure_verified": position_error is None and not pending_entries,
+    }
+
+
 async def audit_exchange_protection_inventory(
     executor: Any,
     intent_store: Any,
     *,
     now: datetime | None = None,
     max_age_seconds: float = 120,
+    trades: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     """Compare local protective intents with a fresh signed venue inventory.
 
@@ -202,6 +297,7 @@ async def audit_exchange_protection_inventory(
             raise ValueError("authenticated algo inventory symbol is missing")
         symbols.add(symbol)
 
+    account_audit = await _audit_account_exposure(executor, trades)
     if not symbols:
         return {
             "schema_version": 1,
@@ -209,7 +305,7 @@ async def audit_exchange_protection_inventory(
             "captured_at": captured_at.isoformat(),
             "age_seconds": 0.0,
             "scope_matched": True,
-            "account_exposure_verified": False,
+            **account_audit,
             "safe_to_resume": False,
             "automatic_actions": [],
             "findings": [],
@@ -234,6 +330,7 @@ async def audit_exchange_protection_inventory(
         now=captured_at,
         max_age_seconds=max_age_seconds,
     )
+    report.update(account_audit)
     report["evidence"] = "AUTHENTICATED_READ_ONLY_EXCHANGE_API"
     report["ambiguous_submissions"] = await query_ambiguous_protection_submissions(
         executor,
