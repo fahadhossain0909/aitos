@@ -115,7 +115,7 @@ class CanonicalMarketDataPersistenceSink:
                 *(self._wait(s) for s in self._subscriptions), return_exceptions=True
             )
         self._subscriptions.clear()
-        if self._workers and self._queue.qsize():
+        if self._workers:
             try:
                 await asyncio.wait_for(
                     self._queue.join(), timeout=self._shutdown_flush_seconds
