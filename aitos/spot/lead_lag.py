@@ -99,7 +99,8 @@ class FuturesSpotLeadLagAnalyzer:
             symbol: pair for symbol, pair in self._pairs.items() if symbol in normalized
         }
         self._estimates = {
-            symbol: estimate for symbol, estimate in self._estimates.items()
+            symbol: estimate
+            for symbol, estimate in self._estimates.items()
             if symbol in normalized
         }
 
