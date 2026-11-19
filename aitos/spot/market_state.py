@@ -62,11 +62,23 @@ class SpotMarketDataConsumer:
         self.ticker_freshness_seconds = ticker_freshness_seconds
         self.book_freshness_seconds = book_freshness_seconds
         self.kline_freshness_seconds = kline_freshness_seconds
+        self._allowed_symbols: frozenset[str] | None = None
         self._states: dict[str, SpotMarketState] = {}
         self._subscriptions = []
         self._started = False
         self._events = 0
         self._rejected = 0
+
+    def set_symbols(self, symbols: list[str] | tuple[str, ...]) -> None:
+        """Constrain live feature state to the discovered Spot instrument universe."""
+        normalized = frozenset(str(symbol).upper() for symbol in symbols if symbol)
+        if not normalized or len(normalized) > self.max_symbols:
+            raise ValueError("Spot symbol universe is empty or exceeds feature capacity")
+        self._allowed_symbols = normalized
+        self._states = {
+            symbol: state for symbol, state in self._states.items()
+            if symbol in normalized
+        }
 
     @property
     def states(self) -> dict[str, SpotMarketState]:
@@ -114,6 +126,8 @@ class SpotMarketDataConsumer:
 
     def _state(self, symbol: str) -> SpotMarketState:
         key = symbol.upper()
+        if self._allowed_symbols is not None and key not in self._allowed_symbols:
+            raise ValueError(f"Spot symbol is outside configured universe: {key}")
         if key not in self._states:
             if len(self._states) >= self.max_symbols:
                 raise RuntimeError("Spot live-state symbol capacity exceeded")
