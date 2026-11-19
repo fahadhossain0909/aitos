@@ -280,6 +280,10 @@ class FuturesSpotLeadLagAnalyzer:
             subscription.cancel()
         self._started = False
 
+    def estimate(self, symbol: str) -> LeadLagEstimate | None:
+        """Return the latest causal cross-market estimate for one Spot symbol."""
+        return self._estimates.get(symbol.upper())
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "started": self._started,
