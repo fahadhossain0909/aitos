@@ -54,3 +54,9 @@ The latest workflow head must complete before this addendum is marked CI-verifie
 ## Safety boundary
 
 This work does not merge the Draft PR, deploy services, enable live orders, change risk limits, clear execution journals, or promote a model.
+
+### 6. Ambiguous ClickHouse order-history protection
+
+The durable trading-state reader now inspects only rows at each order's latest `updated_at` and computes a distinct-version count over the complete order identity/state/request/result tuple. If multiple conflicting payloads share the latest timestamp, `load_order_record`, `load_pending_order_intents` and `load_unlinked_acknowledged_orders` raise a recovery-blocking error instead of letting `argMax` choose an arbitrary row.
+
+Identical duplicate rows remain idempotently readable. This is a read-path safety improvement only; it does not make ClickHouse a transactional order ledger or make ClickHouse and SQLite writes atomic. Tests explicitly cover ambiguous latest-row rejection.
