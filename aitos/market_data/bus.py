@@ -92,6 +92,7 @@ def market_event_to_wire(event: MarketEvent) -> dict[str, Any]:
         "trace_id": event.trace_id,
         "schema_version": event.schema_version,
         "event_revision": event.event_revision,
+        "stage_timestamps": dict(event.stage_timestamps),
         "payload": event.payload,
     }
 
@@ -125,6 +126,7 @@ def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
         trace_id=payload.get("trace_id"),
         schema_version=int(payload.get("schema_version", 1)),
         event_revision=int(payload.get("event_revision", 1)),
+        stage_timestamps=dict(payload.get("stage_timestamps") or {}),
     )
 
 
