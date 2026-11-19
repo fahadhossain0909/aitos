@@ -309,6 +309,10 @@ class LiveScannerCache:
             pass
 
     async def _on_trade_event(self, event) -> None:
+        # This cache is the Futures scanner state. Spot shares semantic
+        # channels, but must never contaminate same-symbol Futures features.
+        if getattr(event, "market_type", None) == "spot":
+            return
         if event.symbol.upper() not in self._symbols:
             return
         state = self._cache(event.symbol)
@@ -362,6 +366,8 @@ class LiveScannerCache:
             pass
 
     async def _on_book_event(self, event) -> None:
+        if getattr(event, "market_type", None) == "spot":
+            return
         if event.symbol.upper() not in self._symbols:
             return
         state = self._cache(event.symbol)
