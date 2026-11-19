@@ -658,4 +658,3 @@ async def test_live_portfolio_tracker_fails_closed_on_stale_pending_risk():
 
     with pytest.raises(RuntimeError, match="fresh validated pending-order snapshot"):
         tracker.build_portfolio_state(EmptyLifecycle())
-
