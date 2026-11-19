@@ -34,8 +34,8 @@ class LeadLagEstimate:
 
 @dataclass(slots=True)
 class _PairState:
-    futures: dict[int, float]
-    spot: dict[int, float]
+    futures: dict[int, tuple[float, float]]
+    spot: dict[int, tuple[float, float]]
 
 
 class FuturesSpotLeadLagAnalyzer:
@@ -160,7 +160,12 @@ class FuturesSpotLeadLagAnalyzer:
             return None
         pair = self._pairs.setdefault(symbol, _PairState({}, {}))
         series = pair.futures if side == "futures" else pair.spot
-        series[bucket] = price
+        event_timestamp = event.event_time.timestamp()
+        existing = series.get(bucket)
+        if existing is not None and event_timestamp <= existing[0]:
+            self._rejected += 1
+            return None
+        series[bucket] = (event_timestamp, price)
         newest = max(pair.futures.keys() | pair.spot.keys())
         cutoff = newest - self.window_buckets - self.max_lag_buckets - 2
         for values in (pair.futures, pair.spot):
@@ -256,10 +261,14 @@ class FuturesSpotLeadLagAnalyzer:
             as_of,
         )
 
-    def _returns(self, prices: dict[int, float]) -> dict[int, float]:
+    def _returns(
+        self, prices: dict[int, tuple[float, float]]
+    ) -> dict[int, float]:
         ordered = sorted(prices.items())
         result: dict[int, float] = {}
-        for (previous_bucket, previous), (bucket, current) in zip(ordered, ordered[1:]):
+        for (previous_bucket, (_, previous)), (bucket, (_, current)) in zip(
+            ordered, ordered[1:]
+        ):
             if bucket - previous_bucket != 1:
                 continue
             result[bucket] = math.log(current / previous)
