@@ -29,6 +29,7 @@ class SpotRuntime:
     quote_asset: str = "USDT"
     max_symbols: int = 20
     min_quote_volume: Decimal = Decimal("100000")
+    owns_capital_gateway: bool = False
 
     async def eligible_instruments(self):
         """Return the highest-turnover supported Spot symbols for this runtime."""
@@ -72,6 +73,8 @@ class SpotRuntime:
     async def close(self) -> None:
         await self.market_data.close()
         self.inventory.close()
+        if self.owns_capital_gateway:
+            self.coordinator.capital_gateway.reservation.close()
 
 
 def build_spot_runtime(
@@ -118,6 +121,7 @@ def build_spot_runtime(
     path = Path(database_path) if database_path else get_data_dir() / "spot" / "inventory.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     inventory = InventoryLedger(path)
+    owns_capital_gateway = capital_gateway is None
     if capital_gateway is None:
         capital_gateway = CapitalGateway(
             reservation=CapitalReservation(
@@ -142,4 +146,5 @@ def build_spot_runtime(
         quote_asset=policy.quote_asset.upper(),
         max_symbols=policy.max_symbols,
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
+        owns_capital_gateway=owns_capital_gateway,
     )
