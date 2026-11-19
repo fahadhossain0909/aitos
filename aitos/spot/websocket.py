@@ -79,10 +79,16 @@ class BinanceSpotWebSocket:
         async for event in self.stream_many(streams):
             yield event
 
-    async def user_stream(self, listen_key: str) -> AsyncIterator[dict[str, Any]]:
-        """Yield private account/order events; caller must keep listen key alive."""
+    async def user_stream(
+        self,
+        listen_key: str,
+        *,
+        reconnect: bool | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield private events; supervisor may disable hidden reconnects."""
         if not listen_key or "/" in listen_key:
             raise ValueError("invalid listen key")
+        should_reconnect = self.reconnect if reconnect is None else reconnect
         url = f"{self.base_url}/ws/{listen_key}"
         delay = 0.5
         while True:
@@ -97,12 +103,12 @@ class BinanceSpotWebSocket:
                     delay = 0.5
                     async for message in ws:
                         yield json.loads(message)
-                if not self.reconnect:
+                if not should_reconnect:
                     return
             except asyncio.CancelledError:
                 raise
             except Exception:
-                if not self.reconnect:
+                if not should_reconnect:
                     raise
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.max_backoff_seconds)
