@@ -170,7 +170,11 @@ class CapitalGateway:
         )
 
     def _include_in_flight_reservations(
-        self, snapshot: PortfolioRiskSnapshot, *, equity_usd: float
+        self,
+        snapshot: PortfolioRiskSnapshot,
+        *,
+        equity_usd: float,
+        reservations: tuple[Reservation, ...] | None = None,
     ) -> PortfolioRiskSnapshot:
         """Project reserved-but-not-yet-open candidates into correlation risk.
 
@@ -181,11 +185,13 @@ class CapitalGateway:
         if not isfinite(equity_usd) or equity_usd <= 0:
             return snapshot
         positions = dict(snapshot.position_risk_pct)
-        for reservation in self.reservation.snapshot():
+        active_reservations = (
+            self.reservation.snapshot() if reservations is None else reservations
+        )
+        known_symbols = {key.upper() for key in positions}
+        for reservation in active_reservations:
             symbol = str(reservation.symbol)
-            if symbol in positions or symbol.upper() in {
-                key.upper() for key in positions
-            }:
+            if symbol.upper() in known_symbols:
                 continue
             risk_pct = max(0.0, float(reservation.risk_budget_usd)) / equity_usd * 100.0
             if risk_pct > 0:
@@ -279,8 +285,9 @@ class CapitalGateway:
         by_symbol = {item.symbol: item for item in eligible_estimates}
         for allocation in allocations:
             estimate = by_symbol[allocation.symbol]
+            base_snapshot = self._snapshot(equity_usd, estimate)
             snapshot = self._include_in_flight_reservations(
-                self._snapshot(equity_usd, estimate), equity_usd=equity_usd
+                base_snapshot, equity_usd=equity_usd
             )
             metadata = estimate.metadata
             loss_streak = max(0, int(metadata.get("consecutive_losses", 0)))
@@ -292,18 +299,20 @@ class CapitalGateway:
             requested_pct = (
                 allocation.risk_budget_usd * streak_multiplier / equity_usd * 100.0
             )
-            protection = self.protection.evaluate(
-                symbol=allocation.symbol,
-                requested_risk_pct=requested_pct,
-                snapshot=snapshot,
-                side=str(metadata.get("side") or "LONG"),
-                regime=str(metadata.get("regime") or ""),
-                volatility_score=metadata.get("volatility_score"),
-                adverse_funding_pct=max(
+            protection_args = {
+                "symbol": allocation.symbol,
+                "requested_risk_pct": requested_pct,
+                "side": str(metadata.get("side") or "LONG"),
+                "regime": str(metadata.get("regime") or ""),
+                "volatility_score": metadata.get("volatility_score"),
+                "adverse_funding_pct": max(
                     0.0, float(metadata.get("funding_bps", 0.0)) / 100.0
                 ),
-                liquidation_buffer_pct=metadata.get("liquidation_buffer_pct"),
-                leverage=float(metadata.get("leverage", 1.0)),
+                "liquidation_buffer_pct": metadata.get("liquidation_buffer_pct"),
+                "leverage": float(metadata.get("leverage", 1.0)),
+            }
+            protection = self.protection.evaluate(
+                snapshot=snapshot, **protection_args
             )
             if not protection.allowed:
                 continue
@@ -325,6 +334,22 @@ class CapitalGateway:
                 equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 - self.reservation.reserved_risk_usd,
             )
+            candidate_risk_pct = candidate.risk_budget_usd / equity_usd * 100.0
+
+            def risk_policy(active_reservations: tuple[Reservation, ...]) -> bool:
+                projected = self._include_in_flight_reservations(
+                    base_snapshot,
+                    equity_usd=equity_usd,
+                    reservations=active_reservations,
+                )
+                current = self.protection.evaluate(
+                    snapshot=projected, **protection_args
+                )
+                return (
+                    current.allowed
+                    and current.allowed_risk_pct + 1e-12 >= candidate_risk_pct
+                )
+
             if self.reservation.reserve(
                 Reservation(
                     candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd
@@ -335,6 +360,7 @@ class CapitalGateway:
                 risk_limit_usd=(
                     equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 ),
+                risk_policy=risk_policy,
             ):
                 protected.append(candidate)
         return CapitalGatewayResult(tuple(decisions), tuple(protected))
