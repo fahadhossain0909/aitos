@@ -584,6 +584,11 @@ class SpotRuntime:
                     self.inventory.pending_fee_conversions()
                 ),
             },
+            "persistence": (
+                self._persistence_sink.snapshot()
+                if self._persistence_sink is not None
+                else {"configured": self.repository is not None, "running": False}
+            ),
             "exchange": {
                 "rate_limit": self.market_data.rest.rate_limit_snapshot,
                 "server_time_synced": self.market_data.rest._server_time_synced,
