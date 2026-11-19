@@ -519,7 +519,6 @@ async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
     inventory.close()
 
 
-
 @pytest.mark.asyncio
 async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejections():
     gateway = FakeCapitalGateway()
@@ -556,9 +555,7 @@ async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejecti
         fusion_min_confidence = 0.6
 
         async def request_decision(self, context):
-            direction = (
-                "long" if context.symbol == "BNBUSDT" else "short"
-            )
+            direction = "long" if context.symbol == "BNBUSDT" else "short"
             return SimpleNamespace(direction=direction, confidence=0.9)
 
     runtime = SpotRuntime(
@@ -570,8 +567,7 @@ async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejecti
         market_consumer=MarketConsumer(),
         lead_lag=SimpleNamespace(),
         quote_volumes_24h={
-            symbol: Decimal("100000")
-            for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT")
+            symbol: Decimal("100000") for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT")
         },
     )
     result = await runtime.scan_and_submit_candidates(
