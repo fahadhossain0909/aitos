@@ -190,10 +190,10 @@ class FuturesSpotLeadLagAnalyzer:
         runner_up = candidates[1][0] if len(candidates) > 1 else 0.0
         if strength < self.min_abs_correlation:
             status, leader_value, lag_value = "no_material_lead", None, None
-        elif leader == "synchronous":
-            status, leader_value, lag_value = "synchronous", None, None
         elif low <= 0 <= high:
             status, leader_value, lag_value = "low_confidence", None, None
+        elif leader == "synchronous":
+            status, leader_value, lag_value = "synchronous", None, None
         elif strength - runner_up < self.min_lead_advantage:
             status, leader_value, lag_value = "ambiguous_lead", None, None
         else:
