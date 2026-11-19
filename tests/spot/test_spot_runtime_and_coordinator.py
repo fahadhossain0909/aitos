@@ -517,3 +517,73 @@ async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
     assert result.rejected[0][0] == "BTCUSDT"
     assert gateway.symbol == "binance:spot:ETHUSDT"
     inventory.close()
+
+
+
+@pytest.mark.asyncio
+async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejections():
+    gateway = FakeCapitalGateway()
+    inventory = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
+        inventory=inventory,
+    )
+    base = SpotCandidate(
+        symbol="BTCUSDT",
+        quote_volume=Decimal("100000"),
+        relative_volume=Decimal("2"),
+        spread_bps=Decimal("2"),
+        volatility_bps=Decimal("100"),
+        momentum_bps=Decimal("50"),
+        order_book_imbalance=Decimal("0.2"),
+        last_price=Decimal("100"),
+    )
+    ranked = [
+        RankedSpotCandidate(replace(base, symbol=symbol), score, ())
+        for symbol, score in (
+            ("BTCUSDT", Decimal("0.9")),
+            ("ETHUSDT", Decimal("0.8")),
+            ("BNBUSDT", Decimal("0.7")),
+        )
+    ]
+
+    class MarketConsumer:
+        def rank_candidates(self, quote_volumes):
+            return ranked
+
+    class RotatingKernel:
+        fusion_min_confidence = 0.6
+
+        async def request_decision(self, context):
+            direction = (
+                "long" if context.symbol == "BNBUSDT" else "short"
+            )
+            return SimpleNamespace(direction=direction, confidence=0.9)
+
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=SpotOpportunityScanner(),
+        coordinator=coordinator,
+        market_consumer=MarketConsumer(),
+        lead_lag=SimpleNamespace(),
+        quote_volumes_24h={
+            symbol: Decimal("100000")
+            for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT")
+        },
+    )
+    result = await runtime.scan_and_submit_candidates(
+        kernel=RotatingKernel(),
+        opportunity_builder=lambda candidate, decision: replace(
+            _opportunity(), symbol=candidate.symbol
+        ),
+        equity_usd=1000,
+        quote_order_quantity_for=lambda candidate: Decimal("50"),
+    )
+    assert result.candidates_seen == 3
+    assert result.selected_symbol == "BNBUSDT"
+    assert len(result.rejected) == 2
+    assert gateway.symbol == "binance:spot:BNBUSDT"
+    inventory.close()
