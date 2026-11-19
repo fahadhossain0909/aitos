@@ -106,3 +106,25 @@ def test_validation_rejects_invalid_reserves_and_unsafe_coalescing():
         pass
     else:
         raise AssertionError("non-replaceable task was allowed to coalesce")
+
+
+def test_aged_background_work_can_compete_with_candidates():
+    scheduler = ComputeAwareScheduler(capacity_units=1, aging_seconds=10)
+    scheduler.submit(
+        task("research", TaskPriority.BACKGROUND_RESEARCH, at=0), now=0
+    )
+    scheduler.submit(
+        task("candidate", TaskPriority.CANDIDATE_ANALYSIS, at=100), now=100
+    )
+    assert scheduler.drain(now=100)[0].task_id == "research"
+
+
+def test_pending_task_ids_must_be_unique():
+    scheduler = ComputeAwareScheduler()
+    scheduler.submit(task("same", TaskPriority.CANDIDATE_ANALYSIS), now=0)
+    try:
+        scheduler.submit(task("same", TaskPriority.MARKET_CRITICAL), now=0)
+    except ValueError as exc:
+        assert "unique" in str(exc)
+    else:
+        raise AssertionError("duplicate pending task id was accepted")
