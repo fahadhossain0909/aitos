@@ -412,6 +412,7 @@ class DurableTradingStateStore:
                   FROM order_execution_ledger
                   WHERE client_order_id = {client_order_id:String}
               )
+            HAVING count() > 0
             """,
             parameters={"client_order_id": client_order_id},
         )
