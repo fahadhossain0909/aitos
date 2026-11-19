@@ -41,6 +41,10 @@ class SpotRuntime:
         async for event in self.market_data.stream_trades(self._bounded(symbols)):
             await market_bus.publish(event)
 
+    async def publish_tickers(self, market_bus, symbols: list[str]) -> None:
+        async for event in self.market_data.stream_tickers(self._bounded(symbols)):
+            await market_bus.publish(event)
+
     async def publish_klines(self, market_bus, symbols: list[str],
                              timeframe: str = "1m") -> None:
         async for event in self.market_data.stream_klines(
