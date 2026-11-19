@@ -63,6 +63,10 @@ class DepthReplayResult:
     impact_cost: float
     fills: tuple[DepthFill, ...]
     complete: bool
+    slippage_cost: float = 0.0
+    funding_cost: float = 0.0
+    borrow_cost: float = 0.0
+    total_cost: float = 0.0
 
 
 def replay_l2_market_order(
@@ -75,6 +79,11 @@ def replay_l2_market_order(
     fee_bps: float,
     impact_coefficient_bps: float = 0.0,
     max_participation: float = 1.0,
+    slippage_bps: float = 0.0,
+    funding_bps: float = 0.0,
+    borrow_bps: float = 0.0,
+    holding_hours: float = 0.0,
+    funding_interval_hours: float = 8.0,
 ) -> DepthReplayResult:
     """Walk visible L2 levels, respecting latency, participation and impact.
 
@@ -86,15 +95,26 @@ def replay_l2_market_order(
     direction = side.upper()
     if direction not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
-    values = (quantity, fee_bps, impact_coefficient_bps, max_participation)
+    values = (
+        quantity,
+        fee_bps,
+        impact_coefficient_bps,
+        max_participation,
+        slippage_bps,
+        funding_bps,
+        borrow_bps,
+        holding_hours,
+        funding_interval_hours,
+    )
     if (
-        any(not math.isfinite(float(x)) for x in values)
+        any(not math.isfinite(float(value)) for value in values)
         or quantity <= 0
-        or fee_bps < 0
-        or impact_coefficient_bps < 0
+        or any(value < 0 for value in values[1:])
         or not 0 < max_participation <= 1
+        or funding_interval_hours <= 0
+        or slippage_bps >= 10000
     ):
-        raise ValueError("invalid replay quantity, fees, impact or participation")
+        raise ValueError("invalid replay quantity, cost, participation or horizon")
     if submitted_at_ms < 0 or latency_ms < 0:
         raise ValueError("timestamps and latency must be non-negative")
     books = tuple(snapshots)
@@ -103,10 +123,12 @@ def replay_l2_market_order(
     eligible = submitted_at_ms + latency_ms
     remaining = float(quantity)
     fills = []
-    fees = spread = impact_total = notional = filled = 0.0
+    fees = spread = impact_total = slippage_total = notional = filled = 0.0
     for book in books:
-        if book.timestamp_ms < eligible or remaining <= 1e-12:
+        if book.timestamp_ms < eligible:
             continue
+        if remaining <= 1e-12:
+            break
         levels = book.asks if direction == "BUY" else book.bids
         opposite = book.bids if direction == "BUY" else book.asks
         if not levels or not opposite:
@@ -130,18 +152,34 @@ def replay_l2_market_order(
                 if direction == "BUY"
                 else 1.0 - impact_bps / 10000.0
             )
-            if impacted <= 0:
-                raise ValueError("impact parameters imply a non-positive fill price")
-            fee = qty * impacted * fee_bps / 10000.0
+            fill_price = impacted * (
+                1.0 + slippage_bps / 10000.0
+                if direction == "BUY"
+                else 1.0 - slippage_bps / 10000.0
+            )
+            if fill_price <= 0:
+                raise ValueError("impact and slippage imply a non-positive fill price")
+            fee = qty * fill_price * fee_bps / 10000.0
             fees += fee
             spread += qty * abs(price - mid)
             impact_total += qty * abs(impacted - price)
-            notional += qty * impacted
+            slippage_total += qty * abs(fill_price - impacted)
+            notional += qty * fill_price
             filled += qty
             remaining -= qty
             allowed -= qty
-            fills.append(DepthFill(book.timestamp_ms, impacted, qty, impact_bps, fee))
+            fills.append(
+                DepthFill(book.timestamp_ms, fill_price, qty, impact_bps, fee)
+            )
+        # A market order consumes one point-in-time book only. Reusing later
+        # snapshots would fabricate resting-order queue priority/replenishment.
+        break
     avg = notional / filled if filled else None
+    funding = (
+        notional * funding_bps / 10000.0 * holding_hours / funding_interval_hours
+    )
+    borrow = notional * borrow_bps / 10000.0 * holding_hours / 24.0
+    total_cost = fees + spread + impact_total + slippage_total + funding + borrow
     return DepthReplayResult(
         direction,
         quantity,
@@ -153,6 +191,10 @@ def replay_l2_market_order(
         impact_total,
         tuple(fills),
         remaining <= 1e-12,
+        slippage_total,
+        funding,
+        borrow,
+        total_cost,
     )
 
 
