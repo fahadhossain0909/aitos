@@ -72,10 +72,16 @@ class GraphContextRetriever:
     ) -> list[dict[str, Any]]:
         """Retrieve graph candidates and rerank them as non-authoritative context."""
         rows = await self.similar_cases(
-            symbol=symbol, regime=regime, strategy_id=strategy_id,
-            model_id=model_id, limit=min(max(limit * 3, limit), 100),
+            symbol=symbol,
+            regime=regime,
+            strategy_id=strategy_id,
+            model_id=model_id,
+            limit=min(max(limit * 3, limit), 100),
         )
         return rank_hybrid_memories(
-            query, rows, semantic_scores=semantic_scores,
-            weights=weights, limit=limit,
+            query,
+            rows,
+            semantic_scores=semantic_scores,
+            weights=weights,
+            limit=limit,
         )
