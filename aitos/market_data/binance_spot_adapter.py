@@ -29,6 +29,9 @@ def _event(
     payload: dict[str, Any],
     source: MarketSource,
     sequence: int | None = None,
+    *,
+    event_id: str | None = None,
+    event_revision: int = 1,
 ) -> MarketEvent:
     key = InstrumentKey(Venue.BINANCE, MarketType.SPOT, symbol.upper())
     return MarketEvent(
@@ -43,7 +46,12 @@ def _event(
         payload=payload,
         source=source,
         sequence=sequence,
-        correlation_id=f"{key.value}:{kind.value}:{sequence or event_time.isoformat()}",
+        event_id=(
+            event_id
+            or f"{key.value}:{kind.value}:{sequence if sequence is not None else int(event_time.timestamp() * 1000)}"
+        ),
+        event_revision=event_revision,
+        correlation_id=f"{key.value}:{kind.value}:{sequence if sequence is not None else event_time.isoformat()}",
     )
 
 
@@ -170,6 +178,10 @@ class BinanceSpotCanonicalMarketDataAdapter:
                 },
                 MarketSource.WEBSOCKET,
                 int(data["T"]),
+                event_id=(
+                    f"binance:spot:{symbol}:kline:{timeframe}:{int(data['t'])}"
+                ),
+                event_revision=max(1, int(data.get("L", 1))),
             )
 
     async def stream_order_books(
