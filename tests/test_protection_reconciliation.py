@@ -14,6 +14,7 @@ from aitos.models.trade import TradeSide
 
 NOW = datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc)
 
+
 class ReadOnlyExecutor:
     def __init__(self, scope, orders):
         self.execution_scope = scope
@@ -471,8 +472,6 @@ async def test_terminal_protection_is_not_expected_in_open_inventory(
     assert protected_intent.protection_intents()[0]["state"] == "TERMINAL"
 
 
-
-
 @pytest.mark.asyncio
 async def test_live_account_audit_requires_stop_identity_for_every_open_trade(
     protected_intent,
@@ -502,7 +501,6 @@ async def test_live_account_audit_requires_stop_identity_for_every_open_trade(
         finding["status"] == "local_position_missing_stop_id"
         for finding in report["findings"]
     )
-
 
 
 @pytest.mark.asyncio
