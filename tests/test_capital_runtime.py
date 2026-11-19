@@ -377,6 +377,7 @@ def test_gateway_includes_other_in_flight_reservations_in_correlation_projection
     assert protection.snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(2.0)
     assert "BTCUSDT" not in (protection.snapshot.position_sides or {})
 
+
 def test_gateway_does_not_double_count_reservation_already_in_live_positions():
     reservation = CapitalReservation()
     assert reservation.reserve(
