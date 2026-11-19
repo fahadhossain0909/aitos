@@ -404,8 +404,16 @@ def test_protection_acceptance_rejects_missing_or_already_transitioned_preclaim(
         90,
         client_order_id="intent-one",
     )
+    missing = OrderResult(
+        "algo:123",
+        "BTCUSDT",
+        TradeSide.LONG,
+        0,
+        90,
+        client_order_id="missing",
+    )
     with pytest.raises(ValueError, match="no submitting preclaim"):
-        journal.record_protection("missing", accepted)
+        journal.record_protection("missing", missing)
     journal.begin(
         request(order_type="STOP_MARKET", reduce_only=True, reference_price=90)
     )
