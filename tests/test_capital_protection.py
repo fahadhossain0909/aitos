@@ -332,3 +332,41 @@ def test_reservation_owner_can_renew_lease_but_other_owner_cannot(tmp_path):
     finally:
         first.close()
         second.close()
+
+@pytest.mark.parametrize("durable", [False, True])
+def test_spot_and_futures_reservations_have_distinct_market_namespaces(
+    tmp_path, durable
+):
+    path = tmp_path / "market-namespaces.sqlite3" if durable else None
+    ledger = CapitalReservation(path=path)
+    try:
+        futures = Reservation("BTCUSDT", 100.0, 10.0)
+        spot = Reservation("BINANCE:SPOT:BTCUSDT", 100.0, 10.0)
+        kwargs = (
+            {"capital_limit_usd": 1_000.0, "risk_limit_usd": 100.0}
+            if durable
+            else {}
+        )
+        assert ledger.reserve(
+            futures,
+            available_capital_usd=1_000.0,
+            available_risk_usd=100.0,
+            **kwargs,
+        )
+        assert ledger.reserve(
+            spot,
+            available_capital_usd=900.0,
+            available_risk_usd=90.0,
+            **kwargs,
+        )
+        assert ledger.reserved_capital_usd == 200.0
+        assert ledger.reserved_risk_usd == 20.0
+        assert {item.symbol for item in ledger.snapshot()} == {
+            "BTCUSDT",
+            "BINANCE:SPOT:BTCUSDT",
+        } if not durable else {
+            "BTCUSDT",
+            "BINANCE:SPOT:BTCUSDT",
+        }
+    finally:
+        ledger.close()
