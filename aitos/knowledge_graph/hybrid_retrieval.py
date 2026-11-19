@@ -87,6 +87,8 @@ def rank_hybrid_memories(
     """Rerank retrieved candidates; scores are context metadata, never signals."""
     if limit < 1:
         raise ValueError("limit must be positive")
+    if not math.isfinite(half_life_days) or half_life_days <= 0:
+        raise ValueError("half_life_days must be finite and positive")
     weights = weights or RetrievalWeights()
     now = now or datetime.now(timezone.utc)
     semantic_scores = semantic_scores or {}
