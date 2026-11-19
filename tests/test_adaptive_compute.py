@@ -159,7 +159,6 @@ def test_invalid_budget_and_workload_inputs_are_rejected():
         raise AssertionError("negative workload cost must be rejected")
 
 
-
 def test_zero_available_memory_produces_zero_optional_budget():
     resources = ResourceSnapshot(2, 2.0, 4096, 4096, 0, False, False)
     budget = build_resource_budget(resources)
@@ -167,7 +166,9 @@ def test_zero_available_memory_produces_zero_optional_budget():
 
 
 def test_high_scoring_duplicate_cannot_replace_protected_symbol():
-    budget = build_resource_budget(ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False))
+    budget = build_resource_budget(
+        ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False)
+    )
     plan = plan_symbol_capacity(
         [
             SymbolWorkload("BTCUSDT", open_position=True, opportunity_score=0),
@@ -177,7 +178,6 @@ def test_high_scoring_duplicate_cannot_replace_protected_symbol():
     )
     assert plan.protected_symbols == ("BTCUSDT",)
     assert plan.selected_symbols == ("BTCUSDT",)
-
 
 
 def test_non_finite_workload_and_pressure_values_are_rejected():
@@ -198,3 +198,75 @@ def test_non_finite_workload_and_pressure_values_are_rejected():
         pass
     else:
         raise AssertionError("non-finite pressure metrics must be rejected")
+
+
+
+def test_pressure_controller_escalates_and_recovers_with_hysteresis():
+    from aitos.compute.pressure_controller import (
+        PressurePolicy,
+        ResourcePressureController,
+    )
+
+    controller = ResourcePressureController(
+        PressurePolicy(
+            warning_hold_seconds=2,
+            high_hold_seconds=2,
+            recovery_hold_seconds=5,
+            minimum_transition_interval_seconds=0,
+        )
+    )
+    first = controller.update(
+        now_seconds=1,
+        cpu_utilization_pct=95,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert first.level == PressureLevel.NORMAL
+    second = controller.update(
+        now_seconds=3,
+        cpu_utilization_pct=95,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert second.level == PressureLevel.HIGH
+    assert second.defer_optional_work is True
+    recovering = controller.update(
+        now_seconds=4,
+        cpu_utilization_pct=10,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert recovering.level == PressureLevel.HIGH
+    recovered = controller.update(
+        now_seconds=9,
+        cpu_utilization_pct=10,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert recovered.level == PressureLevel.NORMAL
+    assert recovered.allow_background_work is True
+
+
+def test_pressure_controller_critical_is_immediate_and_clock_is_monotonic():
+    from aitos.compute.pressure_controller import ResourcePressureController
+
+    controller = ResourcePressureController()
+    critical = controller.update(
+        now_seconds=10,
+        cpu_utilization_pct=99,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert critical.level == PressureLevel.CRITICAL
+    assert critical.defer_optional_work is True
+    try:
+        controller.update(
+            now_seconds=9,
+            cpu_utilization_pct=0,
+            memory_utilization_pct=0,
+            queue_lag_seconds=0,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-monotonic clock must be rejected")
