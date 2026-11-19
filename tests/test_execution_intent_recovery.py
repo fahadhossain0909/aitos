@@ -220,7 +220,9 @@ def test_read_only_inventory_does_not_create_missing_database(tmp_path):
 
 def test_protection_acceptance_survives_crash_until_durable_id_applied(tmp_path):
     journal = store(tmp_path)
-    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    journal.begin(
+        request(order_type="STOP_MARKET", reduce_only=True, reference_price=90)
+    )
     accepted = OrderResult(
         "algo:123", "BTCUSDT", TradeSide.LONG, 0, 90, client_order_id="intent-one"
     )
@@ -404,7 +406,9 @@ def test_protection_acceptance_rejects_missing_or_already_transitioned_preclaim(
     )
     with pytest.raises(ValueError, match="no submitting preclaim"):
         journal.record_protection("missing", accepted)
-    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    journal.begin(
+        request(order_type="STOP_MARKET", reduce_only=True, reference_price=90)
+    )
     journal.record_protection("intent-one", accepted)
     with pytest.raises(ValueError, match="no submitting preclaim"):
         journal.record_protection("intent-one", accepted)
