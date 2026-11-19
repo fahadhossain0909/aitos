@@ -346,9 +346,7 @@ def test_spot_and_futures_reservations_have_distinct_market_namespaces(
         futures = Reservation("BTCUSDT", 100.0, 10.0)
         spot = Reservation("BINANCE:SPOT:BTCUSDT", 100.0, 10.0)
         kwargs = (
-            {"capital_limit_usd": 1_000.0, "risk_limit_usd": 100.0}
-            if durable
-            else {}
+            {"capital_limit_usd": 1_000.0, "risk_limit_usd": 100.0} if durable else {}
         )
         assert ledger.reserve(
             futures,
