@@ -139,6 +139,20 @@ class BinanceSpotAdapter:
         raw = await self._request("GET", "/api/v3/order", params=params, signed=True)
         return self._parse_order(raw, SpotOrderSide(raw["side"]))
 
+    async def my_trades(self, symbol: str, *, order_id: int | None = None,
+                        from_id: int | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        """Return authenticated fills for durable inventory reconciliation."""
+        if order_id is not None and from_id is not None:
+            raise ValueError("order_id and from_id are mutually exclusive")
+        if not 1 <= limit <= 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        params: dict[str, Any] = {"symbol": symbol.upper(), "limit": limit}
+        if order_id is not None:
+            params["orderId"] = order_id
+        if from_id is not None:
+            params["fromId"] = from_id
+        return await self._request("GET", "/api/v3/myTrades", params=params, signed=True)
+
     async def cancel_order(self, symbol: str, *, order_id: int | None = None,
                            client_order_id: str | None = None) -> dict[str, Any]:
         if (order_id is None) == (client_order_id is None):
@@ -156,7 +170,7 @@ class BinanceSpotAdapter:
         return SpotOrder(
             symbol=raw["symbol"], order_id=int(raw["orderId"]),
             client_order_id=raw.get("clientOrderId", ""),
-            side=side, status=SpotOrderStatus(raw.get("status", "UNKNOWN")),
+            side=side, status=SpotOrderStatus(raw.get("status", "UNKNOWN")) if raw.get("status") in SpotOrderStatus._value2member_map_ else SpotOrderStatus.UNKNOWN,
             executed_quantity=D(raw.get("executedQty", 0)),
             cumulative_quote_quantity=D(raw.get("cummulativeQuoteQty", 0)),
             fills=fills, raw=raw,
