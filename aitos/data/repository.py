@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS market_events (
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (instrument_id, event_type, event_time, event_id)
 """
+CREATE_VERSIONED_MARKET_EVENTS = """
+CREATE TABLE IF NOT EXISTS market_event_versions (
+    event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
+    event_id String, event_revision UInt64,
+    exchange LowCardinality(String), market LowCardinality(String),
+    venue LowCardinality(String), market_type LowCardinality(String),
+    instrument_id String, symbol LowCardinality(String),
+    event_type LowCardinality(String), source LowCardinality(String),
+    sequence Nullable(UInt64), schema_version UInt16,
+    correlation_id String, trace_id String, payload_json String
+) ENGINE = ReplacingMergeTree(event_revision)
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (instrument_id, event_id)
+"""
 CREATE_LIVE_ANALYTICS_EVENTS = """
 CREATE TABLE IF NOT EXISTS live_analytics_events (
     event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
@@ -127,6 +141,7 @@ ALL_DDL = [
     CREATE_FUNDING_RATES,
     CREATE_OPEN_INTEREST,
     CREATE_MARKET_EVENTS,
+    CREATE_VERSIONED_MARKET_EVENTS,
     CREATE_LIVE_ANALYTICS_EVENTS,
     CREATE_LEARNING_EXPERIENCES,
     CREATE_TRADE_RUNTIME_STATE,
@@ -291,6 +306,39 @@ class MarketDataRepository(AITOSModule):
                 "correlation_id",
                 "trace_id",
                 "payload_json",
+            ],
+        )
+        self._last_event_time = event.event_time.isoformat()
+
+    async def save_market_event_versioned(self, event: Any) -> None:
+        """Persist an immutable, revision-aware canonical event envelope."""
+        self._require_initialized()
+        await self._client.insert(
+            "market_event_versions",
+            [[
+                event.event_time,
+                event.ingest_time,
+                event.event_id,
+                event.event_revision,
+                event.exchange,
+                event.market,
+                event.venue or event.exchange,
+                event.market_type or event.market,
+                event.instrument_id or event.symbol,
+                event.symbol,
+                event.event_type.value,
+                event.source.value,
+                event.sequence,
+                event.schema_version,
+                event.correlation_id or event.event_id,
+                event.trace_id or event.event_id,
+                json.dumps(event.payload, sort_keys=True, default=str),
+            ]],
+            column_names=[
+                "event_time", "ingest_time", "event_id", "event_revision",
+                "exchange", "market", "venue", "market_type", "instrument_id",
+                "symbol", "event_type", "source", "sequence", "schema_version",
+                "correlation_id", "trace_id", "payload_json",
             ],
         )
         self._last_event_time = event.event_time.isoformat()
