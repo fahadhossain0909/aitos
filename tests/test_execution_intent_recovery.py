@@ -307,6 +307,7 @@ async def test_legacy_protection_never_fabricates_resting_acceptance(response):
         OrderResult("algo:0", "BTCUSDT", TradeSide.LONG, 0, 90),
         OrderResult("algo:not-an-id", "BTCUSDT", TradeSide.LONG, 0, 90),
         OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, float("nan")),
+        OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, 91),
     ],
 )
 def test_protection_acceptance_must_match_preclaim_identity(tmp_path, result):
