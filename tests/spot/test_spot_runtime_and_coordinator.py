@@ -237,7 +237,6 @@ async def test_disabled_spot_execution_does_not_reserve_or_journal():
     assert ledger.unresolved_order_intents() == []
 
 
-
 class FakeSharedStrategyScanner:
     async def decide_with_kernel(self, candidate, kernel):
         return SimpleNamespace(direction="long", confidence=0.8)
@@ -308,7 +307,6 @@ async def test_spot_runtime_rejects_candidates_outside_discovered_universe():
     inventory.close()
 
 
-
 @pytest.mark.asyncio
 async def test_spot_capital_allocation_converts_usd_to_quote_notional():
     gateway = FakeCapitalGateway()
@@ -335,14 +333,15 @@ async def test_spot_capital_allocation_converts_usd_to_quote_notional():
     ledger.close()
 
 
-
 class FakeKernelDecision:
     fusion_min_confidence = 0.6
 
     async def request_decision(self, context):
         assert context.symbol == "BTCUSDT"
         assert context.context["market_type"] == "spot"
-        assert context.context["futures_spot_lead_lag_shadow"]["decision_impact"] is False
+        assert (
+            context.context["futures_spot_lead_lag_shadow"]["decision_impact"] is False
+        )
         return SimpleNamespace(direction="long", confidence=0.85)
 
 
