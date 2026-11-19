@@ -180,3 +180,14 @@ def test_spot_order_intent_rejects_client_id_collision():
             side="BUY", order_type="MARKET",
             quote_order_quantity=Decimal("25"),
         )
+
+
+
+def test_spot_signed_requests_apply_server_clock_offset(monkeypatch):
+    adapter = BinanceSpotAdapter(api_key="spot-key", api_secret="spot-secret")
+    monkeypatch.setattr("aitos.spot.binance.time.time", lambda: 1000.0)
+    adapter._server_time_offset_ms = 2500
+    signed = adapter._signed_params({"symbol": "BTCUSDT"})
+    assert signed["timestamp"] == 1002500
+    assert len(signed["signature"]) == 64
+    assert adapter.rate_limit_snapshot["capacity"] == 1200
