@@ -64,6 +64,7 @@ def test_bridge_preserves_identity_timing_and_provenance(instrument):
     assert domain.venue == "binance"
     assert domain.market_type == "usd_m_futures"
     assert domain.source_event_type == "trade"
+    assert domain.source_instrument_id == "BTCUSDT"
     assert domain.stage_timestamps == {"decode": 1.0, "normalize": 2.0}
     assert domain.payload == source.payload
     assert domain.payload is not source.payload
