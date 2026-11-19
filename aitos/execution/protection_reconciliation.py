@@ -314,7 +314,8 @@ async def audit_exchange_protection_inventory(
             "ambiguous_submissions": [],
             "next_steps": [
                 "No protective intents or open conditional orders were returned.",
-                "Account positions and terminal order history remain separate evidence.",
+                "Account positions and terminal order history remain separate "
+                "evidence.",
             ],
         }
 
