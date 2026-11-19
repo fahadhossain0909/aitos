@@ -20,7 +20,7 @@ class SpotPortfolioSnapshot:
     spot_quote_cash: Decimal
     managed_inventory_market_value: Decimal
     managed_inventory_cost_basis: Decimal
-    spot_wallet_other_assets_value: Decimal
+    spot_wallet_non_quote_asset_value: Decimal
     total_equity_quote: Decimal
     pending_third_asset_fee_conversions: int
     marks_missing: tuple[str, ...]
@@ -67,6 +67,7 @@ class SpotPortfolioValuator:
         inventory_cost = Decimal("0")
         missing: list[str] = []
         managed_base_marks: dict[str, Decimal] = {}
+        asset_marks = {key.upper(): value for key, value in (asset_marks or {}).items()}
         symbols = sorted({str(item["symbol"]) for item in self.inventory.managed_symbols()})
         for symbol in symbols:
             position = self.inventory.get_position(symbol)
@@ -76,7 +77,7 @@ class SpotPortfolioValuator:
                 raise ValueError(
                     f"{symbol} uses {position.quote_asset}; FX conversion is not configured"
                 )
-            mark = marks.get(symbol)
+            mark = marks.get(symbol) or asset_marks.get(position.base_asset)
             if mark is None or mark <= 0:
                 missing.append(symbol)
                 continue
@@ -85,7 +86,6 @@ class SpotPortfolioValuator:
             inventory_cost += position.cost_quote
         wallet_value = Decimal("0")
         unpriced: list[str] = []
-        asset_marks = {key.upper(): value for key, value in (asset_marks or {}).items()}
         for balance in wallet:
             if balance.asset == self.quote_asset or balance.total == 0:
                 continue
