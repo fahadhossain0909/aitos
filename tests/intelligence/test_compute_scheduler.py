@@ -54,11 +54,18 @@ def test_replaceable_tasks_coalesce_but_canonical_work_cannot():
 def test_lower_priority_cannot_replace_urgent_coalesced_task():
     scheduler = ComputeAwareScheduler()
     scheduler.submit(
-        task("urgent", TaskPriority.POSITION_SAFETY, key="position:1", replaceable=True),
+        task(
+            "urgent", TaskPriority.POSITION_SAFETY, key="position:1", replaceable=True
+        ),
         now=1,
     )
     accepted = scheduler.submit(
-        task("background", TaskPriority.BACKGROUND_RESEARCH, key="position:1", replaceable=True),
+        task(
+            "background",
+            TaskPriority.BACKGROUND_RESEARCH,
+            key="position:1",
+            replaceable=True,
+        ),
         now=2,
     )
     assert not accepted
@@ -68,7 +75,12 @@ def test_lower_priority_cannot_replace_urgent_coalesced_task():
 def test_bounded_queue_evicts_only_replaceable_lower_priority_work():
     scheduler = ComputeAwareScheduler(max_pending=1)
     scheduler.submit(
-        task("research", TaskPriority.BACKGROUND_RESEARCH, key="research:1", replaceable=True),
+        task(
+            "research",
+            TaskPriority.BACKGROUND_RESEARCH,
+            key="research:1",
+            replaceable=True,
+        ),
         now=1,
     )
     assert scheduler.submit(task("position", TaskPriority.POSITION_SAFETY), now=2)
@@ -95,7 +107,9 @@ def test_drain_respects_compute_budget_and_task_limit():
 
 def test_validation_rejects_invalid_reserves_and_unsafe_coalescing():
     try:
-        ComputeAwareScheduler(capacity_units=4, position_reserve_units=3, market_reserve_units=2)
+        ComputeAwareScheduler(
+            capacity_units=4, position_reserve_units=3, market_reserve_units=2
+        )
     except ValueError:
         pass
     else:
@@ -110,9 +124,7 @@ def test_validation_rejects_invalid_reserves_and_unsafe_coalescing():
 
 def test_aged_background_work_can_compete_with_candidates():
     scheduler = ComputeAwareScheduler(capacity_units=1, aging_seconds=10)
-    scheduler.submit(
-        task("research", TaskPriority.BACKGROUND_RESEARCH, at=0), now=0
-    )
+    scheduler.submit(task("research", TaskPriority.BACKGROUND_RESEARCH, at=0), now=0)
     scheduler.submit(
         task("candidate", TaskPriority.CANDIDATE_ANALYSIS, at=100), now=100
     )
