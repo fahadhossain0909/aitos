@@ -456,6 +456,7 @@ async def audit_exchange_protection_inventory(
     report["safe_to_resume"] = False
     return report
 
+
 async def require_live_account_exposure_reconciled(
     executor: Any,
     intent_store: Any,
