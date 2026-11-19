@@ -19,6 +19,7 @@ from aitos.spot.coordinator import SpotTradingCoordinator
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
+from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotOpportunityScanner
 from aitos.spot.websocket import BinanceSpotWebSocket
@@ -31,11 +32,13 @@ class SpotRuntime:
     inventory: InventoryLedger
     scanner: SpotOpportunityScanner
     coordinator: SpotTradingCoordinator
+    market_consumer: SpotMarketDataConsumer
     quote_asset: str = "USDT"
     max_symbols: int = 20
     min_quote_volume: Decimal = Decimal("100000")
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
+    quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
 
     async def eligible_instruments(self):
         """Return the highest-turnover supported Spot symbols for this runtime."""
@@ -113,6 +116,16 @@ class SpotRuntime:
     def unresolved_order_intents(self):
         return self.inventory.unresolved_order_intents()
 
+    def scan_candidates(self):
+        """Return current Spot pre-filter rankings from fresh live market state."""
+        return self.market_consumer.rank_candidates(self.quote_volumes_24h)
+
+    def market_data_health(self) -> dict[str, object]:
+        return {
+            "tasks": self.market_data_task_status(),
+            "features": self.market_consumer.health(),
+        }
+
     async def start_market_data(self, market_bus) -> list[asyncio.Task]:
         """Start bounded Spot subscriptions explicitly; never auto-start on import."""
         if self._market_tasks:
@@ -121,6 +134,10 @@ class SpotRuntime:
         symbols = [item.symbol for item in instruments]
         if not symbols:
             raise RuntimeError("no eligible liquid Spot instruments were discovered")
+        self.quote_volumes_24h = dict(
+            self.market_data.rest.universe_quote_volumes
+        )
+        await self.market_consumer.start(market_bus)
         book_symbols = symbols[:5]
         kline_symbols = symbols[:5]
         self._market_tasks = [
@@ -150,6 +167,7 @@ class SpotRuntime:
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await self.market_consumer.stop()
 
     def market_data_task_status(self) -> dict[str, str]:
         return {
@@ -249,12 +267,17 @@ def build_spot_runtime(
         fee_bps=policy.fee_bps,
         slippage_bps=policy.slippage_bps,
     )
+    market_consumer = SpotMarketDataConsumer(
+        scanner,
+        max_symbols=policy.max_symbols,
+    )
     return SpotRuntime(
         market_data,
         executor,
         inventory,
         scanner,
         coordinator,
+        market_consumer,
         quote_asset=policy.quote_asset.upper(),
         max_symbols=policy.max_symbols,
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
