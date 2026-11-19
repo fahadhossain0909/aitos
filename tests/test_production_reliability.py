@@ -192,12 +192,14 @@ async def test_startup_detects_unlinked_accepted_zero_fill_order():
                     [
                         (
                             "aitos-entry-trade-orphan",
-                            [(
-                                "BTCUSDT",
-                                "ACKNOWLEDGED",
-                                "{}",
-                                '{"filled_quantity": 0}',
-                            )],
+                            [
+                                (
+                                    "BTCUSDT",
+                                    "ACKNOWLEDGED",
+                                    "{}",
+                                    '{"filled_quantity": 0}',
+                                )
+                            ],
                         )
                     ]
                 )
@@ -401,25 +403,30 @@ def test_adaptive_exit_observation_counter_survives_trade_recovery():
 async def test_order_record_rejects_conflicting_latest_timestamp_versions():
     class QueryResult:
         result_rows = [
-            ([
-                (
-                    "BTCUSDT",
-                    "SUBMITTING",
-                    '{"symbol":"BTCUSDT"}',
-                    "",
-                ),
-                (
-                    "BTCUSDT",
-                    "ACKNOWLEDGED",
-                    '{"symbol":"BTCUSDT"}',
-                    '{"order_id":"x"}',
-                ),
-            ],)
+            (
+                [
+                    (
+                        "BTCUSDT",
+                        "SUBMITTING",
+                        '{"symbol":"BTCUSDT"}',
+                        "",
+                    ),
+                    (
+                        "BTCUSDT",
+                        "ACKNOWLEDGED",
+                        '{"symbol":"BTCUSDT"}',
+                        '{"order_id":"x"}',
+                    ),
+                ],
+            )
         ]
 
     class ClickHouseClient:
         async def query(self, query, parameters=None):
-            assert "groupUniqArray(tuple(symbol, state, request_json, result_json))" in query
+            assert (
+                "groupUniqArray(tuple(symbol, state, request_json, result_json))"
+                in query
+            )
             assert "any(state)" not in query
             return QueryResult()
 
