@@ -310,3 +310,54 @@ def test_adaptive_compute_pressure_policy_is_validated():
         pass
     else:
         raise AssertionError("negative recovery hold must be rejected")
+
+
+
+def test_adaptive_compute_runtime_factory_is_disabled_by_default():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.config.tuning import TuningSettings
+
+    assert create_adaptive_compute_runtime(TuningSettings()) is None
+
+
+def test_adaptive_compute_runtime_respects_detected_and_configured_caps():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.config.tuning import TuningSettings
+
+    settings = TuningSettings(
+        runtime={"adaptive_compute_enabled": True},
+        hardware={
+            "cpu_worker_budget": 2,
+            "memory_budget_mb": 1024,
+            "memory_reserve_pct": 25,
+            "max_background_tasks": 1,
+        },
+    )
+    runtime = create_adaptive_compute_runtime(
+        settings,
+        resources=ResourceSnapshot(8, 8.0, 16384, 8192, 4096, False, True),
+    )
+    assert runtime is not None
+    assert runtime.budget.cpu_workers == 2
+    assert runtime.resources.memory_limit_mb == 1024
+    assert runtime.budget.memory_budget_mb == 768
+    assert runtime.budget.background_task_limit == 1
+
+
+def test_adaptive_compute_runtime_factory_fails_closed_for_live_mode():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.config.tuning import TuningSettings
+
+    settings = TuningSettings.model_construct(
+        mode="live",
+        runtime=TuningSettings().runtime.model_copy(
+            update={"adaptive_compute_enabled": True}
+        ),
+        hardware=TuningSettings().hardware,
+    )
+    try:
+        create_adaptive_compute_runtime(settings)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("live adaptive compute must fail closed")
