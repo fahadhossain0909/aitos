@@ -154,8 +154,12 @@ class SpotRuntime:
     def market_data_task_status(self) -> dict[str, str]:
         return {
             task.get_name(): (
-                "failed" if task.done() and task.exception() is not None
-                else "stopped" if task.done()
+                "cancelled"
+                if task.cancelled()
+                else "failed"
+                if task.done() and task.exception() is not None
+                else "stopped"
+                if task.done()
                 else "running"
             )
             for task in self._market_tasks
