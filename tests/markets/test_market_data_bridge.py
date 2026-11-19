@@ -125,3 +125,17 @@ def test_bridge_requires_explicit_resolved_instrument():
         market_data_event_to_domain(
             event(), Instrument("BTCUSDT", AssetClass.CRYPTO, "binance")
         )
+
+def test_instrument_identity_separates_spot_and_futures_markets():
+    spot = Instrument(
+        "BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot"
+    )
+    futures = Instrument(
+        "BTCUSDT", AssetClass.CRYPTO, "binance", market_type="usd_m_futures"
+    )
+    legacy = Instrument("BTCUSDT", AssetClass.CRYPTO, "binance")
+
+    assert spot.id != futures.id
+    assert legacy.id == "binance:crypto:BTCUSDT"
+    assert spot.id == "binance:crypto:spot:BTCUSDT"
+    assert futures.id == "binance:crypto:usd_m_futures:BTCUSDT"
