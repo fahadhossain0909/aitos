@@ -95,7 +95,10 @@ already represented by the supplied open-position risk snapshot are projected
 into that snapshot as risk percentages. The reservation side is unknown, so
 existing conservative unknown-correlation treatment applies and no hedge
 credit is granted. Symbols already present in the live-position snapshot are
-not counted twice.
+not counted twice. The policy is re-evaluated inside the SQLite
+`BEGIN IMMEDIATE` reservation transaction before insert, so two durable workers
+cannot both approve a correlated risk projection from the same stale snapshot.
+The in-memory ledger serializes the same callback under its process-local lock.
 
 The existing atomic SQLite reservation ledger remains the capital-budget
 authority. This is an additive conservative projection; it does not create a
@@ -113,7 +116,8 @@ Added tests cover:
   invalid price and instrument-count bounds;
 - nested immutable mappings/lists, JSON serialization and dataclass
   `asdict` compatibility for both event contracts and global state;
-- pending reservation inclusion with conservative unknown side metadata.
+- pending reservation inclusion with conservative unknown side metadata;
+- SQLite reservation-policy serialization across independent ledger instances.
 
 CI must pass on the final commit before this tranche is marked verified.
 No paper soak, production resolver integration, durable replay guarantee,
