@@ -258,10 +258,14 @@ class CapitalGateway:
                 raise ValueError("required reservation symbols must be unique")
             values = (item.capital_usd, item.risk_budget_usd)
             if any(not isfinite(float(value)) or float(value) < 0 for value in values):
-                raise ValueError("required reservation values must be finite and non-negative")
+                raise ValueError(
+                    "required reservation values must be finite and non-negative"
+                )
             actual = self.reservation.get(symbol)
             if actual is None:
-                raise RuntimeError(f"confirmed exposure has no owned reservation: {symbol}")
+                raise RuntimeError(
+                    f"confirmed exposure has no owned reservation: {symbol}"
+                )
             if (
                 actual.capital_usd + 1e-8 < item.capital_usd
                 or actual.risk_budget_usd + 1e-8 < item.risk_budget_usd
