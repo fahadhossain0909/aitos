@@ -37,6 +37,8 @@ class SpotTradingCoordinator:
                            request: SpotOrderRequest) -> SpotOrder:
         if opportunity.side is not TradeSide.LONG:
             raise SpotAuthorizationRejected("Spot entry is long-only; short exposure is unsupported")
+        if request.symbol != opportunity.symbol.upper():
+            raise SpotAuthorizationRejected("Spot order symbol must match the authorized opportunity")
         if request.side is not SpotOrderSide.BUY or request.order_type is not SpotOrderType.MARKET:
             raise SpotAuthorizationRejected("Spot entry requires a market BUY")
         if request.quote_order_quantity is None:
@@ -82,6 +84,11 @@ class SpotTradingCoordinator:
             )
         if quantity <= 0:
             raise SpotAuthorizationRejected("exit quantity must be positive")
+        if any(
+            item["symbol"] == symbol.upper()
+            for item in self.inventory.unresolved_order_intents()
+        ):
+            raise SpotAuthorizationRejected("unresolved Spot order exists for this symbol")
         position = self.inventory.get_position(symbol)
         if position is None or position.quantity < quantity:
             raise SpotAuthorizationRejected(
@@ -117,5 +124,10 @@ class SpotTradingCoordinator:
         key = InstrumentKey(Venue.BINANCE, MarketType.SPOT, symbol)
         position = self.inventory.get_position(symbol)
         if position is not None and position.quantity > 0:
+            return False
+        if any(
+            item["symbol"] == symbol.upper()
+            for item in self.inventory.unresolved_order_intents()
+        ):
             return False
         return self.capital_gateway.release(key.value) is not None
