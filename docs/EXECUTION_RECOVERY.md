@@ -108,6 +108,13 @@ state first. There is deliberately no automatic reset/"mark safe" CLI.
 
 ## Capital and persistence
 
+Live portfolio equity now comes from authenticated Binance account information
+/fapi/v3/account 's `totalMarginBalance` field, which includes unrealized
+PnL. The separate `get_account_balance()` contract continues to expose
+`availableBalance` for spendable-margin callers; it is not used as portfolio
+equity or as the drawdown denominator. Missing, non-finite or negative total
+margin equity fails closed instead of silently substituting available margin.
+
 Live capital has a separate `capital_live_<scope>.sqlite3` ledger, stable owner
 identity and pinned submitted/open exposure. Paper authorization lease behavior is
 preserved. A timer or process crash does not make uncertain live capital spendable.
