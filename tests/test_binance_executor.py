@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import re
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -13,6 +14,55 @@ from aitos.execution.binance_executor import (
     round_step,
 )
 from aitos.models.trade import TradeSide
+
+
+@pytest.mark.asyncio
+async def test_account_equity_uses_total_margin_balance_not_available_margin():
+    executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
+    executor._signed_request = AsyncMock(
+        return_value={
+            "totalMarginBalance": "1250.75",
+            "availableBalance": "240.25",
+            "totalUnrealizedProfit": "50.75",
+        }
+    )
+
+    equity = await executor.get_account_equity()
+
+    assert equity == 1250.75
+    executor._signed_request.assert_awaited_once_with(
+        "GET", "/fapi/v3/account", {}
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"totalMarginBalance": "NaN"},
+        {"totalMarginBalance": "Infinity"},
+        {"totalMarginBalance": "-1"},
+        {"totalMarginBalance": True},
+    ],
+)
+@pytest.mark.asyncio
+async def test_account_equity_rejects_missing_or_invalid_margin_balance(response):
+    executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
+    executor._signed_request = AsyncMock(return_value=response)
+
+    with pytest.raises(ValueError, match="equity"):
+        await executor.get_account_equity()
+
+
+@pytest.mark.asyncio
+async def test_account_equity_rejects_non_usdt_unit():
+    executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
+    executor._signed_request = AsyncMock()
+
+    with pytest.raises(ValueError, match="denominated in USDT"):
+        await executor.get_account_equity("BTC")
+
+    executor._signed_request.assert_not_awaited()
 
 
 def test_round_step_truncates_to_precision():
