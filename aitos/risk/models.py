@@ -101,11 +101,15 @@ class PendingOrderExposure:
     leverage: float = 1.0
 
     def __post_init__(self) -> None:
-        if not self.order_id or not self.symbol:
+        order_id = str(self.order_id).strip()
+        symbol = str(self.symbol).strip().upper()
+        if not order_id or not symbol:
             raise ValueError("pending order identity and symbol are required")
-        normalized_side = str(self.side).upper()
+        normalized_side = str(self.side).strip().upper()
         if normalized_side not in {"LONG", "SHORT"}:
             raise ValueError("pending order side must be LONG or SHORT")
+        object.__setattr__(self, "order_id", order_id)
+        object.__setattr__(self, "symbol", symbol)
         object.__setattr__(self, "side", normalized_side)
         for name in ("remaining_notional_usd", "risk_amount_usd"):
             value = float(getattr(self, name))
