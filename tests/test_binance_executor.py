@@ -16,7 +16,6 @@ from aitos.execution.binance_executor import (
 from aitos.models.trade import TradeSide
 
 
-
 @pytest.mark.asyncio
 async def test_account_equity_uses_total_margin_balance_not_available_margin():
     executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
@@ -31,10 +30,7 @@ async def test_account_equity_uses_total_margin_balance_not_available_margin():
     equity = await executor.get_account_equity()
 
     assert equity == 1250.75
-    executor._signed_request.assert_awaited_once_with(
-        "GET", "/fapi/v3/account", {}
-    )
-
+    executor._signed_request.assert_awaited_once_with("GET", "/fapi/v3/account", {})
 
 
 @pytest.mark.parametrize(
@@ -56,7 +52,6 @@ async def test_account_equity_rejects_missing_or_invalid_margin_balance(response
         await executor.get_account_equity()
 
 
-
 @pytest.mark.asyncio
 async def test_account_equity_rejects_non_usdt_unit():
     executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
@@ -68,18 +63,15 @@ async def test_account_equity_rejects_non_usdt_unit():
     executor._signed_request.assert_not_awaited()
 
 
-
 def test_round_step_truncates_to_precision():
     assert round_step(1.23456, 2) == 1.23
     assert round_step(1.999, 0) == 1.0
     assert round_step(0.001234, 3) == 0.001
 
 
-
 def test_defaults_to_testnet_for_safety():
     executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
     assert executor._base_url == TESTNET_URL
-
 
 
 def test_explicit_mainnet_opt_in():
@@ -89,11 +81,9 @@ def test_explicit_mainnet_opt_in():
     assert executor._base_url == MAINNET_URL
 
 
-
 def test_missing_credentials_raises():
     with pytest.raises(ValueError):
         BinanceFuturesOrderExecutor(api_key="", api_secret="")
-
 
 
 @pytest.mark.asyncio
@@ -134,7 +124,6 @@ async def test_submit_order_signs_request_correctly():
     await executor.close()
 
 
-
 def test_sign_produces_correct_hmac_sha256_signature():
     executor = BinanceFuturesOrderExecutor(api_key="test-key", api_secret="test-secret")
     params = {"symbol": "BTCUSDT", "side": "BUY", "timestamp": 1234567890}
@@ -147,7 +136,6 @@ def test_sign_produces_correct_hmac_sha256_signature():
     ).hexdigest()
     assert signature == expected_signature
     assert query_string == "symbol=BTCUSDT&side=BUY&timestamp=1234567890"
-
 
 
 @pytest.mark.asyncio
@@ -180,7 +168,6 @@ async def test_submit_order_maps_long_to_buy_and_short_to_sell():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_submit_order_returns_failure_result_on_api_error():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -201,13 +188,11 @@ async def test_submit_order_returns_failure_result_on_api_error():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_submit_order_before_connect_raises():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
     with pytest.raises(RuntimeError):
         await executor.submit_order(_order_request())
-
 
 
 @pytest.mark.asyncio
@@ -253,7 +238,6 @@ async def test_submit_order_applies_symbol_filter_quantity_rounding():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_submit_order_rejects_below_min_notional_without_hitting_api():
     from aitos.exchange.symbol_filters import SymbolFilters
@@ -286,7 +270,6 @@ async def test_submit_order_rejects_below_min_notional_without_hitting_api():
     )
 
     await executor.close()
-
 
 
 @pytest.mark.asyncio
@@ -332,7 +315,6 @@ async def test_load_symbol_filters_updates_precision_after_construction():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_get_order_status_and_cancel_order():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -357,7 +339,6 @@ async def test_get_order_status_and_cancel_order():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_set_leverage():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -372,7 +353,6 @@ async def test_set_leverage():
     assert result["leverage"] == 10
 
     await executor.close()
-
 
 
 @pytest.mark.asyncio
@@ -408,7 +388,6 @@ async def test_place_stop_loss_order_uses_reduce_only_and_opposite_side():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_place_take_profit_order_for_short_uses_buy_side():
     executor = BinanceFuturesOrderExecutor(
@@ -439,7 +418,6 @@ async def test_place_take_profit_order_for_short_uses_buy_side():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_place_stop_loss_order_returns_failure_on_api_error():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -459,7 +437,6 @@ async def test_place_stop_loss_order_returns_failure_on_api_error():
     assert "-2021" in result.error
 
     await executor.close()
-
 
 
 @pytest.mark.asyncio
@@ -482,7 +459,6 @@ async def test_cancel_resting_order_verifies_terminal_state_after_unknown_order(
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_get_resting_order_status_returns_status_string():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -497,7 +473,6 @@ async def test_get_resting_order_status_returns_status_string():
 
     assert status == "FILLED"
     await executor.close()
-
 
 
 @pytest.mark.asyncio
@@ -534,7 +509,6 @@ async def test_hedge_mode_open_long_sends_buy_and_position_side_long():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_hedge_mode_open_short_sends_sell_and_position_side_short():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s", hedge_mode=True)
@@ -565,7 +539,6 @@ async def test_hedge_mode_open_short_sends_sell_and_position_side_short():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_hedge_mode_closing_long_sends_sell_but_keeps_position_side_long():
     """Closing a LONG in hedge mode is a SELL order, but positionSide stays
@@ -594,7 +567,6 @@ async def test_hedge_mode_closing_long_sends_sell_but_keeps_position_side_long()
     assert "reduceOnly" not in query
 
     await executor.close()
-
 
 
 @pytest.mark.asyncio
@@ -628,7 +600,6 @@ async def test_one_way_mode_still_sends_reduce_only_and_no_position_side():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_get_position_mode_reflects_account_setting():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -645,7 +616,6 @@ async def test_get_position_mode_reflects_account_setting():
 
     assert is_hedge is True
     await executor.close()
-
 
 
 @pytest.mark.asyncio
@@ -676,7 +646,6 @@ async def test_set_position_mode_updates_account_and_local_flag():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_get_account_balance_returns_matching_asset():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -696,7 +665,6 @@ async def test_get_account_balance_returns_matching_asset():
     await executor.close()
 
 
-
 @pytest.mark.asyncio
 async def test_get_account_balance_returns_zero_for_missing_asset():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
@@ -713,14 +681,12 @@ async def test_get_account_balance_returns_zero_for_missing_asset():
     await executor.close()
 
 
-
 def _order_request(side=TradeSide.LONG, quantity=1.0):
     from aitos.execution.order_executor import OrderRequest
 
     return OrderRequest(
         symbol="BTCUSDT", side=side, quantity=quantity, reference_price=100.0
     )
-
 
 
 @pytest.mark.asyncio
@@ -762,7 +728,6 @@ async def test_new_order_is_accepted_without_falsely_reporting_a_full_fill():
     assert result.filled_quantity == 0.0
     assert "not filled" in result.error
     await executor.close()
-
 
 
 @pytest.mark.asyncio
