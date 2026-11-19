@@ -70,3 +70,117 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - Startup replay is disabled by default. Set AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START=true only after reviewing pending pages; the replay batch is bounded by AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT (1–1000).
 - The decision ledger also aggregates realized executed-trade net returns, win rate, fees and funding by the event/narrative/source IDs attached to accepted ENTRY decisions. The report is surfaced in the existing scanner decision-ledger health snapshot and remains observational, not causal.
 - The worker writes append-only per-source run records to ClickHouse (180-day retention), including success/failure/lease contention, event counts, cursor boundaries, fencing generation and latency. The internal /sources endpoint exposes bounded 24-hour aggregates for operational inspection.
+
+
+## Probability calibration diagnostics
+
+- `aitos.world_intelligence.calibration` adds fixed-width reliability bins, Brier score, clipped log-loss, expected/max calibration error and Wilson 95% intervals for observed event frequencies.
+- Every observation carries an immutable ID, asset, horizon, regime, prediction timestamp and outcome-availability timestamp. Evaluation excludes outcomes not available at the requested `as_of` time and rejects duplicate IDs.
+- `calibration_cohorts` keeps asset/horizon/regime cohorts separate so strong performance in one market cannot hide poor calibration in another.
+- These are evaluation-only diagnostics. They do not fit probabilities, change thresholds, activate a strategy, or promote a model. Production acceptance still requires representative point-in-time historical labels and chronological OOS evidence.
+
+
+## Offline event-impact probability model
+
+- `aitos.world_intelligence.impact_model` adds a dependency-free, regularized logistic baseline for event-direction research, with numeric event evidence and event-type one-hot features.
+- Training is scoped to one asset/horizon/regime cohort and filters by both event time and outcome-availability time at the supplied `as_of` cutoff. Duplicate event IDs, insufficient matured history, and single-class cohorts fail closed.
+- The model stores its training cutoff and cohort identity. Prediction rejects cross-asset, cross-horizon, or cross-regime feature rows.
+- This is an offline research baseline, not a production return forecast. It has no scanner, strategy, risk, model-promotion, or order-execution integration. A real historical point-in-time dataset, chronological purged OOS evaluation, calibration, ablation, and cost-aware replay remain required before any canary.
+
+- `evaluate_event_impact_model` reports Brier score, log-loss, directional accuracy and sample exclusions only for events strictly later than the model training cutoff whose labels have matured by evaluation time. This is a guardrail, not a replacement for rolling-origin walk-forward, benchmark comparison, confidence intervals, or venue-cost replay.
+
+
+## Purged event-impact walk-forward validation
+
+- `aitos.world_intelligence.walk_forward.evaluate_event_impact_walk_forward` refits a fresh event-impact model for each expanding chronological fold.
+- Training rows are restricted to the requested asset/horizon/regime, events strictly before the fold cutoff, and labels available by test-start minus the configured embargo.
+- Test outcomes are counted only when their labels are mature by the evaluation cutoff. Event types absent from a fold's training cohort are excluded and counted explicitly instead of being silently coerced into an unknown feature.
+- The report preserves fold-level training/test counts, time boundaries, skipped insufficient-history folds, unseen event-type exclusions and not-yet-mature outcome exclusions.
+- This remains an offline research utility. It does not activate Scanner intelligence, change strategy/risk policy, place orders, or promote a model. Results still require representative point-in-time data, baseline comparison, calibration, confidence analysis and execution-cost-aware replay.
+
+
+## Point-in-time event dataset and realized labels
+
+- `aitos.world_intelligence.point_in_time` introduces immutable event-revision and market-bar-revision records with timezone-aware publication, first-known and data-availability timestamps.
+- Historical event features are frozen to the first revision AITOS knew; later article edits/corrections do not rewrite the original decision-time feature vector.
+- Market bars use their first observed revision for outcome construction, avoiding hindsight from later backfills or corrected candles.
+- Forward labels are generated per asset and requested horizon from the first eligible bar open after the event became known to AITOS through the first bar close at or beyond the target horizon.
+- A label is emitted only when both selected market-data observations were available by the requested evaluation cutoff. Missing bars, future events, late bars and immature outcomes are explicitly counted.
+- This is a deterministic dataset/labeling core, not a provider ingestion job or a ClickHouse migration. A production adapter still needs to persist raw provider payloads, revision IDs, source provenance and bar availability timestamps before this pipeline can be populated with real historical data.
+
+
+### Durable point-in-time revision storage
+
+`ClickHousePointInTimeStore` persists immutable event revisions and market-bar revisions in separate
+`ReplacingMergeTree` tables keyed by stable revision identity. The store records
+`ingested_at` separately from provider `known_at` / `available_at`, allowing
+historical reconstruction to exclude revisions that AITOS had not ingested at
+the requested cutoff. Batch replay is safe for the same revision identity;
+callers should retain provider/source provenance in the revision identifiers
+and upstream ingestion records.
+
+The store exposes explicit append and bounded point-in-time load operations.
+It does not silently fetch third-party history, infer missing bars, or mutate
+live scanner/strategy decisions. Historical provider pagination, venue-specific
+bar normalization, and production retention/backfill orchestration remain
+separate operational integrations.
+
+
+### Historical provider ingestion and source provenance
+
+- `HistoricalIngestionStore` persists bounded raw/normalized source payloads,
+  SHA-256 content hashes, source identity/type, safe canonical URI, published
+  time, first-known time, metadata and durable source cursors.
+- `NormalizedProviderHistoryAdapter` bridges the existing GDELT/SEC/FRED/RSS
+  normalized provider contract to point-in-time event revisions and an injected
+  historical market-bar provider. The canonical event JSON is stored as the
+  normalized payload; adapters that can expose original wire bytes should
+  implement `HistoricalProvider` directly.
+- Page order is provenance -> event revisions -> bar revisions -> cursor.
+  A crash before the cursor write replays the page. Revision IDs and content
+  hashes make the replay auditable; ingestion remains at-least-once.
+
+### Cross-asset propagation and lead/lag validation
+
+`validate_event_propagation` estimates source/target return correlation,
+target event-window response and lag distribution by asset pair and regime.
+It reports deterministic bootstrap confidence intervals and refuses duplicate
+event/pair observations. Positive lag means the source response precedes the
+target response. Correlation is descriptive, not causal proof; common-factor
+controls and event de-duplication remain necessary before strategy use.
+
+### Venue-aware execution replay
+
+`replay_execution` consumes timestamped L2 snapshots after configured order
+latency, models visible-depth partial fills, taker/maker fee schedules,
+queue-adjusted maker fill evidence, square-root participation impact and
+funding only while a filled position is open. Unfilled quantity is explicit.
+It does not invent hidden liquidity or exchange queue priority; maker fillable
+volume must come from historical trade/queue reconstruction. Venue tick/lot
+rounding, liquidation and exact exchange funding calendars remain adapter
+responsibilities.
+
+### Confidence intervals and regime-wise OOS benchmark evaluation
+
+`evaluate_regime_oos` requires every evaluation event to occur strictly after
+the training cutoff and includes only labels matured by the evaluation cutoff.
+It compares candidate and benchmark Brier loss using paired bootstrap
+confidence intervals, reports directional accuracy with Wilson intervals,
+and keeps regimes separate. Cohorts below the configured minimum are omitted,
+not silently pooled.
+
+### Drift and champion/challenger governance
+
+`EventImpactModelGovernance` connects event-impact candidates to the existing
+SQLite-backed `StatisticalModelRegistry` and `StatisticalGovernanceRuntime`.
+Feature drift or unavailable drift data blocks promotion. Registration stores
+artifact references and hashes, not executable model code. Promotion requires
+statistical/OOS evidence and explicit operator approval on both the evidence
+and the promotion call. Rollback also requires explicit operator approval.
+This facade does not load artifacts, switch live strategies or place orders.
+
+The bounded `HistoricalIngestionStore.backfill` runner follows provider cursors to exhaustion, rejects non-advancing cursors, and fails rather than claiming completeness when its page budget is reached.
+
+The research validation reports must be reviewed by asset, horizon and regime; aggregate metrics alone are not sufficient for model selection or deployment approval.
+
+Historical source checkpoints carry monotonic fencing tokens; stale ingestion workers cannot supersede a checkpoint written by a newer lease holder.
