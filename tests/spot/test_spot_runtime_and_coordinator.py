@@ -37,11 +37,13 @@ class FakeCapitalGateway:
     def __init__(self):
         self.symbol = None
         self.kwargs = None
+        self.opportunity = None
         self.pinned = []
         self.released = []
 
     def authorize_opportunity(self, equity, opportunity, **kwargs):
         self.symbol = opportunity.symbol
+        self.opportunity = opportunity
         self.kwargs = kwargs
         return (
             SimpleNamespace(eligible=True, rejection_reasons=()),
@@ -94,14 +96,18 @@ async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
         SpotOrderType.MARKET,
         quote_order_quantity=Decimal("50"),
     )
+    opportunity = _opportunity()
+    opportunity.agent_consensus = {"leverage": 20.0, "funding_bps": 30.0}
     result = await coordinator.submit_entry(
         equity_quote=1000,
-        opportunity=_opportunity(),
+        opportunity=opportunity,
         request=request,
     )
     assert result.client_order_id.startswith("aitos-")
     assert gateway.symbol == "binance:spot:BTCUSDT"
     assert gateway.kwargs["funding_bps"] == 0.0
+    assert gateway.opportunity.agent_consensus["leverage"] == 1.0
+    assert gateway.opportunity.agent_consensus["funding_bps"] == 0.0
     assert gateway.pinned == ["binance:spot:BTCUSDT"]
 
 
