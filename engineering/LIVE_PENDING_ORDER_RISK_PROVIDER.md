@@ -17,7 +17,7 @@ The tracker passes this evidence through `pending_exposures_from_open_orders`. T
 
 When a provider is configured, every `refresh_equity()` invalidates the previous snapshot before awaiting new evidence. A provider error, missing field, malformed order, stale timestamp, missing mark/stop/leverage, or invalid stop prevents refresh from completing. `build_portfolio_state()` also refuses to build a live risk snapshot until the latest pending-order evidence has been validated.
 
-No provider is configured by default, preserving existing paper and test harness behavior. This is an explicit integration seam, not a claim that a venue adapter has already been wired to the user's authenticated account. A production provider must source a complete authenticated exchange inventory and point-in-time mark/stop/leverage data; partial endpoint responses are not sufficient.
+No provider is configured by default, preserving existing paper and test harness behavior. This is an explicit integration seam, not a claim that a venue adapter has already been wired to the authenticated account. The live entrypoint separately calls `require_live_account_exposure_reconciled()` before every fresh-exposure scan; any ordinary pending entry order without a validated stop-risk projection blocks the next scan. That strict gate remains active until a provider can join each pending entry to its own durable thesis-stop provenance. Do not borrow a stop from another trade or infer one from symbol/side alone. A production provider must source a complete authenticated exchange inventory and point-in-time mark/stop/leverage data; partial endpoint responses are not sufficient.
 
 ## Verification
 
