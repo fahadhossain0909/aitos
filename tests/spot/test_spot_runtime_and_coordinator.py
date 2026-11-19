@@ -449,3 +449,72 @@ def test_spot_runtime_updates_shared_capital_and_portfolio_fx_rate():
     with pytest.raises(ValueError, match="positive and finite"):
         runtime.update_quote_to_usd_rate(Decimal("0"))
     inventory.close()
+
+
+
+@pytest.mark.asyncio
+async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
+    gateway = FakeCapitalGateway()
+    inventory = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
+        inventory=inventory,
+    )
+    btc = SpotCandidate(
+        symbol="BTCUSDT",
+        quote_volume=Decimal("100000"),
+        relative_volume=Decimal("2"),
+        spread_bps=Decimal("2"),
+        volatility_bps=Decimal("100"),
+        momentum_bps=Decimal("50"),
+        order_book_imbalance=Decimal("0.2"),
+        last_price=Decimal("100"),
+    )
+    eth = replace(btc, symbol="ETHUSDT")
+    ranked = [
+        RankedSpotCandidate(btc, Decimal("0.9"), ()),
+        RankedSpotCandidate(eth, Decimal("0.8"), ()),
+    ]
+
+    class MarketConsumer:
+        def rank_candidates(self, quote_volumes):
+            return ranked
+
+    class RotatingKernel:
+        fusion_min_confidence = 0.6
+
+        async def request_decision(self, context):
+            direction = "short" if context.symbol == "BTCUSDT" else "long"
+            return SimpleNamespace(
+                symbol=context.symbol, direction=direction, confidence=0.9
+            )
+
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=SpotOpportunityScanner(),
+        coordinator=coordinator,
+        market_consumer=MarketConsumer(),
+        lead_lag=SimpleNamespace(),
+        quote_volumes_24h={
+            "BTCUSDT": Decimal("100000"),
+            "ETHUSDT": Decimal("100000"),
+        },
+    )
+    result = await runtime.scan_and_submit_candidates(
+        kernel=RotatingKernel(),
+        opportunity_builder=lambda candidate, decision: replace(
+            _opportunity(), symbol=candidate.symbol
+        ),
+        equity_usd=1000,
+        quote_order_quantity_for=lambda candidate: Decimal("50"),
+        max_candidates=2,
+    )
+    assert result.candidates_seen == 2
+    assert result.selected_symbol == "ETHUSDT"
+    assert result.order.status is SpotOrderStatus.NEW
+    assert result.rejected[0][0] == "BTCUSDT"
+    assert gateway.symbol == "binance:spot:ETHUSDT"
+    inventory.close()
