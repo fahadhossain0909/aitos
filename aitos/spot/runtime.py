@@ -25,6 +25,7 @@ from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.lead_lag import FuturesSpotLeadLagAnalyzer
 from aitos.spot.market_state import SpotMarketDataConsumer
+from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotOpportunityScanner
 from aitos.spot.websocket import BinanceSpotWebSocket
@@ -49,6 +50,7 @@ class SpotRuntime:
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     _user_stream: SpotUserDataStreamSupervisor | None = field(default=None, repr=False)
     commission_service: SpotCommissionConversionService | None = field(default=None, repr=False)
+    portfolio_valuator: SpotPortfolioValuator | None = field(default=None, repr=False)
     quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
     _market_stream_health: dict[str, dict[str, object]] = field(
         default_factory=dict, repr=False
@@ -226,6 +228,23 @@ class SpotRuntime:
             keepalive_seconds=keepalive_seconds,
         )
         await self._user_stream.start()
+
+    async def portfolio_snapshot(
+        self,
+        *,
+        futures_account_equity_quote: Decimal,
+        marks: dict[str, Decimal],
+    ) -> SpotPortfolioSnapshot:
+        """Mark managed Spot inventory and Spot quote cash beside Futures equity."""
+        if self.portfolio_valuator is None:
+            self.portfolio_valuator = SpotPortfolioValuator(
+                self.inventory, quote_asset=self.quote_asset
+            )
+        return await self.portfolio_valuator.snapshot(
+            spot_adapter=self.market_data.rest,
+            futures_account_equity_quote=futures_account_equity_quote,
+            marks=marks,
+        )
 
     async def resolve_pending_commissions(self) -> dict[str, int]:
         if self.commission_service is None:
@@ -529,6 +548,9 @@ def build_spot_runtime(
         adapter=rest,
         inventory=inventory,
     )
+    portfolio_valuator = SpotPortfolioValuator(
+        inventory, quote_asset=policy.quote_asset
+    )
     market_consumer = SpotMarketDataConsumer(
         scanner,
         max_symbols=policy.max_symbols,
@@ -547,4 +569,5 @@ def build_spot_runtime(
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
         owns_capital_gateway=owns_capital_gateway,
         commission_service=commission_service,
+        portfolio_valuator=portfolio_valuator,
     )
