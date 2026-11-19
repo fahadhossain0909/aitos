@@ -25,6 +25,17 @@ class SpotRuntime:
     inventory: InventoryLedger
     scanner: SpotOpportunityScanner
     coordinator: SpotTradingCoordinator
+    quote_asset: str = "USDT"
+    max_symbols: int = 20
+    min_quote_volume: Decimal = Decimal("100000")
+
+    async def eligible_instruments(self):
+        """Return the highest-turnover supported Spot symbols for this runtime."""
+        return await self.market_data.rest.discover_universe(
+            quote_asset=self.quote_asset,
+            min_quote_volume=self.min_quote_volume,
+            limit=self.max_symbols,
+        )
 
     async def publish_trades(self, market_bus, symbols: list[str]) -> None:
         async for event in self.market_data.stream_trades(self._bounded(symbols)):
@@ -109,4 +120,9 @@ def build_spot_runtime(
         fee_bps=policy.fee_bps,
         slippage_bps=policy.slippage_bps,
     )
-    return SpotRuntime(market_data, executor, inventory, scanner, coordinator)
+    return SpotRuntime(
+        market_data, executor, inventory, scanner, coordinator,
+        quote_asset=policy.quote_asset.upper(),
+        max_symbols=policy.max_symbols,
+        min_quote_volume=Decimal(str(policy.min_quote_volume)),
+    )
