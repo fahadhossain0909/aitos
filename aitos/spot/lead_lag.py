@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime
+from statistics import NormalDist
 from typing import Any
 
 from aitos.market_data.bus import MarketDataBus
@@ -233,7 +234,9 @@ class FuturesSpotLeadLagAnalyzer:
         else:
             signed_corr, _ = self._lag_correlation(spot_returns, futures_returns, lag)
         assert signed_corr is not None
-        low, high = self._fisher_interval(signed_corr, count)
+        comparisons = 1 + 2 * self.max_lag_buckets
+        critical_z = NormalDist().inv_cdf(1.0 - 0.05 / (2.0 * comparisons))
+        low, high = self._fisher_interval(signed_corr, count, critical_z)
         runner_up = candidates[1][0] if len(candidates) > 1 else 0.0
         if strength < self.min_abs_correlation:
             status, leader_value, lag_value = "no_material_lead", None, None
@@ -296,12 +299,14 @@ class FuturesSpotLeadLagAnalyzer:
         return max(-1.0, min(1.0, covariance / denominator)), len(paired)
 
     @staticmethod
-    def _fisher_interval(correlation: float, count: int) -> tuple[float, float]:
+    def _fisher_interval(
+        correlation: float, count: int, critical_z: float = 1.96
+    ) -> tuple[float, float]:
         if count <= 3:
             return -1.0, 1.0
         clipped = max(-0.999999, min(0.999999, correlation))
         z = math.atanh(clipped)
-        margin = 1.96 / math.sqrt(count - 3)
+        margin = critical_z / math.sqrt(count - 3)
         return math.tanh(z - margin), math.tanh(z + margin)
 
     async def start(self, market_bus: MarketDataBus) -> None:
