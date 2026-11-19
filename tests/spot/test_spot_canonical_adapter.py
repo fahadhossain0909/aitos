@@ -26,6 +26,13 @@ class FakeWebSocket:
     def __init__(self, gap=False):
         self.gap = gap
 
+    async def stream_many(self, streams):
+        for stream in streams:
+            symbol = stream.split("@", 1)[0].upper()
+            channel = stream[len(symbol) :]
+            async for event in self.stream(symbol, channel):
+                yield {"stream": stream, "data": event["data"]}
+
     async def stream(self, symbol, *channels):
         if channels == ("@trade",):
             yield {
