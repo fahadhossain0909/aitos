@@ -15,6 +15,7 @@ class SpotCandidate:
     volatility_bps: Decimal
     momentum_bps: Decimal
     order_book_imbalance: Decimal
+    last_price: Decimal | None = None
     trading_enabled: bool = True
     data_fresh: bool = True
     futures_spot_lead_lag_status: str = "unavailable"
@@ -56,6 +57,11 @@ class SpotCandidate:
                 raise ValueError(
                     "Futures-Spot correlation must be finite and in [-1, 1]"
                 )
+        if self.last_price is not None:
+            price = self.last_price if isinstance(self.last_price, Decimal) else Decimal(str(self.last_price))
+            if not price.is_finite() or price <= 0:
+                raise ValueError("last_price must be positive and finite")
+            object.__setattr__(self, "last_price", price)
         if self.futures_spot_observations < 0:
             raise ValueError("Futures-Spot observations cannot be negative")
 
