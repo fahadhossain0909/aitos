@@ -46,6 +46,7 @@ class BinanceSpotAdapter:
         self._owns_session = session is None
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.filters: dict[str, SpotSymbolFilters] = {}
+        self.universe_quote_volumes: dict[str, Decimal] = {}
         self._rate_limiter = rate_limiter or TokenBucketRateLimiter(
             capacity=1200, refill_per_second=20.0, reserved_capacity=100
         )
@@ -201,7 +202,11 @@ class BinanceSpotAdapter:
                     )
                 )
         candidates.sort(key=lambda item: item[0], reverse=True)
-        return [instrument for _, instrument in candidates[:limit]]
+        selected = candidates[:limit]
+        self.universe_quote_volumes = {
+            instrument.symbol: volume for volume, instrument in selected
+        }
+        return [instrument for _, instrument in selected]
 
     async def klines(
         self, symbol: str, interval: str, limit: int = 500
