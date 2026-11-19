@@ -65,6 +65,7 @@ from aitos.world_intelligence.metrics_server import (
 )
 from aitos.world_intelligence.narratives import NarrativeCluster, cluster_narratives
 from aitos.world_intelligence.pipeline import EnrichmentResult, enrich_event_batch
+from aitos.world_intelligence.point_in_time_storage import ClickHousePointInTimeStore
 from aitos.world_intelligence.point_in_time import (
     EventRevision,
     MarketBarRevision,
@@ -122,6 +123,7 @@ __all__ = [
     "CapitalFlowIntelligenceAdapter",
     "ClickHouseAssetSnapshotProvider",
     "ClickHouseIntelligenceStore",
+    "ClickHousePointInTimeStore",
     "CoordinatedAmplificationCluster",
     "CoordinationEdge",
     "CursorReplayConflict",
