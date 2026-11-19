@@ -30,7 +30,7 @@ class SpotCommissionConversionService:
 
     async def _historical_price(
         self, symbol: str, fill_time_ms: int
-    ) -> Decimal | None:
+    ) -> dict[str, Decimal | int] | None:
         rows = await self.adapter.agg_trades(
             symbol,
             start_time_ms=max(0, fill_time_ms - self.max_price_age_ms),
@@ -46,7 +46,13 @@ class SpotCommissionConversionService:
             return None
         latest = max(eligible, key=lambda row: int(row["T"]))
         price = Decimal(str(latest["p"]))
-        return price if price > 0 else None
+        if price <= 0:
+            return None
+        return {
+            "price": price,
+            "trade_id": int(latest["a"]) if latest.get("a") is not None else -1,
+            "time_ms": int(latest["T"]),
+        }
 
     async def resolve_pending(self) -> dict[str, int]:
         filters = await self.adapter.exchange_info()
@@ -69,22 +75,36 @@ class SpotCommissionConversionService:
                 and direct_filter.status == "TRADING"
                 and direct_filter.is_spot_trading_allowed
             ):
-                price = await self._historical_price(direct, int(fill_time))
-                if price is not None:
+                historical = await self._historical_price(direct, int(fill_time))
+                if historical is not None:
+                    price = historical["price"]
                     conversion = commission * price
+                    conversion_symbol = direct
             elif (
                 inverse_filter is not None
                 and inverse_filter.status == "TRADING"
                 and inverse_filter.is_spot_trading_allowed
             ):
-                price = await self._historical_price(inverse, int(fill_time))
-                if price is not None:
+                historical = await self._historical_price(inverse, int(fill_time))
+                if historical is not None:
+                    price = historical["price"]
                     conversion = commission / price
+                    conversion_symbol = inverse
             if conversion is None or conversion <= 0:
                 skipped += 1
                 continue
             self.inventory.resolve_commission_conversion(
-                str(item["fill_key"]), conversion
+                str(item["fill_key"]),
+                conversion,
+                conversion_symbol=conversion_symbol,
+                conversion_price=price,
+                conversion_trade_id=(
+                    int(historical["trade_id"])
+                    if int(historical["trade_id"]) >= 0
+                    else None
+                ),
+                conversion_time_ms=int(historical["time_ms"]),
+                conversion_source="binance_spot_aggTrades",
             )
             resolved += 1
         return {"resolved": resolved, "pending": skipped}
