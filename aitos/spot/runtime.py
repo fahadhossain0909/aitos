@@ -371,6 +371,14 @@ class SpotRuntime:
         )
         await self._user_stream.start()
 
+    def update_quote_to_usd_rate(self, rate: Decimal) -> None:
+        """Apply a fresh externally sourced USD-per-quote conversion rate."""
+        if not rate.is_finite() or rate <= 0:
+            raise ValueError("quote-to-USD conversion rate must be positive and finite")
+        self.coordinator.quote_to_usd_rate = rate
+        if self.portfolio_valuator is not None:
+            self.portfolio_valuator.quote_to_usd_rate = rate
+
     async def portfolio_snapshot(
         self,
         *,
