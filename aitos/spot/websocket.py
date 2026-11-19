@@ -52,6 +52,29 @@ class BinanceSpotWebSocket:
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.max_backoff_seconds)
 
+    async def user_stream(self, listen_key: str) -> AsyncIterator[dict[str, Any]]:
+        """Yield private account/order events; caller must keep listen key alive."""
+        if not listen_key or "/" in listen_key:
+            raise ValueError("invalid listen key")
+        url = f"{self.base_url}/ws/{listen_key}"
+        delay = 0.5
+        while True:
+            try:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=20,
+                                              open_timeout=10, close_timeout=5) as ws:
+                    delay = 0.5
+                    async for message in ws:
+                        yield json.loads(message)
+                if not self.reconnect:
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not self.reconnect:
+                    raise
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, self.max_backoff_seconds)
+
     async def depth_diffs(self, symbol: str) -> AsyncIterator[dict[str, Any]]:
         """Yield raw depth diffs and fail on malformed/out-of-order sequence.
 
