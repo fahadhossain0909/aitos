@@ -3,6 +3,7 @@
 Spot inventory is sourced only from AITOS-managed fills. Exchange base-asset
 wallet balances are intentionally not adopted as strategy inventory.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,7 +72,9 @@ class SpotPortfolioValuator:
     ) -> SpotPortfolioSnapshot:
         if futures_account_equity_quote < 0:
             raise ValueError("Futures account equity cannot be negative")
-        wallet = list(balances) if balances is not None else await spot_adapter.account()
+        wallet = (
+            list(balances) if balances is not None else await spot_adapter.account()
+        )
         quote_cash = sum(
             (balance.total for balance in wallet if balance.asset == self.quote_asset),
             Decimal("0"),
@@ -81,7 +84,9 @@ class SpotPortfolioValuator:
         missing: list[str] = []
         managed_base_marks: dict[str, Decimal] = {}
         asset_marks = {key.upper(): value for key, value in (asset_marks or {}).items()}
-        symbols = sorted({str(item["symbol"]) for item in self.inventory.managed_symbols()})
+        symbols = sorted(
+            {str(item["symbol"]) for item in self.inventory.managed_symbols()}
+        )
         for symbol in symbols:
             position = self.inventory.get_position(symbol)
             if position is None or position.quantity <= 0:
@@ -102,7 +107,9 @@ class SpotPortfolioValuator:
         for balance in wallet:
             if balance.asset == self.quote_asset or balance.total == 0:
                 continue
-            mark = asset_marks.get(balance.asset) or managed_base_marks.get(balance.asset)
+            mark = asset_marks.get(balance.asset) or managed_base_marks.get(
+                balance.asset
+            )
             if mark is None or mark <= 0:
                 unpriced.append(balance.asset)
                 continue
