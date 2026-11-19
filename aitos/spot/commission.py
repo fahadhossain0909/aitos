@@ -82,8 +82,9 @@ class SpotCommissionConversionService:
                     price = historical["price"]
                     conversion = commission * price
                     conversion_symbol = direct
-            elif (
-                inverse_filter is not None
+            if (
+                conversion is None
+                and inverse_filter is not None
                 and inverse_filter.status == "TRADING"
                 and inverse_filter.is_spot_trading_allowed
             ):
