@@ -65,7 +65,7 @@ an open-algo-order inventory/reconciliation extension before live readiness.
 
 The local protective-intent journal validates an accepted resting-order result against
 its exact pre-submit claim before changing `SUBMITTING` to `PROTECTED`. The binding
-checks the claimed symbol and position side, optional returned client ID, a strictly
+checks the claimed symbol and position side, exact returned client ID, a strictly
 numeric exchange order identity (including the `algo:` namespace), finite positive
 trigger price equal to the claimed trigger, and zero filled quantity. The update is
 conditional on the row still being `SUBMITTING` and verifies exactly one row changed.
