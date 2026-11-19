@@ -94,6 +94,14 @@ class InventoryLedger:
                     f"unknown fill or fee is not third-asset commission: {fill_key}"
                 )
 
+    def managed_symbols(self) -> list[dict[str, str]]:
+        """Return symbols represented by durable fill history."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT DISTINCT symbol FROM spot_fills ORDER BY symbol"
+            ).fetchall()
+        return [{"symbol": row[0]} for row in rows]
+
     def pending_fee_conversions(self) -> list[dict[str, str]]:
         with self._lock:
             rows = self._db.execute(
