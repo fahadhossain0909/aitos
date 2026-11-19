@@ -74,7 +74,6 @@ def test_portfolio_state_sector_exposure_pct():
     assert exposures["crypto-alt"] == pytest.approx(10.0)
 
 
-
 def test_portfolio_state_projects_pending_order_notional_leverage_and_sector():
     portfolio = PortfolioState(
         equity_usd=10_000.0,
