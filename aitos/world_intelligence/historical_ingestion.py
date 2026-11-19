@@ -204,6 +204,24 @@ class HistoricalIngestionStore:
             ])
         return len(rows)
 
+    async def backfill(
+        self, provider: HistoricalProvider, *, start_cursor: str | None = None,
+        max_pages: int = 1000,
+    ) -> tuple[int, str | None]:
+        """Run a bounded provider cursor to exhaustion; date semantics stay in adapter."""
+        if isinstance(max_pages, bool) or not 1 <= max_pages <= 100_000:
+            raise ValueError("max_pages must be between 1 and 100000")
+        cursor = start_cursor
+        pages = 0
+        for _ in range(max_pages):
+            previous = cursor
+            cursor = await self.ingest(provider, cursor=cursor)
+            pages += 1
+            if cursor is None:
+                return pages, None
+            if cursor == previous:
+                raise RuntimeError("historical provider cursor did not advance")
+        raise RuntimeError("historical backfill page limit reached before exhaustion")
     async def load_cursor(self, source_id: str) -> str | None:
         result = await self.client.query(
             f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "
