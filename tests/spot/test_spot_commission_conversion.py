@@ -4,7 +4,6 @@ import pytest
 
 from aitos.spot.commission import SpotCommissionConversionService
 from aitos.spot.inventory import InventoryLedger
-from aitos.spot.filters import SpotSymbolFilters
 
 
 class HistoricalFeeAdapter:
