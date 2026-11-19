@@ -43,7 +43,7 @@ def _decimal(value: Any, field: str) -> Decimal:
 def _flag(value: Any, field: str) -> bool:
     if value is True or value == "true":
         return True
-    if value is False or value == "false" or value is None:
+    if value is False or value == "false":
         return False
     raise ValueError(f"{field} must be a boolean exchange field")
 
@@ -71,6 +71,8 @@ def pending_exposures_from_open_orders(
     current = now or datetime.now(timezone.utc)
     if (
         current.utcoffset() is None
+        or not isinstance(orders_observed_at, datetime)
+        or not isinstance(risk_inputs_observed_at, datetime)
         or orders_observed_at.utcoffset() is None
         or risk_inputs_observed_at.utcoffset() is None
         or not isfinite(max_age_seconds)
@@ -109,7 +111,7 @@ def pending_exposures_from_open_orders(
 
         symbol = row.get("symbol")
         side = row.get("side")
-        position_side = row.get("positionSide", "BOTH")
+        position_side = row.get("positionSide")
         order_type = row.get("type")
         status = row.get("status")
         if (
