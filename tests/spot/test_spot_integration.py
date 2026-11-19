@@ -137,3 +137,46 @@ def test_inventory_marks_third_asset_fee_for_conversion():
         quote_asset="USDT", side="BUY", quantity=Decimal("1"), price=Decimal("10"),
         commission=Decimal("0.001"), commission_asset="BNB")
     assert ledger.get_position("ABCUSDT").fee_conversion_pending
+
+
+
+def test_spot_order_intents_are_durable_and_replay_safe(tmp_path):
+    path = tmp_path / "spot-intents.sqlite"
+    ledger = InventoryLedger(path)
+    ledger.record_order_intent(
+        client_order_id="aitos-order-123", symbol="BTCUSDT",
+        side="BUY", order_type="MARKET",
+        quote_order_quantity=Decimal("25"),
+    )
+    ledger.record_order_intent(
+        client_order_id="aitos-order-123", symbol="BTCUSDT",
+        side="BUY", order_type="MARKET",
+        quote_order_quantity=Decimal("25"),
+    )
+    ledger.update_order_intent(
+        "aitos-order-123", status="UNKNOWN",
+    )
+    ledger.close()
+    reopened = InventoryLedger(path)
+    pending = reopened.unresolved_order_intents()
+    assert len(pending) == 1
+    assert pending[0]["client_order_id"] == "aitos-order-123"
+    assert pending[0]["status"] == "UNKNOWN"
+    reopened.update_order_intent("aitos-order-123", status="FILLED", exchange_order_id=99)
+    assert reopened.unresolved_order_intents() == []
+    reopened.close()
+
+
+def test_spot_order_intent_rejects_client_id_collision():
+    ledger = InventoryLedger()
+    ledger.record_order_intent(
+        client_order_id="aitos-order-123", symbol="BTCUSDT",
+        side="BUY", order_type="MARKET",
+        quote_order_quantity=Decimal("25"),
+    )
+    with pytest.raises(ValueError, match="different intent"):
+        ledger.record_order_intent(
+            client_order_id="aitos-order-123", symbol="ETHUSDT",
+            side="BUY", order_type="MARKET",
+            quote_order_quantity=Decimal("25"),
+        )
