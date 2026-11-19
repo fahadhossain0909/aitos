@@ -451,7 +451,6 @@ def test_spot_runtime_updates_shared_capital_and_portfolio_fx_rate():
     inventory.close()
 
 
-
 @pytest.mark.asyncio
 async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
     gateway = FakeCapitalGateway()
