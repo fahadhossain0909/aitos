@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -131,26 +132,56 @@ class ExecutionIntentStore:
 
     def record_protection(self, client_id: str, result: OrderResult) -> None:
         """Accepted resting protection is not a fill; retain until durable ID write."""
-        if not result.success or not result.order_id or result.filled_quantity != 0:
-            raise ValueError("protection acceptance requires an unfilled resting order")
+        if (
+            not result.success
+            or not isinstance(result.order_id, str)
+            or not re.fullmatch(r"(?:algo:)?[1-9][0-9]{0,29}", result.order_id)
+            or not math.isfinite(result.filled_quantity)
+            or result.filled_quantity != 0
+            or not math.isfinite(result.fill_price)
+            or result.fill_price <= 0
+            or (
+                result.client_order_id is not None
+                and result.client_order_id != client_id
+            )
+        ):
+            raise ValueError(
+                "protection acceptance requires valid identity and an unfilled resting order"
+            )
         payload = json.dumps(asdict(result), sort_keys=True, allow_nan=False)
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT request_json FROM execution_intents WHERE scope=? AND client_id=? AND state='SUBMITTING'",
+                "SELECT symbol, request_json FROM execution_intents "
+                "WHERE scope=? AND client_id=? AND state='SUBMITTING'",
                 (self.scope, client_id),
             ).fetchone()
-            request = json.loads(row[0]) if row else {}
-            if request.get("order_type") not in {
-                "STOP_MARKET",
-                "TAKE_PROFIT_MARKET",
-            } or not request.get("reduce_only"):
+            if row is None:
+                raise ValueError("protection acceptance has no submitting preclaim")
+            request = json.loads(row["request_json"])
+            request_side = str(request.get("side", "")).upper()
+            result_side = str(getattr(result.side, "value", result.side)).upper()
+            if (
+                request.get("order_type") not in {
+                    "STOP_MARKET",
+                    "TAKE_PROFIT_MARKET",
+                }
+                or request.get("reduce_only") is not True
+            ):
                 raise ValueError("protection acceptance requires a protective preclaim")
-            conn.execute(
+            if (
+                request.get("symbol") != row["symbol"]
+                or result.symbol != row["symbol"]
+                or result_side != request_side
+            ):
+                raise ValueError("protection result does not match preclaim identity")
+            cursor = conn.execute(
                 "UPDATE execution_intents SET state='PROTECTED',result_json=?,updated_at=CURRENT_TIMESTAMP "
-                "WHERE scope=? AND client_id=?",
+                "WHERE scope=? AND client_id=? AND state='SUBMITTING'",
                 (payload, self.scope, client_id),
             )
+            if cursor.rowcount != 1:
+                raise ValueError("protection preclaim changed before durable acceptance")
 
     def mark_applied(self, client_id: str, trade_id: str) -> None:
         if not trade_id:
