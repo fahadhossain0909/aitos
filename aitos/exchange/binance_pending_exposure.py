@@ -176,8 +176,7 @@ def pending_exposures_from_open_orders(
             float(leverage),
         )
         if not all(
-            isfinite(value)
-            for value in (notional_float, risk_float, leverage_float)
+            isfinite(value) for value in (notional_float, risk_float, leverage_float)
         ):
             raise ValueError("projected pending exposure exceeds finite numeric range")
         result.append(
