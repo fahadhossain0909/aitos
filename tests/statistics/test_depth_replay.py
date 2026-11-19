@@ -151,14 +151,16 @@ def test_l2_market_order_rejects_boolean_and_non_integer_time_inputs(overrides):
 
 
 @pytest.mark.parametrize(
-    "event",
+    "values",
     [
-        LimitQueueEvent(1000, traded_at_limit=True),
-        LimitQueueEvent(1000, cancelled_ahead=-1.0),
+        {"timestamp_ms": True},
+        {"timestamp_ms": 1000, "traded_at_limit": True},
+        {"timestamp_ms": 1000, "cancelled_ahead": -1.0},
     ],
 )
-def test_queue_event_rejects_invalid_quantities(event):
-    assert event.timestamp_ms == 1000
+def test_queue_event_rejects_invalid_quantities(values):
+    with pytest.raises(ValueError):
+        LimitQueueEvent(**values)
 
 
 def test_queue_replay_rejects_boolean_and_non_integer_inputs():
