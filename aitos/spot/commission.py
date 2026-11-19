@@ -57,9 +57,12 @@ class SpotCommissionConversionService:
         }
 
     async def resolve_pending(self) -> dict[str, int]:
+        pending_items = self.inventory.pending_fee_conversions()
+        if not pending_items:
+            return {"resolved": 0, "pending": 0}
         filters = await self.adapter.exchange_info()
         resolved = skipped = 0
-        for item in self.inventory.pending_fee_conversions():
+        for item in pending_items:
             fill_time = item.get("fill_time_ms")
             if fill_time is None:
                 skipped += 1
