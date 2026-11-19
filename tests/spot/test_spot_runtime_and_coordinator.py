@@ -7,7 +7,7 @@ from aitos.config.settings import SpotSettings
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.inventory import InventoryLedger
-from aitos.spot.models import SpotOrderRequest, SpotOrderSide, SpotOrderType
+from aitos.spot.models import SpotOrderRequest, SpotOrderSide, SpotOrderStatus, SpotOrderType
 
 
 def test_spot_settings_are_disabled_and_testnet_only_by_default():
@@ -52,7 +52,12 @@ class FakeCapitalGateway:
 
 class FakeExecutor:
     async def submit(self, request):
-        return request
+        return SimpleNamespace(
+            client_order_id=request.client_order_id,
+            side=request.side,
+            status=SpotOrderStatus.NEW,
+            order_id=123,
+        )
 
 
 def _opportunity(side=TradeSide.LONG):
@@ -77,7 +82,7 @@ async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
     result = await coordinator.submit_entry(
         equity_quote=1000, opportunity=_opportunity(), request=request,
     )
-    assert result is request
+    assert result.client_order_id.startswith('aitos-')
     assert gateway.symbol == "binance:spot:BTCUSDT"
     assert gateway.kwargs["funding_bps"] == 0.0
     assert gateway.pinned == ["binance:spot:BTCUSDT"]
