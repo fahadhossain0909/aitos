@@ -286,13 +286,14 @@ def test_spot_order_intents_are_durable_and_replay_safe(tmp_path):
         order_type="MARKET",
         quote_order_quantity=Decimal("25"),
     )
-    ledger.record_order_intent(
-        client_order_id="aitos-order-123",
-        symbol="BTCUSDT",
-        side="BUY",
-        order_type="MARKET",
-        quote_order_quantity=Decimal("25"),
-    )
+    with pytest.raises(ValueError, match="already exists"):
+        ledger.record_order_intent(
+            client_order_id="aitos-order-123",
+            symbol="BTCUSDT",
+            side="BUY",
+            order_type="MARKET",
+            quote_order_quantity=Decimal("25"),
+        )
     ledger.update_order_intent(
         "aitos-order-123",
         status="UNKNOWN",
@@ -319,7 +320,7 @@ def test_spot_order_intent_rejects_client_id_collision():
         order_type="MARKET",
         quote_order_quantity=Decimal("25"),
     )
-    with pytest.raises(ValueError, match="different intent"):
+    with pytest.raises(ValueError, match="already exists"):
         ledger.record_order_intent(
             client_order_id="aitos-order-123",
             symbol="ETHUSDT",
