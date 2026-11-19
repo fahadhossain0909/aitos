@@ -97,3 +97,13 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - Test outcomes are counted only when their labels are mature by the evaluation cutoff. Event types absent from a fold's training cohort are excluded and counted explicitly instead of being silently coerced into an unknown feature.
 - The report preserves fold-level training/test counts, time boundaries, skipped insufficient-history folds, unseen event-type exclusions and not-yet-mature outcome exclusions.
 - This remains an offline research utility. It does not activate Scanner intelligence, change strategy/risk policy, place orders, or promote a model. Results still require representative point-in-time data, baseline comparison, calibration, confidence analysis and execution-cost-aware replay.
+
+
+## Point-in-time event dataset and realized labels
+
+- `aitos.world_intelligence.point_in_time` introduces immutable event-revision and market-bar-revision records with timezone-aware publication, first-known and data-availability timestamps.
+- Historical event features are frozen to the first revision AITOS knew; later article edits/corrections do not rewrite the original decision-time feature vector.
+- Market bars use their first observed revision for outcome construction, avoiding hindsight from later backfills or corrected candles.
+- Forward labels are generated per asset and requested horizon from the first eligible bar open after the event became known to AITOS through the first bar close at or beyond the target horizon.
+- A label is emitted only when both selected market-data observations were available by the requested evaluation cutoff. Missing bars, future events, late bars and immature outcomes are explicitly counted.
+- This is a deterministic dataset/labeling core, not a provider ingestion job or a ClickHouse migration. A production adapter still needs to persist raw provider payloads, revision IDs, source provenance and bar availability timestamps before this pipeline can be populated with real historical data.
