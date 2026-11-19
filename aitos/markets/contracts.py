@@ -97,7 +97,9 @@ class MarketEvent:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "payload", freeze_value(self.payload))
-        object.__setattr__(self, "stage_timestamps", freeze_value(self.stage_timestamps))
+        object.__setattr__(
+            self, "stage_timestamps", freeze_value(self.stage_timestamps)
+        )
         if self.schema_version < 1:
             raise ValueError("schema_version must be positive")
         if self.event_revision < 1:
