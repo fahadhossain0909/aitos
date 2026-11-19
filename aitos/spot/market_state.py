@@ -18,7 +18,11 @@ from typing import Any
 
 from aitos.market_data.bus import MarketDataBus
 from aitos.market_data.contracts import MarketEvent, MarketEventType
-from aitos.spot.scanner import SpotCandidate, SpotOpportunityScanner
+from aitos.spot.scanner import (
+    RankedSpotCandidate,
+    SpotCandidate,
+    SpotOpportunityScanner,
+)
 
 SPOT_STATE_GROUP = "spot-live-feature-state-v1"
 
