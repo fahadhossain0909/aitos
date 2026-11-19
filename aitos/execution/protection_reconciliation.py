@@ -355,3 +355,40 @@ async def audit_exchange_protection_inventory(
     )
     report["safe_to_resume"] = False
     return report
+
+
+
+async def require_live_account_exposure_reconciled(
+    executor: Any,
+    intent_store: Any,
+    trades: Iterable[Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Fail closed unless full positions and entry-order inventory reconcile.
+
+    The report remains observational. This guard never acknowledges, cancels,
+    replaces or submits an order and never changes the intent journal.
+    """
+    report = await audit_exchange_protection_inventory(
+        executor, intent_store, now=now, trades=trades
+    )
+    if not report.get("account_exposure_verified"):
+        raise RuntimeError(
+            "live account exposure is not reconciled: "
+            f"position_error={report.get('position_snapshot_error')!r}, "
+            f"pending_entry_orders={len(report.get('pending_entry_orders', []))}"
+        )
+    findings = report.get("findings", [])
+    blocking = [
+        finding
+        for finding in findings
+        if finding.get("status") != "applied_order_present"
+    ]
+    if blocking or report.get("ambiguous_submissions"):
+        raise RuntimeError(
+            "live protective-order inventory requires reconciliation: "
+            f"blocking_findings={len(blocking)}, "
+            f"ambiguous_submissions={len(report.get('ambiguous_submissions', []))}"
+        )
+    return report
