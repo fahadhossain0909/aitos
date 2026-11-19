@@ -127,9 +127,7 @@ def test_bridge_requires_explicit_resolved_instrument():
         )
 
 def test_instrument_identity_separates_spot_and_futures_markets():
-    spot = Instrument(
-        "BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot"
-    )
+    spot = Instrument("BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot")
     futures = Instrument(
         "BTCUSDT", AssetClass.CRYPTO, "binance", market_type="usd_m_futures"
     )
