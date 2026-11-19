@@ -5,6 +5,8 @@ import pytest
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from aitos.market_data.bus import market_event_from_wire, market_event_to_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
+from aitos.market_data.bus import channel_for
+from aitos.market_data.channels import ALL_CHANNELS, CHANNEL_KLINE
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
 from aitos.spot.websocket import SpotOrderBookGap
 
@@ -121,3 +123,9 @@ async def test_spot_ticker_stream_handles_book_ticker_without_exchange_time():
     assert events[0].event_type is MarketEventType.TICKER
     assert events[0].payload["bid_price"] == "99.5"
     assert events[0].payload["ask_price"] == "100.5"
+
+
+
+def test_spot_kline_uses_registered_canonical_event_channel():
+    assert channel_for(MarketEventType.KLINE) == CHANNEL_KLINE
+    assert CHANNEL_KLINE in ALL_CHANNELS
