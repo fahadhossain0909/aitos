@@ -150,3 +150,17 @@ def test_source_provenance_rejects_naive_time_and_oversized_payload():
         SourceProvenance(
             "s", "kind", "r", "https://example.test", NOW, NOW, b"x" * 512001, {}
         )
+
+
+
+@pytest.mark.asyncio
+async def test_historical_cursor_checkpoint_records_fencing_token():
+    client = FakeClient()
+    store = HistoricalIngestionStore(client)
+    await store.save_cursor("official-feed", "cursor-99", fencing_token=7)
+    row = client.inserts[0][1][0]
+    assert row[0] == "official-feed"
+    assert row[1] == "cursor-99"
+    assert row[2] == 7
+    with pytest.raises(ValueError, match="fencing_token"):
+        await store.save_cursor("official-feed", "stale", fencing_token=True)
