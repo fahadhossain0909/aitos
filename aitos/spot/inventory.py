@@ -124,7 +124,16 @@ class InventoryLedger:
                    WHERE status NOT IN ('FILLED','CANCELED','REJECTED','EXPIRED')
                    ORDER BY created_at"""
             ).fetchall()
-                "quote_order_quantity","status","exchange_order_id")
+        keys = (
+            "client_order_id",
+            "symbol",
+            "side",
+            "order_type",
+            "quantity",
+            "quote_order_quantity",
+            "status",
+            "exchange_order_id",
+        )
         return [dict(zip(keys, row)) for row in rows]
 
     def close(self) -> None:
