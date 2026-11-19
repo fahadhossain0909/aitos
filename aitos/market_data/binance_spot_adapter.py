@@ -114,16 +114,14 @@ class BinanceSpotCanonicalMarketDataAdapter:
 
     async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         selected = _symbols(symbols)
-        streams = [f"{symbol.lower()}@bookTicker" for symbol in selected]
+        streams = [f"{symbol.lower()}@ticker" for symbol in selected]
         async for item in self.websocket.stream_many(streams):
             data = item["data"]
             symbol = _stream_symbol(item, data)
-            event_ms = data.get("E") or data.get("T")
-            observed_at = (
-                _event_time(event_ms)
-                if event_ms is not None
-                else datetime.now(timezone.utc)
-            )
+            event_ms = data.get("E")
+            if event_ms is None:
+                raise ValueError("Spot 24-hour ticker event is missing exchange time")
+            observed_at = _event_time(event_ms)
             yield _event(
                 symbol,
                 MarketEventType.TICKER,
@@ -133,6 +131,9 @@ class BinanceSpotCanonicalMarketDataAdapter:
                     "bid_quantity": str(data["B"]),
                     "ask_price": str(data["a"]),
                     "ask_quantity": str(data["A"]),
+                    "last_price": str(data["c"]),
+                    "quote_volume_24h": str(data["q"]),
+                    "price_change_percent_24h": str(data["P"]),
                 },
                 MarketSource.WEBSOCKET,
                 int(data.get("u", 0)) or None,
