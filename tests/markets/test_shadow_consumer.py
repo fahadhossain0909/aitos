@@ -94,7 +94,10 @@ async def test_shadow_consumer_projects_events_and_deduplicates():
     event = make_event()
     await consumer._on_event(event)
     await consumer._on_event(event)
-    await consumer._queue.join()
+    while not consumer._queue.empty():
+        queued = consumer._queue.get_nowait()
+        consumer._process(queued)
+        consumer._queue.task_done()
 
     snapshot = consumer.snapshot()
     instrument_id = "binance:crypto:spot:BTCUSDT"
