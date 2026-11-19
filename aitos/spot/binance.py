@@ -308,6 +308,33 @@ class BinanceSpotAdapter:
         )
         return self._parse_order(raw, SpotOrderSide(raw["side"]))
 
+    async def agg_trades(
+        self,
+        symbol: str,
+        *,
+        start_time_ms: int,
+        end_time_ms: int,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Fetch historical aggregate trades in a bounded time interval."""
+        if start_time_ms < 0 or end_time_ms < start_time_ms:
+            raise ValueError("invalid aggregate-trade time interval")
+        if end_time_ms - start_time_ms > 60 * 60 * 1000:
+            raise ValueError("aggregate-trade interval cannot exceed one hour")
+        if not 1 <= limit <= 1000:
+            raise ValueError("aggregate-trade limit must be between 1 and 1000")
+        return await self._request(
+            "GET",
+            "/api/v3/aggTrades",
+            params={
+                "symbol": symbol.upper(),
+                "startTime": start_time_ms,
+                "endTime": end_time_ms,
+                "limit": limit,
+            },
+            weight=4,
+        )
+
     async def my_trades(
         self,
         symbol: str,
