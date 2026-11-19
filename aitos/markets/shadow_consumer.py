@@ -174,6 +174,13 @@ class MarketDataShadowConsumer:
                 self._queue.task_done()
 
     def _process(self, event: CanonicalMarketEvent) -> None:
+        if event.event_time.tzinfo is None:
+            self._counts["rejected_stale"] += 1
+            return
+        age = (datetime.now(timezone.utc) - event.event_time).total_seconds()
+        if age < -1.0 or age > self._max_age:
+            self._counts["rejected_stale"] += 1
+            return
         market_type = str(event.market_type or event.market).strip().lower()
         if market_type not in self._market_types:
             self._counts["rejected_unresolved"] += 1
