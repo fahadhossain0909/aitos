@@ -160,7 +160,8 @@ class ExecutionIntentStore:
             request_side = str(request.get("side", "")).upper()
             result_side = str(getattr(result.side, "value", result.side)).upper()
             if (
-                request.get("order_type") not in {
+                request.get("order_type")
+                not in {
                     "STOP_MARKET",
                     "TAKE_PROFIT_MARKET",
                 }
