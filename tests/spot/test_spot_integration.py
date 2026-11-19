@@ -210,7 +210,9 @@ def test_inventory_persists_across_reopen(tmp_path):
 @pytest.mark.asyncio
 async def test_mainnet_execution_requires_second_explicit_guard():
     adapter = BinanceSpotAdapter(testnet=False)
-    executor = SpotOrderExecutor(adapter, enabled=True, allow_mainnet=False)
+    executor = SpotOrderExecutor(
+        adapter, enabled=True, allow_mainnet=True, mainnet_approved=False
+    )
     request = SpotOrderRequest(
         "ABCUSDT",
         SpotOrderSide.BUY,
