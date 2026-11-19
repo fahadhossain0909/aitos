@@ -118,7 +118,7 @@ class SpotRuntime:
         self,
         *,
         opportunity: Opportunity,
-        equity_quote: float,
+        equity_usd: float,
         quote_order_quantity: Decimal,
     ) -> SpotOrder:
         """Route a shared AITOS Strategy opportunity through Spot capital checks."""
