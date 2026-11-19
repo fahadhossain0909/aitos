@@ -131,7 +131,8 @@ class AITOSSettings(BaseSettings):
     redis: RedisSettings = Field(default_factory=RedisSettings)
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
-    binance: BinanceSettings = Field(default_factory=BinanceSettings)\n    spot: SpotSettings = Field(default_factory=SpotSettings)
+    binance: BinanceSettings = Field(default_factory=BinanceSettings)
+    spot: SpotSettings = Field(default_factory=SpotSettings)
     tuning: TuningSettings = Field(default_factory=load_tuning_settings)
 
 
