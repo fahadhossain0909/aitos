@@ -101,13 +101,15 @@ def test_existing_python_book_still_fails_closed_on_gap():
         python.apply(DepthUpdate(12, 13, 11, (), (), 1_000))
 
 
-
 def test_resync_replaces_state_and_requires_a_new_snapshot_bridge():
     scale = InstrumentScale.from_exchange_filters(
         SimpleNamespace(tick_size=0.01, step_size=0.001)
     )
     session = NativeOrderBookSession(
-        scale, 10, [("100.00", "1.000")], [("101.00", "1.000")],
+        scale,
+        10,
+        [("100.00", "1.000")],
+        [("101.00", "1.000")],
         prefer_native=False,
     )
     replacement = OrderBookSnapshot(
@@ -164,7 +166,10 @@ def test_golden_binance_depth_payload_replay_matches_local_order_book():
         SimpleNamespace(tick_size=0.01, step_size=0.001)
     )
     native = NativeOrderBookSession(
-        scale, initial.last_update_id, initial.bids, initial.asks,
+        scale,
+        initial.last_update_id,
+        initial.bids,
+        initial.asks,
         prefer_native=False,
     )
     reference = LocalOrderBook("BTCUSDT", max_levels=20)
@@ -172,12 +177,36 @@ def test_golden_binance_depth_payload_replay_matches_local_order_book():
 
     # Captured-shape Binance USD-M diff-depth messages: U/u/pu and b/a.
     payloads = [
-        {"e": "depthUpdate", "E": 1000, "s": "BTCUSDT", "U": 11, "u": 11,
-         "pu": 10, "b": [["100.00", "0.750"]], "a": []},
-        {"e": "depthUpdate", "E": 1100, "s": "BTCUSDT", "U": 12, "u": 12,
-         "pu": 11, "b": [["99.00", "0"]], "a": [["101.00", "0"], ["101.50", "0.875"]]},
-        {"e": "depthUpdate", "E": 1200, "s": "BTCUSDT", "U": 13, "u": 13,
-         "pu": 12, "b": [], "a": [["102.00", "1.250"]]},
+        {
+            "e": "depthUpdate",
+            "E": 1000,
+            "s": "BTCUSDT",
+            "U": 11,
+            "u": 11,
+            "pu": 10,
+            "b": [["100.00", "0.750"]],
+            "a": [],
+        },
+        {
+            "e": "depthUpdate",
+            "E": 1100,
+            "s": "BTCUSDT",
+            "U": 12,
+            "u": 12,
+            "pu": 11,
+            "b": [["99.00", "0"]],
+            "a": [["101.00", "0"], ["101.50", "0.875"]],
+        },
+        {
+            "e": "depthUpdate",
+            "E": 1200,
+            "s": "BTCUSDT",
+            "U": 13,
+            "u": 13,
+            "pu": 12,
+            "b": [],
+            "a": [["102.00", "1.250"]],
+        },
     ]
     updates = [parse_depth_diff_ws(payload) for payload in payloads]
     assert native.apply_depth_updates(updates) == len(updates)
