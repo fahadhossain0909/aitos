@@ -9,7 +9,7 @@ from decimal import Decimal
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
 from aitos.models.trade import Opportunity, TradeSide
-from aitos.spot.execution import SpotOrderExecutor
+from aitos.spot.execution import SpotExecutionDisabled, SpotOrderExecutor
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.models import (
     SpotOrder,
@@ -49,6 +49,8 @@ class SpotTradingCoordinator:
         opportunity: Opportunity,
         request: SpotOrderRequest,
     ) -> SpotOrder:
+        if not self.executor.enabled:
+            raise SpotExecutionDisabled("Spot execution is disabled")
         if opportunity.side is not TradeSide.LONG:
             raise SpotAuthorizationRejected(
                 "Spot entry is long-only; short exposure is unsupported"
@@ -146,6 +148,8 @@ class SpotTradingCoordinator:
         Spot has no exchange reduceOnly flag. The caller must pass an explicit
         authorization from the Exit Intelligence/lifecycle boundary.
         """
+        if not self.executor.enabled:
+            raise SpotExecutionDisabled("Spot execution is disabled")
         if not exit_authorized:
             raise SpotAuthorizationRejected(
                 "Spot exits require explicit Exit Intelligence authorization"
