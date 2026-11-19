@@ -96,6 +96,8 @@ def test_l2_market_order_does_not_reuse_later_snapshot_depth():
     assert result.remaining_quantity == pytest.approx(0.3)
     assert not result.complete
 
+
+
 def test_l2_market_order_accepts_signed_funding_credit():
     book = DepthBookSnapshot(
         1000,
