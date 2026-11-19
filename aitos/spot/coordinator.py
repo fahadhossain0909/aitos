@@ -153,11 +153,15 @@ class SpotTradingCoordinator:
         if not self.executor.enabled:
             raise SpotExecutionDisabled("Spot execution is disabled")
         if authorization.symbol.upper() != symbol.upper():
-            raise SpotAuthorizationRejected("ExitDecision symbol does not match Spot position")
+            raise SpotAuthorizationRejected(
+                "ExitDecision symbol does not match Spot position"
+            )
         if authorization.side.upper() != "LONG":
             raise SpotAuthorizationRejected("Spot exits only support LONG inventory")
         if authorization.action not in {ExitAction.EXIT, ExitAction.MANAGE}:
-            raise SpotAuthorizationRejected("ExitDecision does not authorize a Spot sell")
+            raise SpotAuthorizationRejected(
+                "ExitDecision does not authorize a Spot sell"
+            )
         if quantity <= 0:
             raise SpotAuthorizationRejected("exit quantity must be positive")
         if self._has_unresolved_order(symbol):
@@ -171,9 +175,13 @@ class SpotTradingCoordinator:
         if authorization.action is ExitAction.MANAGE:
             fraction = Decimal(str(authorization.suggested_reduce_fraction))
             if not Decimal("0") < fraction <= Decimal("1"):
-                raise SpotAuthorizationRejected("MANAGE decision has no valid reduce fraction")
+                raise SpotAuthorizationRejected(
+                    "MANAGE decision has no valid reduce fraction"
+                )
             if quantity > position.quantity * fraction:
-                raise SpotAuthorizationRejected("Spot sell exceeds EIE suggested reduce fraction")
+                raise SpotAuthorizationRejected(
+                    "Spot sell exceeds EIE suggested reduce fraction"
+                )
 
         client_order_id = client_order_id or ("aitos-" + uuid.uuid4().hex[:28])
         request = SpotOrderRequest(
