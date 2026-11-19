@@ -74,12 +74,14 @@ CREATE_MARKET_EVENTS = """
 CREATE TABLE IF NOT EXISTS market_events (
     event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
     event_id String, exchange LowCardinality(String), market LowCardinality(String),
-    symbol LowCardinality(String), event_type LowCardinality(String),
-    source LowCardinality(String), sequence Nullable(UInt64), schema_version UInt16,
+    venue LowCardinality(String), market_type LowCardinality(String),
+    instrument_id String, symbol LowCardinality(String),
+    event_type LowCardinality(String), source LowCardinality(String),
+    sequence Nullable(UInt64), schema_version UInt16,
     correlation_id String, trace_id String, payload_json String
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(event_time)
-ORDER BY (symbol, event_type, event_time, event_id)
+ORDER BY (instrument_id, event_type, event_time, event_id)
 """
 CREATE_LIVE_ANALYTICS_EVENTS = """
 CREATE TABLE IF NOT EXISTS live_analytics_events (
@@ -186,6 +188,14 @@ class MarketDataRepository(AITOSModule):
                 "ALTER TABLE learning_experiences "
                 "ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp"
             )
+            # CREATE IF NOT EXISTS does not migrate existing market_events tables.
+            # Defaults preserve historical Futures rows while separating Spot identity.
+            for migration in (
+                "ADD COLUMN IF NOT EXISTS venue LowCardinality(String) DEFAULT exchange",
+                "ADD COLUMN IF NOT EXISTS market_type LowCardinality(String) DEFAULT market",
+                "ADD COLUMN IF NOT EXISTS instrument_id String DEFAULT symbol",
+            ):
+                await self._client.command(f"ALTER TABLE market_events {migration}")
         except BaseException:
             # Cancellation is also a startup failure: release acquired resources
             # without hiding the original schema/connection failure.
@@ -251,6 +261,9 @@ class MarketDataRepository(AITOSModule):
                     event.event_id,
                     event.exchange,
                     event.market,
+                    event.venue or event.exchange,
+                    event.market_type or event.market,
+                    event.instrument_id or event.symbol,
                     event.symbol,
                     event.event_type.value,
                     event.source.value,
@@ -267,6 +280,9 @@ class MarketDataRepository(AITOSModule):
                 "event_id",
                 "exchange",
                 "market",
+                "venue",
+                "market_type",
+                "instrument_id",
                 "symbol",
                 "event_type",
                 "source",
