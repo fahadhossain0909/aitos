@@ -295,6 +295,9 @@ async def install_staged_scan(
             await _enrich_promoted_candidates(scanner, top2)
             scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
             scanner._last_candidate_count = len(top2)
+            scanner._last_candidate_symbols = tuple(
+                sorted({candidate.symbol for candidate in top2})
+            )
             return top2
 
         symbols = list(dict.fromkeys(scanner._symbols))
@@ -452,6 +455,9 @@ async def install_staged_scan(
                 )
                 top5 = [item.symbol for item in ranked[:TOP_5]]
                 top2 = ranked[:TOP_2]
+                scanner._last_candidate_symbols = tuple(
+                    sorted({item.symbol for item in top2})
+                )
                 await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change([item.symbol for item in top2], "TOP_2")
 
