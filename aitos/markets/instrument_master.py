@@ -6,6 +6,7 @@ contract metadata, or aliases. A feed event is resolvable only when its
 Instrument. Registry snapshots are immutable and safe to share with shadow
 consumers; updates require constructing and swapping a new snapshot.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
