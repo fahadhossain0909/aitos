@@ -5,7 +5,9 @@ import pytest
 
 from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.order_executor import OrderRequest
-from aitos.execution.protection_reconciliation import audit_exchange_protection_inventory
+from aitos.execution.protection_reconciliation import (
+    audit_exchange_protection_inventory,
+)
 from aitos.models.trade import TradeSide
 
 NOW = datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc)
