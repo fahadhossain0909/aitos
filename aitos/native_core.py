@@ -6,9 +6,9 @@ Use InstrumentScale to convert exchange decimal strings without float drift.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Iterable
 
 _UINT64_MAX = (1 << 64) - 1
 _INT64_MAX = (1 << 63) - 1
@@ -66,7 +66,7 @@ class InstrumentScale:
         )
 
     @classmethod
-    def from_exchange_filters(cls, filters) -> "InstrumentScale":
+    def from_exchange_filters(cls, filters) -> InstrumentScale:
         """Build from AITOS SymbolFilters or a compatible object."""
         return cls(
             price_tick=Decimal(str(filters.tick_size)),

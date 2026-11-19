@@ -70,7 +70,7 @@ def test_decimal_tick_and_lot_conversion_is_exact():
 
 def test_scale_rejects_non_finite_and_invalid_values():
     with pytest.raises(ValueError):
-        InstrumentScale(Decimal("0"), Decimal("0.001"))
+        InstrumentScale(Decimal(0), Decimal("0.001"))
     scale = InstrumentScale(Decimal("0.01"), Decimal("0.001"))
     with pytest.raises(ValueError):
         scale.price_to_ticks("NaN")
