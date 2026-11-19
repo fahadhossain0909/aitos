@@ -197,13 +197,13 @@ class ClickHousePointInTimeStore:
         cutoff = as_of.astimezone(timezone.utc)
         stamp = cutoff.replace(tzinfo=None).isoformat(sep=" ", timespec="milliseconds")
         events = await self.client.query(
-            f"SELECT payload_json FROM {self.event_revisions_table} FINAL "
+            f"SELECT payload_json FROM {self.event_revisions_table} FINAL "  # nosec B608 - database identifier validated in constructor
             "WHERE ingested_at <= toDateTime64({as_of:String}, 3, 'UTC') "
             "ORDER BY known_at, event_id LIMIT {limit:UInt32}",
             parameters={"as_of": stamp, "limit": limit},
         )
         bars = await self.client.query(
-            f"SELECT payload_json FROM {self.market_bar_revisions_table} FINAL "
+            f"SELECT payload_json FROM {self.market_bar_revisions_table} FINAL "  # nosec B608 - database identifier validated in constructor
             "WHERE ingested_at <= toDateTime64({as_of:String}, 3, 'UTC') "
             "ORDER BY asset, open_time, available_at LIMIT {limit:UInt32}",
             parameters={"as_of": stamp, "limit": limit},
