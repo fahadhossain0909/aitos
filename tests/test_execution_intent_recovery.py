@@ -1,6 +1,7 @@
 """Real local SQLite durability and offline executor wiring; no account/network."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -457,7 +458,7 @@ def test_confirmed_terminal_protection_is_durable_and_no_longer_unresolved(tmp_p
     journal.assert_ready()
     history = journal.protection_intents()
     assert history[0]["state"] == "TERMINAL"
-    terminal = __import__("json").loads(history[0]["result_json"])
+    terminal = json.loads(history[0]["result_json"])
     assert terminal["terminal_status"] == "CANCELED"
     assert terminal["terminal_executed_quantity"] == 0.25
     assert not journal.mark_protection_terminal(
