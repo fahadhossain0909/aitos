@@ -43,7 +43,6 @@ def test_lead_lag_oos_rejects_insufficient_history():
         )
 
 
-
 def test_ticker_event_alignment_uses_contiguous_shared_seconds_only():
     start = datetime(2026, 11, 1, tzinfo=timezone.utc)
     spot_events = [
@@ -74,8 +73,7 @@ def test_ticker_event_alignment_uses_contiguous_shared_seconds_only():
 async def test_clickhouse_oos_loader_uses_explicit_market_and_instrument_identity():
     start = datetime(2026, 11, 1, tzinfo=timezone.utc)
     returns = [
-        0.001 * math.sin(i * 1.7) + 0.0004 * math.cos(i * 0.31)
-        for i in range(400)
+        0.001 * math.sin(i * 1.7) + 0.0004 * math.cos(i * 0.31) for i in range(400)
     ]
     spot_prices = [100.0]
     futures_returns = [0.0, 0.0] + returns[:-2]
