@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -119,8 +119,41 @@ class SpotRuntime:
         return self.inventory.unresolved_order_intents()
 
     def scan_candidates(self):
-        """Return current Spot pre-filter rankings from fresh live market state."""
-        return self.market_consumer.rank_candidates(self.quote_volumes_24h)
+        """Rank fresh Spot candidates and attach observational Futures lead-lag data."""
+        ranked = self.market_consumer.rank_candidates(self.quote_volumes_24h)
+        enriched = []
+        for item in ranked:
+            estimate = self.lead_lag.estimate(item.candidate.symbol)
+            if estimate is None:
+                enriched.append(item)
+                continue
+            candidate = replace(
+                item.candidate,
+                futures_spot_lead_lag_status=estimate.status,
+                futures_spot_leader=estimate.leader,
+                futures_spot_lag_seconds=estimate.lag_seconds,
+                futures_spot_correlation=(
+                    Decimal(str(estimate.correlation))
+                    if estimate.correlation is not None else None
+                ),
+                futures_spot_confidence_low=(
+                    Decimal(str(estimate.confidence_low))
+                    if estimate.confidence_low is not None else None
+                ),
+                futures_spot_confidence_high=(
+                    Decimal(str(estimate.confidence_high))
+                    if estimate.confidence_high is not None else None
+                ),
+                futures_spot_observations=estimate.observations,
+            )
+            enriched.append(
+                replace(
+                    item,
+                    candidate=candidate,
+                    reasons=item.reasons + (f"cross_market:{estimate.status}",),
+                )
+            )
+        return enriched
 
     def market_data_health(self) -> dict[str, object]:
         return {
