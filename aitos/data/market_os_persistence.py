@@ -101,6 +101,7 @@ class MarketOSPersistence(AITOSModule):
             "market_live_state": [],
             "order_book_events": [],
             "live_analytics_events": [],
+            "market_events": [],
         }
         self._column_names = {
             "market_orderflow": [
@@ -164,6 +165,24 @@ class MarketOSPersistence(AITOSModule):
                 "schema_version",
                 "payload_json",
             ],
+            "market_events": [
+                "event_time",
+                "ingest_time",
+                "event_id",
+                "exchange",
+                "market",
+                "venue",
+                "market_type",
+                "instrument_id",
+                "symbol",
+                "event_type",
+                "source",
+                "sequence",
+                "schema_version",
+                "correlation_id",
+                "trace_id",
+                "payload_json",
+            ],
         }
         self._flush_lock = asyncio.Lock()
         self._flush_task: asyncio.Task[None] | None = None
@@ -214,6 +233,16 @@ class MarketOSPersistence(AITOSModule):
                     "market.orderbook.*",
                     self._handle_orderbook,
                     group="clickhouse-orderbook-history-v1",
+                    start_id="0",
+                )
+            )
+            # Persist canonical Spot events independently of Futures feature tables.
+            # Identity columns prevent BTCUSDT Spot/Futures history collisions.
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.spot.*",
+                    self._handle_spot_market_event,
+                    group="clickhouse-spot-market-events-v1",
                     start_id="0",
                 )
             )
@@ -369,6 +398,41 @@ class MarketOSPersistence(AITOSModule):
             int(p.get("last_update_id", 0)),
         ]
         await self._enqueue("order_book_events", row, event)
+        return None
+
+    async def _handle_spot_market_event(self, event: Event) -> EventResponse | None:
+        """Batch-persist canonical Spot events with durable market identity."""
+        p = event.payload
+        event_time = _parse_timestamp(p.get("event_time") or p.get("source_ts"))
+        ingest_time = _parse_timestamp(p.get("ingest_time") or p.get("received_ts"))
+        if event_time is None or ingest_time is None:
+            raise ValueError("canonical Spot event is missing source/ingest timestamps")
+        symbol = str(p.get("symbol") or _symbol_from_topic(event.topic)).upper()
+        market_type = str(p.get("market_type") or p.get("market") or "spot").lower()
+        if market_type != "spot":
+            raise ValueError("market.spot channel carried a non-Spot event")
+        instrument_id = str(p.get("instrument_id") or f"binance:spot:{symbol}")
+        if not instrument_id:
+            raise ValueError("canonical Spot event requires instrument identity")
+        row = [
+            event_time,
+            ingest_time,
+            str(p.get("event_id") or event.event_id),
+            str(p.get("exchange") or "unknown"),
+            str(p.get("market") or "spot"),
+            str(p.get("venue") or p.get("exchange") or "unknown"),
+            market_type,
+            instrument_id,
+            symbol,
+            str(p.get("event_type") or "unknown"),
+            str(p.get("source") or "unknown"),
+            int(p["sequence"]) if p.get("sequence") is not None else None,
+            int(p.get("schema_version", 1)),
+            str(p.get("correlation_id") or event.correlation_id or event.event_id),
+            str(p.get("trace_id") or event.event_id),
+            json.dumps(p.get("payload") or {}, sort_keys=True, default=str),
+        ]
+        await self._enqueue("market_events", row, event)
         return None
 
     async def _handle_live_analytics(self, event: Event) -> EventResponse | None:
