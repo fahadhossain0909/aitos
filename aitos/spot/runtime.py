@@ -70,7 +70,7 @@ class SpotRuntime:
         candidate,
         strategy_scanner,
         kernel,
-        equity_quote: float,
+        equity_usd: float,
         quote_order_quantity: Decimal,
         approved_by: str | None = None,
     ) -> SpotOrder:
@@ -110,7 +110,7 @@ class SpotRuntime:
         )
         return await self.submit_opportunity(
             opportunity=opportunity,
-            equity_quote=equity_quote,
+            equity_usd=equity_usd,
             quote_order_quantity=quote_order_quantity,
         )
 
@@ -129,7 +129,7 @@ class SpotRuntime:
             quote_order_quantity=quote_order_quantity,
         )
         return await self.coordinator.submit_entry(
-            equity_quote=equity_quote,
+            equity_usd=equity_usd,
             opportunity=opportunity,
             request=request,
         )
@@ -551,6 +551,7 @@ def build_spot_runtime(
         inventory=inventory,
         fee_bps=policy.fee_bps,
         slippage_bps=policy.slippage_bps,
+        quote_to_usd_rate=Decimal(str(policy.quote_to_usd_rate)),
     )
     commission_service = SpotCommissionConversionService(
         adapter=rest,
