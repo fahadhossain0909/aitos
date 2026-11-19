@@ -131,6 +131,8 @@ async def test_shadow_consumer_rejects_stale_events():
 
     assert consumer.snapshot().rejected_stale == 1
     assert consumer.snapshot().queued == 0
+    consumer._process(make_event(event_id="stale-at-worker", event_time=old))
+    assert consumer.snapshot().rejected_stale == 2
 
 
 def test_shadow_consumer_rejects_unresolved_and_out_of_order_events():
