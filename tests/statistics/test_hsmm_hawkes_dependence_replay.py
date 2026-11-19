@@ -8,7 +8,13 @@ from aitos.statistics.hawkes import (
     MarkedHawkesOnlineFilter,
     fit_marked_hawkes_mle,
 )
-from aitos.statistics.replay import BookSnapshot, replay_historical_order
+from aitos.statistics.replay import (
+    BookSnapshot,
+    DepthBookSnapshot,
+    DepthLevel,
+    replay_historical_order,
+    replay_historical_order_l2,
+)
 from aitos.statistics.validation import multiclass_calibration_report
 
 
@@ -182,3 +188,85 @@ def test_hsmm_causal_oos_posterior_history_supports_multiclass_calibration():
     assert 0.0 <= report.brier_score <= 2.0
     assert report.log_loss >= 0.0
     assert 0.0 <= report.expected_calibration_error <= 1.0
+
+def test_l2_replay_walks_price_levels_and_accounts_for_market_impact():
+    books = [
+        DepthBookSnapshot(
+            1200,
+            bids=(DepthLevel(99.5, 2.0), DepthLevel(99.0, 3.0)),
+            asks=(DepthLevel(101.0, 0.4), DepthLevel(102.0, 0.6)),
+        ),
+        DepthBookSnapshot(
+            1300,
+            bids=(DepthLevel(100.0, 5.0),),
+            asks=(DepthLevel(100.5, 5.0),),
+        ),
+    ]
+    result = replay_historical_order_l2(
+        books,
+        side="BUY",
+        quantity=1.0,
+        submitted_at_ms=1000,
+        latency_ms=200,
+        taker_fee_bps=5.0,
+        slippage_bps=2.0,
+        funding_bps=1.0,
+        borrow_bps=0.5,
+        holding_hours=4.0,
+    )
+
+    assert result.complete
+    assert [fill.quantity for fill in result.fills] == pytest.approx([0.4, 0.6])
+    assert [fill.quote_price for fill in result.fills] == pytest.approx([101.0, 102.0])
+    assert result.market_impact_cost == pytest.approx(0.6)
+    assert result.spread_cost == pytest.approx(0.75)
+    assert result.total_cost == pytest.approx(
+        result.fees
+        + result.slippage_cost
+        + result.spread_cost
+        + result.market_impact_cost
+        + result.funding_cost
+        + result.borrow_cost
+    )
+
+
+def test_l2_replay_does_not_reuse_later_snapshot_liquidity():
+    books = [
+        DepthBookSnapshot(
+            1000,
+            bids=(DepthLevel(99.0, 5.0),),
+            asks=(DepthLevel(101.0, 0.25),),
+        ),
+        DepthBookSnapshot(
+            1100,
+            bids=(DepthLevel(100.0, 5.0),),
+            asks=(DepthLevel(100.5, 5.0),),
+        ),
+    ]
+    result = replay_historical_order_l2(
+        books,
+        side="BUY",
+        quantity=1.0,
+        submitted_at_ms=1000,
+        latency_ms=0,
+        taker_fee_bps=0.0,
+    )
+    assert result.filled_quantity == pytest.approx(0.25)
+    assert result.remaining_quantity == pytest.approx(0.75)
+    assert not result.complete
+
+
+def test_l2_depth_snapshot_rejects_unsorted_or_crossed_levels():
+    with pytest.raises(ValueError, match="descending"):
+        DepthBookSnapshot(
+            1000,
+            bids=(DepthLevel(99.0, 1.0), DepthLevel(99.5, 1.0)),
+            asks=(DepthLevel(101.0, 1.0),),
+        )
+    with pytest.raises(ValueError, match="crossed"):
+        DepthBookSnapshot(
+            1000,
+            bids=(DepthLevel(102.0, 1.0),),
+            asks=(DepthLevel(101.0, 1.0),),
+        )
+
