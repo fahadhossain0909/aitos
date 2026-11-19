@@ -88,3 +88,12 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - This is an offline research baseline, not a production return forecast. It has no scanner, strategy, risk, model-promotion, or order-execution integration. A real historical point-in-time dataset, chronological purged OOS evaluation, calibration, ablation, and cost-aware replay remain required before any canary.
 
 - `evaluate_event_impact_model` reports Brier score, log-loss, directional accuracy and sample exclusions only for events strictly later than the model training cutoff whose labels have matured by evaluation time. This is a guardrail, not a replacement for rolling-origin walk-forward, benchmark comparison, confidence intervals, or venue-cost replay.
+
+
+## Purged event-impact walk-forward validation
+
+- `aitos.world_intelligence.walk_forward.evaluate_event_impact_walk_forward` refits a fresh event-impact model for each expanding chronological fold.
+- Training rows are restricted to the requested asset/horizon/regime, events strictly before the fold cutoff, and labels available by test-start minus the configured embargo.
+- Test outcomes are counted only when their labels are mature by the evaluation cutoff. Event types absent from a fold's training cohort are excluded and counted explicitly instead of being silently coerced into an unknown feature.
+- The report preserves fold-level training/test counts, time boundaries, skipped insufficient-history folds, unseen event-type exclusions and not-yet-mature outcome exclusions.
+- This remains an offline research utility. It does not activate Scanner intelligence, change strategy/risk policy, place orders, or promote a model. Results still require representative point-in-time data, baseline comparison, calibration, confidence analysis and execution-cost-aware replay.
