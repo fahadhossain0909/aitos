@@ -464,3 +464,19 @@ async def test_unlinked_order_recovery_fails_closed_on_latest_timestamp_tie():
     with pytest.raises(RuntimeError, match="ambiguous latest acknowledged-order evidence"):
         await store.load_unlinked_acknowledged_orders()
 
+@pytest.mark.asyncio
+async def test_order_record_lookup_returns_none_when_no_order_exists():
+    class QueryResult:
+        result_rows = []
+
+    class ClickHouseClient:
+        async def query(self, query, parameters=None):
+            assert "HAVING count() > 0" in query
+            return QueryResult()
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+    assert await store.load_order_record("missing-client-id") is None
+
