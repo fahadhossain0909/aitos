@@ -646,8 +646,11 @@ class LivePortfolioTracker:
             pending_order_max_snapshot_skew_seconds
         )
         self._pending_order_exposures: tuple[PendingOrderExposure, ...] = ()
+        self._pending_order_snapshot_valid = pending_order_snapshot_provider is None
 
     async def refresh_equity(self) -> float:
+        if self._pending_order_snapshot_provider is not None:
+            self._pending_order_snapshot_valid = False
         equity_reader = getattr(self._order_executor, "get_account_equity", None)
         if callable(equity_reader):
             equity = await equity_reader(self._asset)
@@ -692,6 +695,7 @@ class LivePortfolioTracker:
             )
 
         self._pending_order_exposures = tuple(pending)
+        self._pending_order_snapshot_valid = True
         self._last_known_equity_usd = float(equity)
         self._peak_equity_usd = (
             float(equity)
@@ -701,6 +705,10 @@ class LivePortfolioTracker:
         return float(equity)
 
     def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
+        if not self._pending_order_snapshot_valid:
+            raise RuntimeError(
+                "a fresh validated pending-order snapshot is required before live risk assessment"
+            )
         open_trades = trade_lifecycle.get_open_trades()
         positions = tuple(
             PositionExposure(
