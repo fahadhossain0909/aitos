@@ -163,7 +163,9 @@ async def audit_exchange_protection_inventory(
     inventory_reader = getattr(executor, "get_open_algo_orders", None)
     journal_reader = getattr(intent_store, "protection_intents", None)
     if not callable(inventory_reader) or not callable(journal_reader):
-        raise TypeError("read-only inventory and protection-history readers are required")
+        raise TypeError(
+            "read-only inventory and protection-history readers are required"
+        )
 
     captured_at = now or datetime.now(timezone.utc)
     if captured_at.utcoffset() is None:
