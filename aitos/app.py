@@ -92,9 +92,7 @@ class SystemComponents:
     market_shadow_consumer: MarketDataShadowConsumer | None = None
     governance_drift_scheduler: DriftMonitorScheduler | None = None
     governance_drift_batch_provider: Callable[[], Any] | None = None
-    _governance_drift_stop_event: asyncio.Event | None = field(
-        default=None, repr=False
-    )
+    _governance_drift_stop_event: asyncio.Event | None = field(default=None, repr=False)
     _governance_drift_task: asyncio.Task | None = field(default=None, repr=False)
 
     def reload_runtime_tuning(self) -> dict[str, object]:
