@@ -81,6 +81,8 @@ class SpotSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="AITOS_SPOT_")
 
+    api_key: str = ""
+    api_secret: str = ""
     enabled: bool = False
     testnet: bool = True
     execution_enabled: bool = False
