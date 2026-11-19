@@ -88,6 +88,7 @@ class SpotSettings(BaseSettings):
     execution_enabled: bool = False
     allow_mainnet: bool = False
     quote_asset: str = "USDT"
+    quote_to_usd_rate: float = Field(default=1.0, gt=0)
     max_symbols: int = Field(default=20, ge=1, le=100)
     min_quote_volume: float = Field(default=100000.0, ge=0)
     max_spread_bps: float = Field(default=20.0, gt=0)
