@@ -608,7 +608,11 @@ class LivePortfolioTracker:
         self._last_known_equity_usd = 0.0
 
     async def refresh_equity(self) -> float:
-        equity = await self._order_executor.get_account_balance(self._asset)
+        equity_reader = getattr(self._order_executor, "get_account_equity", None)
+        if callable(equity_reader):
+            equity = await equity_reader(self._asset)
+        else:
+            equity = await self._order_executor.get_account_balance(self._asset)
         self._last_known_equity_usd = equity
         self._peak_equity_usd = (
             equity
