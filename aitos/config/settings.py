@@ -69,8 +69,8 @@ class BinanceSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="BINANCE_")
 
-    api_key: SecretStr = SecretStr("")
-    api_secret: SecretStr = SecretStr("")
+    api_key: str = ""
+    api_secret: str = ""
     testnet: bool = True
     recv_window_ms: int = 5000
     hedge_mode: bool = False
@@ -81,8 +81,8 @@ class SpotSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="AITOS_SPOT_")
 
-    api_key: str = ""
-    api_secret: str = ""
+    api_key: SecretStr = SecretStr("")
+    api_secret: SecretStr = SecretStr("")
     enabled: bool = False
     testnet: bool = True
     execution_enabled: bool = False
