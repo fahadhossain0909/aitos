@@ -301,3 +301,30 @@ async def test_spot_runtime_rejects_candidates_outside_discovered_universe():
             quote_order_quantity=Decimal("50"),
         )
     inventory.close()
+
+
+
+@pytest.mark.asyncio
+async def test_spot_capital_allocation_converts_usd_to_quote_notional():
+    gateway = FakeCapitalGateway()
+    ledger = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
+        inventory=ledger,
+        quote_to_usd_rate=Decimal("2"),
+    )
+    request = SpotOrderRequest(
+        "BTCUSDT",
+        SpotOrderSide.BUY,
+        SpotOrderType.MARKET,
+        quote_order_quantity=Decimal("51"),
+    )
+    with pytest.raises(SpotAuthorizationRejected, match="exceeds approved"):
+        await coordinator.submit_entry(
+            equity_usd=1000,
+            opportunity=_opportunity(),
+            request=request,
+        )
+    assert gateway.released == ["binance:spot:BTCUSDT"]
+    ledger.close()
