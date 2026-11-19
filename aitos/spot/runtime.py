@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -99,7 +100,7 @@ class SpotRuntime:
                 + opportunity.rationale
             ),
             agent_consensus={
-                **opportunity.agent_consensus,
+                **(opportunity.agent_consensus or {}),
                 "kernel_fusion_confidence": decision.confidence,
                 "decision_id": opportunity.opportunity_id,
                 "market_type": "spot",
@@ -207,10 +208,17 @@ class SpotRuntime:
                         )
             if on_event is not None:
                 result = on_event(event)
-                if asyncio.iscoroutine(result):
+                if inspect.isawaitable(result):
                     await result
 
         await self.recover_unresolved_orders()
+        try:
+            await self.resolve_pending_commissions()
+        except Exception as exc:
+            logger.warning(
+                "Spot historical commission conversion deferred",
+                extra={"aitos_extra": {"error": str(exc)}},
+            )
         self._user_stream = SpotUserDataStreamSupervisor(
             adapter=self.market_data.rest,
             websocket=self.market_data.websocket,
