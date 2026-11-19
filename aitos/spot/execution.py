@@ -65,9 +65,7 @@ class SpotOrderExecutor:
         ):
             raise ValueError("symbol is not enabled for Spot trading")
         if filters.quote_asset != self.quote_asset:
-            raise ValueError(
-                f"Spot symbol quote asset must be {self.quote_asset}"
-            )
+            raise ValueError(f"Spot symbol quote asset must be {self.quote_asset}")
         if request.client_order_id and len(request.client_order_id) > 36:
             raise ValueError("client_order_id must not exceed 36 characters")
         if request.quote_order_quantity is not None:
