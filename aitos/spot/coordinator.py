@@ -46,9 +46,9 @@ class SpotTradingCoordinator:
             equity_quote, scoped, fee_bps=self.fee_bps,
             slippage_bps=self.slippage_bps, funding_bps=0.0,
         )
-        if not decision.accepted or allocation is None:
+        if not decision.eligible or allocation is None:
             raise SpotAuthorizationRejected(
-                "capital gateway rejected Spot entry: " + ", ".join(decision.reasons)
+                "capital gateway rejected Spot entry: " + ", ".join(decision.rejection_reasons)
             )
         budget = Decimal(str(allocation.capital_usd))
         requested = request.quote_order_quantity
