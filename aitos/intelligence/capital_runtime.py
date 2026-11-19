@@ -13,6 +13,7 @@ import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
+from math import isfinite
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
