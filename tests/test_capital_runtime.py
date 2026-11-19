@@ -403,7 +403,6 @@ def test_gateway_does_not_double_count_reservation_already_in_live_positions():
     assert snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(1.5)
 
 
-
 def test_portfolio_consensus_projects_same_symbol_pending_order_separately():
     portfolio = make_portfolio(
         positions=(
