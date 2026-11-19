@@ -187,9 +187,8 @@ def build_point_in_time_labels(
 
     bars_by_asset: dict[str, list[MarketBarRevision]] = defaultdict(list)
     for bar in first_bars.values():
-        if bar.available_at <= cutoff:
-            bars_by_asset[bar.asset].append(bar)
-        else:
+        bars_by_asset[bar.asset].append(bar)
+        if bar.available_at > cutoff:
             excluded["bar_not_yet_available"] += 1
     for asset_bars in bars_by_asset.values():
         asset_bars.sort(key=lambda item: (item.open_time, item.close_time))
