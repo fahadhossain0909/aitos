@@ -169,6 +169,31 @@ class CapitalGateway:
             equity_usd, peak, positions, correlations, position_sides
         )
 
+    def _include_in_flight_reservations(
+        self, snapshot: PortfolioRiskSnapshot, *, equity_usd: float
+    ) -> PortfolioRiskSnapshot:
+        """Project reserved-but-not-yet-open candidates into correlation risk.
+
+        A reservation for a symbol already represented by the live position
+        snapshot is not counted twice. Other reservations are included with
+        unknown side metadata, which deliberately receives no hedge credit.
+        """
+        if not isfinite(equity_usd) or equity_usd <= 0:
+            return snapshot
+        positions = dict(snapshot.position_risk_pct)
+        for reservation in self.reservation.snapshot():
+            symbol = str(reservation.symbol)
+            if symbol in positions or symbol.upper() in {
+                key.upper() for key in positions
+            }:
+                continue
+            risk_pct = max(0.0, float(reservation.risk_budget_usd)) / equity_usd * 100.0
+            if risk_pct > 0:
+                positions[symbol] = risk_pct
+        if positions == snapshot.position_risk_pct:
+            return snapshot
+        return replace(snapshot, position_risk_pct=positions)
+
     def evaluate(
         self,
         equity_usd: float,
@@ -254,7 +279,9 @@ class CapitalGateway:
         by_symbol = {item.symbol: item for item in eligible_estimates}
         for allocation in allocations:
             estimate = by_symbol[allocation.symbol]
-            snapshot = self._snapshot(equity_usd, estimate)
+            snapshot = self._include_in_flight_reservations(
+                self._snapshot(equity_usd, estimate), equity_usd=equity_usd
+            )
             metadata = estimate.metadata
             loss_streak = max(0, int(metadata.get("consecutive_losses", 0)))
             streak_multiplier = (
