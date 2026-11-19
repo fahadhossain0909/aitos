@@ -4,7 +4,7 @@ import pytest
 
 from aitos.spot.filters import parse_spot_exchange_info
 from aitos.spot.inventory import InventoryLedger
-from aitos.spot.models import SpotOrderRequest, SpotOrderSide, SpotOrderType
+from aitos.spot.models import SpotInstrument, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotCandidate, SpotOpportunityScanner
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.execution import SpotExecutionDisabled, SpotOrderExecutor
@@ -112,3 +112,28 @@ async def test_mainnet_execution_requires_second_explicit_guard():
     with pytest.raises(SpotExecutionDisabled):
         await executor.submit(request)
     await adapter.close()
+
+def test_spot_instrument_uses_distinct_canonical_market_identity():
+    instrument = SpotInstrument("btcusdt", "btc", "usdt", "TRADING", is_spot_trading_allowed=True)
+    assert instrument.instrument_key.value == "binance:spot:BTCUSDT"
+
+
+def test_inventory_accounts_for_base_asset_sell_commission():
+    ledger = InventoryLedger()
+    ledger.record_fill(fill_key="buy", symbol="ABCUSDT", base_asset="ABC",
+        quote_asset="USDT", side="BUY", quantity=Decimal("2"), price=Decimal("10"),
+        commission=Decimal("0.01"), commission_asset="ABC")
+    ledger.record_fill(fill_key="sell", symbol="ABCUSDT", base_asset="ABC",
+        quote_asset="USDT", side="SELL", quantity=Decimal("1"), price=Decimal("12"),
+        commission=Decimal("0.01"), commission_asset="ABC")
+    position = ledger.get_position("ABCUSDT")
+    assert position.quantity == Decimal("0.98")
+    assert position.realized_quote_pnl == Decimal("11.88") - (Decimal("20") / Decimal("1.99") * Decimal("1.01"))
+
+
+def test_inventory_marks_third_asset_fee_for_conversion():
+    ledger = InventoryLedger()
+    ledger.record_fill(fill_key="buy-bnb-fee", symbol="ABCUSDT", base_asset="ABC",
+        quote_asset="USDT", side="BUY", quantity=Decimal("1"), price=Decimal("10"),
+        commission=Decimal("0.001"), commission_asset="BNB")
+    assert ledger.get_position("ABCUSDT").fee_conversion_pending
