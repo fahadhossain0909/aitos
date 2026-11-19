@@ -56,4 +56,3 @@ class ExecutionReplayResult:
     fills: tuple[ReplayFill, ...]
     latency_ms: int
     complete: bool
-
