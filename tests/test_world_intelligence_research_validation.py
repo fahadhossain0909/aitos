@@ -15,7 +15,7 @@ def make_rows(count=80):
         rows.append(OOSPrediction(
             event_id=f"event-{i}", regime="trend" if i < 40 else "range",
             event_time=event_time,
-            label_available_at=event_time + timedelta(hours=2 if i != 3 else 100),
+            label_available_at=event_time + timedelta(hours=2 if i != 3 else 500),
             candidate_probability=0.9 if label else 0.1,
             benchmark_probability=0.6 if label else 0.4,
             label_up=label,
