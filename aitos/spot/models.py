@@ -1,4 +1,5 @@
 """Market-neutral, Decimal-safe Binance Spot domain contracts."""
+
 from __future__ import annotations
 
 import re
@@ -104,10 +105,13 @@ class SpotOrderRequest:
         object.__setattr__(self, "symbol", symbol)
         object.__setattr__(self, "side", SpotOrderSide(self.side))
         object.__setattr__(self, "order_type", SpotOrderType(self.order_type))
-        quantity = _decimal(self.quantity, "quantity") if self.quantity is not None else None
+        quantity = (
+            _decimal(self.quantity, "quantity") if self.quantity is not None else None
+        )
         quote_quantity = (
             _decimal(self.quote_order_quantity, "quote_order_quantity")
-            if self.quote_order_quantity is not None else None
+            if self.quote_order_quantity is not None
+            else None
         )
         price = _decimal(self.price, "price") if self.price is not None else None
         object.__setattr__(self, "quantity", quantity)
@@ -120,7 +124,9 @@ class SpotOrderRequest:
         if quote_quantity is not None and quote_quantity <= 0:
             raise ValueError("quote_order_quantity must be positive")
         if self.client_order_id and not _CLIENT_ID_RE.fullmatch(self.client_order_id):
-            raise ValueError("client_order_id must match Binance's 1-36 character format")
+            raise ValueError(
+                "client_order_id must match Binance's 1-36 character format"
+            )
         if self.order_type is SpotOrderType.LIMIT:
             if quote_quantity is not None:
                 raise ValueError("LIMIT orders require base quantity")
