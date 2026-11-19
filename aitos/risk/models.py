@@ -90,6 +90,29 @@ class PositionExposure:
 
 
 @dataclass(frozen=True)
+class PendingOrderExposure:
+    """Unfilled entry exposure projected into portfolio risk before dispatch."""
+
+    order_id: str
+    symbol: str
+    side: str
+    remaining_notional_usd: float
+    risk_amount_usd: float
+
+    def __post_init__(self) -> None:
+        if not self.order_id or not self.symbol:
+            raise ValueError("pending order identity and symbol are required")
+        normalized_side = str(self.side).upper()
+        if normalized_side not in {"LONG", "SHORT"}:
+            raise ValueError("pending order side must be LONG or SHORT")
+        object.__setattr__(self, "side", normalized_side)
+        for name in ("remaining_notional_usd", "risk_amount_usd"):
+            value = float(getattr(self, name))
+            if not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
+
+
+@dataclass(frozen=True)
 class PortfolioState:
     equity_usd: float
     peak_equity_usd: float
@@ -107,6 +130,12 @@ class PortfolioState:
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    pending_orders: tuple[PendingOrderExposure, ...] = ()
+
+    def __post_init__(self) -> None:
+        order_ids = [order.order_id for order in self.pending_orders]
+        if len(order_ids) != len(set(order_ids)):
+            raise ValueError("pending order IDs must be unique in a portfolio snapshot")
 
     @property
     def current_drawdown_pct(self) -> float:
