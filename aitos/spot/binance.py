@@ -57,7 +57,7 @@ class BinanceSpotAdapter:
             raise RuntimeError("Binance Spot API credentials are required")
         values = dict(params)
         values.setdefault("recvWindow", 5000)
-        values["timestamp"] = int(time.time() * 1000)
+        values["timestamp"] = int(time.time() * 1000) + self._server_time_offset_ms
         query = urlencode(values, doseq=True)
         values["signature"] = hmac.new(self.api_secret.encode(), query.encode(),
                                        hashlib.sha256).hexdigest()
@@ -86,6 +86,19 @@ class BinanceSpotAdapter:
                 message = payload.get("msg", "Binance API error") if isinstance(payload, dict) else str(payload)
                 raise RuntimeError(f"Binance Spot HTTP {response.status} ({code}): {message}")
             return payload
+
+    async def sync_server_time(self) -> int:
+        """Synchronize signed-request timestamps against Binance server time."""
+        before = int(time.time() * 1000)
+        raw = await self._request("GET", "/api/v3/time")
+        after = int(time.time() * 1000)
+        midpoint = (before + after) // 2
+        self._server_time_offset_ms = int(raw["serverTime"]) - midpoint
+        return self._server_time_offset_ms
+
+    @property
+    def rate_limit_snapshot(self) -> dict[str, Any]:
+        return self._rate_limiter.snapshot()
 
     async def exchange_info(self) -> dict[str, SpotSymbolFilters]:
         raw = await self._request("GET", "/api/v3/exchangeInfo", weight=20)
@@ -186,7 +199,7 @@ class BinanceSpotAdapter:
             params["timeInForce"] = request.time_in_force
         if request.client_order_id:
             params["newClientOrderId"] = request.client_order_id
-        raw = await self._request("POST", "/api/v3/order", params=params, signed=True, weight=5)
+        raw = await self._request("POST", "/api/v3/order", params=params, signed=True, weight=1)
         return self._parse_order(raw, request.side)
 
     async def query_order(self, symbol: str, *, order_id: int | None = None,
@@ -211,7 +224,7 @@ class BinanceSpotAdapter:
             params["orderId"] = order_id
         if from_id is not None:
             params["fromId"] = from_id
-        return await self._request("GET", "/api/v3/myTrades", params=params, signed=True)
+        return await self._request("GET", "/api/v3/myTrades", params=params, signed=True, weight=5)
 
     async def cancel_order(self, symbol: str, *, order_id: int | None = None,
                            client_order_id: str | None = None) -> dict[str, Any]:
