@@ -118,7 +118,7 @@ class CrossMarketIntelligenceEngine:
         min_observations: int = 8,
     ) -> tuple[float, int]:
         """Correlate leader returns with follower returns at a time offset."""
-        if not isinstance(lag_buckets, int) or lag_buckets < 0:
+        if isinstance(lag_buckets, bool) or not isinstance(lag_buckets, int) or lag_buckets < 0:
             raise ValueError("lag_buckets must be a non-negative integer")
         if (
             isinstance(min_observations, bool)
@@ -162,7 +162,7 @@ class CrossMarketIntelligenceEngine:
         min_observations: int = 8,
     ) -> LeadLagResult:
         """Discover lead/lag using UTC time buckets rather than sample indices."""
-        if not isinstance(max_lag_buckets, int) or max_lag_buckets < 0:
+        if isinstance(max_lag_buckets, bool) or not isinstance(max_lag_buckets, int) or max_lag_buckets < 0:
             raise ValueError("max_lag_buckets must be a non-negative integer")
         best_lag, best_corr, best_observations = 0, 0.0, 0
         for lag in range(max_lag_buckets + 1):
