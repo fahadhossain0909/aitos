@@ -83,6 +83,10 @@ async def test_shadow_consumer_uses_live_only_allowlisted_subscriptions():
     assert all(call[2]["live_only"] for call in bus.calls)
     assert all("cross-market-shadow-v1-" in call[2]["group"] for call in bus.calls)
 
+    await bus.calls[0][1](make_event())
+    await consumer._queue.join()
+    assert consumer.snapshot().processed == 1
+
     await consumer.stop()
     assert all(subscription.cancelled for subscription in bus.subscriptions)
     assert not consumer.snapshot().started
