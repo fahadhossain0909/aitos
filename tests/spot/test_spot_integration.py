@@ -276,6 +276,36 @@ def test_inventory_marks_third_asset_fee_for_conversion():
         commission_asset="BNB",
     )
     assert ledger.get_position("ABCUSDT").fee_conversion_pending
+    assert len(ledger.pending_fee_conversions()) == 1
+    ledger.resolve_commission_conversion("buy-bnb-fee", Decimal("0.25"))
+    position = ledger.get_position("ABCUSDT")
+    assert position.fee_conversion_pending is False
+    assert position.cost_quote == Decimal("10.25")
+    assert ledger.pending_fee_conversions() == []
+
+
+def test_third_asset_fee_conversion_is_durable_and_replayable(tmp_path):
+    path = tmp_path / "fee-conversion.sqlite"
+    ledger = InventoryLedger(path)
+    ledger.record_fill(
+        fill_key="buy-fee",
+        symbol="ABCUSDT",
+        base_asset="ABC",
+        quote_asset="USDT",
+        side="BUY",
+        quantity=Decimal("1"),
+        price=Decimal("10"),
+        commission=Decimal("0.01"),
+        commission_asset="BNB",
+    )
+    ledger.resolve_commission_conversion("buy-fee", Decimal("0.30"))
+    ledger.close()
+
+    reopened = InventoryLedger(path)
+    position = reopened.get_position("ABCUSDT")
+    assert position.fee_conversion_pending is False
+    assert position.cost_quote == Decimal("10.30")
+    reopened.close()
 
 
 def test_spot_order_intents_are_durable_and_replay_safe(tmp_path):
