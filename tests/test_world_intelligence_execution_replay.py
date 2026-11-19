@@ -45,6 +45,7 @@ def test_maker_orders_need_queue_adjusted_fill_evidence_and_short_funding_sign()
     report = replay_execution(
         [order], [book],
         funding=[FundingObservation(NOW + timedelta(seconds=1), 0.01)],
+        config=ExecutionReplayConfig(latency=timedelta(0)),
     )
     assert report.filled_quantity == 0.5
     assert report.unfilled_quantity == 0.5
