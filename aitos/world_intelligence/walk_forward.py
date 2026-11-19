@@ -112,16 +112,26 @@ def evaluate_event_impact_walk_forward(
             learning_rate=learning_rate,
             regularization=regularization,
         )
-        eligible_test = [
-            row
+        # Keep immature labels in the evaluator so they are explicitly counted
+        # as excluded_unmatured. Only future events are withheld from evaluation.
+        eligible_test = [row for row in test_rows if row.event_time <= cutoff]
+        excluded_after_cutoff += sum(
+            row.event_time > cutoff
+            or (
+                row.event_time > model.training_as_of
+                and row.outcome_available_at > cutoff
+            )
             for row in test_rows
-            if row.event_time <= cutoff and row.outcome_available_at <= cutoff
-        ]
-        excluded_after_cutoff += len(test_rows) - len(eligible_test)
+        )
         known_type_rows = [
             row for row in eligible_test if row.event_type in model.event_types
         ]
-        unseen_count = len(eligible_test) - len(known_type_rows)
+        unseen_count = sum(
+            row.event_time > model.training_as_of
+            and row.outcome_available_at <= cutoff
+            and row.event_type not in model.event_types
+            for row in eligible_test
+        )
         evaluation = evaluate_event_impact_model(model, known_type_rows, as_of=cutoff)
         folds.append(
             EventImpactWalkForwardFold(
