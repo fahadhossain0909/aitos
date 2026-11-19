@@ -25,6 +25,7 @@ class SpotUserDataStreamSupervisor:
         adapter,
         websocket,
         on_event: UserEventHandler,
+        on_connect: Callable[[], Awaitable[None] | None] | None = None,
         keepalive_seconds: float = 25 * 60,
         reconnect_seconds: float = 2.0,
         max_reconnect_seconds: float = 60.0,
@@ -34,6 +35,7 @@ class SpotUserDataStreamSupervisor:
         self.adapter = adapter
         self.websocket = websocket
         self.on_event = on_event
+        self.on_connect = on_connect
         self.keepalive_seconds = keepalive_seconds
         self.reconnect_seconds = reconnect_seconds
         self.max_reconnect_seconds = max_reconnect_seconds
@@ -66,7 +68,7 @@ class SpotUserDataStreamSupervisor:
             await asyncio.gather(task, return_exceptions=True)
 
     async def _consume(self, listen_key: str) -> None:
-        async for event in self.websocket.user_stream(listen_key):
+        async for event in self.websocket.user_stream(listen_key, reconnect=False):
             if not isinstance(event, dict):
                 continue
             result = self.on_event(event)
@@ -91,6 +93,10 @@ class SpotUserDataStreamSupervisor:
             consumer = keeper = None
             try:
                 listen_key = await self.adapter.create_listen_key()
+                if self.on_connect is not None:
+                    result = self.on_connect()
+                    if inspect.isawaitable(result):
+                        await result
                 consumer = asyncio.create_task(self._consume(listen_key))
                 keeper = asyncio.create_task(self._keepalive(listen_key))
                 done, _ = await asyncio.wait(
