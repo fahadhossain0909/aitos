@@ -257,7 +257,6 @@ async def test_open_order_inventory_rejects_invalid_rows(override):
         executedQty="0.0",
         reduceOnly=False,
         closePosition=False,
-        reduceOnly=False,
     )
     row.update(override)
     value._signed_request = AsyncMock(return_value=[row])
