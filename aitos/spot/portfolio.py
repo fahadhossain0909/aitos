@@ -118,7 +118,7 @@ class SpotPortfolioValuator:
             spot_quote_cash=quote_cash,
             managed_inventory_market_value=inventory_value,
             managed_inventory_cost_basis=inventory_cost,
-            spot_wallet_other_assets_value=wallet_value,
+            spot_wallet_non_quote_asset_value=wallet_value,
             total_equity_quote=total,
             pending_third_asset_fee_conversions=pending,
             marks_missing=tuple(missing),
