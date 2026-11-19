@@ -5,6 +5,11 @@ import pytest
 from aitos.intelligence import capital_runtime
 from aitos.intelligence.capital_controls import CapitalControlConfig
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_protection import (
+    CapitalReservation,
+    ProtectionDecision,
+    Reservation,
+)
 from aitos.intelligence.capital_runtime import (
     _portfolio_consensus,
     install_capital_guard,
@@ -336,3 +341,37 @@ async def test_open_position_retains_capital_reservation_until_close(
     await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
     assert gateway.reservation.get(trade.symbol) is None
     await lifecycle.shutdown()
+
+def test_gateway_includes_other_in_flight_reservations_in_correlation_projection():
+    class RecordingProtection:
+        def __init__(self):
+            self.snapshot = None
+
+        def evaluate(self, **kwargs):
+            self.snapshot = kwargs["snapshot"]
+            requested = kwargs["requested_risk_pct"]
+            return ProtectionDecision(
+                True,
+                1.0,
+                requested,
+                requested,
+                self.snapshot.correlated_risk_pct(),
+                self.snapshot.drawdown_pct,
+                "approved",
+            )
+
+    reservation = CapitalReservation()
+    assert reservation.reserve(
+        Reservation("BTCUSDT", 1_000.0, 200.0),
+        available_capital_usd=10_000.0,
+        available_risk_usd=500.0,
+    )
+    protection = RecordingProtection()
+    gateway = CapitalGateway(reservation=reservation, protection=protection)
+    estimate = gateway.estimate_opportunity(make_opportunity(symbol="ETHUSDT"))
+
+    gateway.evaluate(10_000.0, [estimate], max_positions=1)
+
+    assert protection.snapshot is not None
+    assert protection.snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(2.0)
+    assert "BTCUSDT" not in (protection.snapshot.position_sides or {})
