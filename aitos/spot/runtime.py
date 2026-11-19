@@ -59,6 +59,56 @@ class SpotRuntime:
             limit=self.max_symbols,
         )
 
+    async def submit_strategy_candidate(
+        self,
+        *,
+        candidate,
+        strategy_scanner,
+        kernel,
+        equity_quote: float,
+        quote_order_quantity: Decimal,
+        approved_by: str | None = None,
+    ) -> SpotOrder:
+        """Run the shared AITOS kernel gate before routing a Spot candidate.
+
+        The candidate must come from the shared strategy scanner operating on
+        Spot-isolated MarketDataBus features. The method intentionally refuses
+        candidates outside the discovered Spot universe and non-LONG decisions.
+        """
+        symbol = str(candidate.symbol).upper()
+        if symbol not in self.quote_volumes_24h:
+            raise ValueError("candidate is outside the active Spot universe")
+        if candidate.direction.value.upper() != "LONG":
+            raise ValueError("Spot strategy bridge is long-only")
+        decision = await strategy_scanner.decide_with_kernel(candidate, kernel)
+        if (
+            decision.direction != candidate.direction.value.lower()
+            or decision.confidence < kernel.fusion_min_confidence
+        ):
+            raise ValueError("shared AI Kernel rejected the Spot candidate")
+        opportunity = strategy_scanner.to_opportunity(
+            candidate, is_production=False, approved_by=approved_by
+        )
+        opportunity = replace(
+            opportunity,
+            confidence=min(opportunity.confidence, decision.confidence),
+            rationale=(
+                f"kernel_confidence={decision.confidence:.4f}; "
+                + opportunity.rationale
+            ),
+            agent_consensus={
+                **opportunity.agent_consensus,
+                "kernel_fusion_confidence": decision.confidence,
+                "decision_id": opportunity.opportunity_id,
+                "market_type": "spot",
+            },
+        )
+        return await self.submit_opportunity(
+            opportunity=opportunity,
+            equity_quote=equity_quote,
+            quote_order_quantity=quote_order_quantity,
+        )
+
     async def submit_opportunity(
         self,
         *,
