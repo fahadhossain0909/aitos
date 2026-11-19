@@ -74,7 +74,6 @@ def test_incomplete_or_invalid_master_rows_are_rejected():
 
 def test_resolver_does_not_infer_missing_market_or_venue():
     master = InstrumentMaster([_instrument()], version="v1")
-    assert master.resolve(venue="binance", market_type="", symbol="BTCUSDT") is None
     with pytest.raises(ValueError, match="market_type"):
         master.resolve(venue="binance", market_type="", symbol="BTCUSDT")
 
