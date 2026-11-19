@@ -174,7 +174,8 @@ class MarketDataShadowConsumer:
                 self._queue.task_done()
 
     def _process(self, event: CanonicalMarketEvent) -> None:
-        if str(event.market_type or event.market).strip().lower() not in self._market_types:
+        market_type = str(event.market_type or event.market).strip().lower()
+        if market_type not in self._market_types:
             self._counts["rejected_unresolved"] += 1
             return
         if event.event_id in self._seen:
