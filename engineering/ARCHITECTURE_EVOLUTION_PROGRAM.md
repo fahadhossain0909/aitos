@@ -33,7 +33,8 @@ Static inspection does not prove process health, exchange correctness, durabilit
 | Domain | Existing owner / contract | Assessment |
 |---|---|---|
 | Application composition | `run_paper_trading.py`, `run_live_trading.py`, `aitos/app.py` | SOURCE-VERIFIED entrypoints; runtime lifecycle still needs environment-specific evidence |
-| Market identity/events | `aitos/markets/contracts.py` | SOURCE-VERIFIED asset-class-neutral `Instrument`, `MarketEvent`, event types and schema version |
+| Market-data ingress events | `aitos/market_data/contracts.py` | SOURCE-VERIFIED active bus envelope with source/ingest times, sequence, event revision, trace and schema version |
+| Universal market-domain events | `aitos/markets/contracts.py` | SOURCE-VERIFIED asset-class-neutral `Instrument` and separate domain `MarketEvent`; production bridge from MarketDataBus not established |
 | Cross-market context | `aitos/markets/state.py` | SOURCE-VERIFIED immutable `GlobalMarketState` and deterministic builder |
 | Market ingress | `aitos/market_data/*` and canonical market-data documentation | Existing canonical pipeline; freshness and backpressure policy is documented |
 | Transport/storage | Redis Streams, Clickhouse and scoped transactional stores | Existing separation is documented; each table/journal's authority and runtime writers require a complete inventory |
@@ -50,16 +51,16 @@ Static inspection does not prove process health, exchange correctness, durabilit
 
 ### AEP-001 — Canonical contracts have overlapping definitions
 
-Source inspection found multiple similarly named contracts. The Phase 1 consumer/semantic audit now shows these are distinct bounded-context contracts, not proven accidental duplicates:
-- `aitos/decision/types.py::MarketSnapshot`;
-- `aitos/strategy/contracts.py::MarketSnapshot`;
-- `aitos/strategy/contracts.py::ExecutionIntent`;
-- `aitos/markets/adapters.py::ExecutionIntent`;
-- an additional `ExecutionIntent` in `aitos/intelligence/autonomy_pipeline.py`.
+Source inspection found multiple similarly named contracts. The Phase 1 consumer/semantic audit now shows some are distinct bounded-context contracts, while the two market-event envelopes expose a real integration gap:
+- `aitos/market_data/contracts.py::MarketEvent` (active canonical bus envelope);
+- `aitos/markets/contracts.py::MarketEvent` (separate asset-neutral domain envelope);
+- `aitos/statistics/financial_ml.py::MarketEvent` (compact research sample);
+- `aitos/decision/types.py::MarketSnapshot` and `aitos/strategy/contracts.py::MarketSnapshot`;
+- `aitos/strategy/contracts.py::ExecutionIntent`, `aitos/markets/adapters.py::ExecutionIntent`, and `aitos/intelligence/autonomy_pipeline.py::ExecutionIntent`.
 
 The market-domain contract already provides `Instrument` and `MarketEvent`, while `GlobalMarketState` is a separate aggregate. This is not proof that all duplicates are currently incompatible, but it is a concrete contract-drift risk.
 
-**Decision:** do not rename or delete these contracts in bulk. First inventory imports, serialization formats, persistence payloads and public APIs. Define one canonical owner per concept, then add explicit adapters/deprecation shims and migrate consumers incrementally. Preserve serialized compatibility and test old/new round trips.
+**Decision:** do not rename or delete these contracts in bulk. The two snapshot types and three intent types have distinct bounded-context semantics. The market-data and universal-market event envelopes are separate; the former is the live bus contract, while a production bridge to the latter was not established (the cross-market engine's only direct constructor hit was its test). Add an explicit, instrument-resolved, provenance-preserving bridge before claiming universal market context is fed by the canonical bus. The statistics event is a research sample, not a transport contract. Preserve serialized compatibility and test old/new round trips.
 
 ### AEP-002 — Market state is present, but end-to-end provenance is not yet one contract
 
@@ -158,6 +159,7 @@ Control plane (configuration, identity, secrets, observability, CI/CD, incident 
 ### Phase 1 — Contract and ownership audit (source-level audit completed; runtime gates remain)
 - Generate module/import/dependency inventory from source.
 - Map every `MarketSnapshot`, `ExecutionIntent`, `MarketEvent`, portfolio and risk contract and all serialization/persistence consumers.
+- Explicitly bridge canonical MarketDataBus events to universal market-domain context with resolved Instrument metadata and preserved sequence/revision/trace lineage.
 - Publish data authority matrix and per-aggregate recovery ownership.
 - Trace every entry/exit/reduce-only path to the authoritative risk and execution gates.
 - Coordinate with open PR #246 and #250; do not duplicate or rebase their work without review.
