@@ -263,7 +263,9 @@ def _audit_local_stop_orders(
                     "client_id": f"trade:{trade_id}",
                     "symbol": symbol,
                     "status": "unsupported_local_stop_identity",
-                    "reasons": ["live account audit requires a conditional algo stop ID"],
+                    "reasons": [
+                        "live account audit requires a conditional algo stop ID"
+                    ],
                 }
             )
             continue
@@ -275,7 +277,9 @@ def _audit_local_stop_orders(
                     "client_id": f"trade:{trade_id}",
                     "symbol": symbol,
                     "status": "local_stop_missing_from_venue_inventory",
-                    "reasons": ["active position stop is absent from open algo inventory"],
+                    "reasons": [
+                        "active position stop is absent from open algo inventory"
+                    ],
                 }
             )
             continue
@@ -301,7 +305,9 @@ def _audit_local_stop_orders(
             reduce_only = False
             reasons.append("local stop reduction flags are invalid")
         if hedge_mode and reduce_only:
-            reasons.append("hedge-mode stop must use positionSide rather than reduceOnly")
+            reasons.append(
+                "hedge-mode stop must use positionSide rather than reduceOnly"
+            )
         if not hedge_mode and not close_position and not reduce_only:
             reasons.append("one-way stop is not reduce-only")
         if not close_position and not _decimal_matches(
