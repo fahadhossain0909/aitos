@@ -42,6 +42,7 @@ class SpotMarketState:
     book_valid: bool = False
     last_trade_at: datetime | None = None
     last_ticker_at: datetime | None = None
+    last_price: Decimal | None = None
     last_book_at: datetime | None = None
     last_kline_at: datetime | None = None
     sequence_gaps: int = 0
@@ -169,6 +170,7 @@ class SpotMarketDataConsumer:
             return
         state.best_bid = bid
         state.best_ask = ask
+        state.last_price = Decimal(str(payload.get("last_price", (bid + ask) / 2)))
         state.bid_quantity = Decimal(str(payload.get("bid_quantity", "0")))
         state.ask_quantity = Decimal(str(payload.get("ask_quantity", "0")))
         state.last_ticker_at = event.event_time
@@ -321,6 +323,7 @@ class SpotMarketDataConsumer:
             volatility_bps=volatility_bps,
             momentum_bps=momentum_bps,
             order_book_imbalance=imbalance,
+            last_price=state.last_price or mid,
             trading_enabled=True,
             data_fresh=True,
         )
