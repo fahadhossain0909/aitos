@@ -264,10 +264,37 @@ def build_point_in_time_labels(
     )
 
 
+def to_event_impact_training_rows(report: PointInTimeLabelReport):
+    """Convert matured realized labels to the offline model training contract."""
+    from aitos.world_intelligence.impact_model import EventImpactTrainingRow
+
+    return tuple(
+        EventImpactTrainingRow(
+            event_id=f"{label.event_id}:{label.horizon}",
+            asset=label.asset,
+            horizon=label.horizon,
+            regime=label.regime,
+            event_type=label.event_type,
+            event_time=label.event_time,
+            outcome_available_at=label.outcome_available_at,
+            sentiment=label.sentiment,
+            severity=label.severity,
+            novelty=label.novelty,
+            confidence=label.confidence,
+            source_reliability=label.source_reliability,
+            age_hours=0.0,
+            beta=label.beta,
+            forward_return=label.forward_return,
+        )
+        for label in report.labels
+    )
+
+
 __all__ = [
     "EventRevision",
     "MarketBarRevision",
     "PointInTimeLabelReport",
     "RealizedEventLabel",
     "build_point_in_time_labels",
+    "to_event_impact_training_rows",
 ]
