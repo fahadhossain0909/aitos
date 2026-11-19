@@ -422,9 +422,7 @@ async def test_order_record_rejects_conflicting_latest_timestamp_versions():
 @pytest.mark.asyncio
 async def test_pending_order_intent_loader_fails_closed_on_latest_timestamp_tie():
     class QueryResult:
-        result_rows = [
-            ("client-1", "BTCUSDT", "SUBMITTING", '{"symbol":"BTCUSDT"}', 2)
-        ]
+        result_rows = [("client-1", "BTCUSDT", "SUBMITTING", '{"symbol":"BTCUSDT"}', 2)]
 
     class ClickHouseClient:
         async def query(self, query, parameters=None):
@@ -461,7 +459,9 @@ async def test_unlinked_order_recovery_fails_closed_on_latest_timestamp_tie():
         _client = ClickHouseClient()
 
     store = DurableTradingStateStore(Repository())
-    with pytest.raises(RuntimeError, match="ambiguous latest acknowledged-order evidence"):
+    with pytest.raises(
+        RuntimeError, match="ambiguous latest acknowledged-order evidence"
+    ):
         await store.load_unlinked_acknowledged_orders()
 
 @pytest.mark.asyncio
@@ -479,4 +479,3 @@ async def test_order_record_lookup_returns_none_when_no_order_exists():
 
     store = DurableTradingStateStore(Repository())
     assert await store.load_order_record("missing-client-id") is None
-
