@@ -184,7 +184,6 @@ def test_hsmm_causal_oos_posterior_history_supports_multiclass_calibration():
     assert 0.0 <= report.expected_calibration_error <= 1.0
 
 
-
 def test_l1_replay_treats_negative_funding_as_a_cashflow_credit():
     result = replay_historical_order(
         [BookSnapshot(1000, 99.0, 101.0, 1.0, 1.0)],
@@ -201,7 +200,6 @@ def test_l1_replay_treats_negative_funding_as_a_cashflow_credit():
     assert result.total_cost == pytest.approx(
         result.spread_cost + result.slippage_cost + result.fees + result.funding_cost
     )
-
 
 
 def test_l1_replay_accepts_signed_funding_credits():
