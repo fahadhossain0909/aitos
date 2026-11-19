@@ -497,13 +497,14 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
                 topic, components.trade_lifecycle.handle_event, group=group
             )
         )
-    if components.market_shadow_consumer is not None:
+    shadow_consumer = getattr(components, "market_shadow_consumer", None)
+    if shadow_consumer is not None:
         market_bus = components.data_ingestion.market_data_bus
         if market_bus is None:
             raise RuntimeError(
                 "market shadow consumer requires canonical market-data ingestion"
             )
-        await components.market_shadow_consumer.start(market_bus)
+        await shadow_consumer.start(market_bus)
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         statuses = [await _health_status(module) for module in components.all_modules()]
@@ -516,9 +517,10 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
 async def shutdown_all(
     components: SystemComponents, grace_period_seconds: float = 30.0
 ) -> None:
-    if components.market_shadow_consumer is not None:
+    shadow_consumer = getattr(components, "market_shadow_consumer", None)
+    if shadow_consumer is not None:
         try:
-            await components.market_shadow_consumer.stop(drain=True)
+            await shadow_consumer.stop(drain=True)
         except Exception as exc:
             logger.error(
                 "market shadow consumer shutdown failed",
