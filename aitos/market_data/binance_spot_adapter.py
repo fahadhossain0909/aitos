@@ -71,6 +71,19 @@ class BinanceSpotCanonicalMarketDataAdapter:
         async for event in _merge_symbols(_symbols(symbols), source):
             yield event
 
+    async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
+        """Stream best bid/ask and sizes from Binance bookTicker events."""
+        async def source(symbol: str):
+            async for item in self.websocket.stream(symbol, "@bookTicker"):
+                data = item["data"]
+                event_ms = data.get("E") or data.get("T")
+                yield _event(symbol, MarketEventType.TICKER, _event_time(event_ms),
+                    {"bid_price": str(data["b"]), "bid_quantity": str(data["B"]),
+                     "ask_price": str(data["a"]), "ask_quantity": str(data["A"])},
+                    MarketSource.WEBSOCKET, int(data.get("u", 0)) or None)
+        async for event in _merge_symbols(_symbols(symbols), source):
+            yield event
+
     async def stream_klines(self, symbols: list[str],
                             timeframe: str = "1m") -> AsyncIterator[MarketEvent]:
         async def source(symbol: str):
