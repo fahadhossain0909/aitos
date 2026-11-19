@@ -65,15 +65,22 @@ class DepthLevel:
     quantity: float
 
     def __post_init__(self):
+        if isinstance(self.price, bool) or isinstance(self.quantity, bool):
+            raise ValueError("depth levels require numeric price and size")
+        try:
+            price = float(self.price)
+            quantity = float(self.quantity)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("depth levels require numeric price and size") from None
         if (
-            isinstance(self.price, bool)
-            or isinstance(self.quantity, bool)
-            or not math.isfinite(float(self.price))
-            or not math.isfinite(float(self.quantity))
-            or self.price <= 0
-            or self.quantity < 0
+            not math.isfinite(price)
+            or not math.isfinite(quantity)
+            or price <= 0
+            or quantity < 0
         ):
             raise ValueError("depth levels require a positive price and non-negative size")
+        object.__setattr__(self, "price", price)
+        object.__setattr__(self, "quantity", quantity)
 
 
 @dataclass(frozen=True)
@@ -87,11 +94,14 @@ class DepthBookSnapshot:
             isinstance(self.timestamp_ms, bool)
             or not isinstance(self.timestamp_ms, int)
             or self.timestamp_ms < 0
-            or not self.bids
-            or not self.asks
         ):
-            raise ValueError("depth snapshot requires timestamp and both book sides")
-        if any(not isinstance(level, DepthLevel) for level in (*self.bids, *self.asks)):
+            raise ValueError("depth snapshot timestamp must be a non-negative integer")
+        bids, asks = tuple(self.bids), tuple(self.asks)
+        if not bids or not asks:
+            raise ValueError("depth snapshot requires both book sides")
+        object.__setattr__(self, "bids", bids)
+        object.__setattr__(self, "asks", asks)
+        if any(not isinstance(level, DepthLevel) for level in (*bids, *asks)):
             raise TypeError("depth snapshot levels must be DepthLevel instances")
         if any(
             self.bids[index].price <= self.bids[index + 1].price
@@ -261,6 +271,8 @@ def replay_historical_order_l2(
     if submitted_at_ms < 0 or latency_ms < 0:
         raise ValueError("timestamps and latency must be non-negative")
     ordered = tuple(snapshots)
+    if any(not isinstance(snapshot, DepthBookSnapshot) for snapshot in ordered):
+        raise TypeError("L2 replay requires DepthBookSnapshot records")
     if any(
         ordered[index].timestamp_ms >= ordered[index + 1].timestamp_ms
         for index in range(len(ordered) - 1)
