@@ -29,8 +29,11 @@ The Futures live runner does not construct or start Spot components.
 `MarketEvent` envelope and emits the same semantic channels consumed by the
 market-data plane: trades, closed klines, bookTicker, order-book snapshots and
 depth deltas. Every event carries `market_type=spot` and a distinct
-`binance:spot:SYMBOL` instrument identity, preventing a Spot asset from
-colliding with a Futures contract.
+`binance:spot:SYMBOL` instrument identity. Spot events publish on isolated
+`market.spot.*` channels; existing Futures consumers remain subscribed to
+`market.*` and cannot accidentally mix same-symbol Spot data into Futures
+features. A Spot consumer subscribes through
+`MarketDataBus.subscribe(..., market_type="spot")`.
 
 Trade, ticker, kline and depth subscriptions are multiplexed over bounded
 per-symbol tasks. The order-book path seeds from `/api/v3/depth`, bridges the
@@ -149,6 +152,10 @@ fees and execution-cost replay have passed operator review.
   do not report final net PnL while conversion is pending.
 - Extend execution replay with Spot maker/taker fees, spread crossing,
   partial fills, market impact and latency; validate by symbol and regime OOS.
+- Extend the historical repository schema and persistence sink with
+  `instrument_id/market_type` before persisting Spot events; the existing
+  historical writer intentionally remains on Futures channels to avoid
+  same-symbol database collisions.
 - Verify the existing portfolio mark-to-market aggregates Spot inventory,
   quote cash and Futures margin without double-counting shared quote assets.
 
