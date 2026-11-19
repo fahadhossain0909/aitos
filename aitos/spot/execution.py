@@ -135,5 +135,8 @@ class SpotOrderExecutor:
                 price=Decimal(str(trade["price"])),
                 commission=Decimal(str(trade.get("commission", "0"))),
                 commission_asset=str(trade.get("commissionAsset", "")),
+                fill_time_ms=(
+                    int(trade["time"]) if trade.get("time") is not None else None
+                ),
             )
         return order
