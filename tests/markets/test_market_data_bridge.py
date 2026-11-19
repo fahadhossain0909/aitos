@@ -122,4 +122,6 @@ def test_bridge_requires_explicit_resolved_instrument():
     with pytest.raises(TypeError, match="resolved markets.Instrument"):
         market_data_event_to_domain(event(), object())
     with pytest.raises(ValueError, match="market_type is required"):
-        market_data_event_to_domain(event(), Instrument("BTCUSDT", AssetClass.CRYPTO, "binance"))
+        market_data_event_to_domain(
+            event(), Instrument("BTCUSDT", AssetClass.CRYPTO, "binance")
+        )
