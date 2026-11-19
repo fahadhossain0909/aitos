@@ -28,7 +28,7 @@ class FakeWebSocket:
     def __init__(self):
         self.second_key = asyncio.Event()
 
-    async def user_stream(self, key):
+    async def user_stream(self, key, *, reconnect=True):
         if key == "listen-2":
             self.second_key.set()
         yield {"e": "outboundAccountPosition", "key": key}
