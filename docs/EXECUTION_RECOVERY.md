@@ -216,3 +216,14 @@ Console history/performance queries have query-local time/read-byte/memory limit
 and throw on read overflow instead of returning partial financial reports.
 Startup/full recovery is separate and does not use the UI output bounds. No
 production settings, migrations or data cleanup were applied during verification.
+
+
+## Authenticated read-only algo inventory reconciliation
+
+`BinanceFuturesOrderExecutor.get_open_algo_orders()` now fetches the complete USD-M conditional inventory through the signed `GET /fapi/v1/openAlgoOrders` endpoint. `get_open_orders()` separately reads ordinary orders through `GET /fapi/v1/openOrders`; conditional algo orders must not be assumed to appear in that response. Both readers validate the entire returned list and reject malformed, duplicate, non-open or cross-symbol rows rather than silently dropping them.
+
+`aitos.execution.protection_reconciliation.audit_exchange_protection_inventory()` combines the executor's authenticated open-algo response with the matching scoped `ExecutionIntentStore` reader. It is read-only and reports `AUTHENTICATED_READ_ONLY_EXCHANGE_API` provenance. A matching `clientAlgoId`/`algoId`/symbol/side/type/quantity/trigger remains an `unapplied_match`, not a recovery approval. Missing open inventory remains ambiguous and requires terminal algo status, child-order fill evidence and account-position reconciliation. The report always has `safe_to_resume: false`, `account_exposure_verified: false`, and no automatic actions. It never writes to the journal or touches venue orders.
+
+## Strict pending-entry exposure projection
+
+`aitos.exchange.binance_pending_exposure.pending_exposures_from_open_orders()` converts a complete standard USD-M `openOrders` response into `PendingOrderExposure` rows. It accounts only for unfilled remainder after partial fills; excludes reduce-only, close-position and hedge-mode closing legs; and requires fresh mark, side-correct protective stop and leverage inputs. The open-order and risk-input timestamps must both be timezone-aware, within five seconds of the supplied current time, and within two seconds of each other. Risk is linear-contract remaining quantity multiplied by mark-to-stop distance. This adapter is not for inverse/coin-margined contracts and is not yet connected to the live account tracker: that provider's authoritative snapshot owner and lifecycle remain an explicit acceptance gate.
