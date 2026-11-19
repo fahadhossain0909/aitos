@@ -19,6 +19,7 @@ from aitos.spot.coordinator import SpotTradingCoordinator
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
+from aitos.spot.lead_lag import FuturesSpotLeadLagAnalyzer
 from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotOpportunityScanner
@@ -33,6 +34,7 @@ class SpotRuntime:
     scanner: SpotOpportunityScanner
     coordinator: SpotTradingCoordinator
     market_consumer: SpotMarketDataConsumer
+    lead_lag: FuturesSpotLeadLagAnalyzer
     quote_asset: str = "USDT"
     max_symbols: int = 20
     min_quote_volume: Decimal = Decimal("100000")
@@ -124,6 +126,7 @@ class SpotRuntime:
         return {
             "tasks": self.market_data_task_status(),
             "features": self.market_consumer.health(),
+            "futures_spot_lead_lag": self.lead_lag.snapshot(),
         }
 
     async def start_market_data(self, market_bus) -> list[asyncio.Task]:
@@ -138,6 +141,7 @@ class SpotRuntime:
             self.market_data.rest.universe_quote_volumes
         )
         await self.market_consumer.start(market_bus)
+        await self.lead_lag.start(market_bus)
         book_symbols = symbols[:5]
         kline_symbols = symbols[:5]
         self._market_tasks = [
@@ -168,6 +172,7 @@ class SpotRuntime:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.market_consumer.stop()
+        await self.lead_lag.stop()
 
     def market_data_task_status(self) -> dict[str, str]:
         return {
@@ -271,6 +276,7 @@ def build_spot_runtime(
         scanner,
         max_symbols=policy.max_symbols,
     )
+    lead_lag = FuturesSpotLeadLagAnalyzer()
     return SpotRuntime(
         market_data,
         executor,
@@ -278,6 +284,7 @@ def build_spot_runtime(
         scanner,
         coordinator,
         market_consumer,
+        lead_lag,
         quote_asset=policy.quote_asset.upper(),
         max_symbols=policy.max_symbols,
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
