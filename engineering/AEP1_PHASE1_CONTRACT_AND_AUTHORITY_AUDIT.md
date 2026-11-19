@@ -44,6 +44,7 @@ The active Futures opportunity path already has a stronger central control bound
 4. The universal-markets event currently assigns a correlation ID from its event ID when omitted. Event-time/receive-time validation and payload schema enforcement need a dedicated compatibility proposal.
 5. ADL `MarketSnapshot` already requires an aware timestamp and exposes snapshot ID/source versions. Strategy `MarketSnapshot` is deliberately lightweight and has no equivalent point-in-time metadata. A mapper must make missing provenance explicit rather than fabricate timestamps or source versions.
 6. The universal market `Portfolio` is a small in-memory view over `markets.Position`; the trading lifecycle uses a separate `PortfolioState` with equity, peak equity, positions and risk context. They are not interchangeable authorities.
+7. The additive bridge now requires an explicit `Instrument.market_type` and checks it against the source event. When provided, the instrument ID includes venue + asset class + market type + symbol, preventing same-symbol Spot/Futures identity collisions. Legacy instruments without market_type retain their old ID shape; the bridge rejects them rather than guessing.
 
 ## 2. Risk and capital authority map
 
@@ -95,7 +96,7 @@ Source anchors:
 
 - Prove whether all entrypoints—including Futures, Spot, position switching, rebalancing and any direct executor call—cross the intended central gate. The final lifecycle guard is strong, but call-site inventory must be complete.
 - Correlation protection is calculated from open-position risk snapshots; reservation totals separately constrain capital and portfolio risk. Verify whether in-flight/pending candidates are included in correlation/concentration calculations before treating the projected portfolio as fully authoritative.
-- `CapitalReservation` keys durable rows by uppercased symbol. Verify namespace isolation across venue, asset class, product type and account before sharing one ledger across multi-market runtimes.
+- `CapitalReservation` keys durable rows by uppercased string. Spot currently passes a namespaced `InstrumentKey`, while Futures paths commonly use a symbol. Verify namespace isolation across venue, asset class, product type and account before sharing one ledger across multi-market runtimes.
 - The market-domain `Portfolio` and lifecycle `PortfolioState` have different data and lifecycle semantics. A future bridge must preserve equity, mark/valuation, contract multiplier, pending orders and reservation semantics.
 - Keep reduce-only paths available under bounded emergency behavior; do not accidentally make a new-entry gate block safe de-risking.
 
@@ -142,7 +143,7 @@ The Market Data Contract Audit job stopped at its formatting step for the same r
 1. **Complete consumer/call-site graph:** use repository-wide import and call-site inventory for all contract constructors, serializers, event bus boundaries, persistence payloads, direct executor calls and Spot/Futures order paths. The additive pure converter `aitos.markets.market_data_event_to_domain` now resolves no metadata by guess and preserves sequence/revision/trace provenance; verify it in CI, then wire a read-only/shadow consumer into the cross-market engine only after explicit instrument-master resolution and backpressure policy are defined.
 2. **Add explicit mappers, not a universal mega-contract:** strategy proposal → authorized execution request; ADL snapshot ↔ strategy view only where a caller needs it; canonical event → bounded feature snapshot. Each mapper must be pure, versioned and reject missing/ambiguous identity.
 3. **Deep immutability compatibility proposal:** make event payload and global-state feature maps safely immutable without breaking JSON encoding, dataclass/asdict consumers or historical persisted payloads. Add round-trip and mutation-rejection tests before wiring.
-4. **Reservation namespace and in-flight projection:** test same symbol across venue/asset class/account, concurrent proposals, expired leases, pinned exposure, duplicate workers and pending-order correlation risk.
+4. **Reservation namespace and in-flight projection:** test same symbol across venue/asset class/account, concurrent proposals, expired leases, pinned exposure, duplicate workers and pending-order correlation risk. Extend market-scoped identity tests to Spot and USD-M/COIN-M Futures sharing the same ticker symbol.
 5. **Execution/accounting fault matrix:** process death before/after POST, ambiguous ACK, partial fill, protection POST/ID-write crash, store outage, manual/external order and restart reconciliation.
 6. **Paper-only integration:** prove shared CapitalGateway, Spot/Futures isolation, fills/fees/funding and reconciliation with synthetic or isolated paper adapters. No live exchange order is required.
 7. **Quant certification:** after implementation, run walk-forward/OOS/regime/side/cost/ablation, confidence intervals and benchmark comparison. Synthetic tests are not venue calibration.
