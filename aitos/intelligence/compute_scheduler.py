@@ -86,6 +86,8 @@ class ComputeAwareScheduler:
     def submit(self, task: AnalysisTask, *, now: float) -> bool:
         if task.submitted_at > now:
             raise ValueError("submitted_at cannot be in the future")
+        if any(item.task_id == task.task_id for item in self._pending):
+            raise ValueError("task_id must be unique while a task is pending")
         if task.coalesce_key:
             for index, current in enumerate(self._pending):
                 if current.coalesce_key == task.coalesce_key:
@@ -127,11 +129,22 @@ class ComputeAwareScheduler:
             market_waiting = any(
                 item.priority == TaskPriority.MARKET_CRITICAL for item in pending
             )
+            def effective_priority(item: AnalysisTask) -> int:
+                # Position and market-critical work never age downward.
+                if item.priority <= TaskPriority.MARKET_CRITICAL:
+                    return int(item.priority)
+                age_steps = int(
+                    max(0.0, now - item.submitted_at) / self.aging_seconds
+                )
+                return max(
+                    int(TaskPriority.CANDIDATE_ANALYSIS),
+                    int(item.priority) - age_steps,
+                )
+
             ranked = sorted(
                 pending,
                 key=lambda item: (
-                    item.priority,
-                    -(max(0.0, now - item.submitted_at) / self.aging_seconds),
+                    effective_priority(item),
                     item.submitted_at,
                     item.task_id,
                 ),
