@@ -66,8 +66,10 @@ def test_spot_portfolio_marks_missing_and_external_base_holdings_not_adopted():
         SpotPortfolioValuator(ledger).snapshot(
             spot_adapter=adapter,
             futures_account_equity_quote=Decimal("100"),
-            balances=[SpotBalance("USDT", Decimal("20"), Decimal("0")),
-                      SpotBalance("ETH", Decimal("50"), Decimal("0"))],
+            balances=[
+                SpotBalance("USDT", Decimal("20"), Decimal("0")),
+                SpotBalance("ETH", Decimal("50"), Decimal("0")),
+            ],
             marks={},
         )
     )
@@ -101,7 +103,6 @@ def test_spot_execution_replay_walks_depth_and_preserves_partial_fill():
     assert not result.complete
 
 
-
 def test_spot_maker_replay_uses_observed_queue_ahead():
     result = replay_spot_limit_order(
         side="BUY",
@@ -115,7 +116,6 @@ def test_spot_maker_replay_uses_observed_queue_ahead():
     assert result.unfilled_quantity == Decimal("3")
     assert result.fees_quote == Decimal("0.10")
     assert result.fills[0].maker
-
 
 
 def test_spot_replay_uses_first_book_after_order_latency():
@@ -147,7 +147,6 @@ def test_spot_replay_uses_first_book_after_order_latency():
     )
     assert result.average_price == Decimal("102")
     assert result.latency_ms == 100
-
 
 
 def test_spot_portfolio_quote_conversion_is_explicit():
