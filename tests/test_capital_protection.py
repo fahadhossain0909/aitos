@@ -371,6 +371,7 @@ def test_spot_and_futures_reservations_have_distinct_market_namespaces(
     finally:
         ledger.close()
 
+
 def test_sqlite_reservation_risk_policy_is_serialized_across_instances(tmp_path):
     path = tmp_path / "atomic-risk-policy.sqlite3"
     first = CapitalReservation(path=path, owner_id="worker-a")
