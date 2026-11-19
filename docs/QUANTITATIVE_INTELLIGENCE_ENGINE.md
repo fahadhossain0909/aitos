@@ -16,9 +16,9 @@ degrade to the existing conservative policy, never to a permissive default.
 | 1 — Statistical foundations | Distribution, volatility, Bayesian, HMM, GARCH, EVT and hedge-beta estimates | Partial: existing HMM/GARCH/EVT/Bayes stack plus distribution, Kalman and fitted HAR-RV/GJR-GARCH estimators |
 | 2 — Regime and event dynamics | Regime posterior, change-point detection, duration-aware regimes, order-flow event intensity | Partial: Gaussian HMM, CUSUM, BOCPD, explicit-duration Gaussian HSMM and marked continuous-time exponential Hawkes profile-MLE; out-of-sample duration/intensity calibration and production feed wiring remain |
 | 3 — Tail, dependence and portfolio risk | EVT severity, asymmetric volatility, cross-asset dependence, risk sizing and drawdown controls | Partial: downside/upside POT-GPD, GARCH/GJR-GARCH, DCC(1,1)-GARCH, empirical Gaussian-copula dependence, historical portfolio VaR/ES and reduce-only risk overlay; market-regime calibration and full portfolio replay remain |
-| 4 — Research validation | Purged walk-forward, CPCV, PBO, calibration, regime splits and execution-cost sensitivity | Partial: walk-forward, CPCV, PBO, Brier/log-loss/QLIKE, symbol/regime cohort reports and event-time L1 execution replay with fees, spread, slippage, latency, partial fills, funding and borrow; full-depth impact, queue position, venue-specific fee/funding schedules and market-data-backed replay remain |
+| 4 — Research validation | Purged walk-forward, CPCV, PBO, calibration, regime splits and execution-cost sensitivity | Partial: walk-forward, CPCV, PBO, Brier/log-loss/QLIKE, symbol/regime cohort reports and event-time L1/L2 execution replay with fees, spread, slippage, latency, partial fills, funding, borrow and a configurable depth-impact model; venue-calibrated impact/queue coefficients, fee/funding schedules and market-data-backed replay remain |
 | 5 — Strategy and risk integration | Strategy-family suitability, model disagreement, risk gate integration and decision attribution | Partial: fresh matched forecasts reduce base size before hard limits; scanner gate decisions, entries, rejections, HOLD/MANAGE/EXIT and execution failures persist under trace identity and reconcile to net close outcomes; end-to-end completeness across every execution adapter and non-trade candidate lifecycle still requires runtime audit |
-| 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Partial: SQLite shadow forecasts and decision ledger reconcile to outcomes; durable registry and audit events exist; opt-in runtime drift controller blocks promotion on drift and requires explicit operator approval. Continuous live feature-batch scheduling, alert routing and operator-facing approval workflow remain |
+| 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Partial: SQLite shadow forecasts and decision ledger reconcile to outcomes; durable registry and audit events exist; opt-in runtime drift controller blocks promotion on drift and requires explicit operator approval; application lifecycle now owns scheduler start/stop when configured. Live feature-batch providers, alert routing and authenticated operator approval workflow remain deployment integrations |
 
 This status table is intentionally conservative. A module existing in the
 repository is not evidence that it is connected to the live scanner, position
@@ -68,9 +68,11 @@ sizer, portfolio risk gate or paper-trading runtime.
   outcomes.
 - Event-time L1 execution replay with submission latency, displayed-size-limited
   partial fills, bid/ask spread, adverse slippage, taker fees, prorated funding
-  and borrow costs. The separate L2 replay walks every supplied price level,
-  applies a configurable square-root participation impact curve, and supports
-  passive queue-ahead replay from side-classified trades/cancellations/additions.
+  and borrow costs. The separate L2 market-order replay walks one point-in-time
+  book after latency, applies a configurable square-root participation impact
+  curve plus additional slippage, fees, funding and borrow costs, and retains
+  any unfilled remainder rather than reusing later snapshots. Passive queue-ahead
+  replay uses side-classified trades/cancellations/additions.
 - Cross-adapter attribution decorator for the shared OrderExecutor contract.
   It records ENTRY/EXIT/MANAGE and EXECUTION_FAILURE outcomes for simulated,
   Binance, cTrader and MT5 adapters. TradeLifecycle rejects zero-fill positions

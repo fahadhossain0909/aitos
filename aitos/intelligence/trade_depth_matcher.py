@@ -61,6 +61,12 @@ class TradeDepthMatcher:
         """Track per-price reductions and reconcile trades already received."""
         if not event:
             return event
+        # Canonical MarketEvent payloads are recursively immutable. Work on
+        # an owned mutable projection so attribution never mutates source facts.
+        event = dict(event)
+        event["reductions"] = [
+            dict(reduction) for reduction in event.get("reductions", ())
+        ]
         timestamp_ms = int(event.get("event_time_ms", 0))
         if timestamp_ms <= 0:
             return event

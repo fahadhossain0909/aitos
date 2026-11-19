@@ -1,5 +1,7 @@
 import multiprocessing
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -329,6 +331,71 @@ def test_reservation_owner_can_renew_lease_but_other_owner_cannot(tmp_path):
         )
         assert first.renew("BTCUSDT")
         assert not second.renew("BTCUSDT")
+    finally:
+        first.close()
+        second.close()
+
+
+@pytest.mark.parametrize("durable", [False, True])
+def test_spot_and_futures_reservations_have_distinct_market_namespaces(
+    tmp_path, durable
+):
+    path = tmp_path / "market-namespaces.sqlite3" if durable else None
+    ledger = CapitalReservation(path=path)
+    try:
+        futures = Reservation("BTCUSDT", 100.0, 10.0)
+        spot = Reservation("BINANCE:SPOT:BTCUSDT", 100.0, 10.0)
+        kwargs = (
+            {"capital_limit_usd": 1_000.0, "risk_limit_usd": 100.0} if durable else {}
+        )
+        assert ledger.reserve(
+            futures,
+            available_capital_usd=1_000.0,
+            available_risk_usd=100.0,
+            **kwargs,
+        )
+        assert ledger.reserve(
+            spot,
+            available_capital_usd=900.0,
+            available_risk_usd=90.0,
+            **kwargs,
+        )
+        assert ledger.reserved_capital_usd == 200.0
+        assert ledger.reserved_risk_usd == 20.0
+        assert {item.symbol.upper() for item in ledger.snapshot()} == {
+            "BTCUSDT",
+            "BINANCE:SPOT:BTCUSDT",
+        }
+    finally:
+        ledger.close()
+
+
+def test_sqlite_reservation_risk_policy_is_serialized_across_instances(tmp_path):
+    path = tmp_path / "atomic-risk-policy.sqlite3"
+    first = CapitalReservation(path=path, owner_id="worker-a")
+    second = CapitalReservation(path=path, owner_id="worker-b")
+    barrier = Barrier(2)
+
+    def reserve(ledger, symbol):
+        barrier.wait(timeout=5)
+        return ledger.reserve(
+            Reservation(symbol, 100.0, 1.0),
+            available_capital_usd=1_000.0,
+            available_risk_usd=10.0,
+            capital_limit_usd=1_000.0,
+            risk_limit_usd=10.0,
+            risk_policy=lambda active: len(active) == 0,
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(reserve, first, "BTCUSDT"),
+                pool.submit(reserve, second, "ETHUSDT"),
+            ]
+            accepted = [future.result(timeout=10) for future in futures]
+        assert sum(accepted) == 1
+        assert len(first.snapshot()) == 1
     finally:
         first.close()
         second.close()

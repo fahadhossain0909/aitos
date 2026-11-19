@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
+from aitos.core.immutable import freeze_value
+
 
 class MarketRegime(str, Enum):
     UNKNOWN = "unknown"
@@ -33,6 +35,7 @@ class GlobalMarketState:
     as_of: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "features", freeze_value(self.features))
         for name in (
             "risk_score",
             "volatility_score",

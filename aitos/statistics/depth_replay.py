@@ -1,8 +1,12 @@
 """L2 market-order and passive-queue execution replay.
 
-The caller supplies timestamped depth and queue events. Impact coefficients
-must be calibrated from historical fills; defaults are zero and are not a
-claim that market impact is absent.
+The caller supplies timestamped depth and queue events. Market orders consume
+one point-in-time book after modeled latency and retain any unfilled remainder.
+Fees, spread, calibrated impact, additional slippage, signed funding and borrow
+costs are reported separately. Funding basis points are already signed from the
+position perspective; negative values are credits. Impact coefficients must be
+calibrated from historical fills; defaults are zero and are not a claim that market
+impact is absent.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
+from numbers import Real
 
 
 @dataclass(frozen=True)
@@ -19,11 +24,28 @@ class DepthBookSnapshot:
     asks: tuple[tuple[float, float], ...]
 
     def __post_init__(self) -> None:
-        if self.timestamp_ms < 0:
-            raise ValueError("timestamp must be non-negative")
-        for side, levels in (("bid", self.bids), ("ask", self.asks)):
-            previous = math.inf if side == "bid" else -math.inf
-            for price, size in levels:
+        if (
+            isinstance(self.timestamp_ms, bool)
+            or not isinstance(self.timestamp_ms, int)
+            or self.timestamp_ms < 0
+        ):
+            raise ValueError("timestamp must be a non-negative integer")
+        for side in ("bids", "asks"):
+            raw_levels = tuple(getattr(self, side))
+            if not raw_levels:
+                raise ValueError("depth snapshot requires both book sides")
+            normalized = []
+            previous = math.inf if side == "bids" else -math.inf
+            for level in raw_levels:
+                if not isinstance(level, (tuple, list)) or len(level) != 2:
+                    raise ValueError("depth levels must be price/size pairs")
+                raw_price, raw_size = level
+                if isinstance(raw_price, bool) or isinstance(raw_size, bool):
+                    raise ValueError("depth prices and sizes must be numeric")
+                try:
+                    price, size = float(raw_price), float(raw_size)
+                except (TypeError, ValueError, OverflowError):
+                    raise ValueError("depth prices and sizes must be numeric") from None
                 if (
                     not math.isfinite(price)
                     or not math.isfinite(size)
@@ -33,12 +55,14 @@ class DepthBookSnapshot:
                     raise ValueError(
                         "depth levels require positive prices and non-negative finite sizes"
                     )
-                if (side == "bid" and price >= previous) or (
-                    side == "ask" and price <= previous
+                if (side == "bids" and price >= previous) or (
+                    side == "asks" and price <= previous
                 ):
                     raise ValueError("depth levels must be strictly price sorted")
                 previous = price
-        if self.bids and self.asks and self.bids[0][0] > self.asks[0][0]:
+                normalized.append((price, size))
+            object.__setattr__(self, side, tuple(normalized))
+        if self.bids[0][0] > self.asks[0][0]:
             raise ValueError("crossed order book")
 
 
@@ -63,6 +87,10 @@ class DepthReplayResult:
     impact_cost: float
     fills: tuple[DepthFill, ...]
     complete: bool
+    slippage_cost: float = 0.0
+    funding_cost: float = 0.0
+    borrow_cost: float = 0.0
+    total_cost: float = 0.0
 
 
 def replay_l2_market_order(
@@ -75,45 +103,81 @@ def replay_l2_market_order(
     fee_bps: float,
     impact_coefficient_bps: float = 0.0,
     max_participation: float = 1.0,
+    slippage_bps: float = 0.0,
+    funding_bps: float = 0.0,
+    borrow_bps: float = 0.0,
+    holding_hours: float = 0.0,
+    funding_interval_hours: float = 8.0,
 ) -> DepthReplayResult:
     """Walk visible L2 levels, respecting latency, participation and impact.
 
     The impact model is an explicit square-root participation curve:
     impact_bps = coefficient * sqrt(cumulative_filled / visible_side_depth).
     It is a configurable scenario model and should be calibrated per venue,
-    symbol, volatility and order type before being used for forecasts.
+    symbol, volatility and order type before being used for forecasts. Funding
+    basis points are signed from the position perspective; negative values are
+    credits rather than invalid negative costs.
     """
+    if not isinstance(side, str):
+        raise ValueError("side must be BUY or SELL")
     direction = side.upper()
     if direction not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
-    values = (quantity, fee_bps, impact_coefficient_bps, max_participation)
+    values = {
+        "quantity": quantity,
+        "fee_bps": fee_bps,
+        "impact_coefficient_bps": impact_coefficient_bps,
+        "max_participation": max_participation,
+        "slippage_bps": slippage_bps,
+        "funding_bps": funding_bps,
+        "borrow_bps": borrow_bps,
+        "holding_hours": holding_hours,
+        "funding_interval_hours": funding_interval_hours,
+    }
+    for name, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise ValueError(f"{name} must be a finite numeric value")
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{name} must be a finite numeric value")
     if (
-        any(not math.isfinite(float(x)) for x in values)
-        or quantity <= 0
+        quantity <= 0
         or fee_bps < 0
         or impact_coefficient_bps < 0
         or not 0 < max_participation <= 1
+        or slippage_bps < 0
+        or slippage_bps >= 10000
+        or borrow_bps < 0
+        or holding_hours < 0
+        or funding_interval_hours <= 0
     ):
-        raise ValueError("invalid replay quantity, fees, impact or participation")
-    if submitted_at_ms < 0 or latency_ms < 0:
-        raise ValueError("timestamps and latency must be non-negative")
+        raise ValueError("invalid replay quantity, cost, participation or horizon")
+    if (
+        isinstance(submitted_at_ms, bool)
+        or not isinstance(submitted_at_ms, int)
+        or isinstance(latency_ms, bool)
+        or not isinstance(latency_ms, int)
+        or submitted_at_ms < 0
+        or latency_ms < 0
+    ):
+        raise ValueError("timestamps and latency must be non-negative integers")
     books = tuple(snapshots)
+    if any(not isinstance(book, DepthBookSnapshot) for book in books):
+        raise TypeError("L2 replay requires DepthBookSnapshot records")
     if any(a.timestamp_ms >= b.timestamp_ms for a, b in zip(books, books[1:])):
         raise ValueError("depth snapshots must be strictly chronological")
     eligible = submitted_at_ms + latency_ms
     remaining = float(quantity)
     fills = []
-    fees = spread = impact_total = notional = filled = 0.0
+    fees = spread = impact_total = slippage_total = notional = filled = 0.0
     for book in books:
-        if book.timestamp_ms < eligible or remaining <= 1e-12:
+        if book.timestamp_ms < eligible:
             continue
+        if remaining <= 1e-12:
+            break
         levels = book.asks if direction == "BUY" else book.bids
-        opposite = book.bids if direction == "BUY" else book.asks
-        if not levels or not opposite:
-            continue
         visible = sum(size for _, size in levels)
         if visible <= 0:
-            continue
+            break
         mid = (book.bids[0][0] + book.asks[0][0]) / 2.0
         allowed = visible * max_participation
         for price, size in levels:
@@ -130,18 +194,30 @@ def replay_l2_market_order(
                 if direction == "BUY"
                 else 1.0 - impact_bps / 10000.0
             )
-            if impacted <= 0:
-                raise ValueError("impact parameters imply a non-positive fill price")
-            fee = qty * impacted * fee_bps / 10000.0
+            fill_price = impacted * (
+                1.0 + slippage_bps / 10000.0
+                if direction == "BUY"
+                else 1.0 - slippage_bps / 10000.0
+            )
+            if fill_price <= 0:
+                raise ValueError("impact and slippage imply a non-positive fill price")
+            fee = qty * fill_price * fee_bps / 10000.0
             fees += fee
-            spread += qty * abs(price - mid)
-            impact_total += qty * abs(impacted - price)
-            notional += qty * impacted
+            spread += qty * abs(levels[0][0] - mid)
+            impact_total += qty * abs(impacted - levels[0][0])
+            slippage_total += qty * abs(fill_price - impacted)
+            notional += qty * fill_price
             filled += qty
             remaining -= qty
             allowed -= qty
-            fills.append(DepthFill(book.timestamp_ms, impacted, qty, impact_bps, fee))
+            fills.append(DepthFill(book.timestamp_ms, fill_price, qty, impact_bps, fee))
+        # A market order consumes one point-in-time book only. Reusing later
+        # snapshots would fabricate resting-order queue priority/replenishment.
+        break
     avg = notional / filled if filled else None
+    funding = notional * funding_bps / 10000.0 * holding_hours / funding_interval_hours
+    borrow = notional * borrow_bps / 10000.0 * holding_hours / 24.0
+    total_cost = fees + spread + impact_total + slippage_total + funding + borrow
     return DepthReplayResult(
         direction,
         quantity,
@@ -153,6 +229,10 @@ def replay_l2_market_order(
         impact_total,
         tuple(fills),
         remaining <= 1e-12,
+        slippage_total,
+        funding,
+        borrow,
+        total_cost,
     )
 
 
@@ -162,6 +242,25 @@ class LimitQueueEvent:
     traded_at_limit: float = 0.0
     cancelled_ahead: float = 0.0
     added_ahead: float = 0.0
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.timestamp_ms, bool)
+            or not isinstance(self.timestamp_ms, int)
+            or self.timestamp_ms < 0
+        ):
+            raise ValueError("queue event timestamp must be a non-negative integer")
+        for name in ("traded_at_limit", "cancelled_ahead", "added_ahead"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(float(value))
+                or value < 0
+            ):
+                raise ValueError(
+                    "queue event quantities must be finite and non-negative"
+                )
 
 
 @dataclass(frozen=True)
@@ -189,14 +288,22 @@ def replay_passive_limit_queue(
     to infer queue position and must not be passed as queue-ahead events.
     """
     if (
-        not math.isfinite(quantity)
-        or not math.isfinite(queue_ahead)
+        isinstance(quantity, bool)
+        or not isinstance(quantity, Real)
+        or not math.isfinite(float(quantity))
+        or isinstance(queue_ahead, bool)
+        or not isinstance(queue_ahead, Real)
+        or not math.isfinite(float(queue_ahead))
         or quantity <= 0
         or queue_ahead < 0
+        or isinstance(submitted_at_ms, bool)
+        or not isinstance(submitted_at_ms, int)
         or submitted_at_ms < 0
     ):
         raise ValueError("invalid simulated order or queue size")
     ordered = tuple(events)
+    if any(not isinstance(event, LimitQueueEvent) for event in ordered):
+        raise TypeError("queue replay requires LimitQueueEvent records")
     if any(a.timestamp_ms >= b.timestamp_ms for a, b in zip(ordered, ordered[1:])):
         raise ValueError("queue events must be strictly chronological")
     ahead = float(queue_ahead)

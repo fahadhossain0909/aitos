@@ -13,6 +13,7 @@ import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
+from math import isfinite
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
@@ -173,7 +174,7 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     consensus["position_risk_pct"] = {}
     consensus["position_sides"] = {}
     for position in positions:
-        symbol = str(getattr(position, "symbol", "") or "")
+        symbol = str(getattr(position, "symbol", "") or "").strip().upper()
         if not symbol:
             continue
         risk_amount = getattr(position, "risk_amount_usd", None)
@@ -185,6 +186,32 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         side = getattr(position, "side", None)
         if side is not None:
             consensus["position_sides"][symbol] = str(side).upper()
+    pending_orders = tuple(getattr(portfolio, "pending_orders", ()) or ())
+    pending_ids: set[str] = set()
+    consensus["pending_order_risk_pct"] = {}
+    consensus["pending_order_symbols"] = {}
+    consensus["pending_order_sides"] = {}
+    for pending in pending_orders:
+        order_id = str(getattr(pending, "order_id", "") or "")
+        symbol = str(getattr(pending, "symbol", "") or "").strip().upper()
+        side = str(getattr(pending, "side", "") or "").upper()
+        risk_amount = float(getattr(pending, "risk_amount_usd", -1.0))
+        if (
+            not order_id
+            or order_id in pending_ids
+            or not symbol
+            or side not in {"LONG", "SHORT"}
+            or not isfinite(risk_amount)
+            or risk_amount < 0
+            or equity <= 0
+        ):
+            raise ValueError("invalid or duplicate pending order exposure")
+        pending_ids.add(order_id)
+        consensus["pending_order_risk_pct"][f"pending:{order_id}"] = (
+            risk_amount / equity * 100.0
+        )
+        consensus["pending_order_symbols"][f"pending:{order_id}"] = symbol
+        consensus["pending_order_sides"][f"pending:{order_id}"] = side
     if (
         "correlations" not in consensus
         and not consensus.get("return_observations")

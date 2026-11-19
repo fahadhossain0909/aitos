@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
+from aitos.execution.binance_executor import (
+    BinanceAPIError,
+    BinanceFuturesOrderExecutor,
+)
 from aitos.execution.intent_store import ExecutionUncertainError
 from aitos.models.trade import TradeSide
 
@@ -108,3 +111,213 @@ async def test_terminal_partial_child_is_reported_for_actual_exposure_reconcilia
         await value.get_resting_order_status("BTCUSDT", "algo:321")
         == "PARTIALLY_FILLED_TERMINAL"
     )
+
+
+async def test_open_algo_inventory_is_read_only_and_validates_complete_rows():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.5",
+        algoStatus="NEW",
+        closePosition=False,
+        reduceOnly=False,
+    )
+    value._signed_request = AsyncMock(return_value=[row])
+
+    result = await value.get_open_algo_orders("btcusdt")
+
+    assert result == [row] and result[0] is not row
+    assert value._signed_request.call_args.args == (
+        "GET",
+        "/fapi/v1/openAlgoOrders",
+        {"algoType": "CONDITIONAL", "symbol": "BTCUSDT"},
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"algoId": 0},
+        {"clientAlgoId": ""},
+        {"symbol": "ETHUSDT"},
+        {"algoStatus": "TRIGGERED"},
+        {"orderType": "LIMIT"},
+        {"side": "HOLD"},
+        {"positionSide": "UNKNOWN"},
+        {"quantity": "NaN"},
+        {"triggerPrice": "0"},
+        {"reduceOnly": 1},
+    ],
+)
+async def test_open_algo_inventory_rejects_malformed_or_mismatched_rows(override):
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.5",
+        algoStatus="NEW",
+        closePosition=False,
+        reduceOnly=False,
+    )
+    row.update(override)
+    value._signed_request = AsyncMock(return_value=[row])
+
+    with pytest.raises(ValueError):
+        await value.get_open_algo_orders("BTCUSDT")
+
+
+async def test_open_algo_inventory_rejects_duplicate_identities():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.5",
+        algoStatus="NEW",
+        closePosition=False,
+        reduceOnly=False,
+    )
+    value._signed_request = AsyncMock(return_value=[row, dict(row)])
+
+    with pytest.raises(ValueError, match="duplicate"):
+        await value.get_open_algo_orders()
+
+
+async def test_open_order_inventory_is_read_only_and_symbol_scoped():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        orderId=456,
+        symbol="BTCUSDT",
+        status="PARTIALLY_FILLED",
+        side="BUY",
+        positionSide="BOTH",
+        type="LIMIT",
+        origQty="2.0",
+        executedQty="0.5",
+        reduceOnly=False,
+        closePosition=False,
+    )
+    value._signed_request = AsyncMock(return_value=[row])
+
+    result = await value.get_open_orders("btcusdt")
+
+    assert result == [row] and result[0] is not row
+    assert value._signed_request.call_args.args == (
+        "GET",
+        "/fapi/v1/openOrders",
+        {"symbol": "BTCUSDT"},
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"orderId": 0},
+        {"symbol": "ETHUSDT"},
+        {"status": "FILLED"},
+        {"side": "UNKNOWN"},
+        {"positionSide": "UNKNOWN"},
+        {"type": "UNKNOWN"},
+        {"origQty": "NaN"},
+        {"executedQty": "3"},
+        {"reduceOnly": "unknown"},
+        {"closePosition": None},
+        {"reduceOnly": 1},
+        {"closePosition": 0},
+    ],
+)
+async def test_open_order_inventory_rejects_invalid_rows(override):
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        orderId=456,
+        symbol="BTCUSDT",
+        status="NEW",
+        side="BUY",
+        positionSide="BOTH",
+        type="LIMIT",
+        origQty="2.0",
+        executedQty="0.0",
+        reduceOnly=False,
+        closePosition=False,
+    )
+    row.update(override)
+    value._signed_request = AsyncMock(return_value=[row])
+
+    with pytest.raises(ValueError):
+        await value.get_open_orders("BTCUSDT")
+
+
+async def test_algo_client_id_lookup_recovers_accepted_protection_identity():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    response = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        algoStatus="NEW",
+    )
+    value._signed_request = AsyncMock(return_value=response)
+
+    result = await value.get_algo_order_by_client_id("btcusdt", "aitos-stop-1")
+
+    assert result == response and result is not response
+    assert value._signed_request.call_args.args == (
+        "GET",
+        "/fapi/v1/algoOrder",
+        {"clientAlgoId": "aitos-stop-1"},
+    )
+
+
+async def test_algo_client_id_lookup_returns_none_only_for_explicit_not_found():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    value._signed_request = AsyncMock(
+        side_effect=BinanceAPIError("Binance API error -2013: not found", code=-2013)
+    )
+
+    assert await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1") is None
+
+    value._signed_request = AsyncMock(
+        side_effect=BinanceAPIError("Binance API error -1000: unknown", code=-1000)
+    )
+    with pytest.raises(BinanceAPIError):
+        await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1")
+
+
+async def test_algo_client_id_lookup_rejects_cross_symbol_or_client_identity():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    value._signed_request = AsyncMock(
+        return_value=dict(
+            algoId=321,
+            clientAlgoId="different-client",
+            algoType="CONDITIONAL",
+            orderType="STOP_MARKET",
+            symbol="ETHUSDT",
+            side="SELL",
+            positionSide="BOTH",
+            algoStatus="NEW",
+        )
+    )
+
+    with pytest.raises(ExecutionUncertainError):
+        await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1")

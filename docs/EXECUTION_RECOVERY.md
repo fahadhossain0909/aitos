@@ -57,9 +57,30 @@ was added as a runtime dependency.
 Protective replacement keeps the existing SL until its replacement is accepted and
 durably recorded. Old SL IDs awaiting verified cancellation are retained in
 `agent_consensus._pending_stop_cancellations`; such unresolved state blocks fresh
-entries. Market-order journal coverage is not a complete durable protective-order
-intent ledger: a crash between a protective POST and its ID write still requires
-an open-algo-order inventory/reconciliation extension before live readiness.
+entries. Confirmed terminal venue evidence now transitions the matching protective
+journal row to `TERMINAL`, retaining terminal status and executed quantity. This
+prevents a successfully replaced/canceled old stop from being mistaken for a
+currently resting order. Terminal state is recorded only after a signed venue status
+response; an ambiguous cancellation remains unresolved.
+
+## Protective acceptance identity binding
+
+The local protective-intent journal validates an accepted resting-order result against
+its exact pre-submit claim before changing `SUBMITTING` to `PROTECTED`. The binding
+checks the claimed symbol and position side, exact returned client ID, a strictly
+numeric exchange order identity (including the `algo:` namespace), finite positive
+trigger price equal to the claimed trigger, and zero filled quantity. The update is
+conditional on the row still being `SUBMITTING` and verifies exactly one row changed.
+A mismatched or repeated acknowledgement leaves the original intent unresolved.
+
+This closes a local evidence-integrity gap; it does **not** automatically resume a
+process that died between the exchange POST and the local acknowledgement write.
+A signed `clientAlgoId` lookup is now available to the read-only diagnostic path,
+including child-order status/fill lookup when Binance returns an actual child ID.
+The next startup still fails closed at the durable `assert_ready()` boundary until
+an operator has reconciled the preclaim; the diagnostic never changes journal state
+or authorizes resume. Terminal/child-order and account-position reconciliation
+remain independent requirements.
 
 ## Inspect quarantine without exchange access
 
@@ -86,6 +107,13 @@ actual positions, open conditional orders, fill/cost history and durable lifecyc
 state first. There is deliberately no automatic reset/"mark safe" CLI.
 
 ## Capital and persistence
+
+Live portfolio equity now comes from authenticated Binance account information
+/fapi/v3/account 's `totalMarginBalance` field, which includes unrealized
+PnL. The separate `get_account_balance()` contract continues to expose
+`availableBalance` for spendable-margin callers; it is not used as portfolio
+equity or as the drawdown denominator. Missing, non-finite or negative total
+margin equity fails closed instead of silently substituting available margin.
 
 Live capital has a separate `capital_live_<scope>.sqlite3` ledger, stable owner
 identity and pinned submitted/open exposure. Paper authorization lease behavior is
@@ -161,14 +189,17 @@ it may require querying terminal algo state and the actual child fill. Historica
 APPLIED orders can legitimately be absent after fills/cancellation; the report
 does not infer that lifecycle context from an open-order snapshot.
 
-This analyzer currently targets modern algo exports, not a certified legacy/broker
-inventory adapter. It does not fetch an export, independently authenticate its
-completeness/account, verify positions, reconcile child fills, acknowledge IDs,
-clear intents, release capital or submit/cancel replacements. Its result always
-has `safe_to_resume: false`. When a protection audit is requested the CLI exits 1
-rather than signaling a successful readiness certificate, even for matching rows.
-Use the existing approved recovery process; do not bypass quarantine based on a
-report or a model recommendation.
+The offline analyzer targets modern algo exports, not a certified legacy/broker
+inventory adapter. The authenticated runtime diagnostic additionally reads the
+full position snapshot and ordinary open-order inventory, checks every active local
+trade has its matching algo stop in the venue inventory, and blocks live scans when
+positions differ, an entry order lacks a validated stop-risk projection, or a
+protective identity is missing/orphaned. This check runs at live startup and before
+each scan. It does not repair or acknowledge intents, release capital, or submit,
+cancel or replace orders. The report always has `safe_to_resume: false`; the live
+guard uses only explicit reconciliation invariants, not that report field, and
+never performs an automatic recovery action. Use the approved recovery process;
+do not bypass quarantine based on a report or a model recommendation.
 
 ## Closed-ledger integrity and SQL verification (2026-11-07)
 
@@ -200,3 +231,14 @@ Console history/performance queries have query-local time/read-byte/memory limit
 and throw on read overflow instead of returning partial financial reports.
 Startup/full recovery is separate and does not use the UI output bounds. No
 production settings, migrations or data cleanup were applied during verification.
+
+
+## Authenticated read-only algo inventory reconciliation
+
+`BinanceFuturesOrderExecutor.get_open_algo_orders()` now fetches the complete USD-M conditional inventory through the signed `GET /fapi/v1/openAlgoOrders` endpoint. `get_open_orders()` separately reads ordinary orders through `GET /fapi/v1/openOrders`; conditional algo orders must not be assumed to appear in that response. Both readers validate the entire returned list and reject malformed, duplicate, non-open or cross-symbol rows rather than silently dropping them.
+
+`aitos.execution.protection_reconciliation.audit_exchange_protection_inventory()` combines the executor's authenticated open-algo response with the matching scoped `ExecutionIntentStore` reader. It is read-only and reports `AUTHENTICATED_READ_ONLY_EXCHANGE_API` provenance. A matching `clientAlgoId`/`algoId`/symbol/side/type/quantity/trigger remains an `unapplied_match`, not a recovery approval. Missing open inventory remains ambiguous and requires terminal algo status, child-order fill evidence and account-position reconciliation. The report always has `safe_to_resume: false`, `account_exposure_verified: false`, and no automatic actions. It never writes to the journal or touches venue orders.
+
+## Strict pending-entry exposure projection
+
+`aitos.exchange.binance_pending_exposure.pending_exposures_from_open_orders()` converts a complete standard USD-M `openOrders` response into `PendingOrderExposure` rows. It accounts only for unfilled remainder after partial fills; excludes reduce-only, close-position and hedge-mode closing legs; and requires fresh mark, side-correct protective stop and leverage inputs. The open-order and risk-input timestamps must both be timezone-aware, within five seconds of the supplied current time, and within two seconds of each other. Risk is linear-contract remaining quantity multiplied by mark-to-stop distance. This adapter is not for inverse/coin-margined contracts and is not yet connected to the live account tracker: that provider's authoritative snapshot owner and lifecycle remain an explicit acceptance gate.

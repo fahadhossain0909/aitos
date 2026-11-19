@@ -1,6 +1,7 @@
 """Real local SQLite durability and offline executor wiring; no account/network."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -220,7 +221,9 @@ def test_read_only_inventory_does_not_create_missing_database(tmp_path):
 
 def test_protection_acceptance_survives_crash_until_durable_id_applied(tmp_path):
     journal = store(tmp_path)
-    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    journal.begin(
+        request(order_type="STOP_MARKET", reduce_only=True, reference_price=90)
+    )
     accepted = OrderResult(
         "algo:123", "BTCUSDT", TradeSide.LONG, 0, 90, client_order_id="intent-one"
     )
@@ -243,7 +246,15 @@ def test_protection_record_rejects_nonprotective_preclaims(
     journal.begin(request(order_type=order_type, reduce_only=reduce_only))
     with pytest.raises(ValueError, match="protective preclaim"):
         journal.record_protection(
-            "intent-one", OrderResult("123", "BTCUSDT", TradeSide.LONG, 0, 90)
+            "intent-one",
+            OrderResult(
+                "123",
+                "BTCUSDT",
+                TradeSide.LONG,
+                0,
+                90,
+                client_order_id="intent-one",
+            ),
         )
     assert journal.unresolved()[0]["state"] == "SUBMITTING"
 
@@ -295,3 +306,242 @@ async def test_legacy_protection_never_fabricates_resting_acceptance(response):
     value._signed_request = AsyncMock(return_value=response)
     with pytest.raises(ExecutionUncertainError):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        OrderResult(
+            "algo:123",
+            "ETHUSDT",
+            TradeSide.LONG,
+            0,
+            90,
+            client_order_id="intent-one",
+        ),
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.SHORT,
+            0,
+            90,
+            client_order_id="intent-one",
+        ),
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0,
+            90,
+            client_order_id="other",
+        ),
+        OrderResult(
+            "algo:0",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0,
+            90,
+            client_order_id="intent-one",
+        ),
+        OrderResult(
+            "algo:not-an-id",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0,
+            90,
+            client_order_id="intent-one",
+        ),
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0,
+            float("nan"),
+            client_order_id="intent-one",
+        ),
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0,
+            91,
+            client_order_id="intent-one",
+        ),
+    ],
+)
+def test_protection_acceptance_must_match_preclaim_identity(tmp_path, result):
+    journal = store(tmp_path)
+    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    with pytest.raises(ValueError):
+        journal.record_protection("intent-one", result)
+    assert journal.unresolved()[0]["state"] == "SUBMITTING"
+
+
+def test_protection_acceptance_rejects_nonfinite_quantity(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    accepted = OrderResult(
+        "algo:123",
+        "BTCUSDT",
+        TradeSide.LONG,
+        float("nan"),
+        90,
+        client_order_id="intent-one",
+    )
+    with pytest.raises(ValueError, match="valid identity"):
+        journal.record_protection("intent-one", accepted)
+    assert journal.unresolved()[0]["state"] == "SUBMITTING"
+
+
+def test_protection_acceptance_rejects_missing_or_already_transitioned_preclaim(
+    tmp_path,
+):
+    journal = store(tmp_path)
+    accepted = OrderResult(
+        "algo:123",
+        "BTCUSDT",
+        TradeSide.LONG,
+        0,
+        90,
+        client_order_id="intent-one",
+    )
+    missing = OrderResult(
+        "algo:123",
+        "BTCUSDT",
+        TradeSide.LONG,
+        0,
+        90,
+        client_order_id="missing",
+    )
+    with pytest.raises(ValueError, match="no submitting preclaim"):
+        journal.record_protection("missing", missing)
+    journal.begin(
+        request(order_type="STOP_MARKET", reduce_only=True, reference_price=90)
+    )
+    journal.record_protection("intent-one", accepted)
+    with pytest.raises(ValueError, match="no submitting preclaim"):
+        journal.record_protection("intent-one", accepted)
+    assert journal.unresolved()[0]["state"] == "PROTECTED"
+
+
+def test_confirmed_terminal_protection_is_durable_and_no_longer_unresolved(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(
+        request(
+            order_type="STOP_MARKET",
+            reduce_only=True,
+            reference_price=90.0,
+        )
+    )
+    journal.record_protection(
+        "intent-one",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="intent-one",
+        ),
+    )
+    journal.mark_applied("intent-one", "trade-one")
+
+    assert journal.mark_protection_terminal(
+        "algo:123",
+        symbol="BTCUSDT",
+        status="CANCELED",
+        executed_quantity=0.25,
+    )
+
+    assert journal.unresolved() == []
+    journal.assert_ready()
+    history = journal.protection_intents()
+    assert history[0]["state"] == "TERMINAL"
+    terminal = json.loads(history[0]["result_json"])
+    assert terminal["terminal_status"] == "CANCELED"
+    assert terminal["terminal_executed_quantity"] == 0.25
+    assert not journal.mark_protection_terminal(
+        "algo:123",
+        symbol="BTCUSDT",
+        status="CANCELED",
+        executed_quantity=0.25,
+    )
+
+    journal.begin(request(client_order_id="new-entry", symbol="ETHUSDT"))
+    assert journal.unresolved()[0]["client_id"] == "new-entry"
+
+
+def test_terminal_protection_does_not_release_unrelated_intent(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(
+        request(
+            order_type="STOP_MARKET",
+            reduce_only=True,
+            reference_price=90.0,
+        )
+    )
+    journal.record_protection(
+        "intent-one",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="intent-one",
+        ),
+    )
+    journal.mark_applied("intent-one", "trade-one")
+    assert not journal.mark_protection_terminal(
+        "algo:999",
+        symbol="BTCUSDT",
+        status="CANCELED",
+    )
+    assert journal.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.parametrize("status", ["NEW", "PARTIALLY_FILLED", "UNKNOWN"])
+def test_nonterminal_protection_cannot_be_marked_terminal(tmp_path, status):
+    journal = store(tmp_path)
+    with pytest.raises(ValueError):
+        journal.mark_protection_terminal("algo:123", symbol="BTCUSDT", status=status)
+
+
+async def test_confirmed_binance_algo_cancel_updates_protection_journal(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(
+        request(
+            order_type="STOP_MARKET",
+            reduce_only=True,
+            reference_price=90.0,
+        )
+    )
+    journal.record_protection(
+        "intent-one",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="intent-one",
+        ),
+    )
+    journal.mark_applied("intent-one", "trade-one")
+    executor = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=journal)
+    executor._signed_request = AsyncMock(
+        side_effect=[
+            {"algoId": 123, "algoStatus": "CANCELED"},
+            {
+                "algoId": 123,
+                "symbol": "BTCUSDT",
+                "algoStatus": "CANCELED",
+            },
+        ]
+    )
+
+    result = await executor.cancel_order("BTCUSDT", "algo:123")
+
+    assert result["status"] == "CANCELED"
+    assert journal.unresolved() == []
+    assert journal.protection_intents()[0]["state"] == "TERMINAL"

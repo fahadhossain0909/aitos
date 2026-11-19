@@ -149,6 +149,187 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         """Read-only full-account snapshot; no symbol filter can hide exposure."""
         return await self._signed_request("GET", "/fapi/v3/positionRisk", {})
 
+    async def get_open_algo_orders(
+        self, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Read-only authenticated inventory of currently open conditional orders.
+
+        This is inventory evidence only: it does not reconcile child fills,
+        positions, or the local intent journal and never authorizes recovery.
+        An incomplete or malformed response is rejected as a whole.
+        """
+        params: dict[str, Any] = {"algoType": "CONDITIONAL"}
+        if symbol is not None:
+            normalized_symbol = str(symbol).strip().upper()
+            if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
+                raise ValueError("invalid symbol for algo inventory")
+            params["symbol"] = normalized_symbol
+        response = await self._signed_request("GET", "/fapi/v1/openAlgoOrders", params)
+        if not isinstance(response, list):
+            raise ValueError("algo inventory must be a complete list")
+        seen_ids: set[str] = set()
+        seen_clients: set[str] = set()
+        validated: list[dict[str, Any]] = []
+        supported_types = {
+            "STOP_MARKET",
+            "TAKE_PROFIT_MARKET",
+            "STOP",
+            "TAKE_PROFIT",
+            "TRAILING_STOP_MARKET",
+        }
+        for row in response:
+            if not isinstance(row, dict):
+                raise ValueError("malformed algo inventory row")
+            algo_id = row.get("algoId")
+            client_id = row.get("clientAlgoId")
+            row_symbol = row.get("symbol")
+            if (
+                isinstance(algo_id, bool)
+                or not str(algo_id or "").isdigit()
+                or int(algo_id) <= 0
+                or not isinstance(client_id, str)
+                or not client_id.strip()
+                or not isinstance(row_symbol, str)
+                or not re.fullmatch(r"[A-Z0-9]{1,30}", row_symbol)
+                or (symbol is not None and row_symbol != params["symbol"])
+                or row.get("algoType") != "CONDITIONAL"
+                or row.get("algoStatus") != "NEW"
+                or row.get("orderType") not in supported_types
+                or row.get("side") not in {"BUY", "SELL"}
+                or row.get("positionSide") not in {"BOTH", "LONG", "SHORT"}
+            ):
+                raise ValueError("invalid or non-open algo inventory identity")
+            quantity = row.get("quantity")
+            if isinstance(quantity, bool):
+                raise ValueError("invalid algo inventory quantity")
+            try:
+                quantity_value = float(quantity)
+            except (TypeError, ValueError):
+                quantity_value = float("nan")
+            close_position = row.get("closePosition")
+            reduce_only = row.get("reduceOnly")
+            if not (type(close_position) is bool and type(reduce_only) is bool):
+                raise ValueError("invalid algo inventory protection flags")
+            if not close_position and (
+                not math.isfinite(quantity_value) or quantity_value <= 0
+            ):
+                raise ValueError("invalid algo inventory quantity")
+            if row.get("orderType") == "TRAILING_STOP_MARKET":
+                trigger = row.get("activatePrice") or row.get("triggerPrice")
+            else:
+                trigger = row.get("triggerPrice")
+            if isinstance(trigger, bool):
+                raise ValueError("invalid algo inventory trigger")
+            try:
+                trigger_value = float(trigger)
+            except (TypeError, ValueError):
+                trigger_value = float("nan")
+            if not math.isfinite(trigger_value) or trigger_value <= 0:
+                raise ValueError("invalid algo inventory trigger")
+            identity = str(int(algo_id))
+            client_identity = client_id.strip()
+            if identity in seen_ids or client_identity in seen_clients:
+                raise ValueError("duplicate algo inventory identity")
+            seen_ids.add(identity)
+            seen_clients.add(client_identity)
+            validated.append(dict(row))
+        return validated
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        """Read-only inventory of ordinary open USD-M orders.
+
+        Conditional algo orders are returned by ``get_open_algo_orders`` and
+        must be reconciled separately. Malformed, duplicate or cross-symbol
+        rows invalidate the entire snapshot rather than silently dropping risk.
+        """
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            normalized_symbol = str(symbol).strip().upper()
+            if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
+                raise ValueError("invalid symbol for open-order inventory")
+            params["symbol"] = normalized_symbol
+        response = await self._signed_request("GET", "/fapi/v1/openOrders", params)
+        if not isinstance(response, list):
+            raise ValueError("open-order inventory must be a complete list")
+        seen_ids: set[str] = set()
+        validated: list[dict[str, Any]] = []
+        supported_types = {
+            "LIMIT",
+            "MARKET",
+            "STOP",
+            "STOP_MARKET",
+            "TAKE_PROFIT",
+            "TAKE_PROFIT_MARKET",
+            "TRAILING_STOP_MARKET",
+        }
+        for row in response:
+            if not isinstance(row, dict):
+                raise ValueError("malformed open-order inventory row")
+            order_id = row.get("orderId")
+            row_symbol = row.get("symbol")
+            if (
+                isinstance(order_id, bool)
+                or not str(order_id or "").isdigit()
+                or int(order_id) <= 0
+                or not isinstance(row_symbol, str)
+                or not re.fullmatch(r"[A-Z0-9]{1,30}", row_symbol)
+                or (symbol is not None and row_symbol != params["symbol"])
+                or row.get("status") not in {"NEW", "PARTIALLY_FILLED"}
+                or row.get("side") not in {"BUY", "SELL"}
+                or row.get("positionSide") not in {"BOTH", "LONG", "SHORT"}
+                or row.get("type") not in supported_types
+            ):
+                raise ValueError("invalid or non-open order inventory identity")
+            identity = str(int(order_id))
+            if identity in seen_ids:
+                raise ValueError("duplicate open-order identity")
+            seen_ids.add(identity)
+            for field_name in ("origQty", "executedQty"):
+                raw = row.get(field_name)
+                if isinstance(raw, bool):
+                    raise ValueError("invalid open-order quantity")
+                try:
+                    number = float(raw)
+                except (TypeError, ValueError):
+                    number = float("nan")
+                if not math.isfinite(number) or number < 0:
+                    raise ValueError("invalid open-order quantity")
+                if field_name == "origQty" and number <= 0:
+                    raise ValueError("invalid original order quantity")
+            if float(row["executedQty"]) > float(row["origQty"]):
+                raise ValueError("executed quantity exceeds original quantity")
+            for flag in ("reduceOnly", "closePosition"):
+                value = row.get(flag)
+                if not (
+                    type(value) is bool
+                    or (type(value) is str and value in {"true", "false"})
+                ):
+                    raise ValueError(f"invalid open-order {flag} evidence")
+            validated.append(dict(row))
+        return validated
+
+    async def get_account_equity(self, asset: str = "USDT") -> float:
+        """Return total futures margin equity, including unrealized PnL.
+
+        Available balance is spendable margin, not account equity. Portfolio
+        risk and drawdown must use Binance's totalMarginBalance instead.
+        """
+        if asset != "USDT":
+            raise ValueError("USD-M total margin equity is denominated in USDT")
+        response = await self._signed_request("GET", "/fapi/v3/account", {})
+        if not isinstance(response, dict):
+            raise ValueError("Binance account equity response must be an object")
+        raw_equity = response.get("totalMarginBalance")
+        if isinstance(raw_equity, bool):
+            raise ValueError("Binance total margin equity is invalid")
+        try:
+            equity = float(raw_equity)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("Binance total margin equity is unavailable") from None
+        if not math.isfinite(equity) or equity < 0:
+            raise ValueError("Binance total margin equity is non-finite or negative")
+        return equity
+
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
         for a real portfolio tracker rather than the paper-trading
@@ -164,6 +345,11 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         if self._intent_store is None:
             raise RuntimeError("durable execution scope is not configured")
         return self._intent_store.scope
+
+    @property
+    def execution_intent_store(self) -> ExecutionIntentStore | None:
+        """Expose the scoped durable intent journal for read-only diagnostics."""
+        return self._intent_store
 
     @property
     def requires_exchange_execution(self) -> bool:
@@ -406,6 +592,98 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 return None
             raise
 
+    async def get_algo_order_by_client_id(
+        self, symbol: str, client_algo_id: str
+    ) -> dict[str, Any] | None:
+        """Read-only lookup for protective POST-to-ACK crash recovery.
+
+        Binance accepts either algoId or clientAlgoId for this USER_DATA query.
+        Only the explicit venue not-found response returns None; transport and
+        other API failures remain errors and must not release local quarantine.
+        """
+        normalized_symbol = str(symbol).strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
+            raise ValueError("invalid symbol for algo client-id lookup")
+        if not isinstance(client_algo_id, str) or not client_algo_id.strip():
+            raise ValueError("client algo identity is required")
+        try:
+            response = await self._signed_request(
+                "GET",
+                "/fapi/v1/algoOrder",
+                {"clientAlgoId": client_algo_id},
+            )
+        except BinanceAPIError as exc:
+            if exc.code == -2013:
+                return None
+            raise
+        if not isinstance(response, dict):
+            raise ExecutionUncertainError(
+                normalized_symbol,
+                client_algo_id,
+                "algo client-id lookup returned malformed evidence",
+            )
+        algo_id = response.get("algoId")
+        if (
+            isinstance(algo_id, bool)
+            or not str(algo_id or "").isdigit()
+            or int(algo_id) <= 0
+            or response.get("clientAlgoId") != client_algo_id
+            or response.get("symbol") != normalized_symbol
+            or response.get("algoType") != "CONDITIONAL"
+            or response.get("orderType")
+            not in {
+                "STOP_MARKET",
+                "TAKE_PROFIT_MARKET",
+                "STOP",
+                "TAKE_PROFIT",
+                "TRAILING_STOP_MARKET",
+            }
+            or response.get("side") not in {"BUY", "SELL"}
+            or response.get("positionSide") not in {"BOTH", "LONG", "SHORT"}
+            or response.get("algoStatus")
+            not in {"NEW", "CANCELED", "EXPIRED", "REJECTED", "TRIGGERED", "FINISHED"}
+        ):
+            raise ExecutionUncertainError(
+                normalized_symbol,
+                client_algo_id,
+                "algo client-id lookup identity mismatch",
+            )
+        return dict(response)
+
+    def _record_terminal_protection(
+        self, symbol: str, order_id: str, evidence: dict[str, Any]
+    ) -> None:
+        if self._intent_store is None or evidence.get("status") not in {
+            "CANCELED",
+            "FILLED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }:
+            return
+        raw_quantity = evidence.get("executedQty", 0)
+        if isinstance(raw_quantity, bool):
+            raise ExecutionUncertainError(
+                symbol, order_id, "terminal protective fill quantity is invalid"
+            )
+        try:
+            executed_quantity = float(raw_quantity)
+        except (TypeError, ValueError, OverflowError):
+            raise ExecutionUncertainError(
+                symbol, order_id, "terminal protective fill quantity is invalid"
+            ) from None
+        try:
+            self._intent_store.mark_protection_terminal(
+                order_id,
+                symbol=symbol,
+                status=str(evidence["status"]),
+                executed_quantity=executed_quantity,
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ExecutionUncertainError(
+                symbol, order_id, "terminal protective journal update failed"
+            ) from exc
+
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         if order_id.startswith("algo:"):
             algo_id = order_id.removeprefix("algo:")
@@ -414,10 +692,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             await self._signed_request(
                 "DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id}
             )
-            return await self.get_order_status(symbol, order_id)
-        return await self._signed_request(
-            "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
-        )
+            evidence = await self.get_order_status(symbol, order_id)
+        else:
+            evidence = await self._signed_request(
+                "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
+            )
+        if isinstance(evidence, dict):
+            self._record_terminal_protection(symbol, order_id, evidence)
+        return evidence
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -449,6 +731,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             if exc.code not in {-2011, -2013}:
                 raise
             evidence = await self.get_order_status(symbol, order_id)
+        if isinstance(evidence, dict):
+            self._record_terminal_protection(symbol, order_id, evidence)
         if isinstance(evidence, dict) and (
             (
                 "orderId" in evidence

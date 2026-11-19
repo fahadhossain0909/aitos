@@ -19,7 +19,9 @@ from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
-from aitos.execution.position_integrity import assert_position_snapshot_matches
+from aitos.execution.protection_reconciliation import (
+    require_live_account_exposure_reconciled,
+)
 from aitos.health_server import HealthServer
 from aitos.intelligence.capital_protection import Reservation
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
@@ -164,10 +166,10 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     # resulting local ledger against the entire account before any new entry.
     if components.reconciliation is not None:
         await components.reconciliation.run_once()
-    assert_position_snapshot_matches(
+    await require_live_account_exposure_reconciled(
+        raw_order_executor,
+        raw_order_executor.execution_intent_store,
         components.trade_lifecycle.get_open_trades(),
-        await raw_order_executor.get_position_risk(),
-        hedge_mode=raw_order_executor.hedge_mode,
     )
     gateway = components.trade_lifecycle._aitos_capital_gateway
     restored_trades = components.trade_lifecycle.get_open_trades()
@@ -187,6 +189,16 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 trade.risk_amount_usd,
             )
         )
+    gateway.assert_reservations_cover(
+        [
+            Reservation(
+                trade.symbol,
+                trade.position_size_usd / trade.leverage,
+                trade.risk_amount_usd,
+            )
+            for trade in restored_trades
+        ]
+    )
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
@@ -275,6 +287,13 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
             if components.reconciliation is not None:
                 await components.reconciliation.run_once()
             await trade_state_persistence.verify_execution_positions()
+            # Reconcile full account positions, ordinary entry orders and
+            # conditional protection before each fresh-exposure scan.
+            await require_live_account_exposure_reconciled(
+                raw_order_executor,
+                raw_order_executor.execution_intent_store,
+                components.trade_lifecycle.get_open_trades(),
+            )
             submitted = await run_scan_and_trade_cycle(
                 components,
                 tracker,

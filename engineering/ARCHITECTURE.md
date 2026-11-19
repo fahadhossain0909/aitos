@@ -119,3 +119,22 @@ Disposable harness now exercises unique new events throughout duration; no runti
 ## Advanced-main source integration
 
 Main e332e2b9 is an ancestor of integrated source 58807516. PostgreSQL operational fallback and capability selection coexist with ClickHouse analytics; no silent emulation of analytical SQL. Main statistical feedback/ML pipeline wiring retained. Branch local shadow remains default-off and not financial authority. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.
+
+
+## Architecture evolution baseline — 2026-11-19
+
+The original map above is a historical source-backed baseline and must not be
+read as a current exhaustive module graph. The current assessment, source-backed
+contract findings, migration dependencies, explicit safety boundaries and phased
+acceptance gates are maintained in
+[`engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md`](ARCHITECTURE_EVOLUTION_PROGRAM.md).
+That program records existing `GlobalMarketState`, market/decision/strategy
+contracts, portfolio/risk primitives and execution-recovery capabilities so new
+work does not duplicate them. The Phase 1 semantic contract and provisional
+financial-authority audit is maintained in
+[`engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`](AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md).
+Runtime health and production latency remain unverified unless a dated evidence
+record says otherwise.
+
+
+Architecture evolution evidence: `engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md`, `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`, and `engineering/AEP1_PHASE2_SHADOW_AND_IMMUTABILITY.md`.

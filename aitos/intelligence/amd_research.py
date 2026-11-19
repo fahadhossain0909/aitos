@@ -628,12 +628,17 @@ def replay_amd_execution(
     funding_bps: float = 0.0,
     holding_hours: float = 0.0,
 ) -> AMDExecutionReplay:
-    """Replay both legs with L1 fills and explicit venue-cost assumptions."""
+    """Replay both legs with L1 fills and explicit venue-cost assumptions.
+
+    funding_bps is the venue's signed funding rate: positive rates charge
+    LONGs and credit SHORTs; negative rates reverse that direction.
+    """
     side = direction.upper()
     if side not in {"LONG", "SHORT"}:
         raise ValueError("direction must be LONG or SHORT")
     entry_side = "BUY" if side == "LONG" else "SELL"
     exit_side = "SELL" if side == "LONG" else "BUY"
+    position_funding_bps = funding_bps if side == "LONG" else -funding_bps
     entry = replay_historical_order(
         entry_books,
         side=entry_side,
@@ -642,7 +647,7 @@ def replay_amd_execution(
         latency_ms=latency_ms,
         taker_fee_bps=taker_fee_bps,
         slippage_bps=slippage_bps,
-        funding_bps=funding_bps,
+        funding_bps=position_funding_bps,
         holding_hours=holding_hours,
     )
     exit_quantity = entry.filled_quantity

@@ -90,6 +90,36 @@ class PositionExposure:
 
 
 @dataclass(frozen=True)
+class PendingOrderExposure:
+    """Unfilled entry exposure projected into portfolio risk before dispatch."""
+
+    order_id: str
+    symbol: str
+    side: str
+    remaining_notional_usd: float
+    risk_amount_usd: float
+    leverage: float = 1.0
+
+    def __post_init__(self) -> None:
+        order_id = str(self.order_id).strip()
+        symbol = str(self.symbol).strip().upper()
+        if not order_id or not symbol:
+            raise ValueError("pending order identity and symbol are required")
+        normalized_side = str(self.side).strip().upper()
+        if normalized_side not in {"LONG", "SHORT"}:
+            raise ValueError("pending order side must be LONG or SHORT")
+        object.__setattr__(self, "order_id", order_id)
+        object.__setattr__(self, "symbol", symbol)
+        object.__setattr__(self, "side", normalized_side)
+        for name in ("remaining_notional_usd", "risk_amount_usd"):
+            value = float(getattr(self, name))
+            if not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
+        if not isfinite(float(self.leverage)) or self.leverage <= 0:
+            raise ValueError("pending order leverage must be finite and positive")
+
+
+@dataclass(frozen=True)
 class PortfolioState:
     equity_usd: float
     peak_equity_usd: float
@@ -107,6 +137,23 @@ class PortfolioState:
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    pending_orders: tuple[PendingOrderExposure, ...] = ()
+
+    def __post_init__(self) -> None:
+        order_ids = [order.order_id for order in self.pending_orders]
+        if len(order_ids) != len(set(order_ids)):
+            raise ValueError("pending order IDs must be unique in a portfolio snapshot")
+
+    @property
+    def projected_open_position_count(self) -> int:
+        """Count unique instruments across open positions and pending orders."""
+        symbols = {
+            str(position.symbol).strip().upper()
+            for position in self.positions
+            if str(position.symbol).strip()
+        }
+        symbols.update(order.symbol for order in self.pending_orders if order.symbol)
+        return len(symbols)
 
     @property
     def current_drawdown_pct(self) -> float:
@@ -118,11 +165,17 @@ class PortfolioState:
 
     @property
     def gross_exposure_usd(self) -> float:
-        return sum(p.notional_usd for p in self.positions)
+        return sum(p.notional_usd for p in self.positions) + sum(
+            order.remaining_notional_usd for order in self.pending_orders
+        )
 
     @property
     def max_position_leverage(self) -> float:
-        return max((p.leverage for p in self.positions), default=0.0)
+        return max(
+            [p.leverage for p in self.positions]
+            + [order.leverage for order in self.pending_orders],
+            default=0.0,
+        )
 
     @property
     def sector_exposure_pct(self) -> dict[str, float]:
@@ -132,6 +185,11 @@ class PortfolioState:
         for p in self.positions:
             sector = p.sector or "other"
             totals[sector] = totals.get(sector, 0.0) + p.notional_usd
+        from aitos.risk.sector import sector_for_symbol
+
+        for order in self.pending_orders:
+            sector = sector_for_symbol(order.symbol)
+            totals[sector] = totals.get(sector, 0.0) + order.remaining_notional_usd
         return {
             sector: notional / self.equity_usd * 100
             for sector, notional in totals.items()

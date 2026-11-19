@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.app import (
+    LivePortfolioTracker,
     PaperPortfolioTracker,
     build_system,
     initialize_all,
@@ -20,6 +21,10 @@ from aitos.app import (
     shutdown_all,
 )
 from aitos.execution.order_executor import SimulatedOrderExecutor
+from aitos.markets.contracts import AssetClass, Instrument
+from aitos.markets.engine import CrossMarketIntelligenceEngine
+from aitos.markets.instrument_master import InstrumentMaster
+from aitos.markets.shadow_consumer import MarketDataShadowConsumer
 from aitos.intelligence import capital_runtime
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from tests.test_scanner import FakeScannerExchange
@@ -32,6 +37,22 @@ def isolate_app_wiring_capital_ledger(tmp_path, monkeypatch):
         "get_model_data_dir",
         lambda: tmp_path,
     )
+
+
+@pytest.mark.asyncio
+async def test_live_portfolio_tracker_prefers_total_margin_equity():
+    class EquityAwareExecutor:
+        async def get_account_equity(self, asset):
+            assert asset == "USDT"
+            return 1_250.0
+
+        async def get_account_balance(self, asset):
+            return 200.0
+
+    tracker = LivePortfolioTracker(EquityAwareExecutor())
+
+    assert await tracker.refresh_equity() == 1_250.0
+    assert tracker._last_known_equity_usd == 1_250.0
 
 
 async def _wait_for(predicate, timeout=3.0, interval=0.05):
@@ -186,49 +207,67 @@ async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
-    """The key wiring proof: TradeLifecycle isn't manually poked with
-    update_price anywhere here — it's subscribed to market.* on the real
-    Event Bus by initialize_all, and DataIngestionService's own published
-    events are what drive it."""
+    """The app-owned EventBus subscription drives the lifecycle price check.
 
+    Seed one deterministic open position directly so this wiring test does not
+    depend on scanner history ingestion, websocket startup, or unrelated market
+    backlog. The only price update is delivered through the real EventBus.
+    """
     exchange = FakeScannerExchange()
-    executor = SimulatedOrderExecutor()
     components = await build_system(
         event_bus=event_bus,
         exchange=exchange,
-        order_executor=executor,
+        order_executor=SimulatedOrderExecutor(),
         symbols=["BTCUSDT"],
         min_score_threshold=0.0,
     )
     await initialize_all(components)
-    await _seed_live_universe(components)
-    tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
-    await run_scan_and_trade_cycle(components, tracker)
-    trade = components.trade_lifecycle.get_open_trades()[0]
+    trade = Trade(
+        trade_id="price-feed-subscription",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=5.0,
+        strategy_id="subscription-test",
+        agent_consensus={},
+        explanation="deterministic market-event subscription test",
+        sl_price=95.0,
+        tp_price=110.0,
+        take_profit_levels=[110.0],
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time=datetime.now(timezone.utc).isoformat(),
+    )
+    components.trade_lifecycle._open_trades[trade.trade_id] = trade
 
-    # Publish a kline event directly (simulating what DataIngestionService's
-    # live stream would produce) that breaches the stop loss.
-    from aitos.core.contracts import Event
+    try:
+        from aitos.core.contracts import Event
 
-    crash_price = trade.sl_price - 1.0
-    await event_bus.publish(
-        Event(
-            topic=f"market.kline.{trade.symbol}.15m",
-            payload={"symbol": trade.symbol, "close": crash_price},
-            source_module="test",
+        await asyncio.wait_for(
+            event_bus.publish(
+                Event(
+                    topic=f"market.kline.{trade.symbol}.15m",
+                    payload={"symbol": trade.symbol, "close": 94.0},
+                    source_module="test",
+                )
+            ),
+            timeout=5.0,
         )
-    )
 
-    closed = await _wait_for(
-        lambda: len(components.trade_lifecycle.get_open_trades()) == 0
-    )
-    assert closed is True
-    assert (
-        components.trade_lifecycle.get_closed_trades()[0].exit_reason == "sl_triggered"
-    )
-
-    await shutdown_all(components)
+        closed = await _wait_for(
+            lambda: len(components.trade_lifecycle.get_open_trades()) == 0,
+            timeout=5.0,
+        )
+        assert closed is True
+        assert (
+            components.trade_lifecycle.get_closed_trades()[0].exit_reason
+            == "sl_triggered"
+        )
+    finally:
+        await asyncio.wait_for(shutdown_all(components), timeout=10.0)
 
 
 def test_paper_portfolio_tracker_computes_equity_from_closed_trades():
@@ -512,3 +551,130 @@ async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize()
     assert restarted == ["test-auxiliary"]
     assert module.calls == ["shutdown", "initialize"]
     assert module.initialized is True
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
+    exchange = FakeScannerExchange()
+    consumer = MarketDataShadowConsumer(
+        engine=CrossMarketIntelligenceEngine(),
+        instrument_resolver=InstrumentMaster(
+            [
+                Instrument(
+                    symbol="BTCUSDT",
+                    asset_class=AssetClass.CRYPTO,
+                    venue="binance",
+                    market_type="usd_m_futures",
+                )
+            ],
+            version="test-instruments-v1",
+        ),
+        market_types=("usd_m_futures",),
+    )
+    components = await build_system(
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=SimulatedOrderExecutor(),
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
+        market_shadow_consumer=consumer,
+    )
+
+    assert components.market_shadow_consumer is consumer
+    assert components.data_ingestion.market_data_bus is not None
+    assert consumer.snapshot().started is False
+
+    await initialize_all(components)
+    assert consumer.snapshot().started is True
+
+    await shutdown_all(components)
+    assert consumer.snapshot().started is False
+
+
+@pytest.mark.asyncio
+async def test_live_portfolio_tracker_projects_pending_entry_risk():
+    now = datetime.now(timezone.utc)
+
+    class EquityAwareExecutor:
+        async def get_account_equity(self, asset):
+            assert asset == "USDT"
+            return 5_000.0
+
+    async def pending_snapshot():
+        return {
+            "orders": [
+                {
+                    "orderId": 123,
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "positionSide": "BOTH",
+                    "type": "LIMIT",
+                    "status": "NEW",
+                    "origQty": "10",
+                    "executedQty": "4",
+                    "reduceOnly": False,
+                    "closePosition": False,
+                }
+            ],
+            "mark_prices": {"BTCUSDT": "100"},
+            "stop_prices": {("BTCUSDT", "LONG"): "95"},
+            "leverage_by_symbol": {"BTCUSDT": "2"},
+            "orders_observed_at": now,
+            "risk_inputs_observed_at": now,
+            "now": now,
+        }
+
+    tracker = LivePortfolioTracker(
+        EquityAwareExecutor(),
+        pending_order_snapshot_provider=pending_snapshot,
+    )
+
+    class EmptyLifecycle:
+        def get_open_trades(self):
+            return []
+
+    await tracker.refresh_equity()
+    portfolio = tracker.build_portfolio_state(EmptyLifecycle())
+
+    assert len(portfolio.pending_orders) == 1
+    pending = portfolio.pending_orders[0]
+    assert pending.order_id == "binance:123"
+    assert pending.remaining_notional_usd == pytest.approx(600.0)
+    assert pending.risk_amount_usd == pytest.approx(30.0)
+    assert pending.leverage == pytest.approx(2.0)
+    assert portfolio.gross_exposure_usd == pytest.approx(600.0)
+
+
+@pytest.mark.asyncio
+async def test_live_portfolio_tracker_fails_closed_on_stale_pending_risk():
+    now = datetime.now(timezone.utc)
+
+    class EquityAwareExecutor:
+        async def get_account_equity(self, asset):
+            return 5_000.0
+
+    async def stale_snapshot():
+        return {
+            "orders": [],
+            "mark_prices": {},
+            "stop_prices": {},
+            "leverage_by_symbol": {},
+            "orders_observed_at": now.replace(year=now.year - 1),
+            "risk_inputs_observed_at": now.replace(year=now.year - 1),
+            "now": now,
+        }
+
+    tracker = LivePortfolioTracker(
+        EquityAwareExecutor(),
+        pending_order_snapshot_provider=stale_snapshot,
+    )
+    with pytest.raises(ValueError, match="stale or incoherent"):
+        await tracker.refresh_equity()
+
+    class EmptyLifecycle:
+        def get_open_trades(self):
+            return []
+
+    with pytest.raises(RuntimeError, match="fresh validated pending-order snapshot"):
+        tracker.build_portfolio_state(EmptyLifecycle())

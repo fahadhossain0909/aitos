@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -87,7 +88,7 @@ class ExecutionIntentStore:
                 not request.reduce_only
                 and conn.execute(
                     "SELECT 1 FROM execution_intents WHERE scope=? "
-                    "AND state NOT IN ('APPLIED','REJECTED') LIMIT 1",
+                    "AND state NOT IN ('APPLIED','REJECTED','TERMINAL') LIMIT 1",
                     (self.scope,),
                 ).fetchone()
             ):
@@ -131,26 +132,118 @@ class ExecutionIntentStore:
 
     def record_protection(self, client_id: str, result: OrderResult) -> None:
         """Accepted resting protection is not a fill; retain until durable ID write."""
-        if not result.success or not result.order_id or result.filled_quantity != 0:
-            raise ValueError("protection acceptance requires an unfilled resting order")
+        if (
+            not result.success
+            or not isinstance(result.order_id, str)
+            or not re.fullmatch(r"(?:algo:)?[1-9][0-9]{0,29}", result.order_id)
+            or not math.isfinite(result.filled_quantity)
+            or result.filled_quantity != 0
+            or not math.isfinite(result.fill_price)
+            or result.fill_price <= 0
+            or result.client_order_id != client_id
+        ):
+            raise ValueError(
+                "protection acceptance requires valid identity and "
+                "an unfilled resting order"
+            )
         payload = json.dumps(asdict(result), sort_keys=True, allow_nan=False)
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT request_json FROM execution_intents WHERE scope=? AND client_id=? AND state='SUBMITTING'",
+                "SELECT symbol, request_json FROM execution_intents "
+                "WHERE scope=? AND client_id=? AND state='SUBMITTING'",
                 (self.scope, client_id),
             ).fetchone()
-            request = json.loads(row[0]) if row else {}
-            if request.get("order_type") not in {
-                "STOP_MARKET",
-                "TAKE_PROFIT_MARKET",
-            } or not request.get("reduce_only"):
+            if row is None:
+                raise ValueError("protection acceptance has no submitting preclaim")
+            request = json.loads(row["request_json"])
+            request_side = str(request.get("side", "")).upper()
+            result_side = str(getattr(result.side, "value", result.side)).upper()
+            if (
+                request.get("order_type")
+                not in {
+                    "STOP_MARKET",
+                    "TAKE_PROFIT_MARKET",
+                }
+                or request.get("reduce_only") is not True
+            ):
                 raise ValueError("protection acceptance requires a protective preclaim")
-            conn.execute(
+            if (
+                request.get("symbol") != row["symbol"]
+                or result.symbol != row["symbol"]
+                or result_side != request_side
+                or not math.isclose(
+                    result.fill_price,
+                    float(request.get("reference_price", 0)),
+                    rel_tol=1e-12,
+                    abs_tol=0.0,
+                )
+            ):
+                raise ValueError(
+                    "protection result does not match preclaim identity "
+                    "or trigger price"
+                )
+            cursor = conn.execute(
                 "UPDATE execution_intents SET state='PROTECTED',result_json=?,updated_at=CURRENT_TIMESTAMP "
-                "WHERE scope=? AND client_id=?",
+                "WHERE scope=? AND client_id=? AND state='SUBMITTING'",
                 (payload, self.scope, client_id),
             )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "protection preclaim changed before durable acceptance"
+                )
+
+    def mark_protection_terminal(
+        self,
+        order_id: str,
+        *,
+        symbol: str,
+        status: str,
+        executed_quantity: float = 0.0,
+    ) -> bool:
+        """Persist confirmed terminal venue evidence for a protective order."""
+        terminal_states = {
+            "CANCELED",
+            "FILLED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }
+        if (
+            not order_id
+            or not symbol
+            or status not in terminal_states
+            or not math.isfinite(executed_quantity)
+            or executed_quantity < 0
+        ):
+            raise ValueError("valid terminal protective-order evidence required")
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT client_id,result_json,state FROM execution_intents "
+                "WHERE scope=? AND symbol=? AND state IN ('PROTECTED','APPLIED')",
+                (self.scope, symbol),
+            ).fetchall()
+            matches = []
+            for row in rows:
+                result = json.loads(row["result_json"] or "{}")
+                if result.get("order_id") == order_id:
+                    matches.append((row["client_id"], result))
+            if len(matches) > 1:
+                raise ValueError("protective venue order identity is ambiguous")
+            if not matches:
+                return False
+            client_id, result = matches[0]
+            result["terminal_status"] = status
+            result["terminal_executed_quantity"] = executed_quantity
+            payload = json.dumps(result, sort_keys=True, allow_nan=False)
+            cursor = conn.execute(
+                "UPDATE execution_intents SET state='TERMINAL',result_json=?,"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND client_id=? "
+                "AND state IN ('PROTECTED','APPLIED')",
+                (payload, self.scope, client_id),
+            )
+            return cursor.rowcount == 1
 
     def mark_applied(self, client_id: str, trade_id: str) -> None:
         if not trade_id:
@@ -168,10 +261,22 @@ class ExecutionIntentStore:
         with self._connection() as conn:
             rows = conn.execute(
                 "SELECT client_id,symbol,state,request_json,result_json FROM execution_intents "
-                "WHERE scope=? AND state NOT IN ('APPLIED','REJECTED') ORDER BY client_id",
+                "WHERE scope=? AND state NOT IN ('APPLIED','REJECTED','TERMINAL') ORDER BY client_id",
                 (self.scope,),
             ).fetchall()
         return [dict(row) for row in rows if symbol is None or row["symbol"] == symbol]
+
+    def protection_intents(self) -> list[dict]:
+        """Read all non-rejected protective intent states for audit only."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT client_id,symbol,state,request_json,result_json,trade_id "
+                "FROM execution_intents WHERE scope=? "
+                "AND state IN ('SUBMITTING','PROTECTED','APPLIED','TERMINAL') "
+                "ORDER BY client_id",
+                (self.scope,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def assert_ready(self) -> None:
         rows = self.unresolved()

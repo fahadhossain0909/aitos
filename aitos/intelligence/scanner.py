@@ -437,6 +437,7 @@ class OpportunityScanner(AITOSModule):
         )
         self._last_scan_at = None
         self._last_candidate_count = 0
+        self._last_candidate_symbols: tuple[str, ...] = ()
         self._candidate_rotation = CandidateRotationManager(
             default_cooldown_seconds=self._tuning.analysis.rejection_cooldown_seconds,
             kernel_cooldown_seconds=self._tuning.analysis.kernel_rejection_cooldown_seconds,
@@ -534,6 +535,7 @@ class OpportunityScanner(AITOSModule):
             last_event_time=self._last_scan_at,
             details={
                 "last_candidate_count": self._last_candidate_count,
+                "last_candidate_symbols": list(self._last_candidate_symbols),
                 "symbols_tracked": len(self._symbols),
                 "footprint_tick_sizes_loaded": len(self._footprint_tick_sizes),
                 "amt_symbols": len(self._amt_engines),
@@ -2071,6 +2073,9 @@ class OpportunityScanner(AITOSModule):
         )
         candidates = [candidate for candidate in results if candidate is not None]
         self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
+        self._last_candidate_symbols = tuple(
+            sorted({item.symbol for item in candidates})
+        )
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_SCAN_COMPLETE,
@@ -2297,6 +2302,7 @@ class OpportunityScanner(AITOSModule):
         budget = min(cfg.max_candidate_analyses_per_cycle, cfg.candidate_pool_limit)
         selected = selected[:budget]
         scanned = found = 0
+        candidate_symbols_seen: set[str] = set()
         batch_size = max(1, cfg.candidate_batch_size)
         for offset in range(0, len(selected), batch_size):
             batch = selected[offset : offset + batch_size]
@@ -2336,6 +2342,8 @@ class OpportunityScanner(AITOSModule):
             ranked = await self.rank(candidates, top_n=len(candidates))
             found += len(ranked)
             self._last_scan_at, self._last_candidate_count = _utc_now_iso(), found
+            candidate_symbols_seen.update(item.symbol for item in ranked)
+            self._last_candidate_symbols = tuple(sorted(candidate_symbols_seen))
             payload = {
                 "phase": "batch_completed",
                 "batch_index": offset // batch_size + 1,

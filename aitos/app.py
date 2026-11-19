@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from math import isfinite
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
 from aitos.statistics.feedback import AStatFeedbackLoop
+from aitos.statistics.governance_runtime import DriftMonitorScheduler
 
 # Keep model persistence independent of any developer-specific host path.
 # MODEL_DATA_DIR is already part of the deployment environment contract;
@@ -40,7 +42,14 @@ from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
 from aitos.knowledge_graph.writer import GraphDriver, KnowledgeGraphWriter
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeLifecycleState
-from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
+from aitos.markets.shadow_consumer import MarketDataShadowConsumer
+from aitos.exchange.binance_pending_exposure import pending_exposures_from_open_orders
+from aitos.risk.models import (
+    PendingOrderExposure,
+    PortfolioState,
+    PositionExposure,
+    RiskLimits,
+)
 from aitos.risk.risk_engine import RiskEngine
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionManager
@@ -80,6 +89,11 @@ class SystemComponents:
     knowledge_graph: KnowledgeGraphWriter | None = None
     correlation_updater: SymbolCorrelationUpdater | None = None
     _price_feed_subscriptions: list[SubscriptionProtocol] = field(default_factory=list)
+    market_shadow_consumer: MarketDataShadowConsumer | None = None
+    governance_drift_scheduler: DriftMonitorScheduler | None = None
+    governance_drift_batch_provider: Callable[[], Any] | None = None
+    _governance_drift_stop_event: asyncio.Event | None = field(default=None, repr=False)
+    _governance_drift_task: asyncio.Task | None = field(default=None, repr=False)
 
     def reload_runtime_tuning(self) -> dict[str, object]:
         """Reload tunings that can be changed without rebuilding infrastructure.
@@ -167,7 +181,16 @@ async def build_system(
     enable_exit_intelligence: bool = False,
     position_switching_factory: PositionSwitchingFactory | None = None,
     world_intelligence_provider: Any | None = None,
+    market_shadow_consumer: MarketDataShadowConsumer | None = None,
+    governance_drift_scheduler: DriftMonitorScheduler | None = None,
+    governance_drift_batch_provider: Callable[[], Any] | None = None,
 ) -> SystemComponents:
+    if (governance_drift_scheduler is None) != (
+        governance_drift_batch_provider is None
+    ):
+        raise ValueError(
+            "governance drift scheduler and batch provider must be configured together"
+        )
     settings = get_settings()
     tuning = settings.tuning
     tuning_report = effective_tuning_report(tuning)
@@ -415,6 +438,9 @@ async def build_system(
         reconciliation=reconciliation,
         knowledge_graph=knowledge_graph,
         correlation_updater=correlation_updater,
+        market_shadow_consumer=market_shadow_consumer,
+        governance_drift_scheduler=governance_drift_scheduler,
+        governance_drift_batch_provider=governance_drift_batch_provider,
     )
 
 
@@ -486,6 +512,27 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
                 topic, components.trade_lifecycle.handle_event, group=group
             )
         )
+    shadow_consumer = getattr(components, "market_shadow_consumer", None)
+    if shadow_consumer is not None:
+        market_bus = components.data_ingestion.market_data_bus
+        if market_bus is None:
+            raise RuntimeError(
+                "market shadow consumer requires canonical market-data ingestion"
+            )
+        await shadow_consumer.start(market_bus)
+    drift_scheduler = getattr(components, "governance_drift_scheduler", None)
+    drift_provider = getattr(components, "governance_drift_batch_provider", None)
+    if drift_scheduler is not None:
+        if drift_provider is None:
+            raise RuntimeError("governance drift batch provider is required")
+        drift_task = getattr(components, "_governance_drift_task", None)
+        if drift_task is None or drift_task.done():
+            stop_event = asyncio.Event()
+            components._governance_drift_stop_event = stop_event
+            components._governance_drift_task = asyncio.create_task(
+                drift_scheduler.run_forever(stop_event, drift_provider),
+                name="aitos-statistical-drift-monitor",
+            )
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         statuses = [await _health_status(module) for module in components.all_modules()]
@@ -498,6 +545,39 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
 async def shutdown_all(
     components: SystemComponents, grace_period_seconds: float = 30.0
 ) -> None:
+    shadow_consumer = getattr(components, "market_shadow_consumer", None)
+    if shadow_consumer is not None:
+        try:
+            await shadow_consumer.stop(drain=True)
+        except Exception as exc:
+            logger.error(
+                "market shadow consumer shutdown failed",
+                extra={"aitos_extra": {"error": str(exc)}},
+            )
+    drift_stop_event = getattr(components, "_governance_drift_stop_event", None)
+    drift_task = getattr(components, "_governance_drift_task", None)
+    if drift_stop_event is not None:
+        drift_stop_event.set()
+    if drift_task is not None:
+        try:
+            await asyncio.wait_for(
+                drift_task, timeout=max(1.0, float(grace_period_seconds))
+            )
+        except asyncio.TimeoutError:
+            drift_task.cancel()
+            try:
+                await drift_task
+            except asyncio.CancelledError:
+                pass
+            logger.error("statistical drift monitor exceeded shutdown grace period")
+        except Exception as exc:
+            logger.error(
+                "statistical drift monitor shutdown failed",
+                extra={"aitos_extra": {"error": type(exc).__name__}},
+            )
+        finally:
+            components._governance_drift_task = None
+            components._governance_drift_stop_event = None
     for sub in components._price_feed_subscriptions:
         sub.cancel()
     for module in reversed(components.all_modules()):
@@ -602,26 +682,98 @@ def _parse_iso(value: str) -> datetime:
 
 
 class LivePortfolioTracker:
-    def __init__(self, order_executor, asset: str = "USDT"):
+    def __init__(
+        self,
+        order_executor,
+        asset: str = "USDT",
+        *,
+        pending_order_snapshot_provider: Callable[[], Any] | None = None,
+        pending_order_max_age_seconds: float = 5.0,
+        pending_order_max_snapshot_skew_seconds: float = 2.0,
+    ):
         self._order_executor, self._asset = order_executor, asset
         self._peak_equity_usd: float | None = None
         self._last_known_equity_usd = 0.0
+        self._pending_order_snapshot_provider = pending_order_snapshot_provider
+        self._pending_order_max_age_seconds = pending_order_max_age_seconds
+        self._pending_order_max_snapshot_skew_seconds = (
+            pending_order_max_snapshot_skew_seconds
+        )
+        self._pending_order_exposures: tuple[PendingOrderExposure, ...] = ()
+        self._pending_order_snapshot_valid = pending_order_snapshot_provider is None
 
     async def refresh_equity(self) -> float:
-        equity = await self._order_executor.get_account_balance(self._asset)
-        self._last_known_equity_usd = equity
+        if self._pending_order_snapshot_provider is not None:
+            self._pending_order_snapshot_valid = False
+        equity_reader = getattr(self._order_executor, "get_account_equity", None)
+        if callable(equity_reader):
+            equity = await equity_reader(self._asset)
+        else:
+            equity = await self._order_executor.get_account_balance(self._asset)
+        if not isfinite(float(equity)) or float(equity) <= 0:
+            raise ValueError("live account equity must be finite and positive")
+
+        pending = self._pending_order_exposures
+        if self._pending_order_snapshot_provider is not None:
+            # A configured provider is authoritative: errors or stale inputs
+            # abort the scan cycle instead of silently treating pending risk as 0.
+            snapshot = await self._pending_order_snapshot_provider()
+            if not isinstance(snapshot, dict):
+                raise TypeError("pending-order provider must return a mapping")
+            required = {
+                "orders",
+                "mark_prices",
+                "stop_prices",
+                "leverage_by_symbol",
+                "orders_observed_at",
+                "risk_inputs_observed_at",
+            }
+            missing = required.difference(snapshot)
+            if missing:
+                raise ValueError(
+                    "pending-order snapshot missing fields: "
+                    + ", ".join(sorted(missing))
+                )
+            pending = pending_exposures_from_open_orders(
+                snapshot["orders"],
+                mark_prices=snapshot["mark_prices"],
+                stop_prices=snapshot["stop_prices"],
+                leverage_by_symbol=snapshot["leverage_by_symbol"],
+                orders_observed_at=snapshot["orders_observed_at"],
+                risk_inputs_observed_at=snapshot["risk_inputs_observed_at"],
+                now=snapshot.get("now"),
+                max_age_seconds=self._pending_order_max_age_seconds,
+                max_snapshot_skew_seconds=(
+                    self._pending_order_max_snapshot_skew_seconds
+                ),
+            )
+
+        self._pending_order_exposures = tuple(pending)
+        self._pending_order_snapshot_valid = True
+        self._last_known_equity_usd = float(equity)
         self._peak_equity_usd = (
-            equity
+            float(equity)
             if self._peak_equity_usd is None
-            else max(self._peak_equity_usd, equity)
+            else max(self._peak_equity_usd, float(equity))
         )
-        return equity
+        return float(equity)
 
     def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
+        if not self._pending_order_snapshot_valid:
+            raise RuntimeError(
+                "a fresh validated pending-order snapshot is required before live risk assessment"
+            )
         open_trades = trade_lifecycle.get_open_trades()
         positions = tuple(
             PositionExposure(
-                symbol=t.symbol, notional_usd=t.position_size_usd, leverage=t.leverage
+                symbol=t.symbol,
+                notional_usd=t.position_size_usd,
+                leverage=t.leverage,
+                side=t.side.value,
+                risk_amount_usd=abs(
+                    t.entry_price - float(t.emergency_sl_price or t.sl_price)
+                )
+                * t.quantity,
             )
             for t in open_trades
         )
@@ -636,6 +788,7 @@ class LivePortfolioTracker:
             peak_equity_usd=self._peak_equity_usd or self._last_known_equity_usd,
             positions=positions,
             regime=dominant_regime,
+            pending_orders=self._pending_order_exposures,
         )
 
 

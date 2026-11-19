@@ -1,6 +1,7 @@
 import pytest
 
 from aitos.risk.models import (
+    PendingOrderExposure,
     PortfolioState,
     PositionExposure,
     RiskAction,
@@ -189,3 +190,44 @@ async def test_attempt_recovery_transitions_to_half_open_after_cooldown(event_bu
     await asyncio.sleep(0.06)
     assert await engine.attempt_recovery() is True
     assert engine.circuit_breaker.state.value == "half_open"
+
+
+def test_check_limits_includes_pending_orders_in_position_and_sector_projection():
+    portfolio = PortfolioState(
+        equity_usd=10_000.0,
+        peak_equity_usd=10_000.0,
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=1_000.0,
+                leverage=3.0,
+                sector="crypto-major",
+            ),
+        ),
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="btc-entry-2",
+                symbol="BTCUSDT",
+                side="LONG",
+                remaining_notional_usd=2_500.0,
+                risk_amount_usd=50.0,
+                leverage=4.0,
+            ),
+            PendingOrderExposure(
+                order_id="eth-entry-1",
+                symbol="ETHUSDT",
+                side="LONG",
+                remaining_notional_usd=500.0,
+                risk_amount_usd=10.0,
+                leverage=2.0,
+            ),
+        ),
+    )
+    limits = RiskLimits(max_open_positions=1, max_open_positions_hard_cap=2)
+
+    breaches = check_limits(portfolio, limits)
+    names = {breach.limit_name for breach in breaches}
+
+    assert portfolio.projected_open_position_count == 2
+    assert "max_open_positions" in names
+    assert "max_sector_exposure_pct[crypto-major]" in names

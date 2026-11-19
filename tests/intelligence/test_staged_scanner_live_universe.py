@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -96,6 +97,8 @@ async def test_live_universe_path_uses_tickers_then_deep_scans_top_ten_only():
     assert scanner._exchange.calls == ["S0"]
     assert len(scanner.scan_calls) == 10
     assert len(result) == 2
+    assert scanner._last_candidate_count == 2
+    assert scanner._last_candidate_symbols == ("S8", "S9")
     assert [s for s, _ in stages] == ["TOP_50", "TOP_25", "TOP_10", "TOP_5", "TOP_2"]
     assert stages[0][1][0] == "S0"
     assert stages[-1][1] == ["S9", "S8"]
@@ -133,6 +136,8 @@ async def test_runtime_batch_path_uses_live_rank_and_enriches_only_promoted_top_
 
     assert selected[:2] == ["S0", "S2"]
     assert len(batches) == 1
+    assert scanner._last_candidate_count == 2
+    assert scanner._last_candidate_symbols == ("S2", "S3")
     assert scanner._aitos_historical_intelligence.calls == ["S3", "S2"]
     by_symbol = {item.symbol: item for item in batches[0]}
     assert by_symbol["S3"]._aitos_historical_context["available"] is False
@@ -141,3 +146,23 @@ async def test_runtime_batch_path_uses_live_rank_and_enriches_only_promoted_top_
         by_symbol["S0"]._aitos_historical_context["reason"]
         == "not_promoted_for_deep_history"
     )
+
+
+class EmptyBatchScanner(Scanner):
+    async def iter_candidate_batches(self):
+        if False:
+            yield []
+
+
+@pytest.mark.asyncio
+async def test_empty_batch_cycle_clears_previous_promoted_candidate_identity():
+    scanner = EmptyBatchScanner()
+    scanner._last_candidate_count = 2
+    scanner._last_candidate_symbols = ("S4", "S5")
+    await install_staged_scan(scanner, lambda *_args: asyncio.sleep(0))
+
+    batches = [batch async for batch in scanner.iter_candidate_batches()]
+
+    assert batches == []
+    assert scanner._last_candidate_count == 0
+    assert scanner._last_candidate_symbols == ()

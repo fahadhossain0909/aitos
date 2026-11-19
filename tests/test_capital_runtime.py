@@ -5,12 +5,21 @@ import pytest
 from aitos.intelligence import capital_runtime
 from aitos.intelligence.capital_controls import CapitalControlConfig
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_protection import (
+    CapitalReservation,
+    ProtectionDecision,
+    Reservation,
+)
 from aitos.intelligence.capital_runtime import (
     _portfolio_consensus,
     install_capital_guard,
 )
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
-from aitos.risk.models import PortfolioState, PositionExposure
+from aitos.risk.models import (
+    PendingOrderExposure,
+    PortfolioState,
+    PositionExposure,
+)
 from aitos.trading.lifecycle import TradeLifecycle
 
 
@@ -42,6 +51,44 @@ def make_opportunity(**overrides) -> Opportunity:
     )
     values.update(overrides)
     return Opportunity(**values)
+
+
+def test_gateway_reservation_coverage_requires_owned_full_open_exposure():
+    ledger = CapitalReservation()
+    gateway = CapitalGateway(reservation=ledger)
+    required = Reservation("BTCUSDT", 100.0, 5.0)
+
+    with pytest.raises(RuntimeError, match="no owned reservation"):
+        gateway.assert_reservations_cover([required])
+
+    ledger.restore_confirmed_exposure(Reservation("BTCUSDT", 120.0, 6.0))
+    assert gateway.assert_reservations_cover([required]) == {
+        "BTCUSDT": Reservation("BTCUSDT", 120.0, 6.0)
+    }
+
+
+def test_gateway_reservation_coverage_rejects_under_reserved_open_exposure():
+    ledger = CapitalReservation()
+    gateway = CapitalGateway(reservation=ledger)
+    assert ledger.reserve(
+        Reservation("BTCUSDT", 90.0, 4.0),
+        available_capital_usd=100.0,
+        available_risk_usd=10.0,
+    )
+
+    with pytest.raises(RuntimeError, match="under-covers"):
+        gateway.assert_reservations_cover([Reservation("BTCUSDT", 100.0, 5.0)])
+
+
+def test_gateway_reservation_coverage_rejects_duplicate_symbols():
+    gateway = CapitalGateway(reservation=CapitalReservation())
+    with pytest.raises(ValueError, match="symbols must be unique"):
+        gateway.assert_reservations_cover(
+            [
+                Reservation("BTCUSDT", 10.0, 1.0),
+                Reservation("BTCUSDT", 20.0, 2.0),
+            ]
+        )
 
 
 def test_gateway_uses_nearest_target_and_execution_costs():
@@ -336,3 +383,144 @@ async def test_open_position_retains_capital_reservation_until_close(
     await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
     assert gateway.reservation.get(trade.symbol) is None
     await lifecycle.shutdown()
+
+
+def test_gateway_includes_other_in_flight_reservations_in_correlation_projection():
+    class RecordingProtection:
+        def __init__(self):
+            self.snapshot = None
+
+        def evaluate(self, **kwargs):
+            self.snapshot = kwargs["snapshot"]
+            requested = kwargs["requested_risk_pct"]
+            return ProtectionDecision(
+                True,
+                1.0,
+                requested,
+                requested,
+                self.snapshot.correlated_risk_pct(),
+                self.snapshot.drawdown_pct,
+                "approved",
+            )
+
+    reservation = CapitalReservation()
+    assert reservation.reserve(
+        Reservation("BTCUSDT", 1_000.0, 200.0),
+        available_capital_usd=10_000.0,
+        available_risk_usd=500.0,
+    )
+    protection = RecordingProtection()
+    gateway = CapitalGateway(reservation=reservation, protection=protection)
+    estimate = gateway.estimate_opportunity(make_opportunity(symbol="ETHUSDT"))
+
+    gateway.evaluate(10_000.0, [estimate], max_positions=1)
+
+    assert protection.snapshot is not None
+    assert protection.snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(2.0)
+    assert "BTCUSDT" not in (protection.snapshot.position_sides or {})
+
+
+def test_gateway_does_not_double_count_reservation_already_in_live_positions():
+    reservation = CapitalReservation()
+    assert reservation.reserve(
+        Reservation("BTCUSDT", 1_000.0, 200.0),
+        available_capital_usd=10_000.0,
+        available_risk_usd=500.0,
+    )
+    gateway = CapitalGateway(reservation=reservation)
+    estimate = gateway.estimate_opportunity(
+        make_opportunity(
+            symbol="ETHUSDT",
+            agent_consensus={"position_risk_pct": {"BTCUSDT": 1.5}},
+        )
+    )
+    snapshot = gateway._include_in_flight_reservations(
+        gateway._snapshot(10_000.0, estimate),
+        equity_usd=10_000.0,
+    )
+    assert snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(1.5)
+
+
+def test_portfolio_consensus_projects_same_symbol_pending_order_separately():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure(
+                symbol="btcusdt",
+                notional_usd=5_000.0,
+                leverage=5.0,
+                side="LONG",
+                risk_amount_usd=100.0,
+            ),
+        ),
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="entry-2",
+                symbol="BTCUSDT",
+                side="LONG",
+                remaining_notional_usd=2_000.0,
+                risk_amount_usd=50.0,
+            ),
+        ),
+    )
+    opportunity = make_opportunity(symbol="ETHUSDT")
+    consensus = _portfolio_consensus(portfolio, opportunity)
+    projected = make_opportunity(symbol="ETHUSDT", agent_consensus=consensus)
+    gateway = CapitalGateway()
+    snapshot = gateway._snapshot(10_000.0, gateway.estimate_opportunity(projected))
+
+    assert snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(1.0)
+    assert snapshot.position_risk_pct["pending:entry-2"] == pytest.approx(0.5)
+    assert snapshot.position_sides["pending:entry-2"] == "LONG"
+    assert snapshot.position_instruments["pending:entry-2"] == "BTCUSDT"
+    assert snapshot.total_risk_pct == pytest.approx(1.5)
+    assert snapshot.correlated_risk_pct() == pytest.approx(1.5)
+
+
+def test_opposite_side_pending_order_is_not_mistaken_for_same_side_risk():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=5_000.0,
+                leverage=5.0,
+                side="LONG",
+                risk_amount_usd=100.0,
+            ),
+        ),
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="hedge-1",
+                symbol="BTCUSDT",
+                side="SHORT",
+                remaining_notional_usd=2_000.0,
+                risk_amount_usd=50.0,
+            ),
+        ),
+    )
+    consensus = _portfolio_consensus(portfolio, make_opportunity(symbol="ETHUSDT"))
+    estimate = CapitalGateway().estimate_opportunity(
+        make_opportunity(symbol="ETHUSDT", agent_consensus=consensus)
+    )
+    snapshot = CapitalGateway._snapshot(10_000.0, estimate)
+
+    assert snapshot.total_risk_pct == pytest.approx(1.5)
+    assert snapshot.correlated_risk_pct() == pytest.approx(0.5)
+
+
+def test_portfolio_state_rejects_duplicate_pending_order_identity():
+    pending = PendingOrderExposure(
+        order_id="duplicate",
+        symbol="BTCUSDT",
+        side="LONG",
+        remaining_notional_usd=1_000.0,
+        risk_amount_usd=10.0,
+    )
+    with pytest.raises(ValueError, match="pending order IDs must be unique"):
+        make_portfolio(pending_orders=(pending, pending))
+
+
+def test_pending_order_exposure_rejects_invalid_risk_and_side():
+    with pytest.raises(ValueError, match="side must be LONG or SHORT"):
+        PendingOrderExposure("entry", "BTCUSDT", "BOTH", 100.0, 10.0)
+    with pytest.raises(ValueError, match="risk_amount_usd"):
+        PendingOrderExposure("entry", "BTCUSDT", "LONG", 100.0, float("nan"))

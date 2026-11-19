@@ -26,7 +26,9 @@ def read_recovery_inventory(database: str | Path, scope: str) -> dict:
     finally:
         conn.close()
     unresolved = [
-        dict(row) for row in rows if row["state"] not in {"APPLIED", "REJECTED"}
+        dict(row)
+        for row in rows
+        if row["state"] not in {"APPLIED", "REJECTED", "TERMINAL"}
     ]
     return {
         "evidence": "LOCAL_JOURNAL_ONLY",
@@ -45,7 +47,7 @@ def read_protection_audit(database: str | Path, scope: str, evidence: dict) -> d
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            "SELECT scope,client_id,symbol,state,request_json,result_json "
+            "SELECT scope,client_id,symbol,state,request_json,result_json,trade_id "
             "FROM execution_intents WHERE scope=? ORDER BY client_id LIMIT 10001",
             (scope,),
         ).fetchall()

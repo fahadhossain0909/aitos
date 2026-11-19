@@ -315,23 +315,34 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                argMax(symbol, updated_at) AS symbol,
-                argMax(state, updated_at) AS state,
-                argMax(request_json, updated_at) AS request_json
+                groupUniqArray(tuple(symbol, state, request_json, result_json))
+                    AS latest_versions
             FROM order_execution_ledger
+            WHERE (client_order_id, updated_at) IN (
+                SELECT client_order_id, max(updated_at)
+                FROM order_execution_ledger
+                GROUP BY client_order_id
+            )
             GROUP BY client_order_id
-            HAVING state = 'SUBMITTING'
             ORDER BY client_order_id
             """
         )
         pending = []
         for row in result.result_rows:
+            versions = row[1] if len(row) > 1 else ()
+            if len(versions) != 1:
+                raise RuntimeError(
+                    "ambiguous latest order-intent evidence; startup recovery blocked"
+                )
+            symbol, state, request_json, _result_json = versions[0]
+            if str(state) != "SUBMITTING":
+                continue
             pending.append(
                 {
                     "client_order_id": str(row[0]),
-                    "symbol": str(row[1]),
-                    "state": str(row[2]),
-                    "request": json.loads(row[3] or "{}"),
+                    "symbol": str(symbol),
+                    "state": str(state),
+                    "request": json.loads(request_json or "{}"),
                 }
             )
         return pending
@@ -343,11 +354,15 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                argMax(state, updated_at) AS state,
-                argMax(result_json, updated_at) AS result_json
+                groupUniqArray(tuple(symbol, state, request_json, result_json))
+                    AS latest_versions
             FROM order_execution_ledger
+            WHERE (client_order_id, updated_at) IN (
+                SELECT client_order_id, max(updated_at)
+                FROM order_execution_ledger
+                GROUP BY client_order_id
+            )
             GROUP BY client_order_id
-            HAVING state = 'ACKNOWLEDGED'
             """
         )
         trade_rows = await client.query(
@@ -360,6 +375,14 @@ class DurableTradingStateStore:
         known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
         unlinked = []
         for row in orders.result_rows:
+            versions = row[1] if len(row) > 1 else ()
+            if len(versions) != 1:
+                raise RuntimeError(
+                    "ambiguous latest acknowledged-order evidence; recovery blocked"
+                )
+            _symbol, state, _request_json, _result_json = versions[0]
+            if str(state) != "ACKNOWLEDGED":
+                continue
             client_order_id = str(row[0])
             if not client_order_id.startswith("aitos-entry-"):
                 continue
@@ -376,23 +399,34 @@ class DurableTradingStateStore:
         result = await client.query(
             """
             SELECT
-                argMax(symbol, updated_at) AS symbol,
-                argMax(state, updated_at) AS state,
-                argMax(request_json, updated_at) AS request_json,
-                argMax(result_json, updated_at) AS result_json
+                groupUniqArray(tuple(symbol, state, request_json, result_json))
+                    AS latest_versions
             FROM order_execution_ledger
             WHERE client_order_id = {client_order_id:String}
+              AND updated_at = (
+                  SELECT max(updated_at)
+                  FROM order_execution_ledger
+                  WHERE client_order_id = {client_order_id:String}
+              )
+            HAVING count() > 0
             """,
             parameters={"client_order_id": client_order_id},
         )
-        if not result.result_rows or not result.result_rows[0][1]:
+        if not result.result_rows:
             return None
-        row = result.result_rows[0]
+        versions = result.result_rows[0][0]
+        if len(versions) != 1:
+            raise RuntimeError(
+                "ambiguous latest order-intent record; execution recovery blocked"
+            )
+        symbol, state, request_json, result_json = versions[0]
+        if not state:
+            return None
         return {
-            "symbol": str(row[0]),
-            "state": str(row[1]),
-            "request": json.loads(row[2] or "{}"),
-            "result": json.loads(row[3] or "{}"),
+            "symbol": str(symbol),
+            "state": str(state),
+            "request": json.loads(request_json or "{}"),
+            "result": json.loads(result_json or "{}"),
         }
 
     async def save_trade(self, trade: Trade) -> None:
@@ -1079,8 +1113,20 @@ class PersistentLivePortfolioTracker(LivePortfolioTracker):
         order_executor: Any,
         state_store: DurableTradingStateStore,
         asset: str = "USDT",
+        *,
+        pending_order_snapshot_provider: Any | None = None,
+        pending_order_max_age_seconds: float = 5.0,
+        pending_order_max_snapshot_skew_seconds: float = 2.0,
     ) -> None:
-        super().__init__(order_executor=order_executor, asset=asset)
+        super().__init__(
+            order_executor=order_executor,
+            asset=asset,
+            pending_order_snapshot_provider=pending_order_snapshot_provider,
+            pending_order_max_age_seconds=pending_order_max_age_seconds,
+            pending_order_max_snapshot_skew_seconds=(
+                pending_order_max_snapshot_skew_seconds
+            ),
+        )
         self._state_store = state_store
 
     async def restore(self) -> None:

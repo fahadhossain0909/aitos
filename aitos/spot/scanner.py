@@ -112,9 +112,7 @@ class SpotOpportunityScanner:
                 / Decimal(500)
                 * Decimal("0.25")
                 + max(Decimal(0), item.order_book_imbalance) * Decimal("0.25")
-                + max(
-                    Decimal(0), Decimal(1) - item.spread_bps / self.max_spread_bps
-                )
+                + max(Decimal(0), Decimal(1) - item.spread_bps / self.max_spread_bps)
                 * Decimal("0.25")
             )
             reasons = (

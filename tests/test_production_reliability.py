@@ -192,8 +192,14 @@ async def test_startup_detects_unlinked_accepted_zero_fill_order():
                     [
                         (
                             "aitos-entry-trade-orphan",
-                            "ACKNOWLEDGED",
-                            '{"filled_quantity": 0}',
+                            [
+                                (
+                                    "BTCUSDT",
+                                    "ACKNOWLEDGED",
+                                    "{}",
+                                    '{"filled_quantity": 0}',
+                                )
+                            ],
                         )
                     ]
                 )
@@ -391,3 +397,131 @@ def test_adaptive_exit_observation_counter_survives_trade_recovery():
     restored = _trade_from_dict(trade.to_dict())
 
     assert restored.adaptive_exit_observations == 17
+
+
+@pytest.mark.asyncio
+async def test_order_record_rejects_conflicting_latest_timestamp_versions():
+    class QueryResult:
+        result_rows = [
+            (
+                [
+                    (
+                        "BTCUSDT",
+                        "SUBMITTING",
+                        '{"symbol":"BTCUSDT"}',
+                        "",
+                    ),
+                    (
+                        "BTCUSDT",
+                        "ACKNOWLEDGED",
+                        '{"symbol":"BTCUSDT"}',
+                        '{"order_id":"x"}',
+                    ),
+                ],
+            )
+        ]
+
+    class ClickHouseClient:
+        async def query(self, query, parameters=None):
+            assert (
+                "groupUniqArray(tuple(symbol, state, request_json, result_json))"
+                in query
+            )
+            assert "any(state)" not in query
+            return QueryResult()
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+    with pytest.raises(RuntimeError, match="ambiguous latest order-intent record"):
+        await store.load_order_record("client-ambiguous")
+
+
+@pytest.mark.asyncio
+async def test_pending_order_intent_loader_fails_closed_on_latest_timestamp_tie():
+    class QueryResult:
+        result_rows = [
+            (
+                "client-1",
+                [
+                    ("BTCUSDT", "SUBMITTING", '{"symbol":"BTCUSDT"}', ""),
+                    ("BTCUSDT", "ACKNOWLEDGED", '{"symbol":"BTCUSDT"}', "{}"),
+                ],
+            )
+        ]
+
+    class ClickHouseClient:
+        async def query(self, query, parameters=None):
+            assert "latest_versions" in query
+            assert (
+                "groupUniqArray(tuple(symbol, state, request_json, result_json))"
+                in query
+            )
+            assert "any(state)" not in query
+            return QueryResult()
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+    with pytest.raises(RuntimeError, match="ambiguous latest order-intent evidence"):
+        await store.load_pending_order_intents()
+
+
+@pytest.mark.asyncio
+async def test_unlinked_order_recovery_fails_closed_on_latest_timestamp_tie():
+    class QueryResult:
+        result_rows = [
+            (
+                "aitos-entry-trade-orphan",
+                [
+                    ("BTCUSDT", "ACKNOWLEDGED", "{}", '{"filled_quantity": 0}'),
+                    ("BTCUSDT", "REJECTED", "{}", "{}"),
+                ],
+            )
+        ]
+
+    class ClickHouseClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def query(self, query, parameters=None):
+            self.calls += 1
+            if self.calls == 1:
+                assert (
+                    "groupUniqArray(tuple(symbol, state, request_json, result_json))"
+                    in query
+                )
+                assert "any(state)" not in query
+                return QueryResult()
+            return QueryResultWithTrades()
+
+    class QueryResultWithTrades:
+        result_rows = []
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+    with pytest.raises(
+        RuntimeError, match="ambiguous latest acknowledged-order evidence"
+    ):
+        await store.load_unlinked_acknowledged_orders()
+
+
+@pytest.mark.asyncio
+async def test_order_record_lookup_returns_none_when_no_order_exists():
+    class QueryResult:
+        result_rows = []
+
+    class ClickHouseClient:
+        async def query(self, query, parameters=None):
+            assert "HAVING count() > 0" in query
+            return QueryResult()
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+    assert await store.load_order_record("missing-client-id") is None

@@ -186,8 +186,7 @@ class SpotRuntime:
             "spot_spread_quality": float(
                 max(
                     Decimal(0),
-                    Decimal(10)
-                    * (Decimal(1) - candidate.spread_bps / spread_limit),
+                    Decimal(10) * (Decimal(1) - candidate.spread_bps / spread_limit),
                 )
             ),
             "spot_volatility_quality": float(

@@ -182,3 +182,66 @@ def test_hsmm_causal_oos_posterior_history_supports_multiclass_calibration():
     assert 0.0 <= report.brier_score <= 2.0
     assert report.log_loss >= 0.0
     assert 0.0 <= report.expected_calibration_error <= 1.0
+
+
+def test_l1_replay_treats_negative_funding_as_a_cashflow_credit():
+    result = replay_historical_order(
+        [BookSnapshot(1000, 99.0, 101.0, 1.0, 1.0)],
+        side="BUY",
+        quantity=0.5,
+        submitted_at_ms=1000,
+        latency_ms=0,
+        taker_fee_bps=0.0,
+        funding_bps=-8.0,
+        holding_hours=8.0,
+    )
+    assert result.complete
+    assert result.funding_cost < 0.0
+    assert result.total_cost == pytest.approx(
+        result.spread_cost + result.slippage_cost + result.fees + result.funding_cost
+    )
+
+
+def test_l1_replay_accepts_signed_funding_credits():
+    quote = BookSnapshot(1000, 99.0, 101.0, 2.0, 2.0)
+    result = replay_historical_order(
+        [quote],
+        side="BUY",
+        quantity=1.0,
+        submitted_at_ms=1000,
+        latency_ms=0,
+        taker_fee_bps=0.0,
+        funding_bps=-8.0,
+        holding_hours=8.0,
+    )
+    assert result.funding_cost < 0
+    assert result.total_cost == pytest.approx(
+        result.fees
+        + result.spread_cost
+        + result.slippage_cost
+        + result.funding_cost
+        + result.borrow_cost
+    )
+
+
+def test_l1_replay_rejects_boolean_and_non_integer_time_values():
+    with pytest.raises(ValueError):
+        BookSnapshot(True, 99.0, 101.0, 1.0, 1.0)
+    with pytest.raises(ValueError):
+        replay_historical_order(
+            [],
+            side="BUY",
+            quantity=True,
+            submitted_at_ms=1000,
+            latency_ms=0,
+            taker_fee_bps=0.0,
+        )
+    with pytest.raises(ValueError):
+        replay_historical_order(
+            [],
+            side="BUY",
+            quantity=1.0,
+            submitted_at_ms=1000.5,
+            latency_ms=0,
+            taker_fee_bps=0.0,
+        )

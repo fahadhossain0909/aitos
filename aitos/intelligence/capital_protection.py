@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
 from threading import RLock
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class PortfolioRiskSnapshot:
     position_risk_pct: dict[str, float]
     correlations: dict[tuple[str, str], float]
     position_sides: dict[str, str] | None = None
+    position_instruments: dict[str, str] | None = None
 
     @property
     def total_risk_pct(self) -> float:
@@ -111,11 +113,19 @@ class PortfolioRiskSnapshot:
             str(symbol): str(side).upper()
             for symbol, side in (position_sides or self.position_sides or {}).items()
         }
+        instruments = {
+            str(key): str(value)
+            for key, value in (self.position_instruments or {}).items()
+        }
         symbols = sorted(risks)
         variance = sum(risk * risk for risk in risks.values())
         for index, symbol_a in enumerate(symbols):
             for symbol_b in symbols[index + 1 :]:
-                correlation = self.correlation(symbol_a, symbol_b, unknown_correlation)
+                correlation = self.correlation(
+                    instruments.get(symbol_a, symbol_a),
+                    instruments.get(symbol_b, symbol_b),
+                    unknown_correlation,
+                )
                 side_a = sides.get(symbol_a)
                 side_b = sides.get(symbol_b)
                 if side_a in {"LONG", "SHORT"} and side_b in {"LONG", "SHORT"}:
@@ -294,8 +304,9 @@ class PortfolioProtection:
         existing_variance = existing_correlated**2
         cross_term = 0.0
         for other, risk in existing_positions.items():
+            other_instrument = (snapshot.position_instruments or {}).get(other, other)
             correlation = snapshot.correlation(
-                symbol, other, self.config.unknown_correlation
+                symbol, other_instrument, self.config.unknown_correlation
             )
             existing_side = existing_sides.get(other)
             if existing_side in {"LONG", "SHORT"}:
@@ -363,8 +374,10 @@ class CapitalReservation:
 
     The durable mode uses a database transaction and absolute portfolio
     budgets, so two worker processes cannot both spend the same stale
-    availability snapshot. Reservations are leases and expire after a crashed
-    worker stops renewing/finishing its authorization window.
+    availability snapshot. An optional pure risk_policy is evaluated against
+    the active reservation set while the same lock/transaction is held.
+    Reservations are leases and expire after a crashed worker stops renewing
+    or finishing its authorization window.
     """
 
     def __init__(
@@ -416,6 +429,7 @@ class CapitalReservation:
         available_risk_usd: float,
         capital_limit_usd: float | None = None,
         risk_limit_usd: float | None = None,
+        risk_policy: Callable[[tuple[Reservation, ...]], bool] | None = None,
     ) -> bool:
         values = (
             reservation.capital_usd,
@@ -435,6 +449,10 @@ class CapitalReservation:
                 if reservation.capital_usd > available_capital_usd:
                     return False
                 if reservation.risk_budget_usd > available_risk_usd:
+                    return False
+                if risk_policy is not None and not risk_policy(
+                    tuple(self._reservations.values())
+                ):
                     return False
                 self._reservations[reservation.symbol] = reservation
                 return True
@@ -470,6 +488,22 @@ class CapitalReservation:
                         and float(existing[1]) == reservation.capital_usd
                         and float(existing[2]) == reservation.risk_budget_usd
                     )
+                if risk_policy is not None:
+                    rows = self._conn.execute(
+                        """
+                        SELECT symbol, capital_usd, risk_budget_usd
+                        FROM capital_reservations
+                        WHERE expires_at > ? ORDER BY symbol
+                        """,
+                        (now,),
+                    ).fetchall()
+                    active = tuple(
+                        Reservation(str(row[0]), float(row[1]), float(row[2]))
+                        for row in rows
+                    )
+                    if not risk_policy(active):
+                        self._conn.rollback()
+                        return False
                 totals = self._conn.execute(
                     """
                     SELECT COALESCE(SUM(capital_usd), 0),

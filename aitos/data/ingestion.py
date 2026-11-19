@@ -200,6 +200,16 @@ class DataIngestionService(_LegacyDataIngestionService):
                     )
             self._install_ranking_hook(scanner)
 
+    @property
+    def market_data_bus(self) -> MarketDataBus | None:
+        """Return the canonical bus for explicitly opted-in shadow consumers.
+
+        The bus is unavailable in legacy ingestion mode. Exposing this narrow
+        read-only handle avoids reaching into the runtime's private fields.
+        """
+        runtime = self._canonical_runtime
+        return runtime.market_bus if runtime is not None else None
+
     def _install_ranking_hook(self, scanner: Any) -> None:
         if scanner is None or self._ranking_hook_installed:
             return

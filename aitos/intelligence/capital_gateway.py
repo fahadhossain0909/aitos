@@ -120,6 +120,9 @@ class CapitalGateway:
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
                 "position_sides": consensus.get("position_sides", {}),
+                "pending_order_risk_pct": consensus.get("pending_order_risk_pct", {}),
+                "pending_order_symbols": consensus.get("pending_order_symbols", {}),
+                "pending_order_sides": consensus.get("pending_order_sides", {}),
                 "correlations": consensus.get("correlations", {}),
                 "daily_pnl_pct": consensus.get("daily_pnl_pct", 0.0),
                 "consecutive_losses": consensus.get("consecutive_losses", 0),
@@ -152,6 +155,27 @@ class CapitalGateway:
             str(k): str(v).upper()
             for k, v in dict(metadata.get("position_sides") or {}).items()
         }
+        position_instruments = {key: key for key in positions}
+        pending_risk = dict(metadata.get("pending_order_risk_pct") or {})
+        pending_symbols = dict(metadata.get("pending_order_symbols") or {})
+        pending_sides = dict(metadata.get("pending_order_sides") or {})
+        if not (set(pending_risk) == set(pending_symbols) == set(pending_sides)):
+            raise ValueError("pending order risk projection identity mismatch")
+        for order_key, risk_value in pending_risk.items():
+            risk_pct = float(risk_value)
+            instrument = str(pending_symbols[order_key])
+            side = str(pending_sides[order_key]).upper()
+            if (
+                not instrument
+                or side not in {"LONG", "SHORT"}
+                or not isfinite(risk_pct)
+                or risk_pct < 0
+            ):
+                raise ValueError("invalid pending order risk projection")
+            if risk_pct > 0:
+                positions[str(order_key)] = risk_pct
+                position_sides[str(order_key)] = side
+                position_instruments[str(order_key)] = instrument
         if not correlations and metadata.get("return_observations"):
             decision_at = metadata.get("decision_at")
             if decision_at is not None:
@@ -166,8 +190,103 @@ class CapitalGateway:
                     metadata["return_observations"], as_of=cutoff
                 )
         return PortfolioRiskSnapshot(
-            equity_usd, peak, positions, correlations, position_sides
+            equity_usd,
+            peak,
+            positions,
+            correlations,
+            position_sides,
+            position_instruments,
         )
+
+    def _include_in_flight_reservations(
+        self,
+        snapshot: PortfolioRiskSnapshot,
+        *,
+        equity_usd: float,
+        reservations: tuple[Reservation, ...] | None = None,
+    ) -> PortfolioRiskSnapshot:
+        """Project reserved-but-not-yet-open candidates into correlation risk.
+
+        A reservation for a symbol already represented by the live position
+        snapshot is not counted twice. Other reservations are included with
+        unknown side metadata, which deliberately receives no hedge credit.
+        """
+        if not isfinite(equity_usd) or equity_usd <= 0:
+            return snapshot
+        positions = dict(snapshot.position_risk_pct)
+        instruments = dict(snapshot.position_instruments or {})
+        active_reservations = (
+            self.reservation.snapshot() if reservations is None else reservations
+        )
+        known_symbols = {instruments.get(key, key).upper() for key in positions}
+        for reservation in active_reservations:
+            symbol = str(reservation.symbol)
+            if symbol.upper() in known_symbols:
+                continue
+            risk_pct = max(0.0, float(reservation.risk_budget_usd)) / equity_usd * 100.0
+            if risk_pct > 0:
+                positions[symbol] = risk_pct
+                instruments[symbol] = symbol
+                known_symbols.add(symbol.upper())
+        if positions == snapshot.position_risk_pct and instruments == (
+            snapshot.position_instruments or {}
+        ):
+            return snapshot
+        return replace(
+            snapshot,
+            position_risk_pct=positions,
+            position_instruments=instruments,
+        )
+
+    def assert_reservations_cover(
+        self, required: tuple[Reservation, ...] | list[Reservation]
+    ) -> dict[str, Reservation]:
+        """Verify every confirmed open exposure has an owned durable reservation.
+
+        Larger reservations are accepted as conservative. Missing or
+        under-sized reservations fail closed; this method never creates,
+        releases, renews or mutates a reservation.
+        """
+        if not isinstance(required, (tuple, list)):
+            raise TypeError("required reservation sequence is required")
+        normalized: list[tuple[str, Reservation]] = []
+        seen_symbols: set[str] = set()
+        for item in required:
+            if not isinstance(item, Reservation):
+                raise TypeError("required exposure must use Reservation")
+            symbol = str(item.symbol).strip().upper()
+            if not symbol or symbol in seen_symbols:
+                raise ValueError("required reservation symbols must be unique")
+            seen_symbols.add(symbol)
+            values = (item.capital_usd, item.risk_budget_usd)
+            if any(not isfinite(float(value)) or float(value) < 0 for value in values):
+                raise ValueError(
+                    "required reservation values must be finite and non-negative"
+                )
+            normalized.append((symbol, item))
+
+        verified: dict[str, Reservation] = {}
+        for symbol, item in normalized:
+            actual = self.reservation.get(symbol)
+            if actual is None:
+                raise RuntimeError(
+                    f"confirmed exposure has no owned reservation: {symbol}"
+                )
+            actual_values = (actual.capital_usd, actual.risk_budget_usd)
+            if any(
+                not isfinite(float(value)) or float(value) < 0
+                for value in actual_values
+            ):
+                raise RuntimeError(f"owned reservation is corrupt: {symbol}")
+            if (
+                actual.capital_usd + 1e-8 < item.capital_usd
+                or actual.risk_budget_usd + 1e-8 < item.risk_budget_usd
+            ):
+                raise RuntimeError(
+                    f"owned reservation under-covers confirmed exposure: {symbol}"
+                )
+            verified[symbol] = actual
+        return verified
 
     def evaluate(
         self,
@@ -254,7 +373,10 @@ class CapitalGateway:
         by_symbol = {item.symbol: item for item in eligible_estimates}
         for allocation in allocations:
             estimate = by_symbol[allocation.symbol]
-            snapshot = self._snapshot(equity_usd, estimate)
+            base_snapshot = self._snapshot(equity_usd, estimate)
+            snapshot = self._include_in_flight_reservations(
+                base_snapshot, equity_usd=equity_usd
+            )
             metadata = estimate.metadata
             loss_streak = max(0, int(metadata.get("consecutive_losses", 0)))
             streak_multiplier = (
@@ -265,19 +387,19 @@ class CapitalGateway:
             requested_pct = (
                 allocation.risk_budget_usd * streak_multiplier / equity_usd * 100.0
             )
-            protection = self.protection.evaluate(
-                symbol=allocation.symbol,
-                requested_risk_pct=requested_pct,
-                snapshot=snapshot,
-                side=str(metadata.get("side") or "LONG"),
-                regime=str(metadata.get("regime") or ""),
-                volatility_score=metadata.get("volatility_score"),
-                adverse_funding_pct=max(
+            protection_args = {
+                "symbol": allocation.symbol,
+                "requested_risk_pct": requested_pct,
+                "side": str(metadata.get("side") or "LONG"),
+                "regime": str(metadata.get("regime") or ""),
+                "volatility_score": metadata.get("volatility_score"),
+                "adverse_funding_pct": max(
                     0.0, float(metadata.get("funding_bps", 0.0)) / 100.0
                 ),
-                liquidation_buffer_pct=metadata.get("liquidation_buffer_pct"),
-                leverage=float(metadata.get("leverage", 1.0)),
-            )
+                "liquidation_buffer_pct": metadata.get("liquidation_buffer_pct"),
+                "leverage": float(metadata.get("leverage", 1.0)),
+            }
+            protection = self.protection.evaluate(snapshot=snapshot, **protection_args)
             if not protection.allowed:
                 continue
             risk_budget = equity_usd * protection.allowed_risk_pct / 100.0
@@ -298,9 +420,27 @@ class CapitalGateway:
                 equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 - self.reservation.reserved_risk_usd,
             )
+            candidate_risk_pct = candidate.risk_budget_usd / equity_usd * 100.0
+
+            def risk_policy(active_reservations: tuple[Reservation, ...]) -> bool:
+                projected = self._include_in_flight_reservations(
+                    base_snapshot,
+                    equity_usd=equity_usd,
+                    reservations=active_reservations,
+                )
+                current = self.protection.evaluate(
+                    snapshot=projected, **protection_args
+                )
+                return (
+                    current.allowed
+                    and current.allowed_risk_pct + 1e-9 >= candidate_risk_pct
+                )
+
             if self.reservation.reserve(
                 Reservation(
-                    candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd
+                    candidate.symbol,
+                    candidate.capital_usd,
+                    candidate.risk_budget_usd,
                 ),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
@@ -308,6 +448,7 @@ class CapitalGateway:
                 risk_limit_usd=(
                     equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 ),
+                risk_policy=risk_policy,
             ):
                 protected.append(candidate)
         return CapitalGatewayResult(tuple(decisions), tuple(protected))

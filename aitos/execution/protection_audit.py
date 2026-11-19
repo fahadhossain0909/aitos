@@ -80,16 +80,31 @@ def audit_protection_inventory(
     if len(intents) > 10000:
         raise ValueError("bounded journal inventory required")
 
+    active_trade_ids = evidence.get("active_trade_ids")
+    if active_trade_ids is not None and (
+        not isinstance(active_trade_ids, list)
+        or not all(isinstance(value, str) and value for value in active_trade_ids)
+    ):
+        raise ValueError("active trade identity inventory is malformed")
+    active_trade_ids_set = set(active_trade_ids or [])
     expected = {}
     findings = []
     for row in intents:
         if row.get("scope", scope) != scope:
             raise ValueError("journal account scope mismatch")
         request = _object(row.get("request_json", {}))
+        if request.get("order_type") not in PROTECTION_TYPES or row.get("state") in {
+            "REJECTED",
+            "TERMINAL",
+        }:
+            continue
         if (
-            request.get("order_type") not in PROTECTION_TYPES
-            or row.get("state") == "REJECTED"
+            active_trade_ids is not None
+            and row.get("state") == "APPLIED"
+            and row.get("trade_id") not in active_trade_ids_set
         ):
+            # A closed trade no longer owns a resting protective order. If the
+            # venue still returns it, it will be reported as unowned below.
             continue
         cid = row.get("client_id")
         if not isinstance(cid, str) or not cid or cid in expected:
@@ -199,7 +214,8 @@ def audit_protection_inventory(
                     "symbol": request["symbol"],
                     "status": "not_in_open_inventory",
                     "reasons": [
-                        "may be filled, canceled, expired or absent; query terminal/child evidence"
+                        "may be filled, canceled, expired or absent; "
+                        "query terminal/child evidence"
                     ],
                 }
             )
@@ -216,7 +232,9 @@ def audit_protection_inventory(
         "next_steps": [
             "Verify export provenance and current account positions independently.",
             "Query terminal algo and actual child fill evidence for missing orders.",
-            "Durably bind accepted protective IDs to trade state before any acknowledgement.",
-            "Do not clear intents or submit replacement orders based on this report alone.",
+            "Durably bind accepted protective IDs to trade state before any "
+            "acknowledgement.",
+            "Do not clear intents or submit replacement orders based on this "
+            "report alone.",
         ],
     }

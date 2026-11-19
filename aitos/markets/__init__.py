@@ -6,9 +6,11 @@ without changing strategy or risk code.
 """
 
 from .adapters import ExecutionAdapter, ExecutionIntent, MarketDataAdapter
+from .bridges import market_data_event_to_domain
 from .calendar import MacroEvent, MarketSession, TradingCalendar
 from .contracts import AssetClass, Instrument, MarketEvent, MarketEventType
 from .engine import CrossMarketIntelligenceEngine, LeadLagResult
+from .instrument_master import InstrumentKey, InstrumentMaster
 from .portfolio import Portfolio, Position
 from .risk import RiskDecision, RiskEngine
 from .state import GlobalMarketState, MarketRegime, MarketStateBuilder
@@ -20,9 +22,12 @@ __all__ = [
     "ExecutionIntent",
     "GlobalMarketState",
     "Instrument",
+    "InstrumentKey",
+    "InstrumentMaster",
     "LeadLagResult",
     "MacroEvent",
     "MarketDataAdapter",
+    "market_data_event_to_domain",
     "MarketEvent",
     "MarketEventType",
     "MarketRegime",

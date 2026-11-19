@@ -119,9 +119,7 @@ def test_inventory_fill_idempotency_and_fee_accounting():
     )
     pos = ledger.get_position("ABCUSDT")
     assert pos.quantity == Decimal("0.99")
-    assert pos.realized_quote_pnl == Decimal("11.88") - (
-        Decimal(20) / Decimal("1.99")
-    )
+    assert pos.realized_quote_pnl == Decimal("11.88") - (Decimal(20) / Decimal("1.99"))
 
 
 def test_inventory_rejects_unowned_sell():

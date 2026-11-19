@@ -6,6 +6,7 @@ from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
+from aitos.core.immutable import freeze_value
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -38,6 +39,19 @@ def _depth_event(*, side="bid", price=100.0, quantity=5.0, offset_ms=0):
         "inferred_cancel_qty": quantity,
         "reductions": [{"side": side, "price": price, "quantity": quantity}],
     }
+
+
+def test_depth_matcher_copies_recursively_immutable_market_payload():
+    matcher = TradeDepthMatcher()
+    source = freeze_value(_depth_event(quantity=5.0))
+
+    result = matcher.add_depth_event(source)
+
+    assert result is not source
+    assert result["reductions"][0]["matched_execution_qty"] == 0.0
+    assert result["matched_execution_qty"] == 0.0
+    assert "matched_execution_qty" not in source
+    assert "matched_execution_qty" not in source["reductions"][0]
 
 
 def test_trade_before_depth_is_matched_by_price_side_and_time():
