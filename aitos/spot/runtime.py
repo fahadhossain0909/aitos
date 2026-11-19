@@ -15,7 +15,7 @@ from aitos.logging_setup import get_logger
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation
 from aitos.intelligence.exit_intelligence.models import ExitDecision
-from aitos.models.trade import Opportunity
+from aitos.models.trade import Opportunity, TradeSide
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.coordinator import SpotTradingCoordinator
@@ -27,7 +27,7 @@ from aitos.spot.lead_lag import FuturesSpotLeadLagAnalyzer
 from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
-from aitos.spot.scanner import SpotOpportunityScanner
+from aitos.spot.scanner import RankedSpotCandidate, SpotCandidate, SpotOpportunityScanner
 from aitos.spot.websocket import BinanceSpotWebSocket
 from aitos.spot.user_stream import SpotUserDataStreamSupervisor
 
@@ -62,6 +62,113 @@ class SpotRuntime:
             quote_asset=self.quote_asset,
             min_quote_volume=self.min_quote_volume,
             limit=self.max_symbols,
+        )
+
+    async def submit_ranked_spot_candidate(
+        self,
+        *,
+        ranked_candidate: RankedSpotCandidate,
+        kernel,
+        opportunity_builder: Callable[[SpotCandidate, object], Opportunity | Awaitable[Opportunity]],
+        equity_usd: float,
+        quote_order_quantity: Decimal,
+    ) -> SpotOrder:
+        """Evaluate an isolated Spot candidate with the shared AI Kernel.
+
+        The explicit opportunity_builder owns the strategy-specific thesis,
+        stop and targets. The Spot pre-filter and lead-lag diagnostics cannot
+        manufacture an entry signal or silently choose risk parameters.
+        """
+        from aitos.kernel.ai_kernel import DecisionContext
+
+        candidate = ranked_candidate.candidate
+        symbol = candidate.symbol.upper()
+        if symbol not in self.quote_volumes_24h:
+            raise ValueError("candidate is outside the active Spot universe")
+        if not candidate.trading_enabled or not candidate.data_fresh:
+            raise ValueError("Spot candidate is disabled or stale")
+        if candidate.last_price is None or candidate.last_price <= 0:
+            raise ValueError("Spot candidate has no valid exchange reference price")
+        spread_limit = self.scanner.max_spread_bps
+        volatility_limit = self.scanner.max_volatility_bps
+        scores = {
+            "spot_momentum": float(
+                max(Decimal("0"), min(Decimal("10"), Decimal("5") + candidate.momentum_bps / Decimal("100")))
+            ),
+            "spot_relative_volume": float(
+                min(Decimal("10"), candidate.relative_volume * Decimal("2"))
+            ),
+            "spot_order_book_imbalance": float(
+                Decimal("5") + candidate.order_book_imbalance * Decimal("5")
+            ),
+            "spot_spread_quality": float(
+                max(Decimal("0"), Decimal("10") * (Decimal("1") - candidate.spread_bps / spread_limit))
+            ),
+            "spot_volatility_quality": float(
+                max(Decimal("0"), Decimal("10") * (Decimal("1") - candidate.volatility_bps / volatility_limit))
+            ),
+        }
+        context = {
+            "market_type": "spot",
+            "long_only": True,
+            "entry_price": float(candidate.last_price),
+            "component_scores": scores,
+            "component_availability": {key: True for key in scores},
+            "regime": "spot_intraday_unclassified",
+            "quote_volume_24h": str(candidate.quote_volume),
+            "spread_bps": str(candidate.spread_bps),
+            "volatility_bps": str(candidate.volatility_bps),
+            "relative_volume": str(candidate.relative_volume),
+            "futures_spot_lead_lag_shadow": {
+                "status": candidate.futures_spot_lead_lag_status,
+                "leader": candidate.futures_spot_leader,
+                "lag_seconds": candidate.futures_spot_lag_seconds,
+                "correlation": (
+                    str(candidate.futures_spot_correlation)
+                    if candidate.futures_spot_correlation is not None
+                    else None
+                ),
+                "confidence_low": (
+                    str(candidate.futures_spot_confidence_low)
+                    if candidate.futures_spot_confidence_low is not None
+                    else None
+                ),
+                "confidence_high": (
+                    str(candidate.futures_spot_confidence_high)
+                    if candidate.futures_spot_confidence_high is not None
+                    else None
+                ),
+                "decision_impact": False,
+            },
+        }
+        decision = await kernel.request_decision(
+            DecisionContext(symbol=symbol, context=context)
+        )
+        direction = str(getattr(decision.direction, "value", decision.direction)).lower()
+        if direction != "long" or decision.confidence < kernel.fusion_min_confidence:
+            raise ValueError("shared AI Kernel did not approve a confident Spot LONG")
+        opportunity = opportunity_builder(candidate, decision)
+        if inspect.isawaitable(opportunity):
+            opportunity = await opportunity
+        if not isinstance(opportunity, Opportunity):
+            raise TypeError("Spot opportunity_builder must return an Opportunity")
+        if opportunity.symbol.upper() != symbol or opportunity.side is not TradeSide.LONG:
+            raise ValueError("Spot opportunity builder returned a mismatched or non-LONG thesis")
+        opportunity = replace(
+            opportunity,
+            confidence=min(opportunity.confidence, float(decision.confidence)),
+            agent_consensus={
+                **(opportunity.agent_consensus or {}),
+                "market_type": "spot",
+                "kernel_fusion_confidence": float(decision.confidence),
+                "spot_prefilter_score": str(ranked_candidate.score),
+                "futures_spot_lead_lag_decision_impact": False,
+            },
+        )
+        return await self.submit_opportunity(
+            opportunity=opportunity,
+            equity_usd=equity_usd,
+            quote_order_quantity=quote_order_quantity,
         )
 
     async def submit_strategy_candidate(
