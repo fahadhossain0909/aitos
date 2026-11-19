@@ -2,9 +2,165 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass
-from math import sqrt
-from typing import Sequence
+from datetime import datetime, timezone
+from math import log, sqrt
+from typing import Any, Sequence
+
+
+
+@dataclass(frozen=True, slots=True)
+class AlignedFuturesSpotReturns:
+    """Uniform one-second log returns from explicitly paired market identities."""
+
+    bucket_timestamps: tuple[datetime, ...]
+    spot_returns: tuple[float, ...]
+    futures_returns: tuple[float, ...]
+    aligned_price_buckets: int
+    discarded_unaligned_buckets: int
+
+
+def _event_timestamp(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        timestamp = value
+    else:
+        timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        raise ValueError("historical event timestamps must be timezone-aware")
+    return timestamp.astimezone(timezone.utc)
+
+
+def _event_price(event: dict[str, Any]) -> float | None:
+    payload = event.get("payload")
+    if payload is None:
+        try:
+            payload = json.loads(event.get("payload_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        if payload.get("last_price") is not None:
+            price = float(payload["last_price"])
+        elif payload.get("lastPrice") is not None:
+            price = float(payload["lastPrice"])
+        elif payload.get("bid_price") is not None and payload.get("ask_price") is not None:
+            price = (float(payload["bid_price"]) + float(payload["ask_price"])) / 2.0
+        else:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 and price < float("inf") else None
+
+
+def align_futures_spot_ticker_events(
+    *,
+    spot_events: Sequence[dict[str, Any]],
+    futures_events: Sequence[dict[str, Any]],
+    bucket_seconds: int = 1,
+) -> AlignedFuturesSpotReturns:
+    """Align explicit Spot/Futures ticker histories without filling data gaps.
+
+    The longest contiguous common bucket segment is selected so lag values
+    remain measured in true seconds. No symbol aliases or missing prices are
+    inferred; callers must load the intended instrument IDs explicitly.
+    """
+    if bucket_seconds < 1:
+        raise ValueError("bucket_seconds must be positive")
+
+    def prices(events: Sequence[dict[str, Any]]) -> dict[int, tuple[datetime, float]]:
+        result: dict[int, tuple[datetime, float]] = {}
+        for event in events:
+            price = _event_price(event)
+            if price is None or event.get("event_time") is None:
+                continue
+            timestamp = _event_timestamp(event["event_time"])
+            bucket = int(timestamp.timestamp()) // bucket_seconds
+            previous = result.get(bucket)
+            if previous is None or timestamp > previous[0]:
+                result[bucket] = (timestamp, price)
+        return result
+
+    spot = prices(spot_events)
+    futures = prices(futures_events)
+    common = sorted(set(spot).intersection(futures))
+    if len(common) < 2:
+        raise ValueError("insufficient common timestamped Spot/Futures ticker buckets")
+
+    runs: list[list[int]] = []
+    current = [common[0]]
+    for bucket in common[1:]:
+        if bucket == current[-1] + 1:
+            current.append(bucket)
+        else:
+            runs.append(current)
+            current = [bucket]
+    runs.append(current)
+    selected = max(runs, key=len)
+    if len(selected) < 2:
+        raise ValueError("no contiguous common Spot/Futures ticker window")
+    spot_returns: list[float] = []
+    futures_returns: list[float] = []
+    timestamps: list[datetime] = []
+    for previous, current_bucket in zip(selected, selected[1:]):
+        spot_returns.append(log(spot[current_bucket][1] / spot[previous][1]))
+        futures_returns.append(
+            log(futures[current_bucket][1] / futures[previous][1])
+        )
+        timestamps.append(max(spot[current_bucket][0], futures[current_bucket][0]))
+    return AlignedFuturesSpotReturns(
+        bucket_timestamps=tuple(timestamps),
+        spot_returns=tuple(spot_returns),
+        futures_returns=tuple(futures_returns),
+        aligned_price_buckets=len(selected),
+        discarded_unaligned_buckets=len(common) - len(selected),
+    )
+
+
+async def validate_futures_spot_lead_lag_from_clickhouse(
+    repository,
+    *,
+    spot_instrument_id: str,
+    futures_instrument_id: str,
+    start_time: datetime,
+    end_time: datetime,
+    regimes: Sequence[str] | None = None,
+    bucket_seconds: int = 1,
+    event_limit: int = 200_000,
+    **validation_options: Any,
+) -> LeadLagOOSResult:
+    """Load source-provenance history by exact IDs and run frozen OOS validation."""
+    spot_events, futures_events = await asyncio.gather(
+        repository.load_versioned_market_events(
+            market_type="spot",
+            instrument_id=spot_instrument_id,
+            event_types=("ticker",),
+            start_time=start_time,
+            end_time=end_time,
+            limit=event_limit,
+        ),
+        repository.load_versioned_market_events(
+            market_type="usd_m_futures",
+            instrument_id=futures_instrument_id,
+            event_types=("ticker",),
+            start_time=start_time,
+            end_time=end_time,
+            limit=event_limit,
+        ),
+    )
+    aligned = align_futures_spot_ticker_events(
+        spot_events=spot_events,
+        futures_events=futures_events,
+        bucket_seconds=bucket_seconds,
+    )
+    return validate_futures_spot_lead_lag_oos(
+        spot_returns=aligned.spot_returns,
+        futures_returns=aligned.futures_returns,
+        regimes=regimes,
+        **validation_options,
+    )
 
 
 @dataclass(frozen=True, slots=True)
