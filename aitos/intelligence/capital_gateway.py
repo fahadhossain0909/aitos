@@ -266,6 +266,12 @@ class CapitalGateway:
                 raise RuntimeError(
                     f"confirmed exposure has no owned reservation: {symbol}"
                 )
+            actual_values = (actual.capital_usd, actual.risk_budget_usd)
+            if any(
+                not isfinite(float(value)) or float(value) < 0
+                for value in actual_values
+            ):
+                raise RuntimeError(f"owned reservation is corrupt: {symbol}")
             if (
                 actual.capital_usd + 1e-8 < item.capital_usd
                 or actual.risk_budget_usd + 1e-8 < item.risk_budget_usd
