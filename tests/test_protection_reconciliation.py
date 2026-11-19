@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from aitos.execution.intent_store import ExecutionIntentStore
-from aitos.execution.order_executor import OrderRequest
+from aitos.execution.order_executor import OrderRequest, OrderResult
 from aitos.execution.protection_reconciliation import (
     audit_exchange_protection_inventory,
 )
@@ -105,3 +105,27 @@ async def test_empty_journal_and_empty_inventory_return_non_authorizing_report(
     assert report["findings"] == []
     assert report["safe_to_resume"] is False
     assert report["account_exposure_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_applied_protection_is_matched_to_its_durable_history(protected_intent):
+    protected_intent.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    protected_intent.mark_applied("aitos-protection-1", "durable-trade-1")
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW
+    )
+
+    assert report["findings"][0]["status"] == "applied_order_present"
+    assert report["safe_to_resume"] is False
