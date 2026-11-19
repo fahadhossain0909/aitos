@@ -9,6 +9,12 @@ from aitos.compute.pressure_controller import (
     PressurePolicy,
     ResourcePressureController,
 )
+from aitos.compute.workload_estimator import (
+    SymbolTelemetry,
+    WorkloadCostModel,
+    WorkloadEstimate,
+    estimate_symbol_workload,
+)
 from aitos.compute.resource_governor import (
     CapacityPlan,
     PressureLevel,
@@ -30,10 +36,14 @@ __all__ = [
     "ResourceBudget",
     "ResourcePressureController",
     "ResourceSnapshot",
+    "SymbolTelemetry",
     "SymbolWorkload",
+    "WorkloadCostModel",
+    "WorkloadEstimate",
     "build_resource_budget",
     "classify_pressure",
     "create_adaptive_compute_runtime",
     "detect_resources",
+    "estimate_symbol_workload",
     "plan_symbol_capacity",
 ]
