@@ -364,8 +364,10 @@ class CapitalReservation:
 
     The durable mode uses a database transaction and absolute portfolio
     budgets, so two worker processes cannot both spend the same stale
-    availability snapshot. Reservations are leases and expire after a crashed
-    worker stops renewing/finishing its authorization window.
+    availability snapshot. An optional pure risk_policy is evaluated against
+    the active reservation set while the same lock/transaction is held.
+    Reservations are leases and expire after a crashed worker stops renewing
+    or finishing its authorization window.
     """
 
     def __init__(
