@@ -2,17 +2,19 @@
 
 The caller supplies timestamped depth and queue events. Market orders consume
 one point-in-time book after modeled latency and retain any unfilled remainder.
-Fees, spread, calibrated impact, additional slippage, funding and borrow costs
-are reported separately. Impact coefficients must be calibrated from historical
-fills; defaults are zero and are not a claim that market impact is absent.
+Fees, spread, calibrated impact, additional slippage, signed funding and borrow
+costs are reported separately. Funding basis points are already signed from the
+position perspective; negative values are credits. Impact coefficients must be
+calibrated from historical fills; defaults are zero and are not a claim that market
+impact is absent.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from numbers import Real
 from dataclasses import dataclass
+from numbers import Real
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,9 @@ def replay_l2_market_order(
     The impact model is an explicit square-root participation curve:
     impact_bps = coefficient * sqrt(cumulative_filled / visible_side_depth).
     It is a configurable scenario model and should be calibrated per venue,
-    symbol, volatility and order type before being used for forecasts.
+    symbol, volatility and order type before being used for forecasts. Funding
+    basis points are signed from the position perspective; negative values are
+    credits rather than invalid negative costs.
     """
     if not isinstance(side, str):
         raise ValueError("side must be BUY or SELL")
