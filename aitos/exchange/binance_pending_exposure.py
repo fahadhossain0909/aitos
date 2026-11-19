@@ -9,6 +9,7 @@ never counted as new entry exposure. No exchange IO or order mutation occurs.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from math import isfinite
 from typing import Any, Mapping
@@ -53,6 +54,11 @@ def pending_exposures_from_open_orders(
     mark_prices: Mapping[str, Any],
     stop_prices: Mapping[tuple[str, str], Any],
     leverage_by_symbol: Mapping[str, Any],
+    orders_observed_at: datetime,
+    risk_inputs_observed_at: datetime,
+    now: datetime | None = None,
+    max_age_seconds: float = 5.0,
+    max_snapshot_skew_seconds: float = 2.0,
 ) -> tuple[PendingOrderExposure, ...]:
     """Convert a complete Binance ``openOrders`` response into risk exposures.
 
@@ -62,6 +68,26 @@ def pending_exposures_from_open_orders(
     """
     if not isinstance(orders, list) or len(orders) > 10000:
         raise ValueError("complete bounded Binance open-order list required")
+    current = now or datetime.now(timezone.utc)
+    if (
+        current.utcoffset() is None
+        or orders_observed_at.utcoffset() is None
+        or risk_inputs_observed_at.utcoffset() is None
+        or not isfinite(max_age_seconds)
+        or not 0 < max_age_seconds <= 30
+        or not isfinite(max_snapshot_skew_seconds)
+        or not 0 <= max_snapshot_skew_seconds <= 10
+    ):
+        raise ValueError("aware timestamps and bounded freshness limits required")
+    order_age = (current - orders_observed_at).total_seconds()
+    input_age = (current - risk_inputs_observed_at).total_seconds()
+    snapshot_skew = abs((orders_observed_at - risk_inputs_observed_at).total_seconds())
+    if (
+        not 0 <= order_age <= max_age_seconds
+        or not 0 <= input_age <= max_age_seconds
+        or snapshot_skew > max_snapshot_skew_seconds
+    ):
+        raise ValueError("stale or incoherent pending-order risk snapshot")
     if not all(
         isinstance(value, Mapping)
         for value in (mark_prices, stop_prices, leverage_by_symbol)
@@ -167,6 +193,11 @@ def attach_pending_exposures(
     mark_prices: Mapping[str, Any],
     stop_prices: Mapping[tuple[str, str], Any],
     leverage_by_symbol: Mapping[str, Any],
+    orders_observed_at: datetime,
+    risk_inputs_observed_at: datetime,
+    now: datetime | None = None,
+    max_age_seconds: float = 5.0,
+    max_snapshot_skew_seconds: float = 2.0,
 ) -> PortfolioState:
     """Return a new portfolio snapshot with validated pending entry exposure."""
     if not isinstance(portfolio, PortfolioState):
@@ -176,5 +207,10 @@ def attach_pending_exposures(
         mark_prices=mark_prices,
         stop_prices=stop_prices,
         leverage_by_symbol=leverage_by_symbol,
+        orders_observed_at=orders_observed_at,
+        risk_inputs_observed_at=risk_inputs_observed_at,
+        now=now,
+        max_age_seconds=max_age_seconds,
+        max_snapshot_skew_seconds=max_snapshot_skew_seconds,
     )
     return replace(portfolio, pending_orders=pending)
