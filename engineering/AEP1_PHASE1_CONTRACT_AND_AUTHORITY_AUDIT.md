@@ -84,6 +84,23 @@ Source anchors:
 - `aitos/trading/lifecycle.py`: contains projected-portfolio risk checks and execution lifecycle state transitions.
 - `aitos/trading/__init__.py`: installs runtime guards after lifecycle class definition to avoid import cycles.
 
+### Entry/exit and order-dispatch path map
+
+| Path | Observed boundary | Risk / capital treatment | Residual proof |
+|---|---|---|---|
+| Futures entry from app | `aitos.app` calls `TradeLifecycle.submit_opportunity` | `capital_runtime` wraps the final lifecycle method; hard risk check, CapitalGateway, PortfolioProtection and reservation run before the original lifecycle submits | Exercise every alternate app/worker/plugin invocation and concurrent duplicate opportunity IDs |
+| Futures scanner / position switch replacement | Scanner and `PositionSwitchCoordinator` call `TradeLifecycle.submit_opportunity` | Replacement still traverses the same wrapped lifecycle boundary; switching coordinator is paper/test-only and refuses production opportunities | Verify recovery worker only starts after persisted trades and venue positions are hydrated/reconciled |
+| Futures close / partial close | Lifecycle close/reduction methods call the configured order executor; switch close uses `OrderExecutorCloseAdapter` | Reduce-only close is a separate de-risking path, bound to original venue/position and requires authoritative fill/flat evidence before local close or reservation release | Full multi-process partial-fill and venue-account reconciliation remains untested |
+| Spot entry | `SpotRuntime.submit_opportunity` → `SpotTradingCoordinator.submit_entry` | LONG-only; shared CapitalGateway; namespaced Spot InstrumentKey reservation; durable inventory intent; reservation pinned before network submission | Verify account-scoped namespace and reconciliation across simultaneous Spot/Futures workers |
+| Spot exit | `SpotTradingCoordinator.submit_exit` | Requires EIE EXIT/MANAGE, LONG inventory bound and unresolved-order veto; sell quantity cannot exceed managed inventory; no venue reduceOnly flag exists for Spot | Verify manual/external account inventory and commission/dust reconciliation; Spot sells remain limited to AITOS-managed inventory |
+| Direct venue adapters | Binance Futures executor, Spot adapter, routed executor and broker adapters | Venue adapters are below the lifecycle/coordinator boundaries; unsupported broker reductions fail closed; live routed reductions require original-venue binding | Complete static search including dynamic factories/monkey patches and confirm no production caller bypasses the coordinators |
+
+The current code search found the application and switch replacement entrypoints above,
+and the Spot runtime/coordinator entrypoints. It did not establish a separate
+production `execute_rebalance` order-dispatch path. Do not infer that a missing
+search hit proves the absence of dynamically loaded/plugin paths; keep the full
+runtime call graph as an open verification item.
+
 ### Risk components that must not be confused
 
 | Component | Role | Audit conclusion |
