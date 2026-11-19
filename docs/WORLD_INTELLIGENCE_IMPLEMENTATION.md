@@ -178,3 +178,5 @@ artifact references and hashes, not executable model code. Promotion requires
 statistical/OOS evidence and explicit operator approval on both the evidence
 and the promotion call. Rollback also requires explicit operator approval.
 This facade does not load artifacts, switch live strategies or place orders.
+
+The bounded `HistoricalIngestionStore.backfill` runner follows provider cursors to exhaustion, rejects non-advancing cursors, and fails rather than claiming completeness when its page budget is reached.
