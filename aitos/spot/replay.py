@@ -177,3 +177,44 @@ def replay_spot_limit_order(
             (ReplayFill(limit_price, filled, fee, True),) if filled else ()
         ),
     )
+
+
+
+@dataclass(frozen=True, slots=True)
+class TimedBookSnapshot:
+    timestamp_ms: int
+    bids: tuple[BookLevel, ...]
+    asks: tuple[BookLevel, ...]
+
+
+def replay_spot_order_with_latency(
+    *,
+    side: Literal["BUY", "SELL"],
+    quantity: Decimal,
+    submitted_at_ms: int,
+    latency_ms: int,
+    snapshots: Sequence[TimedBookSnapshot],
+    maker_fee_bps: Decimal,
+    taker_fee_bps: Decimal,
+    impact_bps_per_1pct_depth: Decimal = Decimal("0"),
+) -> SpotExecutionReplayResult:
+    """Select the first historical book available after modeled order latency."""
+    if submitted_at_ms < 0 or latency_ms < 0:
+        raise ValueError("submission time and latency must be non-negative")
+    eligible = [
+        snapshot for snapshot in snapshots
+        if snapshot.timestamp_ms >= submitted_at_ms + latency_ms
+    ]
+    if not eligible:
+        raise ValueError("no historical order-book snapshot covers modeled latency")
+    selected = min(eligible, key=lambda snapshot: snapshot.timestamp_ms)
+    return replay_spot_market_order(
+        side=side,
+        quantity=quantity,
+        bids=selected.bids,
+        asks=selected.asks,
+        maker_fee_bps=maker_fee_bps,
+        taker_fee_bps=taker_fee_bps,
+        latency_ms=latency_ms,
+        impact_bps_per_1pct_depth=impact_bps_per_1pct_depth,
+    )
