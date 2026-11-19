@@ -421,3 +421,86 @@ def test_protection_acceptance_rejects_missing_or_already_transitioned_preclaim(
     with pytest.raises(ValueError, match="no submitting preclaim"):
         journal.record_protection("intent-one", accepted)
     assert journal.unresolved()[0]["state"] == "PROTECTED"
+
+
+
+def test_confirmed_terminal_protection_is_durable_and_no_longer_unresolved(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(
+        request(
+            order_type="STOP_MARKET",
+            reduce_only=True,
+            reference_price=90.0,
+        )
+    )
+    journal.record_protection(
+        "intent-one",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="intent-one",
+        ),
+    )
+    journal.mark_applied("intent-one", "trade-one")
+
+    assert journal.mark_protection_terminal(
+        "algo:123",
+        symbol="BTCUSDT",
+        status="CANCELED",
+        executed_quantity=0.25,
+    )
+
+    assert journal.unresolved() == []
+    journal.assert_ready()
+    history = journal.protection_intents()
+    assert history[0]["state"] == "TERMINAL"
+    terminal = __import__("json").loads(history[0]["result_json"])
+    assert terminal["terminal_status"] == "CANCELED"
+    assert terminal["terminal_executed_quantity"] == 0.25
+    assert not journal.mark_protection_terminal(
+        "algo:123",
+        symbol="BTCUSDT",
+        status="CANCELED",
+        executed_quantity=0.25,
+    )
+
+
+def test_terminal_protection_does_not_release_unrelated_intent(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(
+        request(
+            order_type="STOP_MARKET",
+            reduce_only=True,
+            reference_price=90.0,
+        )
+    )
+    journal.record_protection(
+        "intent-one",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="intent-one",
+        ),
+    )
+    journal.mark_applied("intent-one", "trade-one")
+    assert not journal.mark_protection_terminal(
+        "algo:999",
+        symbol="BTCUSDT",
+        status="CANCELED",
+    )
+    assert journal.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.parametrize("status", ["NEW", "PARTIALLY_FILLED", "UNKNOWN"])
+def test_nonterminal_protection_cannot_be_marked_terminal(tmp_path, status):
+    journal = store(tmp_path)
+    with pytest.raises(ValueError):
+        journal.mark_protection_terminal(
+            "algo:123", symbol="BTCUSDT", status=status
+        )
