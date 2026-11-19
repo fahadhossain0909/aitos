@@ -17,6 +17,19 @@ class ReadOnlyExecutor:
     def __init__(self, scope, orders):
         self.execution_scope = scope
         self.get_open_algo_orders = AsyncMock(return_value=orders)
+        self.get_algo_order_by_client_id = AsyncMock(
+            side_effect=lambda symbol, client_id: next(
+                (
+                    dict(row)
+                    for row in orders
+                    if row.get("clientAlgoId") == client_id
+                ),
+                None,
+            )
+        )
+        self.get_order_status = AsyncMock(
+            return_value={"status": "FILLED", "executedQty": "1.0"}
+        )
 
 
 @pytest.fixture
@@ -129,3 +142,40 @@ async def test_applied_protection_is_matched_to_its_durable_history(protected_in
 
     assert report["findings"][0]["status"] == "applied_order_present"
     assert report["safe_to_resume"] is False
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_post_ack_is_queried_by_client_id_without_journal_write(
+    protected_intent,
+):
+    executor = ReadOnlyExecutor("paper-account", [])
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=inventory_row())
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW
+    )
+
+    finding = report["ambiguous_submissions"][0]
+    assert finding["status"] == "accepted_resting_order_found"
+    assert finding["algo_id"] == "123"
+    assert report["safe_to_resume"] is False
+    assert protected_intent.protection_intents()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_triggered_algo_queries_child_fill_read_only(protected_intent):
+    executor = ReadOnlyExecutor("paper-account", [])
+    triggered = inventory_row()
+    triggered.update(algoStatus="FINISHED", actualOrderId="456")
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=triggered)
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW
+    )
+
+    finding = report["ambiguous_submissions"][0]
+    assert finding["status"] == "child_order_observed"
+    assert finding["child_status"] == "FILLED"
+    assert finding["executed_quantity"] == "1.0"
+    executor.get_order_status.assert_awaited_once_with("BTCUSDT", "algo:123")
+    assert protected_intent.protection_intents()[0]["state"] == "SUBMITTING"
