@@ -119,8 +119,8 @@ class SpotTradingCoordinator:
             status=order.status.value,
             exchange_order_id=order.order_id,
         )
-        if self._terminal_without_fills(order):
-            self.capital_gateway.release(key.value)
+        if self._terminal(order):
+            self.release_after_confirmed_flat(request.symbol)
         return order
 
     async def submit_exit(
@@ -177,7 +177,7 @@ class SpotTradingCoordinator:
             status=order.status.value,
             exchange_order_id=order.order_id,
         )
-        if self._terminal_without_fills(order):
+        if self._terminal(order):
             self.release_after_confirmed_flat(symbol)
         return order
 
@@ -210,13 +210,9 @@ class SpotTradingCoordinator:
         )
 
     @staticmethod
-    def _terminal_without_fills(order: SpotOrder) -> bool:
-        return (
-            order.status
-            in {
-                SpotOrderStatus.REJECTED,
-                SpotOrderStatus.CANCELED,
-                SpotOrderStatus.EXPIRED,
-            }
-            and order.executed_quantity == 0
-        )
+    def _terminal(order: SpotOrder) -> bool:
+        return order.status in {
+            SpotOrderStatus.REJECTED,
+            SpotOrderStatus.CANCELED,
+            SpotOrderStatus.EXPIRED,
+        }
