@@ -279,7 +279,7 @@ class HistoricalIngestionStore:
     async def save_cursor(
         self, source_id: str, cursor: str | None, *, fencing_token: int = 0
     ) -> None:
-        if isinstance(fencing_token, bool) or fencing_token < 0:
+        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 0:
             raise ValueError("fencing_token must be a non-negative integer")
         await self.client.insert(
             self.cursors_table,
