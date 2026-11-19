@@ -61,6 +61,22 @@ entries. Market-order journal coverage is not a complete durable protective-orde
 intent ledger: a crash between a protective POST and its ID write still requires
 an open-algo-order inventory/reconciliation extension before live readiness.
 
+## Protective acceptance identity binding
+
+The local protective-intent journal validates an accepted resting-order result against
+its exact pre-submit claim before changing `SUBMITTING` to `PROTECTED`. The binding
+checks the claimed symbol and position side, optional returned client ID, a strictly
+numeric exchange order identity (including the `algo:` namespace), finite positive
+trigger price equal to the claimed trigger, and zero filled quantity. The update is
+conditional on the row still being `SUBMITTING` and verifies exactly one row changed.
+A mismatched or repeated acknowledgement leaves the original intent unresolved.
+
+This closes a local evidence-integrity gap; it does **not** discover an algo order
+after a process dies between the exchange POST and the local acknowledgement write.
+That interval still requires an independently exported, complete, fresh venue
+inventory plus terminal/child-order and account-position reconciliation. The
+read-only inventory auditor cannot authorize resume or clear quarantine.
+
 ## Inspect quarantine without exchange access
 
 The SQLite file is under `MODEL_DATA_DIR/execution_intents.sqlite3`. Its scope is the
