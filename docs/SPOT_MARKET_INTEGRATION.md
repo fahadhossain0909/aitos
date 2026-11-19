@@ -114,12 +114,13 @@ shared ExitDecision contract and AITOS-managed inventory; the Futures
 TradeLifecycle is not repurposed to pretend Spot sells support reduce-only.
 
 `SpotPortfolioValuator` combines the separate Spot account's quote cash,
-mark-to-market value of AITOS-managed Spot inventory, and the separately
-supplied Futures account equity. It never adopts external base-asset wallet
-holdings and rejects unsupported quote currencies rather than inventing FX
-rates. Missing marks or unresolved third-asset fees make the snapshot
-explicitly incomplete. The Futures equity input must not already include Spot
-cash or Spot inventory.
+mark-to-market value of all Spot wallet assets using explicit asset/quote marks,
+and the separately supplied Futures account equity. AITOS-managed Spot
+inventory is reported as a subset attribution view and is never added a second
+time on top of the wallet value. External wallet holdings contribute to account
+equity but are never adopted as strategy-owned inventory. Missing marks or
+unresolved third-asset fees make the snapshot explicitly incomplete. The
+Futures equity input must not already include Spot account cash or assets.
 
 `aitos.spot.replay` provides depth-walking taker fills, queue-ahead passive
 maker fills, partial-fill accounting, maker/taker fees, adverse market impact
