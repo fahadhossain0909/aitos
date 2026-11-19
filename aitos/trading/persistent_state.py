@@ -315,10 +315,7 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                any(symbol) AS latest_symbol,
-                any(state) AS latest_state,
-                any(request_json) AS latest_request_json,
-                uniqExact(tuple(symbol, state, request_json, result_json))
+                groupUniqArray(tuple(symbol, state, request_json, result_json))
                     AS latest_versions
             FROM order_execution_ledger
             WHERE (client_order_id, updated_at) IN (
@@ -332,18 +329,20 @@ class DurableTradingStateStore:
         )
         pending = []
         for row in result.result_rows:
-            if len(row) < 5 or int(row[4]) != 1:
+            versions = row[1] if len(row) > 1 else ()
+            if len(versions) != 1:
                 raise RuntimeError(
                     "ambiguous latest order-intent evidence; startup recovery blocked"
                 )
-            if str(row[2]) != "SUBMITTING":
+            symbol, state, request_json, _result_json = versions[0]
+            if str(state) != "SUBMITTING":
                 continue
             pending.append(
                 {
                     "client_order_id": str(row[0]),
-                    "symbol": str(row[1]),
-                    "state": str(row[2]),
-                    "request": json.loads(row[3] or "{}"),
+                    "symbol": str(symbol),
+                    "state": str(state),
+                    "request": json.loads(request_json or "{}"),
                 }
             )
         return pending
@@ -355,9 +354,8 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                any(state) AS latest_state,
-                any(result_json) AS latest_result_json,
-                uniqExact(tuple(symbol, state, request_json, result_json)) AS latest_versions
+                groupUniqArray(tuple(symbol, state, request_json, result_json))
+                    AS latest_versions
             FROM order_execution_ledger
             WHERE (client_order_id, updated_at) IN (
                 SELECT client_order_id, max(updated_at)
@@ -377,11 +375,13 @@ class DurableTradingStateStore:
         known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
         unlinked = []
         for row in orders.result_rows:
-            if len(row) < 4 or int(row[3]) != 1:
+            versions = row[1] if len(row) > 1 else ()
+            if len(versions) != 1:
                 raise RuntimeError(
                     "ambiguous latest acknowledged-order evidence; recovery blocked"
                 )
-            if str(row[1]) != "ACKNOWLEDGED":
+            _symbol, state, _request_json, _result_json = versions[0]
+            if str(state) != "ACKNOWLEDGED":
                 continue
             client_order_id = str(row[0])
             if not client_order_id.startswith("aitos-entry-"):
@@ -399,11 +399,7 @@ class DurableTradingStateStore:
         result = await client.query(
             """
             SELECT
-                any(symbol) AS latest_symbol,
-                any(state) AS latest_state,
-                any(request_json) AS latest_request_json,
-                any(result_json) AS latest_result_json,
-                uniqExact(tuple(symbol, state, request_json, result_json))
+                groupUniqArray(tuple(symbol, state, request_json, result_json))
                     AS latest_versions
             FROM order_execution_ledger
             WHERE client_order_id = {client_order_id:String}
@@ -418,18 +414,19 @@ class DurableTradingStateStore:
         )
         if not result.result_rows:
             return None
-        row = result.result_rows[0]
-        if len(row) < 5 or int(row[4]) != 1:
+        versions = result.result_rows[0][0]
+        if len(versions) != 1:
             raise RuntimeError(
                 "ambiguous latest order-intent record; execution recovery blocked"
             )
-        if not row[1]:
+        symbol, state, request_json, result_json = versions[0]
+        if not state:
             return None
         return {
-            "symbol": str(row[0]),
-            "state": str(row[1]),
-            "request": json.loads(row[2] or "{}"),
-            "result": json.loads(row[3] or "{}"),
+            "symbol": str(symbol),
+            "state": str(state),
+            "request": json.loads(request_json or "{}"),
+            "result": json.loads(result_json or "{}"),
         }
 
     async def save_trade(self, trade: Trade) -> None:
