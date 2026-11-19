@@ -41,7 +41,8 @@ def test_spot_portfolio_marks_managed_inventory_and_separate_account_cash():
     )
     assert snapshot.spot_quote_cash == Decimal("60")
     assert snapshot.managed_inventory_market_value == Decimal("12.0")
-    assert snapshot.total_equity_quote == Decimal("1072.0")
+    assert snapshot.spot_wallet_non_quote_asset_value == Decimal("1080")
+    assert snapshot.total_equity_quote == Decimal("2140")
     assert snapshot.accounting_complete
     ledger.close()
 
@@ -71,6 +72,7 @@ def test_spot_portfolio_marks_missing_and_external_base_holdings_not_adopted():
     )
     assert snapshot.managed_inventory_market_value == 0
     assert snapshot.marks_missing == ("ETHUSDT",)
+    assert snapshot.unpriced_wallet_assets == ("ETH",)
     assert not snapshot.accounting_complete
     ledger.close()
 
