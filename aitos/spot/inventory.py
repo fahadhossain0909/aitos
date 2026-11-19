@@ -78,9 +78,7 @@ class InventoryLedger:
         }
         for name, sql_type in migrations.items():
             if name not in columns:
-                self._db.execute(
-                    f"ALTER TABLE spot_fills ADD COLUMN {name} {sql_type}"
-                )
+                self._db.execute(f"ALTER TABLE spot_fills ADD COLUMN {name} {sql_type}")
         self._db.commit()
 
     def resolve_commission_conversion(
@@ -172,8 +170,13 @@ class InventoryLedger:
             dict(
                 zip(
                     (
-                        "fill_key", "symbol", "commission", "commission_asset",
-                        "base_asset", "quote_asset", "fill_time_ms"
+                        "fill_key",
+                        "symbol",
+                        "commission",
+                        "commission_asset",
+                        "base_asset",
+                        "quote_asset",
+                        "fill_time_ms",
                     ),
                     row,
                 )
