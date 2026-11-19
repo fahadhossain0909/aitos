@@ -2073,7 +2073,9 @@ class OpportunityScanner(AITOSModule):
         )
         candidates = [candidate for candidate in results if candidate is not None]
         self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
-        self._last_candidate_symbols = tuple(sorted({item.symbol for item in candidates}))
+        self._last_candidate_symbols = tuple(
+            sorted({item.symbol for item in candidates})
+        )
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_SCAN_COMPLETE,
