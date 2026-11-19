@@ -348,9 +348,17 @@ class FuturesSpotLeadLagAnalyzer:
             subscription.cancel()
         self._started = False
 
-    def estimate(self, symbol: str) -> LeadLagEstimate | None:
-        """Return the latest causal cross-market estimate for one Spot symbol."""
-        return self._estimates.get(symbol.upper())
+    def estimate(
+        self, symbol: str, *, max_age_seconds: float = 15.0
+    ) -> LeadLagEstimate | None:
+        """Return a fresh causal cross-market estimate for one Spot symbol."""
+        if max_age_seconds <= 0:
+            raise ValueError("max_age_seconds must be positive")
+        estimate = self._estimates.get(symbol.upper())
+        if estimate is None:
+            return None
+        age = (datetime.now(estimate.as_of.tzinfo) - estimate.as_of).total_seconds()
+        return estimate if -1.0 <= age <= max_age_seconds else None
 
     def snapshot(self) -> dict[str, Any]:
         return {
