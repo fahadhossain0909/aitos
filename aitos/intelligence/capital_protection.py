@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
+from typing import Callable
 from threading import RLock
 
 
@@ -416,6 +417,7 @@ class CapitalReservation:
         available_risk_usd: float,
         capital_limit_usd: float | None = None,
         risk_limit_usd: float | None = None,
+        risk_policy: Callable[[tuple[Reservation, ...]], bool] | None = None,
     ) -> bool:
         values = (
             reservation.capital_usd,
@@ -435,6 +437,10 @@ class CapitalReservation:
                 if reservation.capital_usd > available_capital_usd:
                     return False
                 if reservation.risk_budget_usd > available_risk_usd:
+                    return False
+                if risk_policy is not None and not risk_policy(
+                    tuple(self._reservations.values())
+                ):
                     return False
                 self._reservations[reservation.symbol] = reservation
                 return True
@@ -470,6 +476,22 @@ class CapitalReservation:
                         and float(existing[1]) == reservation.capital_usd
                         and float(existing[2]) == reservation.risk_budget_usd
                     )
+                if risk_policy is not None:
+                    rows = self._conn.execute(
+                        """
+                        SELECT symbol, capital_usd, risk_budget_usd
+                        FROM capital_reservations
+                        WHERE expires_at > ? ORDER BY symbol
+                        """,
+                        (now,),
+                    ).fetchall()
+                    active = tuple(
+                        Reservation(str(row[0]), float(row[1]), float(row[2]))
+                        for row in rows
+                    )
+                    if not risk_policy(active):
+                        self._conn.rollback()
+                        return False
                 totals = self._conn.execute(
                     """
                     SELECT COALESCE(SUM(capital_usd), 0),
