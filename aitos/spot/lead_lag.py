@@ -264,9 +264,7 @@ class FuturesSpotLeadLagAnalyzer:
             as_of,
         )
 
-    def _returns(
-        self, prices: dict[int, tuple[float, float]]
-    ) -> dict[int, float]:
+    def _returns(self, prices: dict[int, tuple[float, float]]) -> dict[int, float]:
         ordered = sorted(prices.items())
         result: dict[int, float] = {}
         for (previous_bucket, (_, previous)), (bucket, (_, current)) in zip(
