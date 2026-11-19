@@ -1,4 +1,5 @@
 """Binance Spot exchangeInfo filters with exact Decimal arithmetic."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
