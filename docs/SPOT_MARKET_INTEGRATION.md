@@ -129,7 +129,7 @@ rolling 15-minute window and tests lead horizons from zero to five seconds.
 It reports the leading market, lag, signed correlation, 95% Fisher confidence
 interval, and aligned observation count. It explicitly reports insufficient
 data, low confidence, ambiguous leadership, or no material lead rather than
-forcing a direction. Symbol aliases are explicit configuration; no guessed
+forcing a direction. Symbol aliases can be supplied to `build_spot_runtime(futures_spot_symbol_aliases=...)`; no guessed
 contract-to-spot mapping is applied.
 
 These values are attached to ranked Spot pre-filter candidates as
