@@ -16,7 +16,7 @@ _ENV_FILE = get_env_file()
 if _ENV_FILE.is_file():
     load_dotenv(_ENV_FILE)
 
-from pydantic import Field
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from aitos.config.tuning import TuningSettings, load_tuning_settings
@@ -69,8 +69,8 @@ class BinanceSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="BINANCE_")
 
-    api_key: str = ""
-    api_secret: str = ""
+    api_key: SecretStr = SecretStr("")
+    api_secret: SecretStr = SecretStr("")
     testnet: bool = True
     recv_window_ms: int = 5000
     hedge_mode: bool = False
@@ -95,12 +95,13 @@ class SpotSettings(BaseSettings):
     fee_bps: float = Field(default=10.0, ge=0)
     slippage_bps: float = Field(default=8.0, ge=0)
 
-    def __init__(self, **values):
-        super().__init__(**values)
+    @model_validator(mode="after")
+    def validate_execution_policy(self):
         if self.execution_enabled and not self.enabled:
             raise ValueError("Spot execution requires AITOS_SPOT_ENABLED=true")
         if self.allow_mainnet and self.testnet:
             raise ValueError("allow_mainnet cannot be combined with Spot testnet")
+        return self
 
 
 class StorageSettings(BaseSettings):
