@@ -142,7 +142,10 @@ def test_invalid_resync_is_atomic():
         SimpleNamespace(tick_size=0.01, step_size=0.001)
     )
     session = NativeOrderBookSession(
-        scale, 10, [("100.00", "1.000")], [("101.00", "1.000")],
+        scale,
+        10,
+        [("100.00", "1.000")],
+        [("101.00", "1.000")],
         prefer_native=False,
     )
     before = session.snapshot(5)
