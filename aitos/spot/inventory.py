@@ -75,12 +75,13 @@ class InventoryLedger:
         The caller must supply the conversion value captured at the fill time;
         current prices must never be used to rewrite historical fee accounting.
         """
-        if quote_value < 0:
-            raise ValueError("commission quote value cannot be negative")
+        if quote_value <= 0:
+            raise ValueError("commission quote value must be positive")
         with self._lock:
             cursor = self._db.execute(
                 """UPDATE spot_fills SET commission_quote_value=?
-                   WHERE fill_key=? AND commission_asset NOT IN (
+                   WHERE fill_key=? AND commission_quote_value IS NULL
+                     AND commission_asset NOT IN (
                        SELECT base_asset FROM spot_fills WHERE fill_key=?
                    ) AND commission_asset NOT IN (
                        SELECT quote_asset FROM spot_fills WHERE fill_key=?
