@@ -98,6 +98,7 @@ class PendingOrderExposure:
     side: str
     remaining_notional_usd: float
     risk_amount_usd: float
+    leverage: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.order_id or not self.symbol:
@@ -110,6 +111,8 @@ class PendingOrderExposure:
             value = float(getattr(self, name))
             if not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and non-negative")
+        if not isfinite(float(self.leverage)) or self.leverage <= 0:
+            raise ValueError("pending order leverage must be finite and positive")
 
 
 @dataclass(frozen=True)
@@ -147,11 +150,17 @@ class PortfolioState:
 
     @property
     def gross_exposure_usd(self) -> float:
-        return sum(p.notional_usd for p in self.positions)
+        return sum(p.notional_usd for p in self.positions) + sum(
+            order.remaining_notional_usd for order in self.pending_orders
+        )
 
     @property
     def max_position_leverage(self) -> float:
-        return max((p.leverage for p in self.positions), default=0.0)
+        return max(
+            [p.leverage for p in self.positions]
+            + [order.leverage for order in self.pending_orders],
+            default=0.0,
+        )
 
     @property
     def sector_exposure_pct(self) -> dict[str, float]:
@@ -161,6 +170,11 @@ class PortfolioState:
         for p in self.positions:
             sector = p.sector or "other"
             totals[sector] = totals.get(sector, 0.0) + p.notional_usd
+        from aitos.risk.sector import sector_for_symbol
+
+        for order in self.pending_orders:
+            sector = sector_for_symbol(order.symbol)
+            totals[sector] = totals.get(sector, 0.0) + order.remaining_notional_usd
         return {
             sector: notional / self.equity_usd * 100
             for sector, notional in totals.items()
