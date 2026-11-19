@@ -152,9 +152,7 @@ class PortfolioState:
             for position in self.positions
             if str(position.symbol).strip()
         }
-        symbols.update(
-            order.symbol for order in self.pending_orders if order.symbol
-        )
+        symbols.update(order.symbol for order in self.pending_orders if order.symbol)
         return len(symbols)
 
     @property
