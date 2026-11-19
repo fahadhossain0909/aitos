@@ -55,7 +55,7 @@ class FuturesSpotLeadLagAnalyzer:
     ) -> None:
         if bucket_seconds <= 0 or max_lag_seconds < 0:
             raise ValueError("invalid lead-lag time resolution")
-        if window_seconds <= (max_lag_seconds + 2) * bucket_seconds:
+        if window_seconds <= max_lag_seconds + 2 * bucket_seconds:
             raise ValueError("lead-lag window is too short for configured lag")
         if min_observations < 10:
             raise ValueError("min_observations must be at least 10")
