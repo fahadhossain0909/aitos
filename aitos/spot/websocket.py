@@ -1,4 +1,5 @@
 """Async Binance Spot WebSocket transport with bounded reconnect behavior."""
+
 from __future__ import annotations
 
 import asyncio
