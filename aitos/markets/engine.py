@@ -91,7 +91,7 @@ class CrossMarketIntelligenceEngine:
         preceding bucket are included. This avoids silently bridging data gaps
         or aligning asynchronous instruments by array index.
         """
-        if not isfinite(bucket_seconds) or bucket_seconds <= 0:
+        if isinstance(bucket_seconds, bool) or not isfinite(bucket_seconds) or bucket_seconds <= 0:
             raise ValueError("bucket_seconds must be finite and positive")
         bucket_prices: dict[int, float] = {}
         for event_time, price in self._timed_series[instrument_id]:
@@ -114,11 +114,13 @@ class CrossMarketIntelligenceEngine:
         min_observations: int = 8,
     ) -> tuple[float, int]:
         """Correlate leader returns with follower returns at a time offset."""
-        if isinstance(lag_buckets, bool) or lag_buckets < 0:
+        if not isinstance(lag_buckets, int) or lag_buckets < 0:
             raise ValueError("lag_buckets must be a non-negative integer")
-        if int(lag_buckets) != lag_buckets:
-            raise ValueError("lag_buckets must be a non-negative integer")
-        if min_observations < 2:
+        if (
+            isinstance(min_observations, bool)
+            or not isinstance(min_observations, int)
+            or min_observations < 2
+        ):
             raise ValueError("min_observations must be >= 2")
         left = self.timestamped_returns(leader, bucket_seconds=bucket_seconds)
         right = self.timestamped_returns(follower, bucket_seconds=bucket_seconds)
@@ -156,9 +158,7 @@ class CrossMarketIntelligenceEngine:
         min_observations: int = 8,
     ) -> LeadLagResult:
         """Discover lead/lag using UTC time buckets rather than sample indices."""
-        if isinstance(max_lag_buckets, bool) or max_lag_buckets < 0:
-            raise ValueError("max_lag_buckets must be a non-negative integer")
-        if int(max_lag_buckets) != max_lag_buckets:
+        if not isinstance(max_lag_buckets, int) or max_lag_buckets < 0:
             raise ValueError("max_lag_buckets must be a non-negative integer")
         best_lag, best_corr, best_observations = 0, 0.0, 0
         for lag in range(max_lag_buckets + 1):
