@@ -1,8 +1,10 @@
 """L2 market-order and passive-queue execution replay.
 
-The caller supplies timestamped depth and queue events. Impact coefficients
-must be calibrated from historical fills; defaults are zero and are not a
-claim that market impact is absent.
+The caller supplies timestamped depth and queue events. Market orders consume
+one point-in-time book after modeled latency and retain any unfilled remainder.
+Fees, spread, calibrated impact, additional slippage, funding and borrow costs
+are reported separately. Impact coefficients must be calibrated from historical
+fills; defaults are zero and are not a claim that market impact is absent.
 """
 
 from __future__ import annotations
@@ -136,7 +138,12 @@ def replay_l2_market_order(
         or slippage_bps >= 10000
     ):
         raise ValueError("invalid replay quantity, cost, participation or horizon")
-    if submitted_at_ms < 0 or latency_ms < 0:
+    if (
+        isinstance(submitted_at_ms, bool)
+        or isinstance(latency_ms, bool)
+        or submitted_at_ms < 0
+        or latency_ms < 0
+    ):
         raise ValueError("timestamps and latency must be non-negative")
     books = tuple(snapshots)
     if any(not isinstance(book, DepthBookSnapshot) for book in books):
