@@ -60,10 +60,15 @@ class Instrument:
     settlement_type: str = "spot"
     margin_model: str = "cash"
     underlying: str | None = None
+    market_type: str | None = None
 
     @property
     def id(self) -> str:
-        return f"{self.venue}:{self.asset_class.value}:{self.symbol}"
+        parts = [self.venue, self.asset_class.value]
+        if self.market_type:
+            parts.append(self.market_type)
+        parts.append(self.symbol)
+        return ":".join(parts)
 
 
 @dataclass(frozen=True, slots=True)
