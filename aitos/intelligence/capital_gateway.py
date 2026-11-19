@@ -220,9 +220,7 @@ class CapitalGateway:
         active_reservations = (
             self.reservation.snapshot() if reservations is None else reservations
         )
-        known_symbols = {
-            instruments.get(key, key).upper() for key in positions
-        }
+        known_symbols = {instruments.get(key, key).upper() for key in positions}
         for reservation in active_reservations:
             symbol = str(reservation.symbol)
             if symbol.upper() in known_symbols:
@@ -232,9 +230,8 @@ class CapitalGateway:
                 positions[symbol] = risk_pct
                 instruments[symbol] = symbol
                 known_symbols.add(symbol.upper())
-        if (
-            positions == snapshot.position_risk_pct
-            and instruments == (snapshot.position_instruments or {})
+        if positions == snapshot.position_risk_pct and instruments == (
+            snapshot.position_instruments or {}
         ):
             return snapshot
         return replace(
