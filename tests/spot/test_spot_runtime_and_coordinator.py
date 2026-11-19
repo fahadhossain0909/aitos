@@ -11,6 +11,7 @@ from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.execution import SpotExecutionDisabled
 from aitos.spot.inventory import InventoryLedger
+from aitos.spot.runtime import SpotRuntime
 from aitos.spot.models import (
     SpotOrderRequest,
     SpotOrderSide,
@@ -229,3 +230,74 @@ async def test_disabled_spot_execution_does_not_reserve_or_journal():
         )
     assert gateway.pinned == []
     assert ledger.unresolved_order_intents() == []
+
+
+
+class FakeSharedStrategyScanner:
+    async def decide_with_kernel(self, candidate, kernel):
+        return SimpleNamespace(direction="long", confidence=0.8)
+
+    def to_opportunity(self, candidate, *, is_production, approved_by):
+        assert is_production is False
+        return _opportunity()
+
+
+@pytest.mark.asyncio
+async def test_spot_runtime_routes_shared_kernel_approved_candidate():
+    gateway = FakeCapitalGateway()
+    inventory = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=gateway,
+        executor=FakeExecutor(),
+        inventory=inventory,
+    )
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=SimpleNamespace(),
+        coordinator=coordinator,
+        market_consumer=SimpleNamespace(),
+        lead_lag=SimpleNamespace(),
+        quote_volumes_24h={"BTCUSDT": Decimal("100000")},
+    )
+    candidate = SimpleNamespace(symbol="BTCUSDT", direction=TradeSide.LONG)
+    kernel = SimpleNamespace(fusion_min_confidence=0.6)
+
+    result = await runtime.submit_strategy_candidate(
+        candidate=candidate,
+        strategy_scanner=FakeSharedStrategyScanner(),
+        kernel=kernel,
+        equity_quote=1000,
+        quote_order_quantity=Decimal("50"),
+    )
+
+    assert result.status is SpotOrderStatus.NEW
+    assert gateway.symbol == "binance:spot:BTCUSDT"
+    assert gateway.opportunity.agent_consensus["market_type"] == "spot"
+    inventory.close()
+
+
+@pytest.mark.asyncio
+async def test_spot_runtime_rejects_candidates_outside_discovered_universe():
+    inventory = InventoryLedger()
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=SimpleNamespace(),
+        coordinator=SimpleNamespace(),
+        market_consumer=SimpleNamespace(),
+        lead_lag=SimpleNamespace(),
+        quote_volumes_24h={"ETHUSDT": Decimal("100000")},
+    )
+    candidate = SimpleNamespace(symbol="BTCUSDT", direction=TradeSide.LONG)
+    with pytest.raises(ValueError, match="outside the active Spot universe"):
+        await runtime.submit_strategy_candidate(
+            candidate=candidate,
+            strategy_scanner=FakeSharedStrategyScanner(),
+            kernel=SimpleNamespace(fusion_min_confidence=0.6),
+            equity_quote=1000,
+            quote_order_quantity=Decimal("50"),
+        )
+    inventory.close()
