@@ -15,7 +15,11 @@ from aitos.intelligence.capital_runtime import (
     install_capital_guard,
 )
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
-from aitos.risk.models import PortfolioState, PositionExposure
+from aitos.risk.models import (
+    PendingOrderExposure,
+    PortfolioState,
+    PositionExposure,
+)
 from aitos.trading.lifecycle import TradeLifecycle
 
 
@@ -397,3 +401,89 @@ def test_gateway_does_not_double_count_reservation_already_in_live_positions():
         equity_usd=10_000.0,
     )
     assert snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(1.5)
+
+
+
+def test_portfolio_consensus_projects_same_symbol_pending_order_separately():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=5_000.0,
+                leverage=5.0,
+                side="LONG",
+                risk_amount_usd=100.0,
+            ),
+        ),
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="entry-2",
+                symbol="BTCUSDT",
+                side="LONG",
+                remaining_notional_usd=2_000.0,
+                risk_amount_usd=50.0,
+            ),
+        ),
+    )
+    opportunity = make_opportunity(symbol="ETHUSDT")
+    consensus = _portfolio_consensus(portfolio, opportunity)
+    projected = make_opportunity(symbol="ETHUSDT", agent_consensus=consensus)
+    gateway = CapitalGateway()
+    snapshot = gateway._snapshot(10_000.0, gateway.estimate_opportunity(projected))
+
+    assert snapshot.position_risk_pct["BTCUSDT"] == pytest.approx(1.0)
+    assert snapshot.position_risk_pct["pending:entry-2"] == pytest.approx(0.5)
+    assert snapshot.position_sides["pending:entry-2"] == "LONG"
+    assert snapshot.position_instruments["pending:entry-2"] == "BTCUSDT"
+    assert snapshot.total_risk_pct == pytest.approx(1.5)
+    assert snapshot.correlated_risk_pct() == pytest.approx(1.5)
+
+
+def test_opposite_side_pending_order_is_not_mistaken_for_same_side_risk():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=5_000.0,
+                leverage=5.0,
+                side="LONG",
+                risk_amount_usd=100.0,
+            ),
+        ),
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="hedge-1",
+                symbol="BTCUSDT",
+                side="SHORT",
+                remaining_notional_usd=2_000.0,
+                risk_amount_usd=50.0,
+            ),
+        ),
+    )
+    consensus = _portfolio_consensus(portfolio, make_opportunity(symbol="ETHUSDT"))
+    estimate = CapitalGateway().estimate_opportunity(
+        make_opportunity(symbol="ETHUSDT", agent_consensus=consensus)
+    )
+    snapshot = CapitalGateway._snapshot(10_000.0, estimate)
+
+    assert snapshot.total_risk_pct == pytest.approx(1.5)
+    assert snapshot.correlated_risk_pct() == pytest.approx(0.5)
+
+
+def test_portfolio_state_rejects_duplicate_pending_order_identity():
+    pending = PendingOrderExposure(
+        order_id="duplicate",
+        symbol="BTCUSDT",
+        side="LONG",
+        remaining_notional_usd=1_000.0,
+        risk_amount_usd=10.0,
+    )
+    with pytest.raises(ValueError, match="pending order IDs must be unique"):
+        make_portfolio(pending_orders=(pending, pending))
+
+
+def test_pending_order_exposure_rejects_invalid_risk_and_side():
+    with pytest.raises(ValueError, match="side must be LONG or SHORT"):
+        PendingOrderExposure("entry", "BTCUSDT", "BOTH", 100.0, 10.0)
+    with pytest.raises(ValueError, match="risk_amount_usd"):
+        PendingOrderExposure("entry", "BTCUSDT", "LONG", 100.0, float("nan"))
