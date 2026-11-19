@@ -1,14 +1,16 @@
-"""Binance Spot market WebSocket streams with explicit sequence-gap detection."""
-
+"""Async Binance Spot WebSocket transport with bounded reconnect behavior."""
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urlencode
 
 import websockets
+
+_STREAM_RE = re.compile(r"^[a-z0-9]+@[A-Za-z0-9_@]+$")
 
 
 class SpotOrderBookGap(RuntimeError):
@@ -31,14 +33,16 @@ class BinanceSpotWebSocket:
         self.reconnect = reconnect
         self.max_backoff_seconds = max_backoff_seconds
 
-    async def stream(
-        self, symbol: str, *channels: str
+    async def stream_many(
+        self, streams: list[str]
     ) -> AsyncIterator[dict[str, Any]]:
-        """Yield decoded combined-stream events; channels e.g. @trade/@depth@100ms."""
-        if not channels:
-            raise ValueError("at least one stream channel is required")
-        streams = [f"{symbol.lower()}{channel}" for channel in channels]
-        url = f"{self.base_url}/stream?{urlencode({'streams': '/'.join(streams)})}"
+        """Multiplex up to 1024 Binance streams over one WebSocket connection."""
+        normalized = list(dict.fromkeys(stream.lower() for stream in streams))
+        if not normalized or len(normalized) > 1024:
+            raise ValueError("combined stream count must be between 1 and 1024")
+        if any(not _STREAM_RE.fullmatch(stream) for stream in normalized):
+            raise ValueError("invalid Binance combined stream name")
+        url = f"{self.base_url}/stream?{urlencode({'streams': '/'.join(normalized)})}"
         delay = 0.5
         while True:
             try:
@@ -55,7 +59,7 @@ class BinanceSpotWebSocket:
                         if isinstance(payload, dict) and "data" in payload:
                             yield payload
                         else:
-                            yield {"stream": streams[0], "data": payload}
+                            yield {"stream": normalized[0], "data": payload}
                 if not self.reconnect:
                     return
             except asyncio.CancelledError:
@@ -65,6 +69,16 @@ class BinanceSpotWebSocket:
                     raise
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.max_backoff_seconds)
+
+    async def stream(
+        self, symbol: str, *channels: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Convenience wrapper for one symbol and one or more channels."""
+        if not channels:
+            raise ValueError("at least one stream channel is required")
+        streams = [f"{symbol.lower()}{channel}" for channel in channels]
+        async for event in self.stream_many(streams):
+            yield event
 
     async def user_stream(self, listen_key: str) -> AsyncIterator[dict[str, Any]]:
         """Yield private account/order events; caller must keep listen key alive."""
@@ -95,7 +109,7 @@ class BinanceSpotWebSocket:
             delay = min(delay * 2, self.max_backoff_seconds)
 
     async def depth_diffs(self, symbol: str) -> AsyncIterator[dict[str, Any]]:
-        """Yield raw depth diffs and fail on malformed/out-of-order sequence.
+        """Yield raw depth diffs with continuity checks between consecutive events.
 
         Bootstrap with GET /api/v3/depth first. The consumer must discard events
         until U <= lastUpdateId + 1 <= u, then require pu == previous u when
