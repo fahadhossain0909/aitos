@@ -132,6 +132,8 @@ async def validate_futures_spot_lead_lag_from_clickhouse(
     **validation_options: Any,
 ) -> LeadLagOOSResult:
     """Load source-provenance history by exact IDs and run frozen OOS validation."""
+    if bucket_seconds != 1:
+        raise ValueError("lead-lag OOS validation currently requires one-second buckets")
     spot_events, futures_events = await asyncio.gather(
         repository.load_versioned_market_events(
             market_type="spot",
