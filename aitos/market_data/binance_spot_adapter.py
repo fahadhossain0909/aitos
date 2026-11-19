@@ -177,81 +177,96 @@ class BinanceSpotCanonicalMarketDataAdapter:
     ) -> AsyncIterator[MarketEvent]:
         selected = _symbols(symbols)
         depth_limit = _depth_limit(levels)
-        snapshots = await asyncio.gather(
-            *(self.rest.depth(symbol, limit=depth_limit) for symbol in selected)
-        )
-        last_update_ids: dict[str, int] = {}
-        bridged: set[str] = set()
-        for symbol, snapshot in zip(selected, snapshots):
-            last_update_id = int(snapshot["lastUpdateId"])
-            last_update_ids[symbol] = last_update_id
-            yield _event(
-                symbol,
-                MarketEventType.BOOK_SNAPSHOT,
-                datetime.now(timezone.utc),
-                {
-                    "bids": [
-                        {"price": price, "quantity": quantity}
-                        for price, quantity in snapshot["bids"]
-                    ],
-                    "asks": [
-                        {"price": price, "quantity": quantity}
-                        for price, quantity in snapshot["asks"]
-                    ],
-                    "last_update_id": last_update_id,
-                },
-                MarketSource.REST,
-                last_update_id,
-            )
-
         streams = [f"{symbol.lower()}@depth@100ms" for symbol in selected]
-        async for item in self.websocket.stream_many(streams):
-            data = item["data"]
-            symbol = _stream_symbol(item, data)
-            if symbol not in last_update_ids:
-                continue
-            first, final = int(data["U"]), int(data["u"])
-            previous_final = last_update_ids[symbol]
-            if final <= previous_final:
-                continue
-            if symbol not in bridged:
-                if first <= previous_final + 1 <= final:
-                    bridged.add(symbol)
-                elif first > previous_final + 1:
-                    raise SpotOrderBookGap(
-                        f"{symbol} initial depth diff does not bridge snapshot"
-                    )
-                else:
-                    continue
-            else:
-                previous = data.get("pu")
-                if previous is not None and int(previous) != previous_final:
-                    raise SpotOrderBookGap(f"{symbol} depth previous-update gap")
-                if previous is None and first > previous_final + 1:
-                    raise SpotOrderBookGap(f"{symbol} depth sequence gap")
-            last_update_ids[symbol] = final
-            yield _event(
-                symbol,
-                MarketEventType.BOOK_DELTA,
-                _event_time(data["E"]),
-                {
-                    "first_update_id": first,
-                    "final_update_id": final,
-                    "previous_update_id": (
-                        int(data["pu"]) if data.get("pu") is not None else None
-                    ),
-                    "bids": [
-                        {"price": price, "quantity": quantity}
-                        for price, quantity in data["b"]
-                    ],
-                    "asks": [
-                        {"price": price, "quantity": quantity}
-                        for price, quantity in data["a"]
-                    ],
-                },
-                MarketSource.WEBSOCKET,
-                final,
+        stream = self.websocket.stream_many(streams).__aiter__()
+        try:
+            # Connect and buffer at least one depth frame before REST snapshots.
+            # Frames received while REST is in flight stay in the WebSocket
+            # receive queue and are sequence-bridged after the snapshots.
+            first_item = await asyncio.wait_for(anext(stream), timeout=10.0)
+            snapshots = await asyncio.gather(
+                *(self.rest.depth(symbol, limit=depth_limit) for symbol in selected)
             )
+            last_update_ids: dict[str, int] = {}
+            bridged: set[str] = set()
+            for symbol, snapshot in zip(selected, snapshots):
+                last_update_id = int(snapshot["lastUpdateId"])
+                last_update_ids[symbol] = last_update_id
+                yield _event(
+                    symbol,
+                    MarketEventType.BOOK_SNAPSHOT,
+                    datetime.now(timezone.utc),
+                    {
+                        "bids": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in snapshot["bids"]
+                        ],
+                        "asks": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in snapshot["asks"]
+                        ],
+                        "last_update_id": last_update_id,
+                    },
+                    MarketSource.REST,
+                    last_update_id,
+                )
+
+            async def buffered_events():
+                yield first_item
+                async for buffered_item in stream:
+                    yield buffered_item
+
+            async for item in buffered_events():
+                data = item["data"]
+                symbol = _stream_symbol(item, data)
+                if symbol not in last_update_ids:
+                    continue
+                first, final = int(data["U"]), int(data["u"])
+                previous_final = last_update_ids[symbol]
+                if final <= previous_final:
+                    continue
+                if symbol not in bridged:
+                    if first <= previous_final + 1 <= final:
+                        bridged.add(symbol)
+                    elif first > previous_final + 1:
+                        raise SpotOrderBookGap(
+                            f"{symbol} initial depth diff does not bridge snapshot"
+                        )
+                    else:
+                        continue
+                else:
+                    previous = data.get("pu")
+                    if previous is not None and int(previous) != previous_final:
+                        raise SpotOrderBookGap(
+                            f"{symbol} depth previous-update gap"
+                        )
+                    if previous is None and first > previous_final + 1:
+                        raise SpotOrderBookGap(f"{symbol} depth sequence gap")
+                last_update_ids[symbol] = final
+                yield _event(
+                    symbol,
+                    MarketEventType.BOOK_DELTA,
+                    _event_time(data["E"]),
+                    {
+                        "first_update_id": first,
+                        "final_update_id": final,
+                        "previous_update_id": (
+                            int(data["pu"]) if data.get("pu") is not None else None
+                        ),
+                        "bids": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in data["b"]
+                        ],
+                        "asks": [
+                            {"price": price, "quantity": quantity}
+                            for price, quantity in data["a"]
+                        ],
+                    },
+                    MarketSource.WEBSOCKET,
+                    final,
+                )
+        finally:
+            await stream.aclose()
 
     async def close(self) -> None:
         await self.rest.close()
