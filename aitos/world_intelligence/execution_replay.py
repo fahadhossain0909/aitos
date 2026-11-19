@@ -25,10 +25,14 @@ class ReplayBookSnapshot:
     timestamp: datetime
     bids: tuple[ReplayBookLevel, ...]
     asks: tuple[ReplayBookLevel, ...]
+    maker_bid_fillable_qty: float = 0.0
+    maker_ask_fillable_qty: float = 0.0
 
     def __post_init__(self):
         if self.timestamp.tzinfo is None:
             raise ValueError("book timestamp must be timezone-aware")
+        if any(not isfinite(v) or v < 0 for v in (self.maker_bid_fillable_qty, self.maker_ask_fillable_qty)):
+            raise ValueError("maker fillable quantities must be finite and non-negative")
         for level in (*self.bids, *self.asks):
             if not isfinite(level.price) or not isfinite(level.quantity) or level.price <= 0 or level.quantity < 0:
                 raise ValueError("book levels must have positive prices and non-negative quantities")
@@ -42,6 +46,7 @@ class ReplayOrder:
     created_at: datetime
     max_wait: timedelta = timedelta(seconds=5)
     liquidity: Literal["maker", "taker"] = "taker"
+    position_end_at: datetime | None = None
 
     def __post_init__(self):
         if not self.order_id.strip() or self.side not in {"buy", "sell"}:
@@ -50,6 +55,9 @@ class ReplayOrder:
             raise ValueError("order quantity must be positive and finite")
         if self.created_at.tzinfo is None or self.max_wait <= timedelta(0):
             raise ValueError("order time must be aware and max_wait positive")
+        if self.position_end_at is not None:
+            if self.position_end_at.tzinfo is None or self.position_end_at <= self.created_at:
+                raise ValueError("position_end_at must be aware and after order creation")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +115,6 @@ class ExecutionReplayConfig:
 def replay_execution(
     orders: Sequence[ReplayOrder], books: Sequence[ReplayBookSnapshot], *,
     funding: Sequence[FundingObservation] = (), config: ExecutionReplayConfig = ExecutionReplayConfig(),
-    position_side: Literal["long", "short"] = "long",
 ) -> ExecutionReplayReport:
     if len({o.order_id for o in orders}) != len(orders):
         raise ValueError("duplicate replay order id")
@@ -123,15 +130,25 @@ def replay_execution(
         if book is None:
             unfilled += order.quantity
             continue
-        levels = (book.asks if order.side == "buy" else book.bids)[:config.max_levels]
+        if order.liquidity == "maker":
+            # Maker fills require explicit queue-adjusted trade evidence. Never
+            # pretend a resting limit order immediately consumes the opposite book.
+            maker_qty = book.maker_bid_fillable_qty if order.side == "buy" else book.maker_ask_fillable_qty
+            maker_levels = book.bids if order.side == "buy" else book.asks
+            levels = maker_levels[:1] if maker_qty > 0 and maker_levels else ()
+            available = min(maker_qty, levels[0].quantity) if levels else 0.0
+            depth = available
+        else:
+            levels = (book.asks if order.side == "buy" else book.bids)[:config.max_levels]
+            depth = sum(max(0.0, level.quantity) for level in levels)
         remaining = order.quantity
-        displayed_depth = sum(max(0.0, level.quantity) for level in levels)
-        participation = order.quantity / max(displayed_depth, 1e-12)
+        participation = order.quantity / max(depth, 1e-12)
         impact_bps = config.impact_coefficient_bps * sqrt(max(0.0, participation))
-        for level in levels:
+        for index, level in enumerate(levels):
             if remaining <= 0:
                 break
-            qty = min(remaining, level.quantity)
+            available = min(level.quantity, depth) if order.liquidity == "maker" else level.quantity
+            qty = min(remaining, available)
             if qty <= 0:
                 continue
             adverse = 1.0 + impact_bps / 10_000 if order.side == "buy" else 1.0 - impact_bps / 10_000
@@ -142,16 +159,24 @@ def replay_execution(
             fees += fee
             impact_total += abs(price - level.price) * qty
             remaining -= qty
+            if order.liquidity == "maker":
+                break
         unfilled += remaining
     filled = sum(f.quantity for f in fills)
     notional = sum(f.quantity * f.price for f in fills)
-    # Funding is charged on the replayed filled notional at each supplied funding timestamp.
+    # Funding is accrued only while each filled position is open. Positive
+    # funding is paid by longs and received by shorts.
     funding_paid = 0.0
-    for observation in funding:
-        if observation.timestamp.tzinfo is None:
-            raise ValueError("funding timestamp must be timezone-aware")
-        signed_rate = observation.rate if position_side == "long" else -observation.rate
-        funding_paid += notional * signed_rate
+    ordered_funding = sorted(funding, key=lambda item: item.timestamp)
+    for fill in fills:
+        order = next(item for item in orders if item.order_id == fill.order_id)
+        for observation in ordered_funding:
+            if observation.timestamp < fill.timestamp:
+                continue
+            if order.position_end_at is not None and observation.timestamp > order.position_end_at:
+                continue
+            signed_rate = observation.rate if order.side == "buy" else -observation.rate
+            funding_paid += fill.quantity * fill.price * signed_rate
     return ExecutionReplayReport(
         order_count=len(orders), fill_count=len(fills), requested_quantity=requested,
         filled_quantity=filled, unfilled_quantity=unfilled,
