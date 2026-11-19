@@ -7,7 +7,7 @@ fail closed on a sequence gap; consumers must discard the book and resnapshot.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -60,7 +60,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
         return await self.rest.instruments(quote_asset)
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
-        for symbol in _symbols(symbols):
+        async def source(symbol: str):
             async for item in self.websocket.stream(symbol, "@trade"):
                 data = item["data"]
                 yield _event(symbol, MarketEventType.TRADE, _event_time(data["T"]),
@@ -68,10 +68,12 @@ class BinanceSpotCanonicalMarketDataAdapter:
                      "quantity": str(data["q"]), "buyer_is_maker": bool(data["m"]),
                      "trade_time_ms": int(data["T"])},
                     MarketSource.WEBSOCKET, int(data["t"]))
+        async for event in _merge_symbols(_symbols(symbols), source):
+            yield event
 
     async def stream_klines(self, symbols: list[str],
                             timeframe: str = "1m") -> AsyncIterator[MarketEvent]:
-        for symbol in _symbols(symbols):
+        async def source(symbol: str):
             async for item in self.websocket.stream(symbol, f"@kline_{timeframe}"):
                 data = item["data"]["k"]
                 if not bool(data["x"]):
@@ -85,10 +87,12 @@ class BinanceSpotCanonicalMarketDataAdapter:
                      "taker_buy_base": str(data["V"]),
                      "taker_buy_quote": str(data["Q"]), "is_closed": True},
                     MarketSource.WEBSOCKET, int(data["T"]))
+        async for event in _merge_symbols(_symbols(symbols), source):
+            yield event
 
     async def stream_order_books(self, symbols: list[str],
                                  levels: int = 20) -> AsyncIterator[MarketEvent]:
-        for symbol in _symbols(symbols):
+        async def source(symbol: str):
             snapshot = await self.rest.depth(symbol, limit=_depth_limit(levels))
             last_update_id = int(snapshot["lastUpdateId"])
             yield _event(symbol, MarketEventType.BOOK_SNAPSHOT, datetime.now(timezone.utc),
@@ -124,6 +128,8 @@ class BinanceSpotCanonicalMarketDataAdapter:
                      "bids": [{"price": p, "quantity": q} for p, q in data["b"]],
                      "asks": [{"price": p, "quantity": q} for p, q in data["a"]]},
                     MarketSource.WEBSOCKET, final)
+        async for event in _merge_symbols(_symbols(symbols), source):
+            yield event
 
     async def close(self) -> None:
         await self.rest.close()
@@ -141,3 +147,36 @@ def _symbols(values: list[str]) -> list[str]:
 def _depth_limit(levels: int) -> int:
     allowed = (5, 10, 20, 50, 100, 500, 1000, 5000)
     return min(allowed, key=lambda n: abs(n - levels))
+
+
+async def _merge_symbols(symbols: list[str], factory: Callable[[str], AsyncIterator[MarketEvent]]) -> AsyncIterator[MarketEvent]:
+    """Run one bounded stream task per symbol and merge events fairly."""
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=max(100, len(symbols) * 100))
+
+    async def worker(symbol: str) -> None:
+        try:
+            async for event in factory(symbol):
+                await queue.put(("event", event))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await queue.put(("error", exc))
+        finally:
+            await queue.put(("done", symbol))
+
+    tasks = [asyncio.create_task(worker(symbol), name=f"spot-stream-{symbol}") for symbol in symbols]
+    completed = 0
+    try:
+        while completed < len(tasks):
+            kind, value = await queue.get()
+            if kind == "event":
+                yield value
+            elif kind == "error":
+                raise value
+            else:
+                completed += 1
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
