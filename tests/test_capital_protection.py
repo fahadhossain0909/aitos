@@ -333,6 +333,7 @@ def test_reservation_owner_can_renew_lease_but_other_owner_cannot(tmp_path):
         first.close()
         second.close()
 
+
 @pytest.mark.parametrize("durable", [False, True])
 def test_spot_and_futures_reservations_have_distinct_market_namespaces(
     tmp_path, durable
