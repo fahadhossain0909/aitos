@@ -30,6 +30,7 @@ from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import (
+    SpotCandidateRejected,
     RankedSpotCandidate,
     SpotCandidate,
     SpotOpportunityScanner,
