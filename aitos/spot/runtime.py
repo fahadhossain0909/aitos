@@ -4,38 +4,38 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from collections.abc import Awaitable, Callable, Mapping
 
 from aitos.config.paths import get_data_dir
 from aitos.config.settings import AITOSSettings, get_settings
-from aitos.logging_setup import get_logger
+from aitos.data.repository import MarketDataRepository
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation
 from aitos.intelligence.exit_intelligence.models import ExitDecision
-from aitos.models.trade import Opportunity, TradeSide
+from aitos.logging_setup import get_logger
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
-from aitos.data.repository import MarketDataRepository
 from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
+from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.binance import BinanceSpotAdapter
-from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.commission import SpotCommissionConversionService
+from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.lead_lag import FuturesSpotLeadLagAnalyzer
 from aitos.spot.market_state import SpotMarketDataConsumer
-from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
+from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.scanner import (
     RankedSpotCandidate,
     SpotCandidate,
     SpotOpportunityScanner,
 )
-from aitos.spot.websocket import BinanceSpotWebSocket
 from aitos.spot.user_stream import SpotUserDataStreamSupervisor
+from aitos.spot.websocket import BinanceSpotWebSocket
 
 logger = get_logger("aitos.spot.runtime")
 
@@ -63,7 +63,7 @@ class SpotRuntime:
     lead_lag: FuturesSpotLeadLagAnalyzer
     quote_asset: str = "USDT"
     max_symbols: int = 20
-    min_quote_volume: Decimal = Decimal("100000")
+    min_quote_volume: Decimal = Decimal(100000)
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     _user_stream: SpotUserDataStreamSupervisor | None = field(default=None, repr=False)
@@ -170,31 +170,31 @@ class SpotRuntime:
         scores = {
             "spot_momentum": float(
                 max(
-                    Decimal("0"),
+                    Decimal(0),
                     min(
-                        Decimal("10"),
-                        Decimal("5") + candidate.momentum_bps / Decimal("100"),
+                        Decimal(10),
+                        Decimal(5) + candidate.momentum_bps / Decimal(100),
                     ),
                 )
             ),
             "spot_relative_volume": float(
-                min(Decimal("10"), candidate.relative_volume * Decimal("2"))
+                min(Decimal(10), candidate.relative_volume * Decimal(2))
             ),
             "spot_order_book_imbalance": float(
-                Decimal("5") + candidate.order_book_imbalance * Decimal("5")
+                Decimal(5) + candidate.order_book_imbalance * Decimal(5)
             ),
             "spot_spread_quality": float(
                 max(
-                    Decimal("0"),
-                    Decimal("10")
-                    * (Decimal("1") - candidate.spread_bps / spread_limit),
+                    Decimal(0),
+                    Decimal(10)
+                    * (Decimal(1) - candidate.spread_bps / spread_limit),
                 )
             ),
             "spot_volatility_quality": float(
                 max(
-                    Decimal("0"),
-                    Decimal("10")
-                    * (Decimal("1") - candidate.volatility_bps / volatility_limit),
+                    Decimal(0),
+                    Decimal(10)
+                    * (Decimal(1) - candidate.volatility_bps / volatility_limit),
                 )
             ),
         }

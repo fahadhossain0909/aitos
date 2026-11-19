@@ -11,18 +11,18 @@ from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordinator
 from aitos.spot.execution import SpotExecutionDisabled
 from aitos.spot.inventory import InventoryLedger
-from aitos.spot.runtime import SpotRuntime
-from aitos.spot.portfolio import SpotPortfolioValuator
-from aitos.spot.scanner import (
-    RankedSpotCandidate,
-    SpotCandidate,
-    SpotOpportunityScanner,
-)
 from aitos.spot.models import (
     SpotOrderRequest,
     SpotOrderSide,
     SpotOrderStatus,
     SpotOrderType,
+)
+from aitos.spot.portfolio import SpotPortfolioValuator
+from aitos.spot.runtime import SpotRuntime
+from aitos.spot.scanner import (
+    RankedSpotCandidate,
+    SpotCandidate,
+    SpotOpportunityScanner,
 )
 
 
@@ -58,7 +58,7 @@ class FakeCapitalGateway:
         self.kwargs = kwargs
         return (
             SimpleNamespace(eligible=True, rejection_reasons=()),
-            SimpleNamespace(capital_usd=Decimal("100")),
+            SimpleNamespace(capital_usd=Decimal(100)),
         )
 
     def pin(self, symbol):
@@ -120,7 +120,7 @@ async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
         "BTCUSDT",
         SpotOrderSide.BUY,
         SpotOrderType.MARKET,
-        quote_order_quantity=Decimal("50"),
+        quote_order_quantity=Decimal(50),
     )
     opportunity = replace(
         _opportunity(),
@@ -151,7 +151,7 @@ async def test_spot_entry_rejects_short_and_oversized_requests():
         "BTCUSDT",
         SpotOrderSide.BUY,
         SpotOrderType.MARKET,
-        quote_order_quantity=Decimal("101"),
+        quote_order_quantity=Decimal(101),
     )
     with pytest.raises(SpotAuthorizationRejected, match="long-only"):
         await coordinator.submit_entry(
@@ -176,8 +176,8 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
         base_asset="BTC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("1"),
-        price=Decimal("100"),
+        quantity=Decimal(1),
+        price=Decimal(100),
     )
     coordinator = SpotTradingCoordinator(
         capital_gateway=FakeCapitalGateway(),
@@ -193,7 +193,7 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
     with pytest.raises(SpotAuthorizationRejected, match="managed Spot inventory"):
         await coordinator.submit_exit(
             symbol="BTCUSDT",
-            quantity=Decimal("2"),
+            quantity=Decimal(2),
             authorization=_exit_decision(),
         )
     with pytest.raises(SpotAuthorizationRejected, match="EIE suggested"):
@@ -228,7 +228,7 @@ async def test_disabled_spot_execution_does_not_reserve_or_journal():
         "BTCUSDT",
         SpotOrderSide.BUY,
         SpotOrderType.MARKET,
-        quote_order_quantity=Decimal("10"),
+        quote_order_quantity=Decimal(10),
     )
     with pytest.raises(SpotExecutionDisabled, match="Spot execution is disabled"):
         await coordinator.submit_entry(
@@ -264,7 +264,7 @@ async def test_spot_runtime_routes_shared_kernel_approved_candidate():
         coordinator=coordinator,
         market_consumer=SimpleNamespace(),
         lead_lag=SimpleNamespace(),
-        quote_volumes_24h={"BTCUSDT": Decimal("100000")},
+        quote_volumes_24h={"BTCUSDT": Decimal(100000)},
     )
     candidate = SimpleNamespace(symbol="BTCUSDT", direction=TradeSide.LONG)
     kernel = SimpleNamespace(fusion_min_confidence=0.6)
@@ -274,7 +274,7 @@ async def test_spot_runtime_routes_shared_kernel_approved_candidate():
         strategy_scanner=FakeSharedStrategyScanner(),
         kernel=kernel,
         equity_usd=1000,
-        quote_order_quantity=Decimal("50"),
+        quote_order_quantity=Decimal(50),
     )
 
     assert result.status is SpotOrderStatus.NEW
@@ -294,7 +294,7 @@ async def test_spot_runtime_rejects_candidates_outside_discovered_universe():
         coordinator=SimpleNamespace(),
         market_consumer=SimpleNamespace(),
         lead_lag=SimpleNamespace(),
-        quote_volumes_24h={"ETHUSDT": Decimal("100000")},
+        quote_volumes_24h={"ETHUSDT": Decimal(100000)},
     )
     candidate = SimpleNamespace(symbol="BTCUSDT", direction=TradeSide.LONG)
     with pytest.raises(ValueError, match="outside the active Spot universe"):
@@ -303,7 +303,7 @@ async def test_spot_runtime_rejects_candidates_outside_discovered_universe():
             strategy_scanner=FakeSharedStrategyScanner(),
             kernel=SimpleNamespace(fusion_min_confidence=0.6),
             equity_usd=1000,
-            quote_order_quantity=Decimal("50"),
+            quote_order_quantity=Decimal(50),
         )
     inventory.close()
 
@@ -316,13 +316,13 @@ async def test_spot_capital_allocation_converts_usd_to_quote_notional():
         capital_gateway=gateway,
         executor=FakeExecutor(),
         inventory=ledger,
-        quote_to_usd_rate=Decimal("2"),
+        quote_to_usd_rate=Decimal(2),
     )
     request = SpotOrderRequest(
         "BTCUSDT",
         SpotOrderSide.BUY,
         SpotOrderType.MARKET,
-        quote_order_quantity=Decimal("51"),
+        quote_order_quantity=Decimal(51),
     )
     with pytest.raises(SpotAuthorizationRejected, match="exceeds approved"):
         await coordinator.submit_entry(
@@ -363,17 +363,17 @@ async def test_spot_prefilter_candidate_uses_kernel_and_explicit_strategy_builde
         coordinator=coordinator,
         market_consumer=SimpleNamespace(),
         lead_lag=SimpleNamespace(),
-        quote_volumes_24h={"BTCUSDT": Decimal("100000")},
+        quote_volumes_24h={"BTCUSDT": Decimal(100000)},
     )
     candidate = SpotCandidate(
         symbol="BTCUSDT",
-        quote_volume=Decimal("100000"),
-        relative_volume=Decimal("2"),
-        spread_bps=Decimal("2"),
-        volatility_bps=Decimal("100"),
-        momentum_bps=Decimal("50"),
+        quote_volume=Decimal(100000),
+        relative_volume=Decimal(2),
+        spread_bps=Decimal(2),
+        volatility_bps=Decimal(100),
+        momentum_bps=Decimal(50),
         order_book_imbalance=Decimal("0.2"),
-        last_price=Decimal("100"),
+        last_price=Decimal(100),
     )
     ranked = RankedSpotCandidate(candidate, Decimal("0.8"), ("fresh",))
     result = await runtime.submit_ranked_spot_candidate(
@@ -381,7 +381,7 @@ async def test_spot_prefilter_candidate_uses_kernel_and_explicit_strategy_builde
         kernel=FakeKernelDecision(),
         opportunity_builder=lambda item, decision: _opportunity(),
         equity_usd=1000,
-        quote_order_quantity=Decimal("50"),
+        quote_order_quantity=Decimal(50),
     )
     assert result.status is SpotOrderStatus.NEW
     assert gateway.opportunity.agent_consensus["market_type"] == "spot"
@@ -403,17 +403,17 @@ async def test_spot_candidate_kernel_short_is_never_authorized():
         coordinator=SimpleNamespace(),
         market_consumer=SimpleNamespace(),
         lead_lag=SimpleNamespace(),
-        quote_volumes_24h={"BTCUSDT": Decimal("100000")},
+        quote_volumes_24h={"BTCUSDT": Decimal(100000)},
     )
     candidate = SpotCandidate(
         symbol="BTCUSDT",
-        quote_volume=Decimal("100000"),
-        relative_volume=Decimal("2"),
-        spread_bps=Decimal("2"),
-        volatility_bps=Decimal("100"),
-        momentum_bps=Decimal("50"),
+        quote_volume=Decimal(100000),
+        relative_volume=Decimal(2),
+        spread_bps=Decimal(2),
+        volatility_bps=Decimal(100),
+        momentum_bps=Decimal(50),
         order_book_imbalance=Decimal("0.2"),
-        last_price=Decimal("100"),
+        last_price=Decimal(100),
     )
     with pytest.raises(ValueError, match="did not approve"):
         await runtime.submit_ranked_spot_candidate(
@@ -421,7 +421,7 @@ async def test_spot_candidate_kernel_short_is_never_authorized():
             kernel=ShortKernel(),
             opportunity_builder=lambda item, decision: _opportunity(),
             equity_usd=1000,
-            quote_order_quantity=Decimal("50"),
+            quote_order_quantity=Decimal(50),
         )
     inventory.close()
 
@@ -447,7 +447,7 @@ def test_spot_runtime_updates_shared_capital_and_portfolio_fx_rate():
     assert coordinator.quote_to_usd_rate == Decimal("0.999")
     assert runtime.portfolio_valuator.quote_to_usd_rate == Decimal("0.999")
     with pytest.raises(ValueError, match="positive and finite"):
-        runtime.update_quote_to_usd_rate(Decimal("0"))
+        runtime.update_quote_to_usd_rate(Decimal(0))
     inventory.close()
 
 
@@ -462,13 +462,13 @@ async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
     )
     btc = SpotCandidate(
         symbol="BTCUSDT",
-        quote_volume=Decimal("100000"),
-        relative_volume=Decimal("2"),
-        spread_bps=Decimal("2"),
-        volatility_bps=Decimal("100"),
-        momentum_bps=Decimal("50"),
+        quote_volume=Decimal(100000),
+        relative_volume=Decimal(2),
+        spread_bps=Decimal(2),
+        volatility_bps=Decimal(100),
+        momentum_bps=Decimal(50),
         order_book_imbalance=Decimal("0.2"),
-        last_price=Decimal("100"),
+        last_price=Decimal(100),
     )
     eth = replace(btc, symbol="ETHUSDT")
     ranked = [
@@ -498,8 +498,8 @@ async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
         market_consumer=MarketConsumer(),
         lead_lag=SimpleNamespace(),
         quote_volumes_24h={
-            "BTCUSDT": Decimal("100000"),
-            "ETHUSDT": Decimal("100000"),
+            "BTCUSDT": Decimal(100000),
+            "ETHUSDT": Decimal(100000),
         },
     )
     result = await runtime.scan_and_submit_candidates(
@@ -508,7 +508,7 @@ async def test_spot_scan_rotates_after_kernel_rejects_first_candidate():
             _opportunity(), symbol=candidate.symbol
         ),
         equity_usd=1000,
-        quote_order_quantity_for=lambda candidate: Decimal("50"),
+        quote_order_quantity_for=lambda candidate: Decimal(50),
         max_candidates=2,
     )
     assert result.candidates_seen == 2
@@ -530,13 +530,13 @@ async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejecti
     )
     base = SpotCandidate(
         symbol="BTCUSDT",
-        quote_volume=Decimal("100000"),
-        relative_volume=Decimal("2"),
-        spread_bps=Decimal("2"),
-        volatility_bps=Decimal("100"),
-        momentum_bps=Decimal("50"),
+        quote_volume=Decimal(100000),
+        relative_volume=Decimal(2),
+        spread_bps=Decimal(2),
+        volatility_bps=Decimal(100),
+        momentum_bps=Decimal(50),
         order_book_imbalance=Decimal("0.2"),
-        last_price=Decimal("100"),
+        last_price=Decimal(100),
     )
     ranked = [
         RankedSpotCandidate(replace(base, symbol=symbol), score, ())
@@ -567,7 +567,7 @@ async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejecti
         market_consumer=MarketConsumer(),
         lead_lag=SimpleNamespace(),
         quote_volumes_24h={
-            symbol: Decimal("100000") for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT")
+            symbol: Decimal(100000) for symbol in ("BTCUSDT", "ETHUSDT", "BNBUSDT")
         },
     )
     result = await runtime.scan_and_submit_candidates(
@@ -576,7 +576,7 @@ async def test_spot_scan_rotates_to_third_candidate_after_top_two_kernel_rejecti
             _opportunity(), symbol=candidate.symbol
         ),
         equity_usd=1000,
-        quote_order_quantity_for=lambda candidate: Decimal("50"),
+        quote_order_quantity_for=lambda candidate: Decimal(50),
     )
     assert result.candidates_seen == 3
     assert result.selected_symbol == "BNBUSDT"

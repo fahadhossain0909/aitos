@@ -22,7 +22,7 @@ def _spot_event(kind, payload, sequence=None, at=None):
 
 @pytest.mark.asyncio
 async def test_spot_live_state_builds_fresh_candidate_from_market_streams():
-    scanner = SpotOpportunityScanner(min_quote_volume=Decimal("1000"))
+    scanner = SpotOpportunityScanner(min_quote_volume=Decimal(1000))
     consumer = SpotMarketDataConsumer(scanner)
     now = datetime.now(timezone.utc)
 
@@ -53,7 +53,7 @@ async def test_spot_live_state_builds_fresh_candidate_from_market_streams():
         )
     )
     for index in range(21):
-        close = Decimal("100") + Decimal(index) / Decimal("100")
+        close = Decimal(100) + Decimal(index) / Decimal(100)
         await consumer._on_kline(
             _spot_event(
                 MarketEventType.KLINE,
@@ -69,14 +69,14 @@ async def test_spot_live_state_builds_fresh_candidate_from_market_streams():
 
     candidate = consumer.build_candidate(
         "BTCUSDT",
-        quote_volume_24h=Decimal("500000"),
+        quote_volume_24h=Decimal(500000),
         now=now,
     )
     assert candidate is not None
-    assert candidate.relative_volume == Decimal("2")
+    assert candidate.relative_volume == Decimal(2)
     assert candidate.momentum_bps > 0
     assert candidate.order_book_imbalance > 0
-    assert consumer.rank_candidates({"BTCUSDT": Decimal("500000")})
+    assert consumer.rank_candidates({"BTCUSDT": Decimal(500000)})
 
 
 @pytest.mark.asyncio
@@ -145,7 +145,7 @@ async def test_spot_live_state_rejects_stale_and_invalid_order_books():
     assert (
         consumer.build_candidate(
             "BTCUSDT",
-            quote_volume_24h=Decimal("100000"),
+            quote_volume_24h=Decimal(100000),
             now=now + timedelta(seconds=30),
         )
     ) is None

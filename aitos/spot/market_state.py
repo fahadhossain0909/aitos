@@ -36,8 +36,8 @@ class SpotMarketState:
     asks: dict[Decimal, Decimal] = field(default_factory=dict)
     best_bid: Decimal | None = None
     best_ask: Decimal | None = None
-    bid_quantity: Decimal = Decimal("0")
-    ask_quantity: Decimal = Decimal("0")
+    bid_quantity: Decimal = Decimal(0)
+    ask_quantity: Decimal = Decimal(0)
     last_update_id: int | None = None
     book_valid: bool = False
     last_trade_at: datetime | None = None
@@ -300,21 +300,21 @@ class SpotMarketDataConsumer:
         volatility_bps = Decimal(str(pstdev(returns) * 10000.0))
         momentum_bps = Decimal(str((closes[-1] / closes[-6] - 1.0) * 10000.0))
         previous_volumes = [row["quote_volume"] for row in candles[-21:-1]]
-        baseline = sum(previous_volumes, Decimal("0")) / Decimal(len(previous_volumes))
+        baseline = sum(previous_volumes, Decimal(0)) / Decimal(len(previous_volumes))
         if baseline <= 0:
             return None
         relative_volume = candles[-1]["quote_volume"] / baseline
 
         top_bids = sorted(state.bids.items(), reverse=True)[:10]
         top_asks = sorted(state.asks.items())[:10]
-        bid_depth = sum((qty for _, qty in top_bids), Decimal("0"))
-        ask_depth = sum((qty for _, qty in top_asks), Decimal("0"))
+        bid_depth = sum((qty for _, qty in top_bids), Decimal(0))
+        ask_depth = sum((qty for _, qty in top_asks), Decimal(0))
         total_depth = bid_depth + ask_depth
         if total_depth <= 0:
             return None
         imbalance = (bid_depth - ask_depth) / total_depth
-        mid = (bid + ask) / Decimal("2")
-        spread_bps = (ask - bid) / mid * Decimal("10000")
+        mid = (bid + ask) / Decimal(2)
+        spread_bps = (ask - bid) / mid * Decimal(10000)
         return SpotCandidate(
             symbol=state.symbol,
             quote_volume=quote_volume_24h,

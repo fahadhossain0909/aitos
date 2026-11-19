@@ -83,9 +83,9 @@ class SpotOpportunityScanner:
     def __init__(
         self,
         *,
-        min_quote_volume: Decimal = Decimal("100000"),
-        max_spread_bps: Decimal = Decimal("20"),
-        max_volatility_bps: Decimal = Decimal("1500"),
+        min_quote_volume: Decimal = Decimal(100000),
+        max_spread_bps: Decimal = Decimal(20),
+        max_volatility_bps: Decimal = Decimal(1500),
     ) -> None:
         if min_quote_volume < 0 or max_spread_bps <= 0 or max_volatility_bps <= 0:
             raise ValueError("invalid scanner thresholds")
@@ -107,13 +107,13 @@ class SpotOpportunityScanner:
             if item.relative_volume < 0 or abs(item.order_book_imbalance) > 1:
                 continue
             score = (
-                min(item.relative_volume, Decimal("5")) * Decimal("0.25")
-                + min(max(item.momentum_bps, Decimal("0")), Decimal("500"))
-                / Decimal("500")
+                min(item.relative_volume, Decimal(5)) * Decimal("0.25")
+                + min(max(item.momentum_bps, Decimal(0)), Decimal(500))
+                / Decimal(500)
                 * Decimal("0.25")
-                + max(Decimal("0"), item.order_book_imbalance) * Decimal("0.25")
+                + max(Decimal(0), item.order_book_imbalance) * Decimal("0.25")
                 + max(
-                    Decimal("0"), Decimal("1") - item.spread_bps / self.max_spread_bps
+                    Decimal(0), Decimal(1) - item.spread_bps / self.max_spread_bps
                 )
                 * Decimal("0.25")
             )

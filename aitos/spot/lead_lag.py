@@ -200,7 +200,7 @@ class FuturesSpotLeadLagAnalyzer:
                 as_of,
             )
         candidates: list[tuple[float, str, int, int]] = []
-        for lag in range(0, self.max_lag_buckets + 1):
+        for lag in range(self.max_lag_buckets + 1):
             corr, count = self._lag_correlation(futures_returns, spot_returns, lag)
             if corr is not None and count >= self.min_observations:
                 candidates.append(

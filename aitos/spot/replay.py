@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal, Sequence
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +57,7 @@ def replay_spot_market_order(
     maker_fee_bps: Decimal,
     taker_fee_bps: Decimal,
     latency_ms: int = 0,
-    impact_bps_per_1pct_depth: Decimal = Decimal("0"),
+    impact_bps_per_1pct_depth: Decimal = Decimal(0),
     reference_mid: Decimal | None = None,
     maker: bool = False,
 ) -> SpotExecutionReplayResult:
@@ -84,7 +85,7 @@ def replay_spot_market_order(
         raise ValueError("replay requires both sides of executable book depth")
     best_bid = max(level.price for level in bids)
     best_ask = min(level.price for level in asks)
-    visible = sum((level.quantity for level in levels), Decimal("0"))
+    visible = sum((level.quantity for level in levels), Decimal(0))
     remaining = quantity
     raw_fills: list[tuple[Decimal, Decimal]] = []
     for level in levels:
@@ -95,17 +96,17 @@ def replay_spot_market_order(
         if remaining == 0:
             break
     filled = quantity - remaining
-    gross = sum((price * qty for price, qty in raw_fills), Decimal("0"))
+    gross = sum((price * qty for price, qty in raw_fills), Decimal(0))
     average = gross / filled if filled else None
     mid = reference_mid or ((best_bid + best_ask) / 2)
     if mid <= 0 or best_bid > best_ask:
         raise ValueError("reference book is crossed or mid is non-positive")
     impact = (
-        (filled / visible) * impact_bps_per_1pct_depth * Decimal("100")
+        (filled / visible) * impact_bps_per_1pct_depth * Decimal(100)
         if visible > 0
-        else Decimal("0")
+        else Decimal(0)
     )
-    adverse = Decimal("1") + impact / Decimal("10000")
+    adverse = Decimal(1) + impact / Decimal(10000)
     adjusted_average = (
         (average * adverse if side == "BUY" else average / adverse)
         if average is not None
@@ -120,20 +121,20 @@ def replay_spot_market_order(
                 (price * adverse if side == "BUY" else price / adverse)
                 * qty
                 * fees_rate
-                / Decimal("10000")
+                / Decimal(10000)
             ),
             maker=False,
         )
         for price, qty in raw_fills
     )
-    gross = sum((fill.price * fill.quantity for fill in fills), Decimal("0"))
-    fees = sum((fill.fee_quote for fill in fills), Decimal("0"))
+    gross = sum((fill.price * fill.quantity for fill in fills), Decimal(0))
+    fees = sum((fill.fee_quote for fill in fills), Decimal(0))
     slippage = (
         ((adjusted_average - mid) if side == "BUY" else (mid - adjusted_average))
         / mid
-        * Decimal("10000")
+        * Decimal(10000)
         if adjusted_average is not None
-        else Decimal("0")
+        else Decimal(0)
     )
     return SpotExecutionReplayResult(
         side=side,
@@ -169,9 +170,9 @@ def replay_spot_limit_order(
         raise ValueError("limit replay quantities/prices are invalid")
     if maker_fee_bps < 0 or latency_ms < 0:
         raise ValueError("maker fee and latency must be non-negative")
-    filled = min(quantity, max(Decimal("0"), traded_quantity_at_price - queue_ahead))
+    filled = min(quantity, max(Decimal(0), traded_quantity_at_price - queue_ahead))
     gross = filled * limit_price
-    fee = gross * maker_fee_bps / Decimal("10000")
+    fee = gross * maker_fee_bps / Decimal(10000)
     return SpotExecutionReplayResult(
         side=side,
         requested_quantity=quantity,
@@ -179,8 +180,8 @@ def replay_spot_limit_order(
         average_price=limit_price if filled else None,
         gross_quote=gross,
         fees_quote=fee,
-        market_impact_bps=Decimal("0"),
-        slippage_bps=Decimal("0"),
+        market_impact_bps=Decimal(0),
+        slippage_bps=Decimal(0),
         latency_ms=latency_ms,
         fills=((ReplayFill(limit_price, filled, fee, True),) if filled else ()),
     )
@@ -202,7 +203,7 @@ def replay_spot_order_with_latency(
     snapshots: Sequence[TimedBookSnapshot],
     maker_fee_bps: Decimal,
     taker_fee_bps: Decimal,
-    impact_bps_per_1pct_depth: Decimal = Decimal("0"),
+    impact_bps_per_1pct_depth: Decimal = Decimal(0),
 ) -> SpotExecutionReplayResult:
     """Select the first historical book available after modeled order latency."""
     if submitted_at_ms < 0 or latency_ms < 0:

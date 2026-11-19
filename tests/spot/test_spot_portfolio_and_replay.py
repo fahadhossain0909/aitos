@@ -22,7 +22,7 @@ def test_spot_portfolio_marks_managed_inventory_and_separate_account_cash():
         quote_asset="USDT",
         side="BUY",
         quantity=Decimal("0.1"),
-        price=Decimal("100"),
+        price=Decimal(100),
     )
     adapter = BinanceSpotAdapter(api_key="x", api_secret="y", testnet=True)
     valuator = SpotPortfolioValuator(ledger)
@@ -31,18 +31,18 @@ def test_spot_portfolio_marks_managed_inventory_and_separate_account_cash():
     snapshot = asyncio.run(
         valuator.snapshot(
             spot_adapter=adapter,
-            futures_account_equity_quote=Decimal("1000"),
+            futures_account_equity_quote=Decimal(1000),
             balances=[
-                SpotBalance("USDT", Decimal("50"), Decimal("10")),
-                SpotBalance("BTC", Decimal("9"), Decimal("0")),
+                SpotBalance("USDT", Decimal(50), Decimal(10)),
+                SpotBalance("BTC", Decimal(9), Decimal(0)),
             ],
-            marks={"BTCUSDT": Decimal("120")},
+            marks={"BTCUSDT": Decimal(120)},
         )
     )
-    assert snapshot.spot_quote_cash == Decimal("60")
+    assert snapshot.spot_quote_cash == Decimal(60)
     assert snapshot.managed_inventory_market_value == Decimal("12.0")
-    assert snapshot.spot_wallet_non_quote_asset_value == Decimal("1080")
-    assert snapshot.total_equity_quote == Decimal("2140")
+    assert snapshot.spot_wallet_non_quote_asset_value == Decimal(1080)
+    assert snapshot.total_equity_quote == Decimal(2140)
     assert snapshot.total_equity_usd == Decimal("2140.0")
     assert snapshot.accounting_complete
     ledger.close()
@@ -56,8 +56,8 @@ def test_spot_portfolio_marks_missing_and_external_base_holdings_not_adopted():
         base_asset="ETH",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("1"),
-        price=Decimal("10"),
+        quantity=Decimal(1),
+        price=Decimal(10),
     )
     adapter = BinanceSpotAdapter(api_key="x", api_secret="y", testnet=True)
     import asyncio
@@ -65,10 +65,10 @@ def test_spot_portfolio_marks_missing_and_external_base_holdings_not_adopted():
     snapshot = asyncio.run(
         SpotPortfolioValuator(ledger).snapshot(
             spot_adapter=adapter,
-            futures_account_equity_quote=Decimal("100"),
+            futures_account_equity_quote=Decimal(100),
             balances=[
-                SpotBalance("USDT", Decimal("20"), Decimal("0")),
-                SpotBalance("ETH", Decimal("50"), Decimal("0")),
+                SpotBalance("USDT", Decimal(20), Decimal(0)),
+                SpotBalance("ETH", Decimal(50), Decimal(0)),
             ],
             marks={},
         )
@@ -83,20 +83,20 @@ def test_spot_portfolio_marks_missing_and_external_base_holdings_not_adopted():
 def test_spot_execution_replay_walks_depth_and_preserves_partial_fill():
     result = replay_spot_market_order(
         side="BUY",
-        quantity=Decimal("3"),
-        bids=[BookLevel(Decimal("99"), Decimal("10"))],
+        quantity=Decimal(3),
+        bids=[BookLevel(Decimal(99), Decimal(10))],
         asks=[
-            BookLevel(Decimal("100"), Decimal("1")),
-            BookLevel(Decimal("101"), Decimal("1")),
+            BookLevel(Decimal(100), Decimal(1)),
+            BookLevel(Decimal(101), Decimal(1)),
         ],
-        maker_fee_bps=Decimal("10"),
-        taker_fee_bps=Decimal("20"),
+        maker_fee_bps=Decimal(10),
+        taker_fee_bps=Decimal(20),
         latency_ms=125,
         impact_bps_per_1pct_depth=Decimal("0.1"),
         reference_mid=Decimal("99.5"),
     )
-    assert result.filled_quantity == Decimal("2")
-    assert result.unfilled_quantity == Decimal("1")
+    assert result.filled_quantity == Decimal(2)
+    assert result.unfilled_quantity == Decimal(1)
     assert result.fees_quote > Decimal("0.402")
     assert result.latency_ms == 125
     assert result.market_impact_bps > 0
@@ -106,14 +106,14 @@ def test_spot_execution_replay_walks_depth_and_preserves_partial_fill():
 def test_spot_maker_replay_uses_observed_queue_ahead():
     result = replay_spot_limit_order(
         side="BUY",
-        quantity=Decimal("5"),
-        limit_price=Decimal("100"),
-        queue_ahead=Decimal("2"),
-        traded_quantity_at_price=Decimal("4"),
-        maker_fee_bps=Decimal("5"),
+        quantity=Decimal(5),
+        limit_price=Decimal(100),
+        queue_ahead=Decimal(2),
+        traded_quantity_at_price=Decimal(4),
+        maker_fee_bps=Decimal(5),
     )
-    assert result.filled_quantity == Decimal("2")
-    assert result.unfilled_quantity == Decimal("3")
+    assert result.filled_quantity == Decimal(2)
+    assert result.unfilled_quantity == Decimal(3)
     assert result.fees_quote == Decimal("0.10")
     assert result.fills[0].maker
 
@@ -122,30 +122,30 @@ def test_spot_replay_uses_first_book_after_order_latency():
     snapshots = [
         TimedBookSnapshot(
             1000,
-            (BookLevel(Decimal("99"), Decimal("10")),),
-            (BookLevel(Decimal("100"), Decimal("10")),),
+            (BookLevel(Decimal(99), Decimal(10)),),
+            (BookLevel(Decimal(100), Decimal(10)),),
         ),
         TimedBookSnapshot(
             1125,
-            (BookLevel(Decimal("100"), Decimal("10")),),
-            (BookLevel(Decimal("102"), Decimal("10")),),
+            (BookLevel(Decimal(100), Decimal(10)),),
+            (BookLevel(Decimal(102), Decimal(10)),),
         ),
         TimedBookSnapshot(
             1200,
-            (BookLevel(Decimal("101"), Decimal("10")),),
-            (BookLevel(Decimal("103"), Decimal("10")),),
+            (BookLevel(Decimal(101), Decimal(10)),),
+            (BookLevel(Decimal(103), Decimal(10)),),
         ),
     ]
     result = replay_spot_order_with_latency(
         side="BUY",
-        quantity=Decimal("1"),
+        quantity=Decimal(1),
         submitted_at_ms=1000,
         latency_ms=100,
         snapshots=snapshots,
-        maker_fee_bps=Decimal("10"),
-        taker_fee_bps=Decimal("20"),
+        maker_fee_bps=Decimal(10),
+        taker_fee_bps=Decimal(20),
     )
-    assert result.average_price == Decimal("102")
+    assert result.average_price == Decimal(102)
     assert result.latency_ms == 100
 
 

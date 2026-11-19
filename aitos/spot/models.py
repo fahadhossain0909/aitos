@@ -14,7 +14,7 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,20}$")
 _CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_:/.-]{1,36}$")
 
 
-def _decimal(value: Decimal | str | int | float, name: str) -> Decimal:
+def _decimal(value: Decimal | str | float, name: str) -> Decimal:
     result = value if isinstance(value, Decimal) else Decimal(str(value))
     if not result.is_finite():
         raise ValueError(f"{name} must be finite")

@@ -6,9 +6,9 @@ wallet balances are intentionally not adopted as strategy inventory.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Mapping, Sequence
 
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.inventory import InventoryLedger
@@ -53,7 +53,7 @@ class SpotPortfolioValuator:
         self,
         inventory: InventoryLedger,
         quote_asset: str = "USDT",
-        quote_to_usd_rate: Decimal = Decimal("1"),
+        quote_to_usd_rate: Decimal = Decimal(1),
     ) -> None:
         if quote_to_usd_rate <= 0:
             raise ValueError("quote_to_usd_rate must be positive")
@@ -77,10 +77,10 @@ class SpotPortfolioValuator:
         )
         quote_cash = sum(
             (balance.total for balance in wallet if balance.asset == self.quote_asset),
-            Decimal("0"),
+            Decimal(0),
         )
-        inventory_value = Decimal("0")
-        inventory_cost = Decimal("0")
+        inventory_value = Decimal(0)
+        inventory_cost = Decimal(0)
         missing: list[str] = []
         managed_base_marks: dict[str, Decimal] = {}
         asset_marks = {key.upper(): value for key, value in (asset_marks or {}).items()}
@@ -102,7 +102,7 @@ class SpotPortfolioValuator:
             managed_base_marks[position.base_asset] = mark
             inventory_value += position.quantity * mark
             inventory_cost += position.cost_quote
-        wallet_value = Decimal("0")
+        wallet_value = Decimal(0)
         unpriced: list[str] = []
         for balance in wallet:
             if balance.asset == self.quote_asset or balance.total == 0:

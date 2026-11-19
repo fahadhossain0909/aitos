@@ -12,7 +12,6 @@ from urllib.parse import urlencode
 import aiohttp
 
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
-
 from aitos.spot.filters import D, SpotSymbolFilters, parse_spot_exchange_info
 from aitos.spot.models import (
     SpotBalance,
@@ -53,7 +52,7 @@ class BinanceSpotAdapter:
         self._server_time_offset_ms = 0
         self._server_time_synced = False
 
-    async def __aenter__(self) -> "BinanceSpotAdapter":
+    async def __aenter__(self) -> BinanceSpotAdapter:
         await self.connect()
         return self
 
@@ -160,7 +159,7 @@ class BinanceSpotAdapter:
         self,
         *,
         quote_asset: str = "USDT",
-        min_quote_volume: Decimal = Decimal("100000"),
+        min_quote_volume: Decimal = Decimal(100000),
         limit: int = 20,
     ) -> list[SpotInstrument]:
         """Select active Spot instruments by 24h quote turnover, never by symbol guess."""

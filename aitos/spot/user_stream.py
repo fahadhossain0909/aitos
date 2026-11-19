@@ -7,7 +7,6 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-
 UserEventHandler = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import log, sqrt
-from typing import Any, Sequence
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)

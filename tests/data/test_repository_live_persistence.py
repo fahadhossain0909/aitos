@@ -81,7 +81,6 @@ def test_live_persistence_schema_contains_required_contracts():
     assert "payload_json String" in CREATE_LIVE_ANALYTICS_EVENTS
 
 
-
 @pytest.mark.asyncio
 async def test_save_spot_market_event_persists_isolated_instrument_identity():
     repo = MarketDataRepository.__new__(MarketDataRepository)
@@ -112,7 +111,6 @@ async def test_save_spot_market_event_persists_isolated_instrument_identity():
     assert rows[0][8] == "BTCUSDT"
     assert columns.index("market_type") == 6
     assert columns.index("instrument_id") == 7
-
 
 
 @pytest.mark.asyncio
@@ -152,7 +150,6 @@ def test_versioned_event_schema_uses_replacing_revision_semantics():
     assert "event_revision UInt64" in CREATE_VERSIONED_MARKET_EVENTS
     assert "ReplacingMergeTree(event_revision)" in CREATE_VERSIONED_MARKET_EVENTS
     assert "ORDER BY (instrument_id, event_id)" in CREATE_VERSIONED_MARKET_EVENTS
-
 
 
 @pytest.mark.asyncio

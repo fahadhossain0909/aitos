@@ -6,13 +6,12 @@ It never targets mainnet.
 
 import os
 import uuid
-from decimal import Decimal, ROUND_UP
+from decimal import ROUND_UP, Decimal
 
 import pytest
 
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.execution import SpotOrderExecutor
-from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.models import (
     SpotOrderRequest,
@@ -59,7 +58,7 @@ async def test_binance_spot_testnet_limit_order_cancel_and_reconcile(tmp_path):
             (
                 (symbol_filters.min_notional / price)
                 if symbol_filters.min_notional > 0
-                else Decimal("0")
+                else Decimal(0)
             ),
         )
         quantity = (

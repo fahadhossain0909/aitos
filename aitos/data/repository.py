@@ -315,30 +315,45 @@ class MarketDataRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "market_event_versions",
-            [[
-                event.event_time,
-                event.ingest_time,
-                event.event_id,
-                event.event_revision,
-                event.exchange,
-                event.market,
-                event.venue or event.exchange,
-                event.market_type or event.market,
-                event.instrument_id or event.symbol,
-                event.symbol,
-                event.event_type.value,
-                event.source.value,
-                event.sequence,
-                event.schema_version,
-                event.correlation_id or event.event_id,
-                event.trace_id or event.event_id,
-                json.dumps(event.payload, sort_keys=True, default=str),
-            ]],
+            [
+                [
+                    event.event_time,
+                    event.ingest_time,
+                    event.event_id,
+                    event.event_revision,
+                    event.exchange,
+                    event.market,
+                    event.venue or event.exchange,
+                    event.market_type or event.market,
+                    event.instrument_id or event.symbol,
+                    event.symbol,
+                    event.event_type.value,
+                    event.source.value,
+                    event.sequence,
+                    event.schema_version,
+                    event.correlation_id or event.event_id,
+                    event.trace_id or event.event_id,
+                    json.dumps(event.payload, sort_keys=True, default=str),
+                ]
+            ],
             column_names=[
-                "event_time", "ingest_time", "event_id", "event_revision",
-                "exchange", "market", "venue", "market_type", "instrument_id",
-                "symbol", "event_type", "source", "sequence", "schema_version",
-                "correlation_id", "trace_id", "payload_json",
+                "event_time",
+                "ingest_time",
+                "event_id",
+                "event_revision",
+                "exchange",
+                "market",
+                "venue",
+                "market_type",
+                "instrument_id",
+                "symbol",
+                "event_type",
+                "source",
+                "sequence",
+                "schema_version",
+                "correlation_id",
+                "trace_id",
+                "payload_json",
             ],
         )
         self._last_event_time = event.event_time.isoformat()
@@ -649,7 +664,11 @@ class MarketDataRepository(AITOSModule):
         """Load point-in-time canonical events with explicit market identity."""
         if not market_type or not instrument_id:
             raise ValueError("market_type and instrument_id are required")
-        if start_time.tzinfo is None or end_time.tzinfo is None or end_time <= start_time:
+        if (
+            start_time.tzinfo is None
+            or end_time.tzinfo is None
+            or end_time <= start_time
+        ):
             raise ValueError("event history requires an ordered timezone-aware range")
         if not event_types or limit < 1:
             raise ValueError("event_types and a positive limit are required")

@@ -25,7 +25,7 @@ class InventoryPosition:
 
     @property
     def average_cost(self) -> Decimal:
-        return self.cost_quote / self.quantity if self.quantity > 0 else Decimal("0")
+        return self.cost_quote / self.quantity if self.quantity > 0 else Decimal(0)
 
 
 class InventoryLedger:
@@ -274,7 +274,7 @@ class InventoryLedger:
         side: str,
         quantity: Decimal,
         price: Decimal,
-        commission: Decimal = Decimal("0"),
+        commission: Decimal = Decimal(0),
         commission_asset: str = "",
         fill_time_ms: int | None = None,
     ) -> bool:
@@ -329,7 +329,7 @@ class InventoryLedger:
             (symbol,),
         ).fetchall()
         base = quote = ""
-        qty = cost = realized = Decimal("0")
+        qty = cost = realized = Decimal(0)
         fee_conversion_pending = False
         for b, q, side, qraw, praw, craw, casset, converted_fee in rows:
             base, quote = b, q
@@ -351,7 +351,7 @@ class InventoryLedger:
                     else:
                         cost += third_asset_fee
             else:
-                avg = cost / qty if qty else Decimal("0")
+                avg = cost / qty if qty else Decimal(0)
                 proceeds = value
                 debit_quantity = amount
                 if casset == quote:

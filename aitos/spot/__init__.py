@@ -30,12 +30,12 @@ __all__ = [
     "SpotCandidate",
     "SpotFill",
     "SpotInstrument",
+    "SpotOpportunityScanner",
     "SpotOrder",
     "SpotOrderRequest",
     "SpotOrderSide",
     "SpotOrderStatus",
     "SpotOrderType",
-    "SpotOpportunityScanner",
     "SpotSymbolFilters",
     "parse_spot_exchange_info",
 ]

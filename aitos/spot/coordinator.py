@@ -34,7 +34,7 @@ class SpotTradingCoordinator:
         inventory: InventoryLedger,
         fee_bps: float = 10.0,
         slippage_bps: float = 8.0,
-        quote_to_usd_rate: Decimal = Decimal("1"),
+        quote_to_usd_rate: Decimal = Decimal(1),
     ) -> None:
         if fee_bps < 0 or slippage_bps < 0:
             raise ValueError("Spot costs cannot be negative")
@@ -182,7 +182,7 @@ class SpotTradingCoordinator:
             raise SpotAuthorizationRejected("sell exceeds AITOS-managed Spot inventory")
         if authorization.action is ExitAction.MANAGE:
             fraction = Decimal(str(authorization.suggested_reduce_fraction))
-            if not Decimal("0") < fraction <= Decimal("1"):
+            if not Decimal(0) < fraction <= Decimal(1):
                 raise SpotAuthorizationRejected(
                     "MANAGE decision has no valid reduce fraction"
                 )

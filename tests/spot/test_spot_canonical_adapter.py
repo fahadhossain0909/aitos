@@ -2,18 +2,21 @@ from datetime import datetime, timezone
 
 import pytest
 
+from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
-from aitos.market_data.bus import market_event_from_wire, market_event_to_wire
-from aitos.market_data.contracts import MarketEventType, MarketSource
-from aitos.market_data.bus import channel_for
+from aitos.market_data.bus import (
+    channel_for,
+    market_event_from_wire,
+    market_event_to_wire,
+)
 from aitos.market_data.channels import (
     ALL_CHANNELS,
     CHANNEL_KLINE,
     CHANNEL_SPOT_KLINE,
     CHANNEL_SPOT_TRADE,
 )
+from aitos.market_data.contracts import MarketEventType, MarketSource
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
-from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.spot.websocket import SpotOrderBookGap
 
 

@@ -2,6 +2,8 @@ from decimal import Decimal
 
 import pytest
 
+from aitos.spot.binance import BinanceSpotAdapter
+from aitos.spot.execution import SpotExecutionDisabled, SpotOrderExecutor
 from aitos.spot.filters import parse_spot_exchange_info
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.models import (
@@ -11,8 +13,6 @@ from aitos.spot.models import (
     SpotOrderType,
 )
 from aitos.spot.scanner import SpotCandidate, SpotOpportunityScanner
-from aitos.spot.binance import BinanceSpotAdapter
-from aitos.spot.execution import SpotExecutionDisabled, SpotOrderExecutor
 
 
 def _exchange_info():
@@ -61,9 +61,9 @@ def test_spot_filters_decimal_rounding_and_notional():
     f = parse_spot_exchange_info(_exchange_info())["ABCUSDT"]
     assert f.round_quantity(Decimal("1.29")) == Decimal("1.2")
     assert f.round_price(Decimal("12.349")) == Decimal("12.34")
-    assert f.validate(Decimal("1.2"), Decimal("10")) == Decimal("1.2")
+    assert f.validate(Decimal("1.2"), Decimal(10)) == Decimal("1.2")
     with pytest.raises(ValueError):
-        f.validate(Decimal("0.1"), Decimal("10"))
+        f.validate(Decimal("0.1"), Decimal(10))
 
 
 def test_spot_order_request_requires_exactly_one_quantity_mode():
@@ -74,8 +74,8 @@ def test_spot_order_request_requires_exactly_one_quantity_mode():
             "ABCUSDT",
             SpotOrderSide.BUY,
             SpotOrderType.MARKET,
-            quantity=Decimal("1"),
-            quote_order_quantity=Decimal("10"),
+            quantity=Decimal(1),
+            quote_order_quantity=Decimal(10),
         )
 
 
@@ -87,8 +87,8 @@ def test_inventory_fill_idempotency_and_fee_accounting():
         base_asset="ABC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("2"),
-        price=Decimal("10"),
+        quantity=Decimal(2),
+        price=Decimal(10),
         commission=Decimal("0.01"),
         commission_asset="ABC",
     )
@@ -98,29 +98,29 @@ def test_inventory_fill_idempotency_and_fee_accounting():
         base_asset="ABC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("2"),
-        price=Decimal("10"),
+        quantity=Decimal(2),
+        price=Decimal(10),
         commission=Decimal("0.01"),
         commission_asset="ABC",
     )
     pos = ledger.get_position("ABCUSDT")
     assert pos.quantity == Decimal("1.99")
-    assert pos.cost_quote == Decimal("20")
+    assert pos.cost_quote == Decimal(20)
     ledger.record_fill(
         fill_key="sell-1",
         symbol="ABCUSDT",
         base_asset="ABC",
         quote_asset="USDT",
         side="SELL",
-        quantity=Decimal("1"),
-        price=Decimal("12"),
+        quantity=Decimal(1),
+        price=Decimal(12),
         commission=Decimal("0.12"),
         commission_asset="USDT",
     )
     pos = ledger.get_position("ABCUSDT")
     assert pos.quantity == Decimal("0.99")
     assert pos.realized_quote_pnl == Decimal("11.88") - (
-        Decimal("20") / Decimal("1.99")
+        Decimal(20) / Decimal("1.99")
     )
 
 
@@ -133,40 +133,40 @@ def test_inventory_rejects_unowned_sell():
             base_asset="ABC",
             quote_asset="USDT",
             side="SELL",
-            quantity=Decimal("1"),
-            price=Decimal("10"),
+            quantity=Decimal(1),
+            price=Decimal(10),
         )
 
 
 def test_scanner_filters_stale_and_illiquid_candidates():
-    scanner = SpotOpportunityScanner(min_quote_volume=Decimal("1000"))
+    scanner = SpotOpportunityScanner(min_quote_volume=Decimal(1000))
     items = [
         SpotCandidate(
             "GOODUSDT",
-            Decimal("5000"),
-            Decimal("2"),
-            Decimal("3"),
-            Decimal("200"),
-            Decimal("80"),
+            Decimal(5000),
+            Decimal(2),
+            Decimal(3),
+            Decimal(200),
+            Decimal(80),
             Decimal("0.4"),
         ),
         SpotCandidate(
             "STALEUSDT",
-            Decimal("5000"),
-            Decimal("2"),
-            Decimal("3"),
-            Decimal("200"),
-            Decimal("80"),
+            Decimal(5000),
+            Decimal(2),
+            Decimal(3),
+            Decimal(200),
+            Decimal(80),
             Decimal("0.4"),
             data_fresh=False,
         ),
         SpotCandidate(
             "WIDEUSDT",
-            Decimal("5000"),
-            Decimal("2"),
-            Decimal("50"),
-            Decimal("200"),
-            Decimal("80"),
+            Decimal(5000),
+            Decimal(2),
+            Decimal(50),
+            Decimal(200),
+            Decimal(80),
             Decimal("0.4"),
         ),
     ]
@@ -182,7 +182,7 @@ async def test_execution_disabled_by_default():
         "ABCUSDT",
         SpotOrderSide.BUY,
         SpotOrderType.MARKET,
-        quote_order_quantity=Decimal("10"),
+        quote_order_quantity=Decimal(10),
     )
     with pytest.raises(SpotExecutionDisabled):
         await executor.submit(request)
@@ -198,12 +198,12 @@ def test_inventory_persists_across_reopen(tmp_path):
         base_asset="ABC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("1"),
-        price=Decimal("5"),
+        quantity=Decimal(1),
+        price=Decimal(5),
     )
     ledger.close()
     reopened = InventoryLedger(path)
-    assert reopened.get_position("ABCUSDT").quantity == Decimal("1")
+    assert reopened.get_position("ABCUSDT").quantity == Decimal(1)
     reopened.close()
 
 
@@ -217,7 +217,7 @@ async def test_mainnet_execution_requires_second_explicit_guard():
         "ABCUSDT",
         SpotOrderSide.BUY,
         SpotOrderType.MARKET,
-        quote_order_quantity=Decimal("10"),
+        quote_order_quantity=Decimal(10),
     )
     with pytest.raises(SpotExecutionDisabled):
         await executor.submit(request)
@@ -239,8 +239,8 @@ def test_inventory_accounts_for_base_asset_sell_commission():
         base_asset="ABC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("2"),
-        price=Decimal("10"),
+        quantity=Decimal(2),
+        price=Decimal(10),
         commission=Decimal("0.01"),
         commission_asset="ABC",
     )
@@ -250,15 +250,15 @@ def test_inventory_accounts_for_base_asset_sell_commission():
         base_asset="ABC",
         quote_asset="USDT",
         side="SELL",
-        quantity=Decimal("1"),
-        price=Decimal("12"),
+        quantity=Decimal(1),
+        price=Decimal(12),
         commission=Decimal("0.01"),
         commission_asset="ABC",
     )
     position = ledger.get_position("ABCUSDT")
     assert position.quantity == Decimal("0.98")
-    assert position.realized_quote_pnl == Decimal("12") - (
-        Decimal("20") / Decimal("1.99") * Decimal("1.01")
+    assert position.realized_quote_pnl == Decimal(12) - (
+        Decimal(20) / Decimal("1.99") * Decimal("1.01")
     )
 
 
@@ -270,8 +270,8 @@ def test_inventory_marks_third_asset_fee_for_conversion():
         base_asset="ABC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("1"),
-        price=Decimal("10"),
+        quantity=Decimal(1),
+        price=Decimal(10),
         commission=Decimal("0.001"),
         commission_asset="BNB",
     )
@@ -295,8 +295,8 @@ def test_third_asset_fee_conversion_is_durable_and_replayable(tmp_path):
         base_asset="ABC",
         quote_asset="USDT",
         side="BUY",
-        quantity=Decimal("1"),
-        price=Decimal("10"),
+        quantity=Decimal(1),
+        price=Decimal(10),
         commission=Decimal("0.01"),
         commission_asset="BNB",
     )
@@ -318,7 +318,7 @@ def test_spot_order_intents_are_durable_and_replay_safe(tmp_path):
         symbol="BTCUSDT",
         side="BUY",
         order_type="MARKET",
-        quote_order_quantity=Decimal("25"),
+        quote_order_quantity=Decimal(25),
     )
     with pytest.raises(ValueError, match="already exists"):
         ledger.record_order_intent(
@@ -326,7 +326,7 @@ def test_spot_order_intents_are_durable_and_replay_safe(tmp_path):
             symbol="BTCUSDT",
             side="BUY",
             order_type="MARKET",
-            quote_order_quantity=Decimal("25"),
+            quote_order_quantity=Decimal(25),
         )
     ledger.update_order_intent(
         "aitos-order-123",
@@ -352,7 +352,7 @@ def test_spot_order_intent_rejects_client_id_collision():
         symbol="BTCUSDT",
         side="BUY",
         order_type="MARKET",
-        quote_order_quantity=Decimal("25"),
+        quote_order_quantity=Decimal(25),
     )
     with pytest.raises(ValueError, match="already exists"):
         ledger.record_order_intent(
@@ -360,7 +360,7 @@ def test_spot_order_intent_rejects_client_id_collision():
             symbol="ETHUSDT",
             side="BUY",
             order_type="MARKET",
-            quote_order_quantity=Decimal("25"),
+            quote_order_quantity=Decimal(25),
         )
 
 
