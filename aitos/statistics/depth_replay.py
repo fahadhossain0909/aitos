@@ -176,7 +176,7 @@ def replay_l2_market_order(
             continue
         visible = sum(size for _, size in levels)
         if visible <= 0:
-            continue
+            break
         mid = (book.bids[0][0] + book.asks[0][0]) / 2.0
         allowed = visible * max_participation
         for price, size in levels:
