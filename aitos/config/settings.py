@@ -76,6 +76,31 @@ class BinanceSettings(BaseSettings):
     hedge_mode: bool = False
 
 
+class SpotSettings(BaseSettings):
+    """Explicit opt-in policy for the isolated Binance Spot market."""
+
+    model_config = SettingsConfigDict(env_prefix="AITOS_SPOT_")
+
+    enabled: bool = False
+    testnet: bool = True
+    execution_enabled: bool = False
+    allow_mainnet: bool = False
+    quote_asset: str = "USDT"
+    max_symbols: int = Field(default=20, ge=1, le=100)
+    min_quote_volume: float = Field(default=100000.0, ge=0)
+    max_spread_bps: float = Field(default=20.0, gt=0)
+    max_volatility_bps: float = Field(default=1500.0, gt=0)
+    fee_bps: float = Field(default=10.0, ge=0)
+    slippage_bps: float = Field(default=8.0, ge=0)
+
+    def __init__(self, **values):
+        super().__init__(**values)
+        if self.execution_enabled and not self.enabled:
+            raise ValueError("Spot execution requires AITOS_SPOT_ENABLED=true")
+        if self.allow_mainnet and self.testnet:
+            raise ValueError("allow_mainnet cannot be combined with Spot testnet")
+
+
 class StorageSettings(BaseSettings):
     """Runtime storage policy; adapters must prove capability parity before failover."""
 
@@ -106,7 +131,7 @@ class AITOSSettings(BaseSettings):
     redis: RedisSettings = Field(default_factory=RedisSettings)
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
-    binance: BinanceSettings = Field(default_factory=BinanceSettings)
+    binance: BinanceSettings = Field(default_factory=BinanceSettings)\n    spot: SpotSettings = Field(default_factory=SpotSettings)
     tuning: TuningSettings = Field(default_factory=load_tuning_settings)
 
 
