@@ -440,6 +440,9 @@ def test_confirmed_terminal_protection_is_durable_and_no_longer_unresolved(tmp_p
         executed_quantity=0.25,
     )
 
+    journal.begin(request(client_order_id="new-entry", symbol="ETHUSDT"))
+    assert journal.unresolved()[0]["client_id"] == "new-entry"
+
 def test_terminal_protection_does_not_release_unrelated_intent(tmp_path):
     journal = store(tmp_path)
     journal.begin(
