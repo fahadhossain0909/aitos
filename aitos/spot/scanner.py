@@ -1,4 +1,5 @@
 """Conservative Spot opportunity ranking; ranking is not an order signal."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,8 +21,6 @@ class SpotCandidate:
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", self.symbol.upper())
         fields = (
-            "quote_volume", "relative_volume", "spread_bps",
-            "volatility_bps", "momentum_bps", "order_book_imbalance",
         )
         for name in fields:
             value = getattr(self, name)
@@ -47,9 +46,14 @@ class RankedSpotCandidate:
 
 class SpotOpportunityScanner:
     """Deterministic, explainable pre-filter. A downstream strategy must approve."""
-    def __init__(self, *, min_quote_volume: Decimal = Decimal("100000"),
-                 max_spread_bps: Decimal = Decimal("20"),
-                 max_volatility_bps: Decimal = Decimal("1500")) -> None:
+
+    def __init__(
+        self,
+        *,
+        min_quote_volume: Decimal = Decimal("100000"),
+        max_spread_bps: Decimal = Decimal("20"),
+        max_volatility_bps: Decimal = Decimal("1500"),
+    ) -> None:
         if min_quote_volume < 0 or max_spread_bps <= 0 or max_volatility_bps <= 0:
             raise ValueError("invalid scanner thresholds")
         self.min_quote_volume = min_quote_volume
@@ -69,11 +73,22 @@ class SpotOpportunityScanner:
                 continue
             if item.relative_volume < 0 or abs(item.order_book_imbalance) > 1:
                 continue
-            score = (min(item.relative_volume, Decimal("5")) * Decimal("0.25")
-                     + min(max(item.momentum_bps, Decimal("0")), Decimal("500")) / Decimal("500") * Decimal("0.25")
-                     + max(Decimal("0"), item.order_book_imbalance) * Decimal("0.25")
-                     + max(Decimal("0"), Decimal("1") - item.spread_bps / self.max_spread_bps) * Decimal("0.25"))
-            reasons = ("liquid_quote_volume", "spread_within_limit",
-                       "fresh_market_data", "relative_volume_and_flow")
+            score = (
+                min(item.relative_volume, Decimal("5")) * Decimal("0.25")
+                + min(max(item.momentum_bps, Decimal("0")), Decimal("500"))
+                / Decimal("500")
+                * Decimal("0.25")
+                + max(Decimal("0"), item.order_book_imbalance) * Decimal("0.25")
+                + max(
+                    Decimal("0"), Decimal("1") - item.spread_bps / self.max_spread_bps
+                )
+                * Decimal("0.25")
+            )
+            reasons = (
+                "liquid_quote_volume",
+                "spread_within_limit",
+                "fresh_market_data",
+                "relative_volume_and_flow",
+            )
             ranked.append(RankedSpotCandidate(item, score, reasons))
         return sorted(ranked, key=lambda x: x.score, reverse=True)
