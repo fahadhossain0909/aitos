@@ -49,7 +49,7 @@ def test_depth_matcher_copies_recursively_immutable_market_payload():
 
     assert result is not source
     assert result["reductions"][0]["matched_execution_qty"] == 0.0
-    assert "matched_execution_qty" not in result
+    assert result["matched_execution_qty"] == 0.0
     assert "matched_execution_qty" not in source
     assert "matched_execution_qty" not in source["reductions"][0]
 
