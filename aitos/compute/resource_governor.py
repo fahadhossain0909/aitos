@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import glob
 import os
+from math import isfinite
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -26,8 +27,12 @@ class ResourceSnapshot:
     accelerators: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.logical_cpus < 1 or self.effective_cpus <= 0:
-            raise ValueError("CPU capacity must be positive")
+        if (
+            self.logical_cpus < 1
+            or not isfinite(self.effective_cpus)
+            or self.effective_cpus <= 0
+        ):
+            raise ValueError("CPU capacity must be finite and positive")
         if (
             min(self.memory_total_mb, self.memory_limit_mb, self.memory_available_mb)
             < 0
@@ -62,8 +67,14 @@ class SymbolWorkload:
     def __post_init__(self) -> None:
         if not self.symbol.strip():
             raise ValueError("symbol cannot be empty")
-        if self.cpu_cost_units < 0 or self.memory_cost_mb < 0:
-            raise ValueError("workload costs cannot be negative")
+        if (
+            not isfinite(self.cpu_cost_units)
+            or not isfinite(self.opportunity_score)
+            or not isfinite(self.liquidity_score)
+            or self.cpu_cost_units < 0
+            or self.memory_cost_mb < 0
+        ):
+            raise ValueError("workload costs and scores must be finite and costs non-negative")
 
 
 @dataclass(frozen=True)
@@ -326,8 +337,8 @@ def classify_pressure(
 ) -> PressureLevel:
     """Classify operational pressure; this is advisory and never changes risk."""
     values = (cpu_utilization_pct, memory_utilization_pct, queue_lag_seconds)
-    if any(value < 0 for value in values):
-        raise ValueError("pressure metrics cannot be negative")
+    if any(not isfinite(value) or value < 0 for value in values):
+        raise ValueError("pressure metrics must be finite and non-negative")
     if (
         cpu_utilization_pct >= 98
         or memory_utilization_pct >= 95
