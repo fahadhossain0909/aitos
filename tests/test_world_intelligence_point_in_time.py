@@ -139,7 +139,6 @@ def test_duplicate_revisions_invalid_timestamps_and_horizons_fail_closed():
         )
 
 
-
 def test_matured_labels_convert_to_training_rows_without_clipping_extreme_returns():
     report = build(
         [event()],
