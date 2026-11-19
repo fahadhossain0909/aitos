@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
+from aitos.execution.binance_executor import BinanceAPIError, BinanceFuturesOrderExecutor
 from aitos.execution.intent_store import ExecutionUncertainError
 from aitos.models.trade import TradeSide
 
@@ -262,3 +262,61 @@ async def test_open_order_inventory_rejects_invalid_rows(override):
 
     with pytest.raises(ValueError):
         await value.get_open_orders("BTCUSDT")
+
+
+async def test_algo_client_id_lookup_recovers_accepted_protection_identity():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    response = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        algoStatus="NEW",
+    )
+    value._signed_request = AsyncMock(return_value=response)
+
+    result = await value.get_algo_order_by_client_id("btcusdt", "aitos-stop-1")
+
+    assert result == response and result is not response
+    assert value._signed_request.call_args.args == (
+        "GET",
+        "/fapi/v1/algoOrder",
+        {"clientAlgoId": "aitos-stop-1"},
+    )
+
+
+async def test_algo_client_id_lookup_returns_none_only_for_explicit_not_found():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    value._signed_request = AsyncMock(
+        side_effect=BinanceAPIError("Binance API error -2013: not found", code=-2013)
+    )
+
+    assert await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1") is None
+
+    value._signed_request = AsyncMock(
+        side_effect=BinanceAPIError("Binance API error -1000: unknown", code=-1000)
+    )
+    with pytest.raises(BinanceAPIError):
+        await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1")
+
+
+async def test_algo_client_id_lookup_rejects_cross_symbol_or_client_identity():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    value._signed_request = AsyncMock(
+        return_value=dict(
+            algoId=321,
+            clientAlgoId="different-client",
+            algoType="CONDITIONAL",
+            orderType="STOP_MARKET",
+            symbol="ETHUSDT",
+            side="SELL",
+            positionSide="BOTH",
+            algoStatus="NEW",
+        )
+    )
+
+    with pytest.raises(ExecutionUncertainError):
+        await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1")
