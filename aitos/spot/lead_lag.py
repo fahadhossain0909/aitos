@@ -81,12 +81,28 @@ class FuturesSpotLeadLagAnalyzer:
             str(key).upper(): str(value).upper()
             for key, value in (symbol_aliases or {}).items()
         }
+        self._allowed_symbols: frozenset[str] | None = None
         self._pairs: dict[str, _PairState] = {}
         self._estimates: dict[str, LeadLagEstimate] = {}
         self._subscriptions = []
         self._started = False
         self._accepted = 0
         self._rejected = 0
+
+    def set_symbols(self, symbols: list[str] | tuple[str, ...]) -> None:
+        """Restrict analysis to the selected Spot universe after alias mapping."""
+        normalized = frozenset(str(symbol).upper() for symbol in symbols if symbol)
+        if not normalized or len(normalized) > self.max_symbols:
+            raise ValueError("lead-lag symbol universe is empty or exceeds capacity")
+        self._allowed_symbols = normalized
+        self._pairs = {
+            symbol: pair for symbol, pair in self._pairs.items()
+            if symbol in normalized
+        }
+        self._estimates = {
+            symbol: estimate for symbol, estimate in self._estimates.items()
+            if symbol in normalized
+        }
 
     def _canonical_symbol(self, event: MarketEvent) -> str:
         symbol = event.symbol.upper()
@@ -128,7 +144,9 @@ class FuturesSpotLeadLagAnalyzer:
             self._rejected += 1
             return None
         symbol = self._canonical_symbol(event)
-        if not symbol:
+        if not symbol or (
+            self._allowed_symbols is not None and symbol not in self._allowed_symbols
+        ):
             self._rejected += 1
             return None
         bucket = int(event.event_time.timestamp()) // self.bucket_seconds
