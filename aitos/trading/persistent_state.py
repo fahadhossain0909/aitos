@@ -415,13 +415,15 @@ class DurableTradingStateStore:
             """,
             parameters={"client_order_id": client_order_id},
         )
-        if not result.result_rows or not result.result_rows[0][1]:
+        if not result.result_rows:
             return None
         row = result.result_rows[0]
         if len(row) < 5 or int(row[4]) != 1:
             raise RuntimeError(
                 "ambiguous latest order-intent record; execution recovery blocked"
             )
+        if not row[1]:
+            return None
         return {
             "symbol": str(row[0]),
             "state": str(row[1]),
