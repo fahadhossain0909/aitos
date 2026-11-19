@@ -156,3 +156,17 @@ Before declaring this initiative complete, these staged settings must be wired
 to their owning components and covered by runtime integration tests; use the
 effective config report to distinguish configured intent from measured runtime
 behavior.
+
+
+## Adaptive compute foundation (PR #261)
+
+The additive `aitos.compute.resource_governor` module now provides process-visible
+CPU/cgroup and memory/cgroup discovery, conservative resource-budget
+calculation, protected-symbol-aware capacity planning, and advisory pressure
+classification. See `engineering/ADAPTIVE_COMPUTE_FOUNDATION.md`.
+
+This is a tested library foundation only. It is not yet wired into
+`TuningSettings`, the staged scanner, service lifecycle, or automatic runtime
+degradation. Existing profile-based limits remain authoritative until those
+integration phases are separately reviewed and enabled. No automatic live
+strategy or risk mutation is introduced.
