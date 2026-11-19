@@ -50,6 +50,13 @@ class SpotSymbolFilters:
     def validate(self, quantity: Decimal, price: Decimal, market: bool = False) -> Decimal:
         if quantity <= 0 or price <= 0:
             raise ValueError("quantity and price must be positive")
+        if not market:
+            if self.min_price > 0 and price < self.min_price:
+                raise ValueError("price is below PRICE_FILTER minimum")
+            if self.max_price > 0 and price > self.max_price:
+                raise ValueError("price exceeds PRICE_FILTER maximum")
+            if self.tick_size > 0 and self.round_price(price) != price:
+                raise ValueError("price is not aligned to PRICE_FILTER tick size")
         step = self.market_step_size if market else self.lot_step_size
         minimum = self.market_min_qty if market else self.lot_min_qty
         maximum = self.market_max_qty if market else self.lot_max_qty
