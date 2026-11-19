@@ -325,6 +325,11 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return self._intent_store.scope
 
     @property
+    def execution_intent_store(self) -> ExecutionIntentStore | None:
+        """Expose the scoped durable intent journal for read-only diagnostics."""
+        return self._intent_store
+
+    @property
     def requires_exchange_execution(self) -> bool:
         return True
 
