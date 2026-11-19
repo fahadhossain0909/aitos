@@ -114,7 +114,9 @@ async def test_historical_ingestion_persists_raw_provenance_revisions_then_curso
         .sha256(provider.page.provenance[0].raw_payload)
         .hexdigest()
     )
-    assert base64.b64decode(provenance_row[8]) == provider.page.provenance[0].raw_payload
+    assert (
+        base64.b64decode(provenance_row[8]) == provider.page.provenance[0].raw_payload
+    )
 
 
 @pytest.mark.asyncio
@@ -150,7 +152,6 @@ def test_source_provenance_rejects_naive_time_and_oversized_payload():
         SourceProvenance(
             "s", "kind", "r", "https://example.test", NOW, NOW, b"x" * 512001, {}
         )
-
 
 
 @pytest.mark.asyncio
