@@ -408,7 +408,7 @@ def test_portfolio_consensus_projects_same_symbol_pending_order_separately():
     portfolio = make_portfolio(
         positions=(
             PositionExposure(
-                symbol="BTCUSDT",
+                symbol="btcusdt",
                 notional_usd=5_000.0,
                 leverage=5.0,
                 side="LONG",
