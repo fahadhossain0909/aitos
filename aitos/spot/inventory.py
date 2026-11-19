@@ -3,6 +3,7 @@
 This ledger records AITOS-managed inventory only; external wallet balances must
 never be silently adopted as strategy-owned inventory.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -140,10 +141,19 @@ class InventoryLedger:
         with self._lock:
             self._db.close()
 
-    def record_fill(self, *, fill_key: str, symbol: str, base_asset: str,
-                    quote_asset: str, side: str, quantity: Decimal,
-                    price: Decimal, commission: Decimal = Decimal("0"),
-                    commission_asset: str = "") -> bool:
+    def record_fill(
+        self,
+        *,
+        fill_key: str,
+        symbol: str,
+        base_asset: str,
+        quote_asset: str,
+        side: str,
+        quantity: Decimal,
+        price: Decimal,
+        commission: Decimal = Decimal("0"),
+        commission_asset: str = "",
+    ) -> bool:
         if not fill_key or quantity <= 0 or price <= 0 or commission < 0:
             raise ValueError("invalid fill")
         side = side.upper()
