@@ -153,8 +153,7 @@ def test_shadow_consumer_rejects_unresolved_and_out_of_order_events():
 
 def test_shadow_consumer_rejects_invalid_price_and_bounds_instrument_count():
     consumer = make_consumer()
-    invalid = make_event(event_id="invalid")
-    invalid.payload["lastPrice"] = "NaN"
+    invalid = make_event(event_id="invalid", price=float("nan"))
     consumer._process(invalid)
     assert consumer.snapshot().rejected_invalid_price == 1
 
