@@ -43,6 +43,8 @@ class CanonicalMarketDataPersistenceSink:
             MarketEventType.TRADE,
             MarketEventType.BOOK_DELTA,
             MarketEventType.BOOK_SNAPSHOT,
+            MarketEventType.TICKER,
+            MarketEventType.KLINE,
         ),
     ) -> None:
         self._bus = MarketDataBus(event_bus)
@@ -66,6 +68,7 @@ class CanonicalMarketDataPersistenceSink:
         self._rejected = 0
         self._filtered = 0
         self._batches = 0
+        self._versioned_events = 0
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -124,6 +127,10 @@ class CanonicalMarketDataPersistenceSink:
                 return
         elif event.event_type is MarketEventType.BOOK_DELTA:
             if event.symbol.upper() not in self._historical_books:
+                self._filtered += 1
+                return
+        elif event.event_type in {MarketEventType.TICKER, MarketEventType.KLINE}:
+            if event.symbol.upper() not in self._historical_trades:
                 self._filtered += 1
                 return
         elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
@@ -237,6 +244,14 @@ class CanonicalMarketDataPersistenceSink:
         for event in events:
             grouped[event.event_type].append(event)
 
+        versioned_writer = getattr(
+            self._repository, "save_market_event_versioned", None
+        )
+        if versioned_writer is not None:
+            for event in events:
+                await versioned_writer(event)
+                self._versioned_events += 1
+
         trades = grouped.get(MarketEventType.TRADE, [])
         if trades:
             await self._repository.save_trade_ticks(
@@ -322,6 +337,7 @@ class CanonicalMarketDataPersistenceSink:
             "batch_size": self._batch_size,
             "batch_wait_seconds": self._batch_wait,
             "batches": self._batches,
+            "versioned_events": self._versioned_events,
             "persist_event_types": sorted(
                 item.value for item in self._persist_event_types
             ),
