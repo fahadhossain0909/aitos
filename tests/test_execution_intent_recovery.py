@@ -295,3 +295,48 @@ async def test_legacy_protection_never_fabricates_resting_acceptance(response):
     value._signed_request = AsyncMock(return_value=response)
     with pytest.raises(ExecutionUncertainError):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
+
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        OrderResult("algo:123", "ETHUSDT", TradeSide.LONG, 0, 90),
+        OrderResult("algo:123", "BTCUSDT", TradeSide.SHORT, 0, 90),
+        OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, 90, client_order_id="other"),
+        OrderResult("algo:0", "BTCUSDT", TradeSide.LONG, 0, 90),
+        OrderResult("algo:not-an-id", "BTCUSDT", TradeSide.LONG, 0, 90),
+        OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, float("nan")),
+    ],
+)
+def test_protection_acceptance_must_match_preclaim_identity(tmp_path, result):
+    journal = store(tmp_path)
+    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    with pytest.raises(ValueError):
+        journal.record_protection("intent-one", result)
+    assert journal.unresolved()[0]["state"] == "SUBMITTING"
+
+
+def test_protection_acceptance_rejects_nonfinite_quantity(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    accepted = OrderResult(
+        "algo:123", "BTCUSDT", TradeSide.LONG, float("nan"), 90
+    )
+    with pytest.raises(ValueError, match="valid identity"):
+        journal.record_protection("intent-one", accepted)
+    assert journal.unresolved()[0]["state"] == "SUBMITTING"
+
+
+def test_protection_acceptance_rejects_missing_or_already_transitioned_preclaim(
+    tmp_path,
+):
+    journal = store(tmp_path)
+    accepted = OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, 90)
+    with pytest.raises(ValueError, match="no submitting preclaim"):
+        journal.record_protection("missing", accepted)
+    journal.begin(request(order_type="STOP_MARKET", reduce_only=True))
+    journal.record_protection("intent-one", accepted)
+    with pytest.raises(ValueError, match="no submitting preclaim"):
+        journal.record_protection("intent-one", accepted)
+    assert journal.unresolved()[0]["state"] == "PROTECTED"
