@@ -617,7 +617,7 @@ class SpotRuntime:
                 raise RuntimeError(
                     "Spot durable persistence requires the canonical MarketDataBus"
                 )
-            self._persistence_sink = CanonicalMarketDataPersistenceSink(
+            sink = CanonicalMarketDataPersistenceSink(
                 event_bus,
                 self.repository,
                 historical_book_symbols=tuple(book_symbols),
@@ -625,7 +625,15 @@ class SpotRuntime:
                 market_types=("spot",),
                 canonical_only=True,
             )
-            await self._persistence_sink.initialize()
+            self._persistence_sink = sink
+            try:
+                await sink.initialize()
+            except BaseException:
+                self._persistence_sink = None
+                await sink.shutdown()
+                await self.lead_lag.stop()
+                await self.market_consumer.stop()
+                raise
         self._market_stream_health.clear()
         self._market_tasks = [
             asyncio.create_task(
