@@ -1,4 +1,3 @@
-
 import pytest
 
 from aitos.core.contracts import Event
