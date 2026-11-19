@@ -214,7 +214,8 @@ def audit_protection_inventory(
                     "symbol": request["symbol"],
                     "status": "not_in_open_inventory",
                     "reasons": [
-                        "may be filled, canceled, expired or absent; query terminal/child evidence"
+                        "may be filled, canceled, expired or absent; "
+                        "query terminal/child evidence"
                     ],
                 }
             )
@@ -231,7 +232,9 @@ def audit_protection_inventory(
         "next_steps": [
             "Verify export provenance and current account positions independently.",
             "Query terminal algo and actual child fill evidence for missing orders.",
-            "Durably bind accepted protective IDs to trade state before any acknowledgement.",
-            "Do not clear intents or submit replacement orders based on this report alone.",
+            "Durably bind accepted protective IDs to trade state before any "
+            "acknowledgement.",
+            "Do not clear intents or submit replacement orders based on this "
+            "report alone.",
         ],
     }
