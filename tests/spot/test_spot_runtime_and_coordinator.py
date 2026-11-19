@@ -399,7 +399,7 @@ async def test_spot_candidate_kernel_short_is_never_authorized():
         market_data=SimpleNamespace(),
         executor=FakeExecutor(),
         inventory=inventory,
-        scanner=__import__("aitos.spot.scanner", fromlist=["SpotOpportunityScanner"]).SpotOpportunityScanner(),
+        scanner=SpotOpportunityScanner(),
         coordinator=SimpleNamespace(),
         market_consumer=SimpleNamespace(),
         lead_lag=SimpleNamespace(),
