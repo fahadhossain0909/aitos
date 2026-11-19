@@ -6,6 +6,7 @@ from aitos.world_intelligence.point_in_time import (
     EventRevision,
     MarketBarRevision,
     build_point_in_time_labels,
+    to_event_impact_training_rows,
 )
 
 BASE = datetime(2026, 10, 1, tzinfo=timezone.utc)
@@ -136,3 +137,21 @@ def test_duplicate_revisions_invalid_timestamps_and_horizons_fail_closed():
             horizons={"1h": timedelta(hours=1)},
             as_of=datetime(2026, 10, 1),
         )
+
+
+
+def test_matured_labels_convert_to_training_rows_without_clipping_extreme_returns():
+    report = build(
+        [event()],
+        [
+            bar(1, close_hour=2, available_hour=2, close_price=250.0),
+            bar(2, close_hour=3, available_hour=3, open_price=250.0, close_price=260.0),
+            bar(3, close_hour=4, available_hour=4, open_price=260.0, close_price=270.0),
+            bar(4, close_hour=5, available_hour=5, open_price=270.0, close_price=280.0),
+            bar(5, close_hour=6, available_hour=6, open_price=280.0, close_price=290.0),
+        ],
+    )
+    rows = to_event_impact_training_rows(report)
+    one_hour = next(item for item in rows if item.horizon == "1h")
+    assert one_hour.forward_return == pytest.approx(1.5)
+    assert one_hour.event_id == "event-1:1h"
