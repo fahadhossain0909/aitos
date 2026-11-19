@@ -27,8 +27,10 @@ def _lexical_score(query: str, document: str) -> float:
     return len(q & d) / len(q | d) if q and d else 0.0
 
 def _recency_score(event_time: Any, now: datetime, half_life_days: float) -> float:
-    if half_life_days <= 0:
-        raise ValueError("half_life_days must be positive")
+    if not math.isfinite(half_life_days) or half_life_days <= 0:
+        raise ValueError("half_life_days must be finite and positive")
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     if isinstance(event_time, str):
         try:
             event_time = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
@@ -41,7 +43,21 @@ def _recency_score(event_time: Any, now: datetime, half_life_days: float) -> flo
     age = max(0.0, (now - event_time).total_seconds() / 86400)
     return math.exp(-math.log(2) * age / half_life_days)
 
-def _outcome_score(row: dict[str, Any]) -> float:
+def _outcome_score(row: dict[str, Any], now: datetime) -> float:
+    # A closed-trade outcome is unavailable to a historical decision until its
+    # outcome timestamp. Treat future outcomes as unknown to prevent leakage.
+    available_at = row.get("outcome_available_at") or row.get("closed_at")
+    if isinstance(available_at, str):
+        try:
+            available_at = datetime.fromisoformat(available_at.replace("Z", "+00:00"))
+        except ValueError:
+            available_at = None
+    if isinstance(available_at, datetime):
+        if available_at.tzinfo is None:
+            available_at = available_at.replace(tzinfo=timezone.utc)
+        comparison_now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        if available_at > comparison_now:
+            return 0.5
     try:
         pnl = float(row.get("pnl"))
     except (TypeError, ValueError):
@@ -77,7 +93,7 @@ def rank_hybrid_memories(query: str, rows: Iterable[dict[str, Any]], *,
             "lexical": _lexical_score(query, document),
             "semantic": min(1.0, max(0.0, semantic)),
             "recency": _recency_score(row.get("event_time"), now, half_life_days),
-            "outcome": _outcome_score(row),
+            "outcome": _outcome_score(row, now),
         }
         row["retrieval_score"] = sum(getattr(weights, k) * v for k, v in components.items()) / total
         row["retrieval_components"] = components
