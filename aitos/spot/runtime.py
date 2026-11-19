@@ -96,6 +96,10 @@ def build_spot_runtime(
     policy = settings.spot
     if not policy.enabled:
         raise RuntimeError("Spot runtime is disabled; set AITOS_SPOT_ENABLED=true")
+    if policy.execution_enabled and capital_gateway is None:
+        raise RuntimeError(
+            "Spot execution requires the shared AITOS CapitalGateway instance"
+        )
     if not policy.testnet and policy.execution_enabled:
         if not (policy.allow_mainnet and mainnet_approved):
             raise RuntimeError("Spot mainnet execution requires separate operator approval")
