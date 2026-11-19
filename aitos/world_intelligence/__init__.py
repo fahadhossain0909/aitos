@@ -111,6 +111,12 @@ from aitos.world_intelligence.worker import (
     SourceRunResult,
 )
 
+from aitos.world_intelligence.historical_ingestion import HistoricalIngestionStore, NormalizedProviderHistoryAdapter, SourceProvenance
+from aitos.world_intelligence.propagation import PropagationEstimate, PropagationSample, validate_event_propagation
+from aitos.world_intelligence.execution_replay import ExecutionReplayConfig, ExecutionReplayReport, FundingObservation, ReplayBookLevel, ReplayBookSnapshot, ReplayOrder, replay_execution
+from aitos.world_intelligence.research_validation import OOSPrediction, OOSRegimeReport, OOSValidationReport, evaluate_regime_oos
+from aitos.world_intelligence.model_governance import EventImpactCandidate, EventImpactModelGovernance
+
 __all__ = [
     "DEFAULT_ENTITY_REGISTRY",
     "AblationComparison",
@@ -124,6 +130,22 @@ __all__ = [
     "ClickHouseAssetSnapshotProvider",
     "ClickHouseIntelligenceStore",
     "ClickHousePointInTimeStore",
+    "EventImpactModelGovernance",
+    "EventImpactCandidate",
+    "OOSValidationReport",
+    "OOSRegimeReport",
+    "OOSPrediction",
+    "ReplayOrder",
+    "ReplayBookSnapshot",
+    "ReplayBookLevel",
+    "FundingObservation",
+    "ExecutionReplayReport",
+    "ExecutionReplayConfig",
+    "PropagationSample",
+    "PropagationEstimate",
+    "SourceProvenance",
+    "NormalizedProviderHistoryAdapter",
+    "HistoricalIngestionStore",
     "CoordinatedAmplificationCluster",
     "CoordinationEdge",
     "CursorReplayConflict",
@@ -182,6 +204,9 @@ __all__ = [
     "estimate_asset_impact",
     "evaluate_event_impact_model",
     "evaluate_event_impact_walk_forward",
+    "validate_event_propagation",
+    "replay_execution",
+    "evaluate_regime_oos",
     "fit_event_impact_model",
     "estimate_event_beta",
     "estimate_source_reliability",
