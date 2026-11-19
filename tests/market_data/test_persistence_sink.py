@@ -277,3 +277,69 @@ def test_market_event_rejects_non_positive_revision():
             source=MarketSource.WEBSOCKET,
             event_revision=0,
         )
+
+
+
+@pytest.mark.asyncio
+async def test_canonical_only_spot_persistence_skips_legacy_symbol_tables():
+    repo = FakeRepository()
+    sink = CanonicalMarketDataPersistenceSink(
+        None,
+        repo,
+        historical_trade_symbols=("BTCUSDT",),
+        market_types=("spot",),
+        canonical_only=True,
+    )
+    now = datetime.now(timezone.utc)
+    spot_trade = MarketEvent(
+        event_type=MarketEventType.TRADE,
+        exchange="binance",
+        market="spot",
+        market_type="spot",
+        instrument_id="binance:spot:BTCUSDT",
+        symbol="BTCUSDT",
+        event_time=now,
+        ingest_time=now,
+        payload={
+            "symbol": "BTCUSDT",
+            "trade_id": 71,
+            "price": 90000.0,
+            "quantity": 0.1,
+            "side": "BUY",
+            "is_buyer_maker": False,
+            "timestamp": now.isoformat(),
+        },
+        source=MarketSource.WEBSOCKET,
+    )
+    await sink._persist_batch([spot_trade])
+    assert repo.versioned_events == [spot_trade]
+    assert repo.trades == []
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flushes_queued_canonical_events_before_worker_exit():
+    repo = FakeRepository()
+    sink = CanonicalMarketDataPersistenceSink(
+        None,
+        repo,
+        canonical_only=True,
+        shutdown_flush_seconds=1.0,
+    )
+    spot_ticker = MarketEvent(
+        event_type=MarketEventType.TICKER,
+        exchange="binance",
+        market="spot",
+        market_type="spot",
+        instrument_id="binance:spot:ETHUSDT",
+        symbol="ETHUSDT",
+        event_time=datetime.now(timezone.utc),
+        payload={"last_price": "3000"},
+        source=MarketSource.WEBSOCKET,
+    )
+    await sink._queue.put(spot_ticker)
+    sink._workers = [
+        __import__("asyncio").create_task(sink._worker(0))
+    ]
+    await sink.shutdown()
+    assert repo.versioned_events == [spot_ticker]
+    assert sink.snapshot()["shutdown_dropped"] == 0
