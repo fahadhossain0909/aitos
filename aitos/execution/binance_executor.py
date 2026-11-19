@@ -308,6 +308,28 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             validated.append(dict(row))
         return validated
 
+    async def get_account_equity(self, asset: str = "USDT") -> float:
+        """Return total futures margin equity, including unrealized PnL.
+
+        Available balance is spendable margin, not account equity. Portfolio
+        risk and drawdown must use Binance's totalMarginBalance instead.
+        """
+        if asset != "USDT":
+            raise ValueError("USD-M total margin equity is denominated in USDT")
+        response = await self._signed_request("GET", "/fapi/v3/account", {})
+        if not isinstance(response, dict):
+            raise ValueError("Binance account equity response must be an object")
+        raw_equity = response.get("totalMarginBalance")
+        if isinstance(raw_equity, bool):
+            raise ValueError("Binance total margin equity is invalid")
+        try:
+            equity = float(raw_equity)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("Binance total margin equity is unavailable") from None
+        if not math.isfinite(equity) or equity < 0:
+            raise ValueError("Binance total margin equity is non-finite or negative")
+        return equity
+
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
         for a real portfolio tracker rather than the paper-trading
