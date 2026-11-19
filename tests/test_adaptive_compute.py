@@ -200,7 +200,6 @@ def test_non_finite_workload_and_pressure_values_are_rejected():
         raise AssertionError("non-finite pressure metrics must be rejected")
 
 
-
 def test_pressure_controller_escalates_and_recovers_with_hysteresis():
     from aitos.compute.pressure_controller import (
         PressurePolicy,
@@ -272,7 +271,6 @@ def test_pressure_controller_critical_is_immediate_and_clock_is_monotonic():
         raise AssertionError("non-monotonic clock must be rejected")
 
 
-
 def test_adaptive_compute_tuning_is_opt_in_and_live_rejected():
     from pydantic import ValidationError
 
@@ -310,7 +308,6 @@ def test_adaptive_compute_pressure_policy_is_validated():
         pass
     else:
         raise AssertionError("negative recovery hold must be rejected")
-
 
 
 def test_adaptive_compute_runtime_factory_is_disabled_by_default():
@@ -361,7 +358,6 @@ def test_adaptive_compute_runtime_factory_fails_closed_for_live_mode():
         pass
     else:
         raise AssertionError("live adaptive compute must fail closed")
-
 
 
 def test_workload_estimator_uses_conservative_cost_until_calibrated():
