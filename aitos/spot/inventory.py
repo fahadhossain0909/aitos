@@ -58,7 +58,8 @@ class InventoryLedger:
         """
         )
         columns = {
-            row[1] for row in self._db.execute("PRAGMA table_info(spot_fills)").fetchall()
+            row[1]
+            for row in self._db.execute("PRAGMA table_info(spot_fills)").fetchall()
         }
         if "commission_quote_value" not in columns:
             self._db.execute(
