@@ -65,7 +65,8 @@ async def test_governance_drift_scheduler_is_owned_by_application_lifecycle():
             self.stopped = True
 
     scheduler = FakeDriftScheduler()
-    provider = lambda: ({}, {})
+    def provider():
+        return {}, {}
     system.governance_drift_scheduler = scheduler
     system.governance_drift_batch_provider = provider
     system._governance_drift_task = None
