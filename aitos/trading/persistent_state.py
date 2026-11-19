@@ -315,17 +315,29 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                argMax(symbol, updated_at) AS symbol,
-                argMax(state, updated_at) AS state,
-                argMax(request_json, updated_at) AS request_json
+                any(symbol) AS symbol,
+                any(state) AS state,
+                any(request_json) AS request_json,
+                uniqExact(tuple(symbol, state, request_json, result_json))
+                    AS latest_versions
             FROM order_execution_ledger
+            WHERE (client_order_id, updated_at) IN (
+                SELECT client_order_id, max(updated_at)
+                FROM order_execution_ledger
+                GROUP BY client_order_id
+            )
             GROUP BY client_order_id
-            HAVING state = 'SUBMITTING'
             ORDER BY client_order_id
             """
         )
         pending = []
         for row in result.result_rows:
+            if len(row) < 5 or int(row[4]) != 1:
+                raise RuntimeError(
+                    "ambiguous latest order-intent evidence; startup recovery blocked"
+                )
+            if str(row[2]) != "SUBMITTING":
+                continue
             pending.append(
                 {
                     "client_order_id": str(row[0]),
@@ -343,11 +355,16 @@ class DurableTradingStateStore:
             """
             SELECT
                 client_order_id,
-                argMax(state, updated_at) AS state,
-                argMax(result_json, updated_at) AS result_json
+                any(state) AS state,
+                any(result_json) AS result_json,
+                uniqExact(tuple(state, result_json)) AS latest_versions
             FROM order_execution_ledger
+            WHERE (client_order_id, updated_at) IN (
+                SELECT client_order_id, max(updated_at)
+                FROM order_execution_ledger
+                GROUP BY client_order_id
+            )
             GROUP BY client_order_id
-            HAVING state = 'ACKNOWLEDGED'
             """
         )
         trade_rows = await client.query(
@@ -360,6 +377,12 @@ class DurableTradingStateStore:
         known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
         unlinked = []
         for row in orders.result_rows:
+            if len(row) < 4 or int(row[3]) != 1:
+                raise RuntimeError(
+                    "ambiguous latest acknowledged-order evidence; recovery blocked"
+                )
+            if str(row[1]) != "ACKNOWLEDGED":
+                continue
             client_order_id = str(row[0])
             if not client_order_id.startswith("aitos-entry-"):
                 continue
@@ -376,18 +399,29 @@ class DurableTradingStateStore:
         result = await client.query(
             """
             SELECT
-                argMax(symbol, updated_at) AS symbol,
-                argMax(state, updated_at) AS state,
-                argMax(request_json, updated_at) AS request_json,
-                argMax(result_json, updated_at) AS result_json
+                any(symbol) AS symbol,
+                any(state) AS state,
+                any(request_json) AS request_json,
+                any(result_json) AS result_json,
+                uniqExact(tuple(symbol, state, request_json, result_json))
+                    AS latest_versions
             FROM order_execution_ledger
             WHERE client_order_id = {client_order_id:String}
+              AND updated_at = (
+                  SELECT max(updated_at)
+                  FROM order_execution_ledger
+                  WHERE client_order_id = {client_order_id:String}
+              )
             """,
             parameters={"client_order_id": client_order_id},
         )
         if not result.result_rows or not result.result_rows[0][1]:
             return None
         row = result.result_rows[0]
+        if len(row) < 5 or int(row[4]) != 1:
+            raise RuntimeError(
+                "ambiguous latest order-intent record; execution recovery blocked"
+            )
         return {
             "symbol": str(row[0]),
             "state": str(row[1]),
