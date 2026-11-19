@@ -436,3 +436,37 @@ async def test_live_guard_blocks_unpriced_pending_entry_order(protected_intent):
         await require_live_account_exposure_reconciled(
             executor, protected_intent, [], now=NOW
         )
+
+
+
+@pytest.mark.asyncio
+async def test_terminal_protection_is_not_expected_in_open_inventory(
+    protected_intent,
+):
+    protected_intent.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    protected_intent.mark_applied("aitos-protection-1", "closed-trade-1")
+    protected_intent.mark_protection_terminal(
+        "algo:123",
+        symbol="BTCUSDT",
+        status="CANCELED",
+        executed_quantity=0.0,
+    )
+    executor = ReadOnlyExecutor("paper-account", [])
+
+    report = await audit_exchange_protection_inventory(
+        executor, protected_intent, now=NOW, trades=[]
+    )
+
+    assert report["findings"] == []
+    assert report["account_exposure_verified"] is True
+    assert protected_intent.protection_intents()[0]["state"] == "TERMINAL"
