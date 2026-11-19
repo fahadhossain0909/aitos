@@ -72,6 +72,7 @@ class PortfolioRiskSnapshot:
     position_risk_pct: dict[str, float]
     correlations: dict[tuple[str, str], float]
     position_sides: dict[str, str] | None = None
+    position_instruments: dict[str, str] | None = None
 
     @property
     def total_risk_pct(self) -> float:
@@ -112,11 +113,19 @@ class PortfolioRiskSnapshot:
             str(symbol): str(side).upper()
             for symbol, side in (position_sides or self.position_sides or {}).items()
         }
+        instruments = {
+            str(key): str(value)
+            for key, value in (self.position_instruments or {}).items()
+        }
         symbols = sorted(risks)
         variance = sum(risk * risk for risk in risks.values())
         for index, symbol_a in enumerate(symbols):
             for symbol_b in symbols[index + 1 :]:
-                correlation = self.correlation(symbol_a, symbol_b, unknown_correlation)
+                correlation = self.correlation(
+                    instruments.get(symbol_a, symbol_a),
+                    instruments.get(symbol_b, symbol_b),
+                    unknown_correlation,
+                )
                 side_a = sides.get(symbol_a)
                 side_b = sides.get(symbol_b)
                 if side_a in {"LONG", "SHORT"} and side_b in {"LONG", "SHORT"}:
@@ -295,8 +304,11 @@ class PortfolioProtection:
         existing_variance = existing_correlated**2
         cross_term = 0.0
         for other, risk in existing_positions.items():
+            other_instrument = (snapshot.position_instruments or {}).get(
+                other, other
+            )
             correlation = snapshot.correlation(
-                symbol, other, self.config.unknown_correlation
+                symbol, other_instrument, self.config.unknown_correlation
             )
             existing_side = existing_sides.get(other)
             if existing_side in {"LONG", "SHORT"}:
