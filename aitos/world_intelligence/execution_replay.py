@@ -49,7 +49,7 @@ class ReplayOrder:
     position_end_at: datetime | None = None
 
     def __post_init__(self):
-        if not self.order_id.strip() or self.side not in {"buy", "sell"}:
+        if not self.order_id.strip() or self.side not in {"buy", "sell"} or self.liquidity not in {"maker", "taker"}:
             raise ValueError("order identity and side are required")
         if not isfinite(self.quantity) or self.quantity <= 0:
             raise ValueError("order quantity must be positive and finite")
