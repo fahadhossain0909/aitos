@@ -214,6 +214,18 @@ class ExecutionIntentStore:
             ).fetchall()
         return [dict(row) for row in rows if symbol is None or row["symbol"] == symbol]
 
+    def protection_intents(self) -> list[dict]:
+        """Read all non-rejected protective intent states for audit only."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT client_id,symbol,state,request_json,result_json "
+                "FROM execution_intents WHERE scope=? "
+                "AND state IN ('SUBMITTING','PROTECTED','APPLIED') "
+                "ORDER BY client_id",
+                (self.scope,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def assert_ready(self) -> None:
         rows = self.unresolved()
         if rows:
