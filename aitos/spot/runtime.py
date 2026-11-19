@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class SpotRuntime:
     max_symbols: int = 20
     min_quote_volume: Decimal = Decimal("100000")
     owns_capital_gateway: bool = False
+    _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
 
     async def eligible_instruments(self):
         """Return the highest-turnover supported Spot symbols for this runtime."""
@@ -111,7 +113,56 @@ class SpotRuntime:
     def unresolved_order_intents(self):
         return self.inventory.unresolved_order_intents()
 
+    async def start_market_data(self, market_bus) -> list[asyncio.Task]:
+        """Start bounded Spot subscriptions explicitly; never auto-start on import."""
+        if self._market_tasks:
+            raise RuntimeError("Spot market-data runtime is already started")
+        instruments = await self.eligible_instruments()
+        symbols = [item.symbol for item in instruments]
+        if not symbols:
+            raise RuntimeError("no eligible liquid Spot instruments were discovered")
+        book_symbols = symbols[:5]
+        kline_symbols = symbols[:5]
+        self._market_tasks = [
+            asyncio.create_task(
+                self.publish_trades(market_bus, symbols),
+                name="aitos-spot-trades",
+            ),
+            asyncio.create_task(
+                self.publish_tickers(market_bus, symbols),
+                name="aitos-spot-tickers",
+            ),
+            asyncio.create_task(
+                self.publish_order_books(market_bus, book_symbols, levels=20),
+                name="aitos-spot-order-books",
+            ),
+            asyncio.create_task(
+                self.publish_klines(market_bus, kline_symbols, timeframe="1m"),
+                name="aitos-spot-klines",
+            ),
+        ]
+        return list(self._market_tasks)
+
+    async def stop_market_data(self) -> None:
+        tasks, self._market_tasks = self._market_tasks, []
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def market_data_task_status(self) -> dict[str, str]:
+        return {
+            task.get_name(): (
+                "failed" if task.done() and task.exception() is not None
+                else "stopped" if task.done()
+                else "running"
+            )
+            for task in self._market_tasks
+        }
+
     async def close(self) -> None:
+        await self.stop_market_data()
         await self.market_data.close()
         self.inventory.close()
         if self.owns_capital_gateway:
