@@ -361,3 +361,58 @@ def test_adaptive_compute_runtime_factory_fails_closed_for_live_mode():
         pass
     else:
         raise AssertionError("live adaptive compute must fail closed")
+
+
+
+def test_workload_estimator_uses_conservative_cost_until_calibrated():
+    from aitos.compute.workload_estimator import (
+        WorkloadCostModel,
+        estimate_symbol_workload,
+    )
+
+    estimate = estimate_symbol_workload(
+        None,
+        opportunity_score=9,
+        model=WorkloadCostModel(
+            minimum_samples=50,
+            unknown_cpu_cost_units=250,
+            unknown_memory_cost_mb=512,
+        ),
+    )
+    assert estimate.calibrated is False
+    assert estimate.workload.cpu_cost_units == 250
+    assert estimate.workload.memory_cost_mb == 512
+
+
+def test_workload_estimator_scales_cost_with_event_rate_depth_and_analysis():
+    from aitos.compute.workload_estimator import (
+        SymbolTelemetry,
+        WorkloadCostModel,
+        estimate_symbol_workload,
+    )
+
+    estimate = estimate_symbol_workload(
+        SymbolTelemetry(
+            symbol="BTCUSDT",
+            p95_event_rate_per_second=100,
+            p95_book_depth_levels=1000,
+            analysis_runs_per_minute=5,
+            sample_count=1000,
+        ),
+        model=WorkloadCostModel(minimum_samples=100),
+    )
+    assert estimate.calibrated is True
+    assert estimate.workload.cpu_cost_units > 20
+    assert estimate.workload.memory_cost_mb >= 16
+    assert estimate.reason == "p95_telemetry_cost_estimate"
+
+
+def test_workload_estimator_rejects_invalid_telemetry():
+    from aitos.compute.workload_estimator import SymbolTelemetry
+
+    try:
+        SymbolTelemetry("BTCUSDT", float("nan"), 10, 1, 100)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite telemetry must be rejected")
