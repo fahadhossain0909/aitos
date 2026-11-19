@@ -108,3 +108,8 @@ def test_immutable_canonical_event_round_trips_through_existing_wire_format():
     assert restored.stage_timestamps == event.stage_timestamps
     with pytest.raises(TypeError, match="immutable"):
         restored.payload["book"][0]["sizes"].append(3)
+
+    legacy_wire = dict(wire)
+    legacy_wire.pop("stage_timestamps")
+    legacy_restored = market_event_from_wire(legacy_wire)
+    assert legacy_restored.stage_timestamps == {}
