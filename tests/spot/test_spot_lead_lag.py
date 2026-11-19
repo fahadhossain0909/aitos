@@ -139,3 +139,43 @@ def test_futures_spot_lead_lag_estimates_expire_when_market_feed_stales():
         as_of=now - timedelta(seconds=30),
     )
     assert analyzer.estimate("BTCUSDT", max_age_seconds=15) is None
+
+
+
+def test_futures_spot_lead_lag_detects_spot_leading_by_two_seconds():
+    analyzer = FuturesSpotLeadLagAnalyzer(
+        bucket_seconds=1,
+        max_lag_seconds=4,
+        window_seconds=240,
+        min_observations=40,
+        min_abs_correlation=0.2,
+        min_lead_advantage=0.02,
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    spot_returns = [
+        0.0005 * math.sin(index * 1.71)
+        + 0.0003 * math.cos(index * 0.37)
+        + 0.0001 * math.sin(index * 0.11)
+        for index in range(240)
+    ]
+    spot_prices = [100.0]
+    futures_prices = [100.0]
+    for index in range(1, 240):
+        spot_prices.append(spot_prices[-1] * math.exp(spot_returns[index - 1]))
+        delayed_return = spot_returns[index - 3] if index >= 3 else 0.0
+        futures_prices.append(futures_prices[-1] * math.exp(delayed_return))
+
+    estimate = None
+    for index in range(240):
+        at = start + timedelta(seconds=index)
+        analyzer.ingest(_ticker("spot", "BTCUSDT", spot_prices[index], at))
+        estimate = analyzer.ingest(
+            _ticker("usd_m_futures", "BTCUSDT", futures_prices[index], at)
+        )
+
+    assert estimate is not None
+    assert estimate.status == "spot_leads"
+    assert estimate.leader == "spot"
+    assert estimate.lag_seconds == 2
+    assert estimate.correlation is not None and estimate.correlation > 0.95
+    assert estimate.confidence_low is not None and estimate.confidence_low > 0.8
