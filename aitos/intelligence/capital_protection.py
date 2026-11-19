@@ -5,11 +5,11 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
 from threading import RLock
-from typing import Callable
 
 
 @dataclass(frozen=True)

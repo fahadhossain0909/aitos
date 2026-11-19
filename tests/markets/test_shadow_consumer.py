@@ -2,11 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aitos.market_data.contracts import (
-    MarketEvent as CanonicalMarketEvent,
-    MarketEventType,
-    MarketSource,
-)
+from aitos.market_data.contracts import MarketEvent as CanonicalMarketEvent
+from aitos.market_data.contracts import MarketEventType, MarketSource
 from aitos.markets.contracts import AssetClass, Instrument
 from aitos.markets.engine import CrossMarketIntelligenceEngine
 from aitos.markets.shadow_consumer import MarketDataShadowConsumer

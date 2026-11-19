@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 import math
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
 
 from aitos.market_data.bus import MarketDataBus
 from aitos.market_data.contracts import MarketEvent as CanonicalMarketEvent

@@ -2,11 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aitos.market_data.contracts import (
-    MarketEvent as CanonicalMarketDataEvent,
-    MarketEventType as CanonicalMarketEventType,
-    MarketSource,
-)
+from aitos.market_data.contracts import MarketEvent as CanonicalMarketDataEvent
+from aitos.market_data.contracts import MarketEventType as CanonicalMarketEventType
+from aitos.market_data.contracts import MarketSource
 from aitos.markets.bridges import market_data_event_to_domain
 from aitos.markets.contracts import AssetClass, Instrument, MarketEventType
 

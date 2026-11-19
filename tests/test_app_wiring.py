@@ -21,11 +21,11 @@ from aitos.app import (
     shutdown_all,
 )
 from aitos.execution.order_executor import SimulatedOrderExecutor
+from aitos.intelligence import capital_runtime
 from aitos.markets.contracts import AssetClass, Instrument
 from aitos.markets.engine import CrossMarketIntelligenceEngine
 from aitos.markets.instrument_master import InstrumentMaster
 from aitos.markets.shadow_consumer import MarketDataShadowConsumer
-from aitos.intelligence import capital_runtime
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from tests.test_scanner import FakeScannerExchange
 

@@ -8,11 +8,12 @@ never counted as new entry exposure. No exchange IO or order mutation occurs.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from math import isfinite
-from typing import Any, Mapping
+from typing import Any
 
 from aitos.risk.models import PendingOrderExposure, PortfolioState
 

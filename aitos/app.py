@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from math import isfinite
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from math import isfinite
 from typing import Any, Protocol
 
 from aitos.config.paths import get_model_data_dir
@@ -32,6 +32,7 @@ _MODEL_DATA_DIR = get_model_data_dir()
 for _rl_dir in (_MODEL_DATA_DIR / "online_rl", _MODEL_DATA_DIR / "online_ml"):
     _rl_dir.mkdir(parents=True, exist_ok=True)
 
+from aitos.exchange.binance_pending_exposure import pending_exposures_from_open_orders
 from aitos.journal.decision_repository import DecisionJournalRepository
 from aitos.journal.journal_system import JournalSystem
 from aitos.journal.performance_evaluator import DecisionPerformanceEvaluator
@@ -41,9 +42,8 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
 from aitos.knowledge_graph.writer import GraphDriver, KnowledgeGraphWriter
 from aitos.logging_setup import get_logger
-from aitos.models.trade import Opportunity, TradeLifecycleState
 from aitos.markets.shadow_consumer import MarketDataShadowConsumer
-from aitos.exchange.binance_pending_exposure import pending_exposures_from_open_orders
+from aitos.models.trade import Opportunity, TradeLifecycleState
 from aitos.risk.models import (
     PendingOrderExposure,
     PortfolioState,

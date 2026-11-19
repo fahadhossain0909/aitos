@@ -422,7 +422,7 @@ async def audit_exchange_protection_inventory(
         **(
             {
                 "active_trade_ids": [
-                    str(getattr(trade, "trade_id"))
+                    str(trade.trade_id)
                     for trade in local_trades
                     if getattr(trade, "trade_id", None)
                 ]

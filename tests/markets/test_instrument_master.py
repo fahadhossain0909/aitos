@@ -4,7 +4,7 @@ import pytest
 
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
 from aitos.markets.contracts import AssetClass, Instrument
-from aitos.markets.instrument_master import InstrumentMaster, InstrumentKey
+from aitos.markets.instrument_master import InstrumentKey, InstrumentMaster
 
 
 def _event(*, venue="BINANCE", market="SPOT", symbol="btcusdt"):

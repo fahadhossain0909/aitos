@@ -2,11 +2,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from aitos.core.immutable import freeze_value
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
-from aitos.core.immutable import freeze_value
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)

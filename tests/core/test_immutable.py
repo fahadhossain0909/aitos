@@ -14,9 +14,9 @@ from aitos.market_data.contracts import (
 from aitos.markets.contracts import (
     AssetClass,
     Instrument,
-    MarketEvent as DomainMarketEvent,
-    MarketEventType as DomainMarketEventType,
 )
+from aitos.markets.contracts import MarketEvent as DomainMarketEvent
+from aitos.markets.contracts import MarketEventType as DomainMarketEventType
 from aitos.markets.state import GlobalMarketState
 
 

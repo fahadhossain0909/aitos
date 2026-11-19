@@ -9,10 +9,9 @@ consumers; updates require constructing and swapping a new snapshot.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 from aitos.market_data.contracts import MarketEvent as CanonicalMarketDataEvent
 

@@ -27,7 +27,6 @@ __all__ = [
     "LeadLagResult",
     "MacroEvent",
     "MarketDataAdapter",
-    "market_data_event_to_domain",
     "MarketEvent",
     "MarketEventType",
     "MarketRegime",
@@ -38,4 +37,5 @@ __all__ = [
     "RiskDecision",
     "RiskEngine",
     "TradingCalendar",
+    "market_data_event_to_domain",
 ]
