@@ -214,7 +214,6 @@ async def test_open_order_inventory_is_read_only_and_symbol_scoped():
         executedQty="0.5",
         reduceOnly=False,
         closePosition=False,
-        reduceOnly=False,
     )
     value._signed_request = AsyncMock(return_value=[row])
 
