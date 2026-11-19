@@ -76,7 +76,9 @@ def test_market_domain_event_payload_is_deeply_immutable():
     now = datetime.now(timezone.utc)
     event = DomainMarketEvent(
         event_type=DomainMarketEventType.QUOTE,
-        instrument=Instrument("BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot"),
+        instrument=Instrument(
+            "BTCUSDT", AssetClass.CRYPTO, "binance", market_type="spot"
+        ),
         event_time=now,
         payload={"levels": [{"price": 100.0}]},
         source="websocket",
