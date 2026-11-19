@@ -165,6 +165,7 @@ class HistoricalIngestionStore:
             CREATE TABLE IF NOT EXISTS {self.cursors_table} (
                 source_id LowCardinality(String),
                 cursor String,
+                fencing_token UInt64 DEFAULT 0,
                 updated_at DateTime64(6, 'UTC')
             )
             ENGINE = ReplacingMergeTree(updated_at)
@@ -248,7 +249,7 @@ class HistoricalIngestionStore:
         provider: HistoricalProvider,
         *,
         start_cursor: str | None = None,
-        max_pages: int = 1000,
+        max_pages: int = 1000, fencing_token: int = 0,
     ) -> tuple[int, str | None]:
         """Run a bounded provider cursor to exhaustion; date semantics stay in adapter."""
         if isinstance(max_pages, bool) or not 1 <= max_pages <= 100_000:
@@ -257,7 +258,9 @@ class HistoricalIngestionStore:
         pages = 0
         for _ in range(max_pages):
             previous = cursor
-            cursor = await self.ingest(provider, cursor=cursor)
+            cursor = await self.ingest(
+                provider, cursor=cursor, fencing_token=fencing_token
+            )
             pages += 1
             if cursor is None:
                 return pages, None
@@ -267,21 +270,26 @@ class HistoricalIngestionStore:
 
     async def load_cursor(self, source_id: str) -> str | None:
         result = await self.client.query(
-            f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "
+            f"SELECT argMax(cursor, (fencing_token, updated_at)) FROM {self.cursors_table} "
             "WHERE source_id = {source_id:String}",
             parameters={"source_id": source_id},
         )
         return (result.result_rows[0][0] or None) if result.result_rows else None
 
-    async def save_cursor(self, source_id: str, cursor: str | None) -> None:
+    async def save_cursor(
+        self, source_id: str, cursor: str | None, *, fencing_token: int = 0
+    ) -> None:
+        if isinstance(fencing_token, bool) or fencing_token < 0:
+            raise ValueError("fencing_token must be a non-negative integer")
         await self.client.insert(
             self.cursors_table,
-            [(source_id, cursor or "", datetime.now(timezone.utc))],
-            column_names=["source_id", "cursor", "updated_at"],
+            [(source_id, cursor or "", fencing_token, datetime.now(timezone.utc))],
+            column_names=["source_id", "cursor", "fencing_token", "updated_at"],
         )
 
     async def ingest(
-        self, provider: HistoricalProvider, *, cursor: str | None = None
+        self, provider: HistoricalProvider, *, cursor: str | None = None,
+        fencing_token: int = 0,
     ) -> str | None:
         current_cursor = (
             cursor if cursor is not None else await self.load_cursor(provider.source_id)
@@ -298,7 +306,9 @@ class HistoricalIngestionStore:
         await self.revisions.append_market_bar_revisions(
             list(page.market_bar_revisions)
         )
-        await self.save_cursor(page.source_id, page.next_cursor)
+        await self.save_cursor(
+            page.source_id, page.next_cursor, fencing_token=fencing_token
+        )
         return page.next_cursor
 
 
