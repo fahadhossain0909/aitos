@@ -26,6 +26,30 @@ class SpotRuntime:
     scanner: SpotOpportunityScanner
     coordinator: SpotTradingCoordinator
 
+    async def publish_trades(self, market_bus, symbols: list[str]) -> None:
+        async for event in self.market_data.stream_trades(self._bounded(symbols)):
+            await market_bus.publish(event)
+
+    async def publish_klines(self, market_bus, symbols: list[str],
+                             timeframe: str = "1m") -> None:
+        async for event in self.market_data.stream_klines(
+            self._bounded(symbols), timeframe
+        ):
+            await market_bus.publish(event)
+
+    async def publish_order_books(self, market_bus, symbols: list[str],
+                                  levels: int = 20) -> None:
+        async for event in self.market_data.stream_order_books(
+            self._bounded(symbols), levels
+        ):
+            await market_bus.publish(event)
+
+    def _bounded(self, symbols: list[str]) -> list[str]:
+        values = list(dict.fromkeys(s.upper() for s in symbols if s))
+        if not values or len(values) > 100:
+            raise ValueError("Spot subscription must contain 1 to 100 symbols")
+        return values
+
     async def close(self) -> None:
         await self.market_data.close()
         self.inventory.close()
