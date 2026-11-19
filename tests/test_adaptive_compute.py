@@ -270,3 +270,43 @@ def test_pressure_controller_critical_is_immediate_and_clock_is_monotonic():
         pass
     else:
         raise AssertionError("non-monotonic clock must be rejected")
+
+
+
+def test_adaptive_compute_tuning_is_opt_in_and_live_rejected():
+    from pydantic import ValidationError
+
+    from aitos.config.tuning import TuningSettings
+
+    defaults = TuningSettings()
+    assert defaults.runtime.adaptive_compute_enabled is False
+    assert defaults.runtime.pressure_recovery_hold_seconds == 30.0
+
+    try:
+        TuningSettings(
+            mode="live",
+            runtime={"adaptive_compute_enabled": True},
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("adaptive compute must remain disabled in live mode")
+
+
+def test_adaptive_compute_pressure_policy_is_validated():
+    from pydantic import ValidationError
+
+    from aitos.config.tuning import RuntimeTuning
+
+    policy = RuntimeTuning(
+        pressure_warning_hold_seconds=7,
+        pressure_recovery_hold_seconds=60,
+    )
+    assert policy.pressure_warning_hold_seconds == 7
+    assert policy.pressure_recovery_hold_seconds == 60
+    try:
+        RuntimeTuning(pressure_recovery_hold_seconds=-1)
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("negative recovery hold must be rejected")
