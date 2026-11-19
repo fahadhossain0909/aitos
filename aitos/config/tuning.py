@@ -156,7 +156,9 @@ class RuntimeTuning(BaseModel):
     pressure_warning_hold_seconds: float = Field(default=5.0, ge=0, le=300)
     pressure_high_hold_seconds: float = Field(default=3.0, ge=0, le=300)
     pressure_recovery_hold_seconds: float = Field(default=30.0, ge=0, le=3600)
-    pressure_minimum_transition_interval_seconds: float = Field(default=10.0, ge=0, le=3600)
+    pressure_minimum_transition_interval_seconds: float = Field(
+        default=10.0, ge=0, le=3600
+    )
     config_reload_enabled: bool = False
 
 
@@ -187,7 +189,8 @@ class TuningSettings(BaseModel):
                 "universe_mode='allowlist'"
             )
         if self.mode == "live" and (
-            self.runtime.adaptive_tuning_enabled or self.runtime.adaptive_compute_enabled
+            self.runtime.adaptive_tuning_enabled
+            or self.runtime.adaptive_compute_enabled
         ):
             raise ValueError(
                 "adaptive tuning/compute is not permitted in live mode; change "
