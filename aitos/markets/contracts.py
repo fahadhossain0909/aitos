@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from aitos.core.immutable import freeze_value
+
 
 class AssetClass(str, Enum):
     CRYPTO = "crypto"
@@ -94,6 +96,8 @@ class MarketEvent:
     stage_timestamps: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", freeze_value(self.payload))
+        object.__setattr__(self, "stage_timestamps", freeze_value(self.stage_timestamps))
         if self.schema_version < 1:
             raise ValueError("schema_version must be positive")
         if self.event_revision < 1:
