@@ -26,6 +26,7 @@ from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotOpportunityScanner
 from aitos.spot.websocket import BinanceSpotWebSocket
+from aitos.spot.user_stream import SpotUserDataStreamSupervisor
 
 logger = get_logger("aitos.spot.runtime")
 
@@ -44,6 +45,7 @@ class SpotRuntime:
     min_quote_volume: Decimal = Decimal("100000")
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
+    _user_stream: SpotUserDataStreamSupervisor | None = field(default=None, repr=False)
     quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
     _market_stream_health: dict[str, dict[str, object]] = field(
         default_factory=dict, repr=False
@@ -122,6 +124,52 @@ class SpotRuntime:
             raise ValueError("Spot subscription must contain 1 to 100 symbols")
         return values
 
+    async def start_user_data_stream(
+        self,
+        on_event: Callable[[dict[str, object]], Awaitable[None] | None] | None = None,
+        *,
+        keepalive_seconds: float = 25 * 60,
+    ) -> None:
+        """Start private Spot updates with durable REST reconciliation."""
+        if self._user_stream is not None:
+            raise RuntimeError("Spot User Data Stream is already configured")
+        if not (self.market_data.rest.api_key and self.market_data.rest.api_secret):
+            raise RuntimeError("Spot User Data Stream requires dedicated API credentials")
+
+        async def handle(event: dict[str, object]) -> None:
+            if event.get("e") == "executionReport":
+                symbol = str(event.get("s") or "").upper()
+                client_id = str(event.get("c") or "")
+                known = {
+                    str(item["client_order_id"])
+                    for item in self.inventory.unresolved_order_intents()
+                }
+                if symbol and client_id in known:
+                    try:
+                        await self.coordinator.reconcile(symbol, client_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Spot private event reconciliation deferred to recovery",
+                            extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                        )
+            if on_event is not None:
+                result = on_event(event)
+                if asyncio.iscoroutine(result):
+                    await result
+
+        self._user_stream = SpotUserDataStreamSupervisor(
+            adapter=self.market_data.rest,
+            websocket=self.market_data.websocket,
+            on_event=handle,
+            keepalive_seconds=keepalive_seconds,
+        )
+        await self._user_stream.start()
+
+    async def stop_user_data_stream(self) -> None:
+        stream, self._user_stream = self._user_stream, None
+        if stream is not None:
+            await stream.stop()
+
     def unresolved_order_intents(self):
         return self.inventory.unresolved_order_intents()
 
@@ -173,6 +221,10 @@ class SpotRuntime:
             },
             "features": self.market_consumer.health(),
             "futures_spot_lead_lag": self.lead_lag.snapshot(),
+            "user_data_stream": (
+                self._user_stream.health if self._user_stream is not None
+                else {"running": False, "configured": False}
+            ),
         }
 
     async def start_market_data(self, market_bus) -> list[asyncio.Task]:
@@ -287,6 +339,7 @@ class SpotRuntime:
         }
 
     async def close(self) -> None:
+        await self.stop_user_data_stream()
         await self.stop_market_data()
         await self.market_data.close()
         self.inventory.close()
