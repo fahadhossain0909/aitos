@@ -103,7 +103,7 @@ class SpotRuntime:
                 if inspect.isawaitable(quote_quantity):
                     quote_quantity = await quote_quantity
                 if not isinstance(quote_quantity, Decimal) or quote_quantity <= 0:
-                    raise ValueError("Spot quote allocation must be a positive Decimal")
+                    raise SpotCandidateRejected("Spot quote allocation must be a positive Decimal")
                 order = await self.submit_ranked_spot_candidate(
                     ranked_candidate=item,
                     kernel=kernel,
@@ -117,7 +117,7 @@ class SpotRuntime:
                     order=order,
                     rejected=tuple(rejected),
                 )
-            except (SpotAuthorizationRejected, ValueError) as exc:
+            except (SpotAuthorizationRejected, SpotCandidateRejected) as exc:
                 rejected.append((symbol, str(exc)))
         return SpotScanCycleResult(
             candidates_seen=len(selected),
@@ -148,11 +148,11 @@ class SpotRuntime:
         candidate = ranked_candidate.candidate
         symbol = candidate.symbol.upper()
         if symbol not in self.quote_volumes_24h:
-            raise ValueError("candidate is outside the active Spot universe")
+            raise SpotCandidateRejected("candidate is outside the active Spot universe")
         if not candidate.trading_enabled or not candidate.data_fresh:
-            raise ValueError("Spot candidate is disabled or stale")
+            raise SpotCandidateRejected("Spot candidate is disabled or stale")
         if candidate.last_price is None or candidate.last_price <= 0:
-            raise ValueError("Spot candidate has no valid exchange reference price")
+            raise SpotCandidateRejected("Spot candidate has no valid exchange reference price")
         spread_limit = self.scanner.max_spread_bps
         volatility_limit = self.scanner.max_volatility_bps
         scores = {
@@ -226,7 +226,7 @@ class SpotRuntime:
             getattr(decision.direction, "value", decision.direction)
         ).lower()
         if direction != "long" or decision.confidence < kernel.fusion_min_confidence:
-            raise ValueError("shared AI Kernel did not approve a confident Spot LONG")
+            raise SpotCandidateRejected("shared AI Kernel did not approve a confident Spot LONG")
         opportunity = opportunity_builder(candidate, decision)
         if inspect.isawaitable(opportunity):
             opportunity = await opportunity
