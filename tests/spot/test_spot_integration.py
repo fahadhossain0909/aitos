@@ -278,6 +278,8 @@ def test_inventory_marks_third_asset_fee_for_conversion():
     assert ledger.get_position("ABCUSDT").fee_conversion_pending
     assert len(ledger.pending_fee_conversions()) == 1
     ledger.resolve_commission_conversion("buy-bnb-fee", Decimal("0.25"))
+    with pytest.raises(KeyError, match="unknown fill or fee"):
+        ledger.resolve_commission_conversion("buy-bnb-fee", Decimal("0.30"))
     position = ledger.get_position("ABCUSDT")
     assert position.fee_conversion_pending is False
     assert position.cost_quote == Decimal("10.25")
