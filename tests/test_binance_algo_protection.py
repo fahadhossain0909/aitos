@@ -108,3 +108,87 @@ async def test_terminal_partial_child_is_reported_for_actual_exposure_reconcilia
         await value.get_resting_order_status("BTCUSDT", "algo:321")
         == "PARTIALLY_FILLED_TERMINAL"
     )
+
+
+async def test_open_algo_inventory_is_read_only_and_validates_complete_rows():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.5",
+        algoStatus="NEW",
+        closePosition=False,
+    )
+    value._signed_request = AsyncMock(return_value=[row])
+
+    result = await value.get_open_algo_orders("btcusdt")
+
+    assert result == [row] and result[0] is not row
+    assert value._signed_request.call_args.args == (
+        "GET",
+        "/fapi/v1/openAlgoOrders",
+        {"algoType": "CONDITIONAL", "symbol": "BTCUSDT"},
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"algoId": 0},
+        {"clientAlgoId": ""},
+        {"symbol": "ETHUSDT"},
+        {"algoStatus": "TRIGGERED"},
+        {"orderType": "LIMIT"},
+        {"side": "HOLD"},
+        {"positionSide": "UNKNOWN"},
+        {"quantity": "NaN"},
+        {"triggerPrice": "0"},
+    ],
+)
+async def test_open_algo_inventory_rejects_malformed_or_mismatched_rows(override):
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.5",
+        algoStatus="NEW",
+        closePosition=False,
+    )
+    row.update(override)
+    value._signed_request = AsyncMock(return_value=[row])
+
+    with pytest.raises(ValueError):
+        await value.get_open_algo_orders("BTCUSDT")
+
+
+async def test_open_algo_inventory_rejects_duplicate_identities():
+    value = BinanceFuturesOrderExecutor("dummy", "dummy")
+    row = dict(
+        algoId=321,
+        clientAlgoId="aitos-stop-1",
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.5",
+        algoStatus="NEW",
+        closePosition=False,
+    )
+    value._signed_request = AsyncMock(return_value=[row, dict(row)])
+
+    with pytest.raises(ValueError, match="duplicate"):
+        await value.get_open_algo_orders()
