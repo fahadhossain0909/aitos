@@ -77,6 +77,8 @@ def validate_futures_spot_lead_lag_oos(
     if not 0.5 <= train_fraction < 0.9 or max_lag_seconds < 0:
         raise ValueError("invalid train fraction or maximum lag")
     split = int(n * train_fraction)
+    if max_lag_seconds >= split:
+        raise ValueError("maximum lag must be shorter than the training segment")
     if split < min_train_observations or n - split < min_test_observations:
         raise ValueError("insufficient chronological train/test observations")
     spot = list(map(float, spot_returns[:n]))
