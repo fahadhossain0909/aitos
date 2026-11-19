@@ -58,6 +58,88 @@ class HistoricalProvider(Protocol):
     async def fetch_page(self, *, cursor: str | None) -> HistoricalProviderPage: ...
 
 
+class HistoricalBarProvider(Protocol):
+    async def fetch_revisions(
+        self, *, assets: tuple[str, ...], start: datetime, end: datetime
+    ) -> tuple[MarketBarRevision, ...]: ...
+
+
+class NormalizedProviderHistoryAdapter:
+    """Bridge an existing normalized source adapter into the historical store.
+
+    The event's canonical JSON is retained as the normalized source payload.
+    To preserve the provider's exact wire response, implement HistoricalProvider
+    directly and supply that response in SourceProvenance.raw_payload.
+    """
+
+    def __init__(self, source, bar_provider: HistoricalBarProvider, *, asset_resolver, clock=None):
+        self.source = source
+        self.bar_provider = bar_provider
+        self.asset_resolver = asset_resolver
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.source_id = source.source_id
+
+    async def fetch_page(self, *, cursor: str | None) -> HistoricalProviderPage:
+        events, next_cursor = await self.source.poll(cursor=cursor)
+        now = self.clock()
+        if now.tzinfo is None:
+            raise ValueError("historical adapter clock must be timezone-aware")
+        revisions = []
+        provenance = []
+        assets = set()
+        for event in events:
+            asset = self.asset_resolver(event)
+            if not asset:
+                continue
+            assets.add(str(asset).upper())
+            payload = event.to_json().encode("utf-8")
+            digest = hashlib.sha256(payload).hexdigest()
+            revisions.append(EventRevision(
+                event_id=event.event_id,
+                revision_id=digest,
+                asset=str(asset).upper(),
+                event_type=event.event_type,
+                published_at=event.published_at,
+                known_at=event.first_seen_at,
+                sentiment=event.sentiment,
+                severity=event.severity,
+                novelty=event.novelty,
+                confidence=event.confidence,
+                source_reliability=event.source.reliability,
+                regime=str(event.metadata.get("regime", "unknown")),
+                beta=float(event.metadata.get("beta", 0.0)),
+            ))
+            provenance.append(SourceProvenance(
+                source_id=self.source_id,
+                source_kind=event.source.source_kind,
+                record_id=event.event_id,
+                uri=event.source.uri,
+                published_at=event.source.published_at,
+                known_at=event.first_seen_at,
+                raw_payload=payload,
+                metadata={
+                    "payload_kind": "normalized_event_json",
+                    "schema_version": event.schema_version,
+                    "deduplication_key": event.deduplication_key,
+                    "original_story_id": event.source.original_story_id,
+                },
+            ))
+        bars = ()
+        if assets:
+            bars = await self.bar_provider.fetch_revisions(
+                assets=tuple(sorted(assets)),
+                start=min(item.known_at for item in revisions),
+                end=now,
+            )
+        return HistoricalProviderPage(
+            source_id=self.source_id,
+            next_cursor=next_cursor,
+            event_revisions=tuple(revisions),
+            market_bar_revisions=tuple(bars),
+            provenance=tuple(provenance),
+        )
+
+
 class HistoricalIngestionStore:
     """Persists raw source provenance plus point-in-time event/bar revisions."""
 
@@ -153,4 +235,4 @@ class HistoricalIngestionStore:
         return page.next_cursor
 
 
-__all__ = ["HistoricalIngestionStore", "HistoricalProvider", "HistoricalProviderPage", "SourceProvenance"]
+__all__ = ["HistoricalBarProvider", "HistoricalIngestionStore", "HistoricalProvider", "HistoricalProviderPage", "NormalizedProviderHistoryAdapter", "SourceProvenance"]
