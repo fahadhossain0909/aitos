@@ -22,7 +22,9 @@ def test_detect_resources_honors_cgroup_v2_limits(tmp_path):
     )
     (cgroup / "cpu.max").write_text("200000 100000", encoding="ascii")
     (cgroup / "memory.max").write_text(str(6 * 1024 * 1024 * 1024), encoding="ascii")
-    (cgroup / "memory.current").write_text(str(2 * 1024 * 1024 * 1024), encoding="ascii")
+    (cgroup / "memory.current").write_text(
+        str(2 * 1024 * 1024 * 1024), encoding="ascii"
+    )
 
     result = detect_resources(proc_root=proc, cgroup_root=cgroup, device_root=devices)
 
@@ -50,12 +52,20 @@ def test_budget_uses_available_memory_when_lower_than_reserve_budget():
 
 
 def test_symbol_planner_prioritizes_value_per_compute_cost():
-    budget = build_resource_budget(ResourceSnapshot(2, 2.0, 6144, 6144, 5000, False, False))
+    budget = build_resource_budget(
+        ResourceSnapshot(2, 2.0, 6144, 6144, 5000, False, False)
+    )
     plan = plan_symbol_capacity(
         [
-            SymbolWorkload("LOW", cpu_cost_units=80, memory_cost_mb=100, opportunity_score=1),
-            SymbolWorkload("HIGH", cpu_cost_units=40, memory_cost_mb=100, opportunity_score=9),
-            SymbolWorkload("MID", cpu_cost_units=40, memory_cost_mb=100, opportunity_score=5),
+            SymbolWorkload(
+                "LOW", cpu_cost_units=80, memory_cost_mb=100, opportunity_score=1
+            ),
+            SymbolWorkload(
+                "HIGH", cpu_cost_units=40, memory_cost_mb=100, opportunity_score=9
+            ),
+            SymbolWorkload(
+                "MID", cpu_cost_units=40, memory_cost_mb=100, opportunity_score=5
+            ),
         ],
         budget,
     )
@@ -65,12 +75,20 @@ def test_symbol_planner_prioritizes_value_per_compute_cost():
 
 
 def test_open_positions_and_pending_orders_are_never_dropped():
-    budget = build_resource_budget(ResourceSnapshot(1, 1.0, 1024, 1024, 500, False, False))
+    budget = build_resource_budget(
+        ResourceSnapshot(1, 1.0, 1024, 1024, 500, False, False)
+    )
     plan = plan_symbol_capacity(
         [
-            SymbolWorkload("BTCUSDT", cpu_cost_units=1000, memory_cost_mb=900, open_position=True),
-            SymbolWorkload("ETHUSDT", cpu_cost_units=1000, memory_cost_mb=900, pending_order=True),
-            SymbolWorkload("NEWUSDT", cpu_cost_units=1, memory_cost_mb=1, opportunity_score=10),
+            SymbolWorkload(
+                "BTCUSDT", cpu_cost_units=1000, memory_cost_mb=900, open_position=True
+            ),
+            SymbolWorkload(
+                "ETHUSDT", cpu_cost_units=1000, memory_cost_mb=900, pending_order=True
+            ),
+            SymbolWorkload(
+                "NEWUSDT", cpu_cost_units=1, memory_cost_mb=1, opportunity_score=10
+            ),
         ],
         budget,
         max_symbols=1,
@@ -83,7 +101,9 @@ def test_open_positions_and_pending_orders_are_never_dropped():
 
 
 def test_duplicate_symbols_are_deduplicated_without_losing_protection():
-    budget = build_resource_budget(ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False))
+    budget = build_resource_budget(
+        ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False)
+    )
     plan = plan_symbol_capacity(
         [
             SymbolWorkload("btcusdt", opportunity_score=10),
@@ -97,18 +117,30 @@ def test_duplicate_symbols_are_deduplicated_without_losing_protection():
 
 
 def test_pressure_classification_has_ordered_levels():
-    assert classify_pressure(
-        cpu_utilization_pct=20, memory_utilization_pct=30, queue_lag_seconds=0.1
-    ) == PressureLevel.NORMAL
-    assert classify_pressure(
-        cpu_utilization_pct=82, memory_utilization_pct=30, queue_lag_seconds=0.1
-    ) == PressureLevel.WARNING
-    assert classify_pressure(
-        cpu_utilization_pct=92, memory_utilization_pct=30, queue_lag_seconds=0.1
-    ) == PressureLevel.HIGH
-    assert classify_pressure(
-        cpu_utilization_pct=30, memory_utilization_pct=30, queue_lag_seconds=12
-    ) == PressureLevel.CRITICAL
+    assert (
+        classify_pressure(
+            cpu_utilization_pct=20, memory_utilization_pct=30, queue_lag_seconds=0.1
+        )
+        == PressureLevel.NORMAL
+    )
+    assert (
+        classify_pressure(
+            cpu_utilization_pct=82, memory_utilization_pct=30, queue_lag_seconds=0.1
+        )
+        == PressureLevel.WARNING
+    )
+    assert (
+        classify_pressure(
+            cpu_utilization_pct=92, memory_utilization_pct=30, queue_lag_seconds=0.1
+        )
+        == PressureLevel.HIGH
+    )
+    assert (
+        classify_pressure(
+            cpu_utilization_pct=30, memory_utilization_pct=30, queue_lag_seconds=12
+        )
+        == PressureLevel.CRITICAL
+    )
 
 
 def test_invalid_budget_and_workload_inputs_are_rejected():
