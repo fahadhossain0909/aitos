@@ -7,9 +7,12 @@ shared capital-protection boundary. It does not reuse the Futures order adapter,
 leverage, funding, liquidation or reduce-only assumptions. Options remain a
 market-identity extension point only; no Options strategy or execution exists.
 
-Capital authorization currently uses the USD numeraire, so the first Spot rollout
-accepts USDT-quoted instruments only. USDC, BTC-quoted and other quote assets
-must wait until point-in-time FX conversion is included in portfolio equity,
+Capital authorization uses the USD numeraire. The first Spot rollout accepts
+USDT-quoted instruments only and converts allocation budgets with the explicit
+`AITOS_SPOT_QUOTE_TO_USD_RATE` (USD per USDT, default 1.0 peg assumption).
+For live risk, update this rate from a point-in-time conversion source rather
+than assuming a permanent peg. USDC, BTC-quoted and other quote assets remain
+disabled until equivalent FX conversion is included in portfolio equity,
 risk and execution-cost accounting.
 
 The Spot runtime is opt-in. Defaults are:
@@ -42,7 +45,9 @@ to `lastUpdateId`, checks subsequent `pu`/update continuity, and raises
 rebootstraps snapshots; a consumer never continues with a silently stale book.
 
 The runtime exposes explicit publishers into the existing `MarketDataBus`,
-including isolated `market.spot.*` channels. It does not start
+including isolated `market.spot.*` channels. The runtime health snapshot also
+exposes weighted REST rate-limit state and server-time synchronization offset.
+It does not start
 subscriptions by importing the package. The runtime's
 `submit_opportunity()` port accepts the shared Strategy `Opportunity` contract
 and routes it through the Spot coordinator and shared CapitalGateway.
@@ -105,13 +110,17 @@ signed requests support explicit server-time offset synchronization.
 
 ### Shared strategy, portfolio and execution replay
 
-`SpotRuntime.submit_strategy_candidate()` is the explicit bridge from the
-shared AITOS scanner and AI Kernel into Spot. It requires the candidate to be
-inside the discovered Spot universe, applies the same kernel direction and
-confidence gate, rejects non-LONG candidates, then sends the resulting
-Opportunity through the shared CapitalGateway. Exits continue to require the
-shared ExitDecision contract and AITOS-managed inventory; the Futures
-TradeLifecycle is not repurposed to pretend Spot sells support reduce-only.
+`SpotRuntime.submit_ranked_spot_candidate()` connects the Spot-isolated
+pre-filter candidate to the shared AI Kernel. It passes normalized Spot
+momentum, relative volume, spread quality, volatility quality and book
+imbalance, plus Futures↔Spot lead-lag as explicitly non-decision shadow
+metadata. A required strategy-owned Opportunity builder supplies the actual
+thesis, stop and targets; no generic stop/target is invented by the Spot
+adapter. The result is checked as LONG-only and sent through the shared
+CapitalGateway. `submit_strategy_candidate()` also supports already-built
+shared scanner candidates. Exits require the shared ExitDecision contract and
+AITOS-managed inventory; the Futures TradeLifecycle is not repurposed to
+pretend Spot sells support reduce-only.
 
 `SpotPortfolioValuator` combines the separate Spot account's quote cash,
 mark-to-market value of all Spot wallet assets using explicit asset/quote marks,
@@ -144,6 +153,7 @@ AITOS_SPOT_TESTNET=true
 AITOS_SPOT_EXECUTION_ENABLED=false
 AITOS_SPOT_ALLOW_MAINNET=false
 AITOS_SPOT_QUOTE_ASSET=USDT
+AITOS_SPOT_QUOTE_TO_USD_RATE=1.0
 AITOS_SPOT_MAX_SYMBOLS=20
 ```
 
