@@ -175,9 +175,7 @@ class CrossMarketIntelligenceEngine:
             )
             if observations >= min_observations and abs(correlation) > abs(best_corr):
                 best_lag, best_corr, best_observations = lag, correlation, observations
-        return LeadLagResult(
-            leader, follower, best_lag, best_corr, best_observations
-        )
+        return LeadLagResult(leader, follower, best_lag, best_corr, best_observations)
 
     def build_state(
         self,
