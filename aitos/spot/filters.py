@@ -47,7 +47,9 @@ class SpotSymbolFilters:
         step = self.market_step_size if market else self.lot_step_size
         return floor_step(quantity, step)
 
-    def validate(self, quantity: Decimal, price: Decimal, market: bool = False) -> Decimal:
+    def validate(
+        self, quantity: Decimal, price: Decimal, market: bool = False
+    ) -> Decimal:
         if quantity <= 0 or price <= 0:
             raise ValueError("quantity and price must be positive")
         if not market:
@@ -70,7 +72,9 @@ class SpotSymbolFilters:
             if notional < self.min_notional:
                 raise ValueError("order violates minimum notional")
         if self.max_notional and self.max_notional > 0:
-            if (not market or self.apply_max_to_market) and notional > self.max_notional:
+            if (
+                not market or self.apply_max_to_market
+            ) and notional > self.max_notional:
                 raise ValueError("order exceeds maximum notional")
         return rounded
 
@@ -86,21 +90,30 @@ def parse_spot_exchange_info(payload: dict[str, Any]) -> dict[str, SpotSymbolFil
         notional = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL") or {}
         min_notional = D(notional.get("minNotional", 0))
         result[item["symbol"]] = SpotSymbolFilters(
-            symbol=item["symbol"], status=str(item.get("status", "UNKNOWN")).upper(),
+            symbol=item["symbol"],
+            status=str(item.get("status", "UNKNOWN")).upper(),
             base_asset=item.get("baseAsset", "").upper(),
             quote_asset=item.get("quoteAsset", "").upper(),
             tick_size=D(price.get("tickSize", 0)),
-            min_price=D(price.get("minPrice", 0)), max_price=D(price.get("maxPrice", 0)),
+            min_price=D(price.get("minPrice", 0)),
+            max_price=D(price.get("maxPrice", 0)),
             lot_step_size=D(lot.get("stepSize", 0)),
-            lot_min_qty=D(lot.get("minQty", 0)), lot_max_qty=D(lot.get("maxQty", 0)),
+            lot_min_qty=D(lot.get("minQty", 0)),
+            lot_max_qty=D(lot.get("maxQty", 0)),
             market_step_size=D(market_lot.get("stepSize", 0)),
             market_min_qty=D(market_lot.get("minQty", 0)),
             market_max_qty=D(market_lot.get("maxQty", 0)),
             min_notional=min_notional,
-            max_notional=D(notional["maxNotional"]) if notional.get("maxNotional") else None,
-            apply_min_to_market=bool(notional.get("applyToMarket", notional.get("applyMinToMarket", True))),
+            max_notional=(
+                D(notional["maxNotional"]) if notional.get("maxNotional") else None
+            ),
+            apply_min_to_market=bool(
+                notional.get("applyToMarket", notional.get("applyMinToMarket", True))
+            ),
             apply_max_to_market=bool(notional.get("applyMaxToMarket", False)),
-            quote_order_qty_market_allowed=bool(item.get("quoteOrderQtyMarketAllowed", False)),
+            quote_order_qty_market_allowed=bool(
+                item.get("quoteOrderQtyMarketAllowed", False)
+            ),
             is_spot_trading_allowed=bool(item.get("isSpotTradingAllowed", False)),
         )
     return result
