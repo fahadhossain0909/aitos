@@ -305,7 +305,6 @@ async def test_legacy_protection_never_fabricates_resting_acceptance(response):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
 
 
-
 @pytest.mark.parametrize(
     "result",
     [
