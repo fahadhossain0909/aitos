@@ -121,7 +121,7 @@ async def test_spot_entry_uses_shared_capital_gate_and_namespaced_reservation():
         agent_consensus={"leverage": 20.0, "funding_bps": 30.0},
     )
     result = await coordinator.submit_entry(
-        equity_quote=1000,
+        equity_usd=1000,
         opportunity=opportunity,
         request=request,
     )
@@ -149,13 +149,13 @@ async def test_spot_entry_rejects_short_and_oversized_requests():
     )
     with pytest.raises(SpotAuthorizationRejected, match="long-only"):
         await coordinator.submit_entry(
-            equity_quote=1000,
+            equity_usd=1000,
             opportunity=_opportunity(TradeSide.SHORT),
             request=request,
         )
     with pytest.raises(SpotAuthorizationRejected, match="exceeds approved"):
         await coordinator.submit_entry(
-            equity_quote=1000,
+            equity_usd=1000,
             opportunity=_opportunity(),
             request=request,
         )
@@ -226,7 +226,7 @@ async def test_disabled_spot_execution_does_not_reserve_or_journal():
     )
     with pytest.raises(SpotExecutionDisabled, match="Spot execution is disabled"):
         await coordinator.submit_entry(
-            equity_quote=1000, opportunity=_opportunity(), request=request
+            equity_usd=1000, opportunity=_opportunity(), request=request
         )
     assert gateway.pinned == []
     assert ledger.unresolved_order_intents() == []
@@ -268,7 +268,7 @@ async def test_spot_runtime_routes_shared_kernel_approved_candidate():
         candidate=candidate,
         strategy_scanner=FakeSharedStrategyScanner(),
         kernel=kernel,
-        equity_quote=1000,
+        equity_usd=1000,
         quote_order_quantity=Decimal("50"),
     )
 
@@ -297,7 +297,7 @@ async def test_spot_runtime_rejects_candidates_outside_discovered_universe():
             candidate=candidate,
             strategy_scanner=FakeSharedStrategyScanner(),
             kernel=SimpleNamespace(fusion_min_confidence=0.6),
-            equity_quote=1000,
+            equity_usd=1000,
             quote_order_quantity=Decimal("50"),
         )
     inventory.close()
