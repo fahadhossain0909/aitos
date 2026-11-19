@@ -61,6 +61,8 @@ class FakeCapitalGateway:
 
 
 class FakeExecutor:
+    enabled = True
+
     async def submit(self, request):
         return SimpleNamespace(
             client_order_id=request.client_order_id,
@@ -182,3 +184,27 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
 def test_spot_settings_reject_non_usdt_capital_numeraire():
     with pytest.raises(ValueError, match="requires USDT"):
         SpotSettings(_env_file=None, quote_asset="BTC")
+
+
+
+@pytest.mark.asyncio
+async def test_disabled_spot_execution_does_not_reserve_or_journal():
+    gateway = FakeCapitalGateway()
+    executor = FakeExecutor()
+    executor.enabled = False
+    ledger = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=gateway, executor=executor, inventory=ledger
+    )
+    request = SpotOrderRequest(
+        "BTCUSDT",
+        SpotOrderSide.BUY,
+        SpotOrderType.MARKET,
+        quote_order_quantity=Decimal("10"),
+    )
+    with pytest.raises(Exception, match="Spot execution is disabled"):
+        await coordinator.submit_entry(
+            equity_quote=1000, opportunity=_opportunity(), request=request
+        )
+    assert gateway.pinned == []
+    assert ledger.unresolved_order_intents() == []
