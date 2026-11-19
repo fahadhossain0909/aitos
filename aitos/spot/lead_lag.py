@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from aitos.market_data.bus import MarketDataBus
@@ -96,7 +96,8 @@ class FuturesSpotLeadLagAnalyzer:
             raise ValueError("lead-lag symbol universe is empty or exceeds capacity")
         self._allowed_symbols = normalized
         self._pairs = {
-            symbol: pair for symbol, pair in self._pairs.items()
+            symbol: pair
+            for symbol, pair in self._pairs.items()
             if symbol in normalized
         }
         self._estimates = {
@@ -199,7 +200,14 @@ class FuturesSpotLeadLagAnalyzer:
                 futures_returns, spot_returns, lag
             )
             if corr is not None and count >= self.min_observations:
-                candidates.append((abs(corr), "synchronous" if lag == 0 else "futures", lag, count))
+                candidates.append(
+                    (
+                        abs(corr),
+                        "synchronous" if lag == 0 else "futures",
+                        lag,
+                        count,
+                    )
+                )
             if lag:
                 corr, count = self._lag_correlation(
                     spot_returns, futures_returns, lag
@@ -208,16 +216,26 @@ class FuturesSpotLeadLagAnalyzer:
                     candidates.append((abs(corr), "spot", lag, count))
         if not candidates:
             return LeadLagEstimate(
-                symbol, "insufficient_aligned_returns", None, None, None,
-                None, None, 0, as_of
+                symbol,
+                "insufficient_aligned_returns",
+                None,
+                None,
+                None,
+                None,
+                None,
+                0,
+                as_of,
             )
         candidates.sort(key=lambda item: item[0], reverse=True)
         strength, leader, lag, count = candidates[0]
-        signed_corr, _ = self._lag_correlation(
-            futures_returns, spot_returns, lag
-        ) if leader == "futures" else self._lag_correlation(
-            spot_returns, futures_returns, lag
-        )
+        if leader in {"futures", "synchronous"}:
+            signed_corr, _ = self._lag_correlation(
+                futures_returns, spot_returns, lag
+            )
+        else:
+            signed_corr, _ = self._lag_correlation(
+                spot_returns, futures_returns, lag
+            )
         assert signed_corr is not None
         low, high = self._fisher_interval(signed_corr, count)
         runner_up = candidates[1][0] if len(candidates) > 1 else 0.0
@@ -250,7 +268,9 @@ class FuturesSpotLeadLagAnalyzer:
     def _returns(self, prices: dict[int, float]) -> dict[int, float]:
         ordered = sorted(prices.items())
         result: dict[int, float] = {}
-        for (previous_bucket, previous), (bucket, current) in zip(ordered, ordered[1:]):
+        for (previous_bucket, previous), (bucket, current) in zip(
+            ordered, ordered[1:]
+        ):
             if bucket - previous_bucket != 1:
                 continue
             result[bucket] = math.log(current / previous)
