@@ -5,6 +5,7 @@ import pytest
 from aitos.data.repository import (
     CREATE_LIVE_ANALYTICS_EVENTS,
     CREATE_MARKET_EVENTS,
+    CREATE_VERSIONED_MARKET_EVENTS,
     MarketDataRepository,
 )
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
@@ -100,3 +101,43 @@ async def test_save_spot_market_event_persists_isolated_instrument_identity():
     assert rows[0][8] == "BTCUSDT"
     assert columns.index("market_type") == 6
     assert columns.index("instrument_id") == 7
+
+
+
+@pytest.mark.asyncio
+async def test_save_versioned_spot_market_event_preserves_revision_and_identity():
+    repo = MarketDataRepository.__new__(MarketDataRepository)
+    repo._client = FakeClient()
+    repo._initialized = True
+    repo._last_event_time = None
+    now = datetime.now(timezone.utc)
+    event = MarketEvent(
+        event_type=MarketEventType.KLINE,
+        exchange="binance",
+        market="spot",
+        market_type="spot",
+        instrument_id="binance:spot:BTCUSDT",
+        symbol="BTCUSDT",
+        event_time=now,
+        ingest_time=now,
+        payload={"close": "101.5", "is_closed": True},
+        source=MarketSource.REST,
+        event_revision=7,
+    )
+
+    await repo.save_market_event_versioned(event)
+
+    table, rows, columns = repo._client.inserts[0]
+    assert table == "market_event_versions"
+    assert rows[0][2] == event.event_id
+    assert rows[0][3] == 7
+    assert rows[0][7] == "spot"
+    assert rows[0][8] == "binance:spot:BTCUSDT"
+    assert "event_revision" in columns
+    assert "payload_json" in columns
+
+
+def test_versioned_event_schema_uses_replacing_revision_semantics():
+    assert "event_revision UInt64" in CREATE_VERSIONED_MARKET_EVENTS
+    assert "ReplacingMergeTree(event_revision)" in CREATE_VERSIONED_MARKET_EVENTS
+    assert "ORDER BY (instrument_id, event_id)" in CREATE_VERSIONED_MARKET_EVENTS
