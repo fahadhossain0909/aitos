@@ -53,6 +53,7 @@ class FuturesSpotLeadLagAnalyzer:
         min_lead_advantage: float = 0.05,
         futures_market_types: frozenset[str] = FUTURES_MARKET_TYPES,
         symbol_aliases: dict[str, str] | None = None,
+        max_symbols: int = 100,
     ) -> None:
         if bucket_seconds <= 0 or max_lag_seconds < 0:
             raise ValueError("invalid lead-lag time resolution")
@@ -64,6 +65,9 @@ class FuturesSpotLeadLagAnalyzer:
             raise ValueError("min_abs_correlation must be in [0, 1)")
         if not 0 <= min_lead_advantage < 1:
             raise ValueError("min_lead_advantage must be in [0, 1)")
+        if not 1 <= max_symbols <= 500:
+            raise ValueError("max_symbols must be between 1 and 500")
+        self.max_symbols = max_symbols
         self.bucket_seconds = bucket_seconds
         self.max_lag_buckets = math.ceil(max_lag_seconds / bucket_seconds)
         self.window_buckets = math.ceil(window_seconds / bucket_seconds)
@@ -130,6 +134,9 @@ class FuturesSpotLeadLagAnalyzer:
             self._rejected += 1
             return None
         bucket = int(event.event_time.timestamp()) // self.bucket_seconds
+        if symbol not in self._pairs and len(self._pairs) >= self.max_symbols:
+            self._rejected += 1
+            return None
         pair = self._pairs.setdefault(symbol, _PairState({}, {}))
         series = pair.futures if side == "futures" else pair.spot
         series[bucket] = price
