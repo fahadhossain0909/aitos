@@ -74,7 +74,9 @@ class SymbolWorkload:
             or self.cpu_cost_units < 0
             or self.memory_cost_mb < 0
         ):
-            raise ValueError("workload costs and scores must be finite and costs non-negative")
+            raise ValueError(
+                "workload costs and scores must be finite and costs non-negative"
+            )
 
 
 @dataclass(frozen=True)
