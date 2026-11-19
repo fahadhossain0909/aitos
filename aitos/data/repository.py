@@ -636,6 +636,55 @@ class MarketDataRepository(AITOSModule):
             settings={"insert_deduplication_token": str(record.experience_id)},
         )
 
+    async def load_versioned_market_events(
+        self,
+        *,
+        market_type: str,
+        instrument_id: str,
+        event_types: tuple[str, ...] = ("ticker",),
+        start_time: datetime,
+        end_time: datetime,
+        limit: int = 200_000,
+    ) -> list[dict[str, Any]]:
+        """Load point-in-time canonical events with explicit market identity."""
+        if not market_type or not instrument_id:
+            raise ValueError("market_type and instrument_id are required")
+        if start_time.tzinfo is None or end_time.tzinfo is None or end_time <= start_time:
+            raise ValueError("event history requires an ordered timezone-aware range")
+        if not event_types or limit < 1:
+            raise ValueError("event_types and a positive limit are required")
+        rows = await self._query(
+            """
+            SELECT event_time, ingest_time, event_id, event_revision,
+                   exchange, market, venue, market_type, instrument_id, symbol,
+                   event_type, source, sequence, schema_version,
+                   correlation_id, trace_id, payload_json
+            FROM market_event_versions FINAL
+            WHERE market_type = {market_type:String}
+              AND instrument_id = {instrument_id:String}
+              AND event_type IN {event_types:Array(String)}
+              AND event_time >= {start_time:DateTime64(3, 'UTC')}
+              AND event_time < {end_time:DateTime64(3, 'UTC')}
+            ORDER BY event_time ASC, event_id ASC
+            LIMIT {limit:UInt32}
+            """,
+            {
+                "market_type": market_type,
+                "instrument_id": instrument_id,
+                "event_types": list(event_types),
+                "start_time": start_time,
+                "end_time": end_time,
+                "limit": limit,
+            },
+        )
+        for row in rows:
+            payload_json = row.pop("payload_json", "{}")
+            try:
+                row["payload"] = json.loads(payload_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                row["payload"] = {}
+        return rows
+
     async def get_recent_klines(
         self, symbol: str, timeframe: str, limit: int = 500
     ) -> list[dict[str, Any]]:
