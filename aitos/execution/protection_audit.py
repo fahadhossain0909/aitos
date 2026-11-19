@@ -40,6 +40,7 @@ def audit_protection_inventory(
     scope: str,
     now: datetime | None = None,
     max_age_seconds: float = 120,
+    evidence_source: str = "CALLER_EXPORTED_INVENTORY",
 ) -> dict:
     """Compare scoped journal intents with a caller-supplied exported snapshot.
 
@@ -47,6 +48,11 @@ def audit_protection_inventory(
     Caller declarations are not independently authenticated venue evidence.
     Reject stale/cross-account/incomplete input before interpreting missing IDs.
     """
+    if evidence_source not in {
+        "CALLER_EXPORTED_INVENTORY",
+        "AUTHENTICATED_READ_ONLY_EXCHANGE_API",
+    }:
+        raise ValueError("unsupported protection evidence source")
     if not scope or evidence.get("scope") != scope:
         raise ValueError("protection evidence account scope mismatch")
     if evidence.get("complete") is not True:
@@ -205,7 +211,7 @@ def audit_protection_inventory(
             )
     return {
         "schema_version": 1,
-        "evidence": "CALLER_EXPORTED_INVENTORY",
+        "evidence": evidence_source,
         "captured_at": captured.isoformat(),
         "age_seconds": age,
         "scope_matched": True,
