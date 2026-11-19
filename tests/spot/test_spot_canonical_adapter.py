@@ -135,6 +135,8 @@ def test_spot_kline_uses_registered_canonical_event_channel():
 
 @pytest.mark.asyncio
 async def test_spot_events_never_enter_futures_live_scanner_cache():
+    from aitos.market_data.binance_spot_adapter import _event
+
     cache = LiveScannerCache(None, ["BTCUSDT"])
     event = _event(
         "BTCUSDT",
