@@ -410,6 +410,8 @@ async def test_order_record_rejects_conflicting_latest_timestamp_versions():
     class ClickHouseClient:
         async def query(self, query, parameters=None):
             assert "uniqExact(tuple(symbol, state, request_json, result_json))" in query
+            assert "any(state) AS latest_state" in query
+            assert "any(state) AS state" not in query
             return QueryResult()
 
     class Repository:
@@ -428,6 +430,8 @@ async def test_pending_order_intent_loader_fails_closed_on_latest_timestamp_tie(
     class ClickHouseClient:
         async def query(self, query, parameters=None):
             assert "latest_versions" in query
+            assert "any(state) AS latest_state" in query
+            assert "any(state) AS state" not in query
             return QueryResult()
 
     class Repository:
@@ -451,7 +455,11 @@ async def test_unlinked_order_recovery_fails_closed_on_latest_timestamp_tie():
 
         async def query(self, query, parameters=None):
             self.calls += 1
-            return QueryResult() if self.calls == 1 else QueryResultWithTrades()
+            if self.calls == 1:
+                assert "any(state) AS latest_state" in query
+                assert "any(state) AS state" not in query
+                return QueryResult()
+            return QueryResultWithTrades()
 
     class QueryResultWithTrades:
         result_rows = []
