@@ -177,7 +177,7 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
         executor=FakeExecutor(),
         inventory=ledger,
     )
-    with pytest.raises(SpotAuthorizationRejected, match="Exit Intelligence"):
+    with pytest.raises(SpotAuthorizationRejected, match="does not authorize"):
         await coordinator.submit_exit(
             symbol="BTCUSDT",
             quantity=Decimal("0.5"),
