@@ -140,10 +140,7 @@ class ExecutionIntentStore:
             or result.filled_quantity != 0
             or not math.isfinite(result.fill_price)
             or result.fill_price <= 0
-            or (
-                result.client_order_id is not None
-                and result.client_order_id != client_id
-            )
+            or result.client_order_id != client_id
         ):
             raise ValueError(
                 "protection acceptance requires valid identity and "
