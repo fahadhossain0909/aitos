@@ -19,11 +19,28 @@ class DepthBookSnapshot:
     asks: tuple[tuple[float, float], ...]
 
     def __post_init__(self) -> None:
-        if self.timestamp_ms < 0:
-            raise ValueError("timestamp must be non-negative")
-        for side, levels in (("bid", self.bids), ("ask", self.asks)):
-            previous = math.inf if side == "bid" else -math.inf
-            for price, size in levels:
+        if (
+            isinstance(self.timestamp_ms, bool)
+            or not isinstance(self.timestamp_ms, int)
+            or self.timestamp_ms < 0
+        ):
+            raise ValueError("timestamp must be a non-negative integer")
+        for side in ("bids", "asks"):
+            raw_levels = tuple(getattr(self, side))
+            if not raw_levels:
+                raise ValueError("depth snapshot requires both book sides")
+            normalized = []
+            previous = math.inf if side == "bids" else -math.inf
+            for level in raw_levels:
+                if not isinstance(level, (tuple, list)) or len(level) != 2:
+                    raise ValueError("depth levels must be price/size pairs")
+                raw_price, raw_size = level
+                if isinstance(raw_price, bool) or isinstance(raw_size, bool):
+                    raise ValueError("depth prices and sizes must be numeric")
+                try:
+                    price, size = float(raw_price), float(raw_size)
+                except (TypeError, ValueError, OverflowError):
+                    raise ValueError("depth prices and sizes must be numeric") from None
                 if (
                     not math.isfinite(price)
                     or not math.isfinite(size)
@@ -33,12 +50,14 @@ class DepthBookSnapshot:
                     raise ValueError(
                         "depth levels require positive prices and non-negative finite sizes"
                     )
-                if (side == "bid" and price >= previous) or (
-                    side == "ask" and price <= previous
+                if (side == "bids" and price >= previous) or (
+                    side == "asks" and price <= previous
                 ):
                     raise ValueError("depth levels must be strictly price sorted")
                 previous = price
-        if self.bids and self.asks and self.bids[0][0] > self.asks[0][0]:
+                normalized.append((price, size))
+            object.__setattr__(self, side, tuple(normalized))
+        if self.bids[0][0] > self.asks[0][0]:
             raise ValueError("crossed order book")
 
 
@@ -92,6 +111,8 @@ def replay_l2_market_order(
     It is a configurable scenario model and should be calibrated per venue,
     symbol, volatility and order type before being used for forecasts.
     """
+    if not isinstance(side, str):
+        raise ValueError("side must be BUY or SELL")
     direction = side.upper()
     if direction not in {"BUY", "SELL"}:
         raise ValueError("side must be BUY or SELL")
@@ -118,6 +139,8 @@ def replay_l2_market_order(
     if submitted_at_ms < 0 or latency_ms < 0:
         raise ValueError("timestamps and latency must be non-negative")
     books = tuple(snapshots)
+    if any(not isinstance(book, DepthBookSnapshot) for book in books):
+        raise TypeError("L2 replay requires DepthBookSnapshot records")
     if any(a.timestamp_ms >= b.timestamp_ms for a, b in zip(books, books[1:])):
         raise ValueError("depth snapshots must be strictly chronological")
     eligible = submitted_at_ms + latency_ms
