@@ -4,6 +4,7 @@ It emits the same MarketEvent envelope as Futures while retaining a distinct
 binance:spot instrument identity. Combined WebSocket streams reduce socket
 count; depth snapshots are bridged to update IDs and fail closed on any gap.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -62,9 +63,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
         websocket: BinanceSpotWebSocket | None = None,
     ) -> None:
         self.rest = rest or BinanceSpotAdapter(testnet=True)
-        self.websocket = websocket or BinanceSpotWebSocket(
-            testnet=self.rest.testnet
-        )
+        self.websocket = websocket or BinanceSpotWebSocket(testnet=self.rest.testnet)
 
     @property
     def venue(self) -> Venue:
@@ -92,9 +91,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
     async def instruments(self, quote_asset: str = "USDT"):
         return await self.rest.instruments(quote_asset)
 
-    async def stream_trades(
-        self, symbols: list[str]
-    ) -> AsyncIterator[MarketEvent]:
+    async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         selected = _symbols(symbols)
         streams = [f"{symbol.lower()}@trade" for symbol in selected]
         async for item in self.websocket.stream_many(streams):
@@ -115,9 +112,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
                 int(data["t"]),
             )
 
-    async def stream_tickers(
-        self, symbols: list[str]
-    ) -> AsyncIterator[MarketEvent]:
+    async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         selected = _symbols(symbols)
         streams = [f"{symbol.lower()}@bookTicker" for symbol in selected]
         async for item in self.websocket.stream_many(streams):
@@ -230,9 +225,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
             else:
                 previous = data.get("pu")
                 if previous is not None and int(previous) != previous_final:
-                    raise SpotOrderBookGap(
-                        f"{symbol} depth previous-update gap"
-                    )
+                    raise SpotOrderBookGap(f"{symbol} depth previous-update gap")
                 if previous is None and first > previous_final + 1:
                     raise SpotOrderBookGap(f"{symbol} depth sequence gap")
             last_update_ids[symbol] = final
