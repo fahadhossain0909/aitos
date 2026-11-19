@@ -628,6 +628,40 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             )
         return dict(response)
 
+    def _record_terminal_protection(
+        self, symbol: str, order_id: str, evidence: dict[str, Any]
+    ) -> None:
+        if self._intent_store is None or evidence.get("status") not in {
+            "CANCELED",
+            "FILLED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }:
+            return
+        raw_quantity = evidence.get("executedQty", 0)
+        if isinstance(raw_quantity, bool):
+            raise ExecutionUncertainError(
+                symbol, order_id, "terminal protective fill quantity is invalid"
+            )
+        try:
+            executed_quantity = float(raw_quantity)
+        except (TypeError, ValueError, OverflowError):
+            raise ExecutionUncertainError(
+                symbol, order_id, "terminal protective fill quantity is invalid"
+            ) from None
+        try:
+            self._intent_store.mark_protection_terminal(
+                order_id,
+                symbol=symbol,
+                status=str(evidence["status"]),
+                executed_quantity=executed_quantity,
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ExecutionUncertainError(
+                symbol, order_id, "terminal protective journal update failed"
+            ) from exc
+
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         if order_id.startswith("algo:"):
             algo_id = order_id.removeprefix("algo:")
@@ -636,10 +670,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             await self._signed_request(
                 "DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id}
             )
-            return await self.get_order_status(symbol, order_id)
-        return await self._signed_request(
-            "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
-        )
+            evidence = await self.get_order_status(symbol, order_id)
+        else:
+            evidence = await self._signed_request(
+                "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
+            )
+        if isinstance(evidence, dict):
+            self._record_terminal_protection(symbol, order_id, evidence)
+        return evidence
 
     @property
     def supports_exchange_side_stops(self) -> bool:
