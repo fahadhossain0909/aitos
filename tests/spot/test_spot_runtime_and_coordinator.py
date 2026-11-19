@@ -12,6 +12,7 @@ from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordin
 from aitos.spot.execution import SpotExecutionDisabled
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.runtime import SpotRuntime
+from aitos.spot.portfolio import SpotPortfolioValuator
 from aitos.spot.scanner import (
     RankedSpotCandidate,
     SpotCandidate,
@@ -422,4 +423,30 @@ async def test_spot_candidate_kernel_short_is_never_authorized():
             equity_usd=1000,
             quote_order_quantity=Decimal("50"),
         )
+    inventory.close()
+
+
+
+def test_spot_runtime_updates_shared_capital_and_portfolio_fx_rate():
+    inventory = InventoryLedger()
+    coordinator = SpotTradingCoordinator(
+        capital_gateway=FakeCapitalGateway(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+    )
+    runtime = SpotRuntime(
+        market_data=SimpleNamespace(),
+        executor=FakeExecutor(),
+        inventory=inventory,
+        scanner=SpotOpportunityScanner(),
+        coordinator=coordinator,
+        market_consumer=SimpleNamespace(),
+        lead_lag=SimpleNamespace(),
+        portfolio_valuator=SpotPortfolioValuator(inventory),
+    )
+    runtime.update_quote_to_usd_rate(Decimal("0.999"))
+    assert coordinator.quote_to_usd_rate == Decimal("0.999")
+    assert runtime.portfolio_valuator.quote_to_usd_rate == Decimal("0.999")
+    with pytest.raises(ValueError, match="positive and finite"):
+        runtime.update_quote_to_usd_rate(Decimal("0"))
     inventory.close()
