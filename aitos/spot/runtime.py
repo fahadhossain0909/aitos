@@ -30,7 +30,6 @@ from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.portfolio import SpotPortfolioSnapshot, SpotPortfolioValuator
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import (
-    SpotCandidateRejected,
     RankedSpotCandidate,
     SpotCandidate,
     SpotOpportunityScanner,
@@ -39,6 +38,10 @@ from aitos.spot.websocket import BinanceSpotWebSocket
 from aitos.spot.user_stream import SpotUserDataStreamSupervisor
 
 logger = get_logger("aitos.spot.runtime")
+
+
+class SpotCandidateRejected(ValueError):
+    """Raised when a ranked Spot candidate fails an explicit strategy gate."""
 
 
 @dataclass(frozen=True, slots=True)
