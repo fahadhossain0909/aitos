@@ -78,7 +78,6 @@ def test_passive_queue_replay_consumes_ahead_queue_before_own_fill():
     assert result.fills == ((1100, 2.0),)
 
 
-
 def test_l2_market_order_does_not_reuse_later_snapshot_depth():
     books = [
         DepthBookSnapshot(1000, ((99.0, 1.0),), ((101.0, 0.2),)),
@@ -95,7 +94,6 @@ def test_l2_market_order_does_not_reuse_later_snapshot_depth():
     assert result.filled_quantity == pytest.approx(0.2)
     assert result.remaining_quantity == pytest.approx(0.3)
     assert not result.complete
-
 
 
 def test_l2_market_order_accepts_signed_funding_credit():
