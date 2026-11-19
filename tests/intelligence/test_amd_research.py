@@ -578,6 +578,7 @@ def test_live_event_flow_requires_nonzero_depth_ofi_activity():
     assert not result.evidence.fresh
     assert "depth_ofi_unavailable" in result.diagnostics
 
+
 def test_execution_replay_applies_funding_credit_to_short_positions():
     entry = [BookSnapshot(100, 99.0, 101.0, 2.0, 2.0)]
     exit_books = [BookSnapshot(1000, 99.0, 101.0, 2.0, 2.0)]
