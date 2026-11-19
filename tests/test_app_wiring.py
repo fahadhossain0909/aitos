@@ -534,6 +534,7 @@ async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize()
     assert module.calls == ["shutdown", "initialize"]
     assert module.initialized is True
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
@@ -571,6 +572,7 @@ async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
 
     await shutdown_all(components)
     assert consumer.snapshot().started is False
+
 
 @pytest.mark.asyncio
 async def test_live_portfolio_tracker_projects_pending_entry_risk():
