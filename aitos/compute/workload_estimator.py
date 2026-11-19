@@ -4,6 +4,7 @@ Estimates are admission hints only. Until enough observations exist, unknown
 workloads receive deliberately conservative costs and cannot be mistaken for
 measured/calibrated capacity.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -55,7 +56,9 @@ class WorkloadCostModel:
             self.unknown_cpu_cost_units,
         )
         if any(not isfinite(value) or value < 0 for value in numeric):
-            raise ValueError("cost model CPU parameters must be finite and non-negative")
+            raise ValueError(
+                "cost model CPU parameters must be finite and non-negative"
+            )
         if (
             min(
                 self.base_memory_mb,
@@ -109,11 +112,9 @@ def estimate_symbol_workload(
 
     cpu_cost = (
         cost_model.base_cpu_units
-        + telemetry.p95_event_rate_per_second
-        * cost_model.cpu_units_per_event_second
+        + telemetry.p95_event_rate_per_second * cost_model.cpu_units_per_event_second
         + telemetry.p95_book_depth_levels * cost_model.cpu_units_per_depth_level
-        + telemetry.analysis_runs_per_minute
-        * cost_model.cpu_units_per_analysis_minute
+        + telemetry.analysis_runs_per_minute * cost_model.cpu_units_per_analysis_minute
     )
     book_memory_mb = (
         telemetry.p95_book_depth_levels * cost_model.bytes_per_book_level
