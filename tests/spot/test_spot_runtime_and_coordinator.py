@@ -168,3 +168,9 @@ async def test_spot_exit_requires_authorization_and_managed_inventory():
         exit_authorized=True,
     )
     assert result.side is SpotOrderSide.SELL
+
+
+
+def test_spot_settings_reject_non_usdt_capital_numeraire():
+    with pytest.raises(ValueError, match="requires USDT"):
+        SpotSettings(_env_file=None, quote_asset="BTC")
