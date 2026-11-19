@@ -489,7 +489,10 @@ async def test_unlinked_order_recovery_fails_closed_on_latest_timestamp_tie():
         async def query(self, query, parameters=None):
             self.calls += 1
             if self.calls == 1:
-                assert "groupUniqArray(tuple(symbol, state, request_json, result_json))" in query
+                assert (
+                    "groupUniqArray(tuple(symbol, state, request_json, result_json))"
+                    in query
+                )
                 assert "any(state)" not in query
                 return QueryResult()
             return QueryResultWithTrades()
