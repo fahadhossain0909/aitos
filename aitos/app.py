@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from math import isfinite
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
