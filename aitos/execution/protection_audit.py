@@ -80,6 +80,13 @@ def audit_protection_inventory(
     if len(intents) > 10000:
         raise ValueError("bounded journal inventory required")
 
+    active_trade_ids = evidence.get("active_trade_ids")
+    if active_trade_ids is not None and (
+        not isinstance(active_trade_ids, list)
+        or not all(isinstance(value, str) and value for value in active_trade_ids)
+    ):
+        raise ValueError("active trade identity inventory is malformed")
+    active_trade_ids_set = set(active_trade_ids or [])
     expected = {}
     findings = []
     for row in intents:
@@ -90,6 +97,14 @@ def audit_protection_inventory(
             request.get("order_type") not in PROTECTION_TYPES
             or row.get("state") == "REJECTED"
         ):
+            continue
+        if (
+            active_trade_ids is not None
+            and row.get("state") == "APPLIED"
+            and row.get("trade_id") not in active_trade_ids_set
+        ):
+            # A closed trade no longer owns a resting protective order. If the
+            # venue still returns it, it will be reported as unowned below.
             continue
         cid = row.get("client_id")
         if not isinstance(cid, str) or not cid or cid in expected:
