@@ -77,14 +77,12 @@ def build_spot_runtime(
     if not policy.testnet and policy.execution_enabled:
         if not (policy.allow_mainnet and mainnet_approved):
             raise RuntimeError("Spot mainnet execution requires separate operator approval")
-    if policy.execution_enabled and not (
-        settings.binance.api_key and settings.binance.api_secret
-    ):
-        raise RuntimeError("Spot execution requires Binance API credentials")
+    if policy.execution_enabled and not (policy.api_key and policy.api_secret):
+        raise RuntimeError("Spot execution requires dedicated Spot API credentials")
 
     rest = BinanceSpotAdapter(
-        api_key=settings.binance.api_key or None,
-        api_secret=settings.binance.api_secret or None,
+        api_key=policy.api_key or None,
+        api_secret=policy.api_secret or None,
         testnet=policy.testnet,
     )
     market_data = BinanceSpotCanonicalMarketDataAdapter(
