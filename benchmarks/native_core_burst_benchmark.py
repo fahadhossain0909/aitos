@@ -10,7 +10,11 @@ import math
 import statistics
 import time
 
-from aitos.native_core import PythonFixedPointOrderBook, create_order_book, native_available
+from aitos.native_core import (
+    PythonFixedPointOrderBook,
+    create_order_book,
+    native_available,
+)
 
 
 def percentile(samples, quantile):
@@ -124,7 +128,13 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--burst-size", type=int, default=256)
     args = parser.parse_args()
-    if min(args.events, args.repeats, args.queue_capacity, args.batch_size, args.burst_size) <= 0:
+    if min(
+        args.events,
+        args.repeats,
+        args.queue_capacity,
+        args.batch_size,
+        args.burst_size,
+    ) <= 0:
         parser.error("all arguments must be positive")
 
     factories = {
