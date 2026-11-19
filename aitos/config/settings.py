@@ -101,6 +101,10 @@ class SpotSettings(BaseSettings):
             raise ValueError("Spot execution requires AITOS_SPOT_ENABLED=true")
         if self.allow_mainnet and self.testnet:
             raise ValueError("allow_mainnet cannot be combined with Spot testnet")
+        if self.quote_asset.upper() != "USDT":
+            raise ValueError(
+                "Spot capital authorization currently requires USDT quote pairs"
+            )
         return self
 
 
