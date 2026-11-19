@@ -156,11 +156,11 @@ class SpotRuntime:
             task.get_name(): (
                 "cancelled"
                 if task.cancelled()
-                else "failed"
-                if task.done() and task.exception() is not None
-                else "stopped"
-                if task.done()
-                else "running"
+                else (
+                    "failed"
+                    if task.done() and task.exception() is not None
+                    else "stopped" if task.done() else "running"
+                )
             )
             for task in self._market_tasks
         }
