@@ -145,6 +145,19 @@ class PortfolioState:
             raise ValueError("pending order IDs must be unique in a portfolio snapshot")
 
     @property
+    def projected_open_position_count(self) -> int:
+        """Count unique instruments across open positions and pending orders."""
+        symbols = {
+            str(position.symbol).strip().upper()
+            for position in self.positions
+            if str(position.symbol).strip()
+        }
+        symbols.update(
+            order.symbol for order in self.pending_orders if order.symbol
+        )
+        return len(symbols)
+
+    @property
     def current_drawdown_pct(self) -> float:
         if self.peak_equity_usd <= 0:
             return 0.0
