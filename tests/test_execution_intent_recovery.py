@@ -303,7 +303,14 @@ async def test_legacy_protection_never_fabricates_resting_acceptance(response):
     [
         OrderResult("algo:123", "ETHUSDT", TradeSide.LONG, 0, 90),
         OrderResult("algo:123", "BTCUSDT", TradeSide.SHORT, 0, 90),
-        OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, 90, client_order_id="other"),
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0,
+            90,
+            client_order_id="other",
+        ),
         OrderResult("algo:0", "BTCUSDT", TradeSide.LONG, 0, 90),
         OrderResult("algo:not-an-id", "BTCUSDT", TradeSide.LONG, 0, 90),
         OrderResult("algo:123", "BTCUSDT", TradeSide.LONG, 0, float("nan")),
