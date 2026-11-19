@@ -49,6 +49,7 @@ async def test_partial_subscription_failure_keeps_handles_for_managed_shutdown()
     first.cancel.assert_called_once()
 
 
+
 async def test_governance_drift_scheduler_is_owned_by_application_lifecycle():
     bus = SimpleNamespace(subscribe=AsyncMock(side_effect=lambda *args, **kw: Mock()))
     system = components(bus)
@@ -83,4 +84,3 @@ async def test_governance_drift_scheduler_is_owned_by_application_lifecycle():
     assert scheduler.stopped is True
     assert system._governance_drift_task is None
     assert system._governance_drift_stop_event is None
-
