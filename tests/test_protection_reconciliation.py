@@ -216,6 +216,7 @@ async def test_account_exposure_mismatch_is_reported_not_authorized(protected_in
         symbol="BTCUSDT",
         side=TradeSide.LONG,
         quantity=1.0,
+        sl_order_id="algo:123",
     )
 
     report = await audit_exchange_protection_inventory(
