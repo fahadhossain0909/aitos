@@ -189,6 +189,16 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 trade.risk_amount_usd,
             )
         )
+    gateway.assert_reservations_cover(
+        [
+            Reservation(
+                trade.symbol,
+                trade.position_size_usd / trade.leverage,
+                trade.risk_amount_usd,
+            )
+            for trade in restored_trades
+        ]
+    )
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
