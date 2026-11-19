@@ -58,7 +58,7 @@ def test_inventory_fill_idempotency_and_fee_accounting():
         commission=Decimal("0.12"), commission_asset="USDT")
     pos = ledger.get_position("ABCUSDT")
     assert pos.quantity == Decimal("0.99")
-    assert pos.realized_quote_pnl == Decimal("1.839899497487437185929648241")
+    assert pos.realized_quote_pnl == Decimal("11.88") - (Decimal("20") / Decimal("1.99"))
 
 
 def test_inventory_rejects_unowned_sell():
@@ -86,6 +86,27 @@ def test_scanner_filters_stale_and_illiquid_candidates():
 async def test_execution_disabled_by_default():
     adapter = BinanceSpotAdapter(testnet=True)
     executor = SpotOrderExecutor(adapter)
+    request = SpotOrderRequest("ABCUSDT", SpotOrderSide.BUY, SpotOrderType.MARKET,
+                               quote_order_quantity=Decimal("10"))
+    with pytest.raises(SpotExecutionDisabled):
+        await executor.submit(request)
+    await adapter.close()
+
+def test_inventory_persists_across_reopen(tmp_path):
+    path = tmp_path / "spot-ledger.sqlite"
+    ledger = InventoryLedger(path)
+    ledger.record_fill(fill_key="persistent-buy", symbol="ABCUSDT", base_asset="ABC",
+        quote_asset="USDT", side="BUY", quantity=Decimal("1"), price=Decimal("5"))
+    ledger.close()
+    reopened = InventoryLedger(path)
+    assert reopened.get_position("ABCUSDT").quantity == Decimal("1")
+    reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_mainnet_execution_requires_second_explicit_guard():
+    adapter = BinanceSpotAdapter(testnet=False)
+    executor = SpotOrderExecutor(adapter, enabled=True, allow_mainnet=False)
     request = SpotOrderRequest("ABCUSDT", SpotOrderSide.BUY, SpotOrderType.MARKET,
                                quote_order_quantity=Decimal("10"))
     with pytest.raises(SpotExecutionDisabled):
