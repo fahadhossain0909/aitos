@@ -107,3 +107,20 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - Forward labels are generated per asset and requested horizon from the first eligible bar open after the event became known to AITOS through the first bar close at or beyond the target horizon.
 - A label is emitted only when both selected market-data observations were available by the requested evaluation cutoff. Missing bars, future events, late bars and immature outcomes are explicitly counted.
 - This is a deterministic dataset/labeling core, not a provider ingestion job or a ClickHouse migration. A production adapter still needs to persist raw provider payloads, revision IDs, source provenance and bar availability timestamps before this pipeline can be populated with real historical data.
+
+
+### Durable point-in-time revision storage
+
+`ClickHousePointInTimeStore` persists immutable event revisions and market-bar revisions in separate
+`ReplacingMergeTree` tables keyed by stable revision identity. The store records
+`ingested_at` separately from provider `known_at` / `available_at`, allowing
+historical reconstruction to exclude revisions that AITOS had not ingested at
+the requested cutoff. Batch replay is safe for the same revision identity;
+callers should retain provider/source provenance in the revision identifiers
+and upstream ingestion records.
+
+The store exposes explicit append and bounded point-in-time load operations.
+It does not silently fetch third-party history, infer missing bars, or mutate
+live scanner/strategy decisions. Historical provider pagination, venue-specific
+bar normalization, and production retention/backfill orchestration remain
+separate operational integrations.
