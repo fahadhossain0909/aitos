@@ -35,7 +35,13 @@ klines, order-book snapshots and depth deltas. Every event carries `market_type=
 `market.spot.*` channels; existing Futures consumers remain subscribed to
 `market.*` and cannot accidentally mix same-symbol Spot data into Futures
 features. A Spot consumer subscribes through
-`MarketDataBus.subscribe(..., market_type="spot")`.
+`MarketDataBus.subscribe(..., market_type="spot")`. The wire contract carries
+an explicit `event_revision`; Spot trade/ticker/kline/book envelopes can be
+persisted in ClickHouse `market_event_versions` using
+`ReplacingMergeTree(event_revision)`, keyed by isolated `instrument_id` and
+stable `event_id`. This preserves market identity, exchange/source timestamps,
+source type, sequence, schema version and payload provenance without writing
+Spot rows into legacy symbol-only Futures projection tables.
 
 Trade, ticker, kline and depth symbols are multiplexed over four bounded
 combined-stream connections. The order-book path opens the depth WebSocket and
@@ -157,10 +163,18 @@ AITOS_SPOT_QUOTE_TO_USD_RATE=1.0
 AITOS_SPOT_MAX_SYMBOLS=20
 ```
 
-Construct the runtime explicitly with `build_spot_runtime()`, then call
-`await runtime.start_market_data(market_bus)`. It discovers the highest-turnover
-eligible USDT Spot symbols and starts supervised trade/ticker subscriptions
-for the bounded universe plus book/kline subscriptions for the top five.
+Construct the runtime explicitly with `build_spot_runtime()`, passing the
+already-initialized shared `MarketDataRepository` when durable market history
+is required, then call `await runtime.start_market_data(market_bus)`. When a
+repository is supplied, the runtime starts a Spot-only persistence consumer
+for `market.spot.*` channels. It writes versioned canonical events only; it
+does not contaminate legacy Futures `trade_ticks`, `depth_events` or
+`order_book_snapshots` tables whose primary identity is symbol-only. The
+consumer uses a bounded queue and flushes on shutdown with a finite timeout;
+any shutdown drops are exposed in its snapshot. The runtime discovers the
+highest-turnover eligible USDT Spot symbols and starts supervised trade/ticker
+subscriptions for the bounded universe plus book/kline subscriptions for the
+top five.
 Call `await runtime.stop_market_data()` before shutdown, or
 `await runtime.close()` to stop streams and close durable stores. The Futures
 runner does not call this factory automatically.
