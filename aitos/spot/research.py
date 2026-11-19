@@ -99,10 +99,13 @@ def validate_futures_spot_lead_lag_oos(
         )
     _, leader, lag = max(candidates, key=lambda item: item[0])
     if leader == "spot":
+        train_corr = _pearson(spot[: split - lag], futures[lag:split])
         x, y = spot[split - lag : n - lag], futures[split:n]
     elif leader == "futures":
+        train_corr = _pearson(futures[: split - lag], spot[lag:split])
         x, y = futures[split - lag : n - lag], spot[split:n]
     else:
+        train_corr = _pearson(spot[:split], futures[:split])
         x, y = spot[split:n], futures[split:n]
     test_corr = _pearson(x, y)
     sync_corr = _pearson(spot[split:n], futures[split:n])
@@ -142,7 +145,7 @@ def validate_futures_spot_lead_lag_oos(
     return LeadLagOOSResult(
         leader=leader,
         lag_seconds=lag,
-        train_correlation=max(candidates, key=lambda item: item[0])[0],
+        train_correlation=train_corr,
         test_correlation=test_corr,
         confidence_low=low,
         confidence_high=high,
