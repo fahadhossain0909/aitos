@@ -50,6 +50,7 @@ class BinanceSpotAdapter:
             capacity=1200, refill_per_second=20.0, reserved_capacity=100
         )
         self._server_time_offset_ms = 0
+        self._server_time_synced = False
 
     async def __aenter__(self) -> "BinanceSpotAdapter":
         await self.connect()
@@ -88,6 +89,8 @@ class BinanceSpotAdapter:
         api_key_only: bool = False,
         weight: int = 1,
     ) -> Any:
+        if signed and not self._server_time_synced:
+            await self.sync_server_time()
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
@@ -123,6 +126,7 @@ class BinanceSpotAdapter:
         after = int(time.time() * 1000)
         midpoint = (before + after) // 2
         self._server_time_offset_ms = int(raw["serverTime"]) - midpoint
+        self._server_time_synced = True
         return self._server_time_offset_ms
 
     @property
