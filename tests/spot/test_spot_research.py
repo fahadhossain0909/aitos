@@ -6,10 +6,7 @@ from aitos.spot.research import validate_futures_spot_lead_lag_oos
 
 
 def test_lead_lag_oos_selects_spot_leader_without_test_lookahead():
-    spot = [
-        0.001 * math.sin(i * 1.7) + 0.0004 * math.cos(i * 0.31)
-        for i in range(500)
-    ]
+    spot = [0.001 * math.sin(i * 1.7) + 0.0004 * math.cos(i * 0.31) for i in range(500)]
     futures = [0.0, 0.0] + spot[:-2]
     regimes = ["trend" if i % 2 else "range" for i in range(len(spot))]
     result = validate_futures_spot_lead_lag_oos(
