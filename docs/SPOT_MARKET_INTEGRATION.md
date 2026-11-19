@@ -178,10 +178,6 @@ fees and execution-cost replay have passed operator review.
 - Test live User Data Stream keepalive/reconnect and account/order event recovery.
 - Add order lifecycle integration tests against Spot Testnet, including
   partial fills, cancel/replace, ambiguous POST recovery and process restart.
-- Convert third-asset commissions to quote currency using point-in-time prices;
-  do not report final net PnL while conversion is pending.
-- Extend execution replay with Spot maker/taker fees, spread crossing,
-  partial fills, market impact and latency; validate by symbol and regime OOS.
 - Wire a point-in-time third-asset fee-price source into the pending fee-conversion
   ledger; until resolved, net PnL remains provisional for affected fills.
 - Extend execution replay with Spot maker/taker fees, spread crossing,
