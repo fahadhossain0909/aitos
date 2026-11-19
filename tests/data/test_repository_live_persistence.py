@@ -180,19 +180,17 @@ async def test_load_versioned_events_filters_exact_spot_instrument_and_decodes_p
     assert rows[0]["payload"] == {"last_price": "101"}
 
 
-def test_versioned_event_loader_rejects_naive_or_reversed_time_ranges():
+@pytest.mark.asyncio
+async def test_versioned_event_loader_rejects_naive_or_reversed_time_ranges():
     repo = MarketDataRepository.__new__(MarketDataRepository)
     repo._initialized = True
     start = datetime(2026, 11, 1)
     end = start + timedelta(hours=1)
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        awaitable = repo.load_versioned_market_events(
+        await repo.load_versioned_market_events(
             market_type="spot",
             instrument_id="binance:spot:BTCUSDT",
             start_time=start,
             end_time=end,
         )
-        import asyncio
-
-        asyncio.run(awaitable)
