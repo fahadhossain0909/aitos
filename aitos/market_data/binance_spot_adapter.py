@@ -178,9 +178,7 @@ class BinanceSpotCanonicalMarketDataAdapter:
                 },
                 MarketSource.WEBSOCKET,
                 int(data["T"]),
-                event_id=(
-                    f"binance:spot:{symbol}:kline:{timeframe}:{int(data['t'])}"
-                ),
+                event_id=(f"binance:spot:{symbol}:kline:{timeframe}:{int(data['t'])}"),
                 event_revision=max(1, int(data.get("L", 1))),
             )
 
