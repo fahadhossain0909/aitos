@@ -27,6 +27,9 @@ class FakeWebSocket:
         if channels == ("@trade",):
             yield {"data": {"T": 1700000000000, "t": 7, "p": "100",
                             "q": "0.25", "m": False}}
+        elif channels == ("@bookTicker",):
+            yield {"data": {"u": 99, "s": symbol, "b": "99.5", "B": "2",
+                            "a": "100.5", "A": "3"}}
         elif channels == ("@depth@100ms",):
             first = 14 if self.gap else 11
             yield {"data": {"E": 1700000000100, "U": first, "u": first + 1,
@@ -73,3 +76,13 @@ def test_spot_market_event_round_trip_preserves_market_type_and_identity():
     assert restored.market_type == "spot"
     assert restored.instrument_id == "binance:spot:BTCUSDT"
     assert restored.sequence == 3
+
+
+@pytest.mark.asyncio
+async def test_spot_ticker_stream_handles_book_ticker_without_exchange_time():
+    adapter = BinanceSpotCanonicalMarketDataAdapter(FakeRest(), FakeWebSocket())
+    events = [event async for event in adapter.stream_tickers(["BTCUSDT"])]
+    assert len(events) == 1
+    assert events[0].event_type is MarketEventType.TICKER
+    assert events[0].payload["bid_price"] == "99.5"
+    assert events[0].payload["ask_price"] == "100.5"
