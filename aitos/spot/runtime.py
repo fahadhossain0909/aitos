@@ -17,6 +17,7 @@ from aitos.spot.coordinator import SpotTradingCoordinator
 from aitos.spot.execution import SpotOrderExecutor
 from aitos.spot.filters import SpotSymbolFilters
 from aitos.spot.inventory import InventoryLedger
+from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotOpportunityScanner
 from aitos.spot.websocket import BinanceSpotWebSocket
 
