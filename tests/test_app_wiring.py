@@ -21,6 +21,10 @@ from aitos.app import (
     shutdown_all,
 )
 from aitos.execution.order_executor import SimulatedOrderExecutor
+from aitos.markets.contracts import AssetClass, Instrument
+from aitos.markets.engine import CrossMarketIntelligenceEngine
+from aitos.markets.instrument_master import InstrumentMaster
+from aitos.markets.shadow_consumer import MarketDataShadowConsumer
 from aitos.intelligence import capital_runtime
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from tests.test_scanner import FakeScannerExchange
@@ -529,3 +533,42 @@ async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize()
     assert restarted == ["test-auxiliary"]
     assert module.calls == ["shutdown", "initialize"]
     assert module.initialized is True
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
+    exchange = FakeScannerExchange()
+    consumer = MarketDataShadowConsumer(
+        engine=CrossMarketIntelligenceEngine(),
+        instrument_resolver=InstrumentMaster(
+            [
+                Instrument(
+                    symbol="BTCUSDT",
+                    asset_class=AssetClass.CRYPTO,
+                    venue="binance",
+                    market_type="usd_m_futures",
+                )
+            ],
+            version="test-instruments-v1",
+        ),
+        market_types=("usd_m_futures",),
+    )
+    components = await build_system(
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=SimulatedOrderExecutor(),
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
+        market_shadow_consumer=consumer,
+    )
+
+    assert components.market_shadow_consumer is consumer
+    assert components.data_ingestion.market_data_bus is not None
+    assert consumer.snapshot().started is False
+
+    await initialize_all(components)
+    assert consumer.snapshot().started is True
+
+    await shutdown_all(components)
+    assert consumer.snapshot().started is False
+
