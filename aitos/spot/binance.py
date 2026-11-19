@@ -93,6 +93,40 @@ class BinanceSpotAdapter:
             if f.quote_asset == quote_asset.upper() and f.status == "TRADING"
             and f.is_spot_trading_allowed]
 
+    async def discover_universe(self, *, quote_asset: str = "USDT",
+                                min_quote_volume: Decimal = Decimal("100000"),
+                                limit: int = 20) -> list[SpotInstrument]:
+        """Select active Spot instruments by 24h quote turnover, never by symbol guess."""
+        if not 1 <= limit <= 100:
+            raise ValueError("universe limit must be between 1 and 100")
+        if min_quote_volume < 0:
+            raise ValueError("minimum quote volume cannot be negative")
+        if not self.filters:
+            await self.exchange_info()
+        tickers = await self.ticker_24h()
+        by_symbol = {
+            str(row.get("symbol", "")).upper(): row
+            for row in tickers if isinstance(row, dict)
+        }
+        candidates = []
+        for symbol, filters in self.filters.items():
+            if (filters.quote_asset != quote_asset.upper()
+                    or filters.status != "TRADING"
+                    or not filters.is_spot_trading_allowed):
+                continue
+            ticker = by_symbol.get(symbol)
+            if ticker is None:
+                continue
+            quote_volume = D(ticker.get("quoteVolume", "0"))
+            if quote_volume >= min_quote_volume:
+                candidates.append((quote_volume, SpotInstrument(
+                    symbol=symbol, base_asset=filters.base_asset,
+                    quote_asset=filters.quote_asset, status=filters.status,
+                    is_spot_trading_allowed=True,
+                )))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return [instrument for _, instrument in candidates[:limit]]
+
     async def klines(self, symbol: str, interval: str, limit: int = 500) -> list[list[Any]]:
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
