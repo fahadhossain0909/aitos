@@ -48,6 +48,7 @@ class CanonicalMarketDataPersistenceSink:
         ),
         market_types: tuple[str, ...] | None = None,
         canonical_only: bool = False,
+        shutdown_flush_seconds: float = 10.0,
     ) -> None:
         self._bus = MarketDataBus(event_bus)
         self._repository = repository
@@ -68,6 +69,8 @@ class CanonicalMarketDataPersistenceSink:
             else None
         )
         self._canonical_only = canonical_only
+        self._shutdown_flush_seconds = max(0.0, shutdown_flush_seconds)
+        self._shutdown_dropped = 0
         self._subscriptions: list[Subscription] = []
         self._workers: list[asyncio.Task] = []
         self._last_book_persist: dict[str, datetime] = {}
@@ -112,11 +115,27 @@ class CanonicalMarketDataPersistenceSink:
                 *(self._wait(s) for s in self._subscriptions), return_exceptions=True
             )
         self._subscriptions.clear()
+        if self._workers and self._queue.qsize():
+            try:
+                await asyncio.wait_for(
+                    self._queue.join(), timeout=self._shutdown_flush_seconds
+                )
+            except asyncio.TimeoutError:
+                # A bounded shutdown is more important than hanging service teardown.
+                pass
         for worker in self._workers:
             worker.cancel()
         if self._workers:
             await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            else:
+                self._shutdown_dropped += 1
+                self._queue.task_done()
         self._initialized = False
 
     async def _wait(self, subscription: Subscription) -> None:
@@ -365,6 +384,8 @@ class CanonicalMarketDataPersistenceSink:
             ),
             "market_types": list(self._market_types or ()),
             "canonical_only": self._canonical_only,
+            "shutdown_flush_seconds": self._shutdown_flush_seconds,
+            "shutdown_dropped": self._shutdown_dropped,
             "historical_book_symbols": sorted(self._historical_books),
             "historical_orderbook_levels": self._historical_orderbook_levels,
             "historical_trade_symbols": sorted(self._historical_trades),
