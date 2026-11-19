@@ -21,6 +21,11 @@ from .channels import (
     CHANNEL_OPTIONS,
     CHANNEL_TICKER,
     CHANNEL_TRADE,
+    CHANNEL_SPOT_TRADE,
+    CHANNEL_SPOT_BOOK_DELTA,
+    CHANNEL_SPOT_BOOK_SNAPSHOT,
+    CHANNEL_SPOT_TICKER,
+    CHANNEL_SPOT_KLINE,
 )
 from .contracts import MarketEvent, MarketEventType, MarketSource
 
@@ -38,11 +43,29 @@ _CHANNEL_BY_TYPE = {
 }
 
 
-def channel_for(event_type: MarketEventType) -> str:
+_SPOT_CHANNEL_BY_TYPE = {
+    MarketEventType.TRADE: CHANNEL_SPOT_TRADE,
+    MarketEventType.BOOK_DELTA: CHANNEL_SPOT_BOOK_DELTA,
+    MarketEventType.BOOK_SNAPSHOT: CHANNEL_SPOT_BOOK_SNAPSHOT,
+    MarketEventType.TICKER: CHANNEL_SPOT_TICKER,
+    MarketEventType.KLINE: CHANNEL_SPOT_KLINE,
+}
+
+
+def channel_for(
+    event_type: MarketEventType, market_type: str | None = None
+) -> str:
+    mapping = (
+        _SPOT_CHANNEL_BY_TYPE
+        if str(market_type or "").lower() == "spot"
+        else _CHANNEL_BY_TYPE
+    )
     try:
-        return _CHANNEL_BY_TYPE[event_type]
+        return mapping[event_type]
     except KeyError as exc:
-        raise ValueError(f"unsupported market event type: {event_type}") from exc
+        raise ValueError(
+            f"unsupported market event type for {market_type or 'default'}: {event_type}"
+        ) from exc
 
 
 def _datetime_from_wire(value: Any) -> datetime:
@@ -115,7 +138,7 @@ class MarketDataBus:
         self._event_bus = event_bus
 
     async def publish(self, event: MarketEvent) -> None:
-        channel = channel_for(event.event_type)
+        channel = channel_for(event.event_type, event.market_type)
         payload = market_event_to_wire(event)
         # Production contract checkpoint. Findings are observed and classified;
         # the checkpoint does not silently discard traffic during rollout.
@@ -236,8 +259,9 @@ class MarketDataBus:
         *,
         group: str,
         live_only: bool = True,
+        market_type: str | None = None,
     ) -> SubscriptionProtocol:
-        channel = channel_for(event_type)
+        channel = channel_for(event_type, market_type)
 
         async def _handle(event: Event) -> Any:
             started = time.perf_counter()
