@@ -500,6 +500,9 @@ class SpotRuntime:
                 if self._user_stream is not None
                 else {"running": False, "configured": False}
             ),
+            "capital": {
+                "quote_to_usd_rate": str(self.coordinator.quote_to_usd_rate),
+            },
             "exchange": {
                 "rate_limit": self.market_data.rest.rate_limit_snapshot,
                 "server_time_synced": self.market_data.rest._server_time_synced,
