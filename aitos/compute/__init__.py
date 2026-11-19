@@ -1,5 +1,9 @@
 """Adaptive compute capability and capacity planning primitives."""
 
+from aitos.compute.adaptive_runtime import (
+    AdaptiveComputeRuntime,
+    create_adaptive_compute_runtime,
+)
 from aitos.compute.pressure_controller import (
     PressureDecision,
     PressurePolicy,
@@ -18,6 +22,7 @@ from aitos.compute.resource_governor import (
 )
 
 __all__ = [
+    "AdaptiveComputeRuntime",
     "CapacityPlan",
     "PressureDecision",
     "PressureLevel",
@@ -28,6 +33,7 @@ __all__ = [
     "SymbolWorkload",
     "build_resource_budget",
     "classify_pressure",
+    "create_adaptive_compute_runtime",
     "detect_resources",
     "plan_symbol_capacity",
 ]
