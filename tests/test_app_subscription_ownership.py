@@ -1,5 +1,6 @@
 """Composition-root subscription contracts without databases or exchange IO."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -46,3 +47,37 @@ async def test_partial_subscription_failure_keeps_handles_for_managed_shutdown()
     assert system._price_feed_subscriptions == [first]
     await shutdown_all(system)
     first.cancel.assert_called_once()
+
+async def test_governance_drift_scheduler_is_owned_by_application_lifecycle():
+    bus = SimpleNamespace(subscribe=AsyncMock(side_effect=lambda *args, **kw: Mock()))
+    system = components(bus)
+    provider_calls = []
+
+    class FakeDriftScheduler:
+        def __init__(self):
+            self.started = asyncio.Event()
+            self.stopped = False
+
+        async def run_forever(self, stop_event, batch_provider):
+            provider_calls.append(batch_provider)
+            self.started.set()
+            await stop_event.wait()
+            self.stopped = True
+
+    scheduler = FakeDriftScheduler()
+    provider = lambda: ({}, {})
+    system.governance_drift_scheduler = scheduler
+    system.governance_drift_batch_provider = provider
+    system._governance_drift_task = None
+    system._governance_drift_stop_event = None
+
+    await initialize_all(system)
+    await asyncio.wait_for(scheduler.started.wait(), timeout=1.0)
+    assert provider_calls == [provider]
+    assert system._governance_drift_task is not None
+
+    await shutdown_all(system)
+    assert scheduler.stopped is True
+    assert system._governance_drift_task is None
+    assert system._governance_drift_stop_event is None
+
