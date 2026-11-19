@@ -142,8 +142,9 @@ async def test_spot_live_state_rejects_stale_and_invalid_order_books():
     )
     assert state.book_valid is False
     assert state.sequence_gaps == 1
-    assert consumer.build_candidate(
-        "BTCUSDT",
-        quote_volume_24h=Decimal("100000"),
-        now=now + timedelta(seconds=30),
-    ) is None
+    assert (
+        consumer.build_candidate(
+            "BTCUSDT",
+            quote_volume_24h=Decimal("100000"),
+            now=now + timedelta(seconds=30),
+        )
