@@ -73,10 +73,13 @@ class SpotMarketDataConsumer:
         """Constrain live feature state to the discovered Spot instrument universe."""
         normalized = frozenset(str(symbol).upper() for symbol in symbols if symbol)
         if not normalized or len(normalized) > self.max_symbols:
-            raise ValueError("Spot symbol universe is empty or exceeds feature capacity")
+            raise ValueError(
+                "Spot symbol universe is empty or exceeds feature capacity"
+            )
         self._allowed_symbols = normalized
         self._states = {
-            symbol: state for symbol, state in self._states.items()
+            symbol: state
+            for symbol, state in self._states.items()
             if symbol in normalized
         }
 
