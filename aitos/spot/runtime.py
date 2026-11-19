@@ -512,8 +512,12 @@ class SpotRuntime:
                 "quote_to_usd_rate": str(self.coordinator.quote_to_usd_rate),
             },
             "inventory_recovery": {
-                "unresolved_order_intents": len(self.inventory.unresolved_order_intents()),
-                "pending_fee_conversions": len(self.inventory.pending_fee_conversions()),
+                "unresolved_order_intents": len(
+                    self.inventory.unresolved_order_intents()
+                ),
+                "pending_fee_conversions": len(
+                    self.inventory.pending_fee_conversions()
+                ),
             },
             "exchange": {
                 "rate_limit": self.market_data.rest.rate_limit_snapshot,
