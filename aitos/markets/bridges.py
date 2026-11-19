@@ -7,23 +7,24 @@ an already-resolved Instrument; it never guesses asset class or contract metadat
 
 from __future__ import annotations
 
-from aitos.market_data.contracts import (
-    MarketEvent as CanonicalMarketDataEvent,
-    MarketEventType as CanonicalMarketEventType,
-)
+from typing import TYPE_CHECKING
+
 from aitos.markets.contracts import Instrument, MarketEvent, MarketEventType
 
+if TYPE_CHECKING:
+    from aitos.market_data.contracts import MarketEvent as CanonicalMarketDataEvent
+
 _EVENT_TYPE_MAP = {
-    CanonicalMarketEventType.TRADE: MarketEventType.TRADE,
-    CanonicalMarketEventType.BOOK_DELTA: MarketEventType.ORDER_BOOK,
-    CanonicalMarketEventType.BOOK_SNAPSHOT: MarketEventType.ORDER_BOOK,
-    CanonicalMarketEventType.TICKER: MarketEventType.QUOTE,
-    CanonicalMarketEventType.KLINE: MarketEventType.BAR,
-    CanonicalMarketEventType.FUNDING: MarketEventType.FUNDING,
-    CanonicalMarketEventType.OPEN_INTEREST: MarketEventType.OPEN_INTEREST,
-    CanonicalMarketEventType.LIQUIDATION: MarketEventType.LIQUIDATION,
-    CanonicalMarketEventType.OPTIONS: MarketEventType.OPTIONS,
-    CanonicalMarketEventType.INSTRUMENT: MarketEventType.INSTRUMENT,
+    "trade": MarketEventType.TRADE,
+    "book_delta": MarketEventType.ORDER_BOOK,
+    "book_snapshot": MarketEventType.ORDER_BOOK,
+    "ticker": MarketEventType.QUOTE,
+    "kline": MarketEventType.BAR,
+    "funding": MarketEventType.FUNDING,
+    "open_interest": MarketEventType.OPEN_INTEREST,
+    "liquidation": MarketEventType.LIQUIDATION,
+    "options": MarketEventType.OPTIONS,
+    "instrument": MarketEventType.INSTRUMENT,
 }
 
 
@@ -39,6 +40,8 @@ def market_data_event_to_domain(
     as first-class fields, including the distinction between book deltas and
     snapshots (both share the domain ORDER_BOOK family).
     """
+    from aitos.market_data.contracts import MarketEvent as CanonicalMarketDataEvent
+
     if not isinstance(event, CanonicalMarketDataEvent):
         raise TypeError("event must be a canonical market-data MarketEvent")
     if not isinstance(instrument, Instrument):
@@ -50,11 +53,12 @@ def market_data_event_to_domain(
     if event_venue != instrument.venue.strip().lower():
         raise ValueError("resolved instrument venue does not match market event")
 
+    source_event_type = event.event_type.value
     try:
-        domain_type = _EVENT_TYPE_MAP[event.event_type]
+        domain_type = _EVENT_TYPE_MAP[source_event_type]
     except KeyError as exc:
         raise ValueError(
-            f"unsupported canonical market event type: {event.event_type}"
+            f"unsupported canonical market event type: {source_event_type}"
         ) from exc
 
     return MarketEvent(
@@ -72,6 +76,6 @@ def market_data_event_to_domain(
         trace_id=event.trace_id,
         venue=event.venue or event.exchange,
         market_type=event.market_type or event.market,
-        source_event_type=event.event_type.value,
+        source_event_type=source_event_type,
         stage_timestamps=dict(event.stage_timestamps),
     )
