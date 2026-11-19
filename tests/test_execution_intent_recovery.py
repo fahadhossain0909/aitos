@@ -243,7 +243,15 @@ def test_protection_record_rejects_nonprotective_preclaims(
     journal.begin(request(order_type=order_type, reduce_only=reduce_only))
     with pytest.raises(ValueError, match="protective preclaim"):
         journal.record_protection(
-            "intent-one", OrderResult("123", "BTCUSDT", TradeSide.LONG, 0, 90)
+            "intent-one",
+            OrderResult(
+                "123",
+                "BTCUSDT",
+                TradeSide.LONG,
+                0,
+                90,
+                client_order_id="intent-one",
+            ),
         )
     assert journal.unresolved()[0]["state"] == "SUBMITTING"
 
