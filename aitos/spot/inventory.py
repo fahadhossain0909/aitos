@@ -40,7 +40,8 @@ class InventoryLedger:
               base_asset TEXT NOT NULL, quote_asset TEXT NOT NULL,
               side TEXT NOT NULL, quantity TEXT NOT NULL, price TEXT NOT NULL,
               commission TEXT NOT NULL, commission_asset TEXT NOT NULL,
-              quote_value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+              quote_value TEXT NOT NULL, commission_quote_value TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """
         )
@@ -56,7 +57,60 @@ class InventoryLedger:
             )
         """
         )
+        columns = {
+            row[1] for row in self._db.execute("PRAGMA table_info(spot_fills)").fetchall()
+        }
+        if "commission_quote_value" not in columns:
+            self._db.execute(
+                "ALTER TABLE spot_fills ADD COLUMN commission_quote_value TEXT"
+            )
         self._db.commit()
+
+    def resolve_commission_conversion(
+        self, fill_key: str, quote_value: Decimal
+    ) -> None:
+        """Resolve a third-asset fee using its point-in-time quote valuation.
+
+        The caller must supply the conversion value captured at the fill time;
+        current prices must never be used to rewrite historical fee accounting.
+        """
+        if quote_value < 0:
+            raise ValueError("commission quote value cannot be negative")
+        with self._lock:
+            cursor = self._db.execute(
+                """UPDATE spot_fills SET commission_quote_value=?
+                   WHERE fill_key=? AND commission_asset NOT IN (
+                       SELECT base_asset FROM spot_fills WHERE fill_key=?
+                   ) AND commission_asset NOT IN (
+                       SELECT quote_asset FROM spot_fills WHERE fill_key=?
+                   )""",
+                (str(quote_value), fill_key, fill_key, fill_key),
+            )
+            self._db.commit()
+            if cursor.rowcount != 1:
+                raise KeyError(
+                    f"unknown fill or fee is not third-asset commission: {fill_key}"
+                )
+
+    def pending_fee_conversions(self) -> list[dict[str, str]]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT fill_key,symbol,commission,commission_asset
+                   FROM spot_fills
+                   WHERE CAST(commission AS REAL) > 0
+                     AND commission_asset NOT IN (base_asset, quote_asset)
+                     AND commission_quote_value IS NULL
+                   ORDER BY rowid"""
+            ).fetchall()
+        return [
+            dict(
+                zip(
+                    ("fill_key", "symbol", "commission", "commission_asset"),
+                    row,
+                )
+            )
+            for row in rows
+        ]
 
     def record_order_intent(
         self,
@@ -196,16 +250,20 @@ class InventoryLedger:
     def _position_from_cursor(cur: sqlite3.Cursor, symbol: str) -> InventoryPosition:
         rows = cur.execute(
             """SELECT base_asset,quote_asset,side,quantity,price,
-            commission,commission_asset FROM spot_fills WHERE symbol=? ORDER BY rowid""",
+            commission,commission_asset,commission_quote_value
+            FROM spot_fills WHERE symbol=? ORDER BY rowid""",
             (symbol,),
         ).fetchall()
         base = quote = ""
         qty = cost = realized = Decimal("0")
         fee_conversion_pending = False
-        for b, q, side, qraw, praw, craw, casset in rows:
+        for b, q, side, qraw, praw, craw, casset, converted_fee in rows:
             base, quote = b, q
             amount, price, fee = Decimal(qraw), Decimal(praw), Decimal(craw)
             value = amount * price
+            third_asset_fee = (
+                Decimal(converted_fee) if converted_fee is not None else None
+            )
             if side == "BUY":
                 qty += amount
                 cost += value
@@ -214,7 +272,10 @@ class InventoryLedger:
                 elif casset == quote:
                     cost += fee
                 elif fee > 0:
-                    fee_conversion_pending = True
+                    if third_asset_fee is None:
+                        fee_conversion_pending = True
+                    else:
+                        cost += third_asset_fee
             else:
                 avg = cost / qty if qty else Decimal("0")
                 proceeds = value
@@ -224,7 +285,10 @@ class InventoryLedger:
                 elif casset == base:
                     debit_quantity += fee
                 elif fee > 0:
-                    fee_conversion_pending = True
+                    if third_asset_fee is None:
+                        fee_conversion_pending = True
+                    else:
+                        proceeds -= third_asset_fee
                 if debit_quantity > qty:
                     raise ValueError("sell exceeds AITOS-managed inventory")
                 cost -= avg * debit_quantity
