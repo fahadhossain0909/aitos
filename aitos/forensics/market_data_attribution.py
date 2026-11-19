@@ -12,6 +12,7 @@ from functools import wraps
 from typing import Any
 
 _MARKET_PREFIXES = (
+    "market.spot.",
     "market.trade.",
     "market.orderbook.",
     "market.orderflow.",
