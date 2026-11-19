@@ -342,6 +342,7 @@ async def test_open_position_retains_capital_reservation_until_close(
     assert gateway.reservation.get(trade.symbol) is None
     await lifecycle.shutdown()
 
+
 def test_gateway_includes_other_in_flight_reservations_in_correlation_projection():
     class RecordingProtection:
         def __init__(self):
