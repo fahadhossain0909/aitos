@@ -206,7 +206,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 quantity_value = float(quantity)
             except (TypeError, ValueError):
                 quantity_value = float("nan")
-            close_position = row.get("closePosition") is True
+            close_position = row.get("closePosition")
+            reduce_only = row.get("reduceOnly")
+            if not (type(close_position) is bool and type(reduce_only) is bool):
+                raise ValueError("invalid algo inventory protection flags")
             if not close_position and (
                 not math.isfinite(quantity_value) or quantity_value <= 0
             ):
@@ -297,7 +300,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 raise ValueError("executed quantity exceeds original quantity")
             for flag in ("reduceOnly", "closePosition"):
                 value = row.get(flag)
-                if value not in (True, False, "true", "false"):
+                if not (
+                    type(value) is bool
+                    or (type(value) is str and value in {"true", "false"})
+                ):
                     raise ValueError(f"invalid open-order {flag} evidence")
             validated.append(dict(row))
         return validated
