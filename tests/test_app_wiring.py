@@ -207,49 +207,67 @@ async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
-    """The key wiring proof: TradeLifecycle isn't manually poked with
-    update_price anywhere here — it's subscribed to market.* on the real
-    Event Bus by initialize_all, and DataIngestionService's own published
-    events are what drive it."""
+    """The app-owned EventBus subscription drives the lifecycle price check.
 
+    Seed one deterministic open position directly so this wiring test does not
+    depend on scanner history ingestion, websocket startup, or unrelated market
+    backlog. The only price update is delivered through the real EventBus.
+    """
     exchange = FakeScannerExchange()
-    executor = SimulatedOrderExecutor()
     components = await build_system(
         event_bus=event_bus,
         exchange=exchange,
-        order_executor=executor,
+        order_executor=SimulatedOrderExecutor(),
         symbols=["BTCUSDT"],
         min_score_threshold=0.0,
     )
     await initialize_all(components)
-    await _seed_live_universe(components)
-    tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
-    await run_scan_and_trade_cycle(components, tracker)
-    trade = components.trade_lifecycle.get_open_trades()[0]
+    trade = Trade(
+        trade_id="price-feed-subscription",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=5.0,
+        strategy_id="subscription-test",
+        agent_consensus={},
+        explanation="deterministic market-event subscription test",
+        sl_price=95.0,
+        tp_price=110.0,
+        take_profit_levels=[110.0],
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time=datetime.now(timezone.utc).isoformat(),
+    )
+    components.trade_lifecycle._open_trades[trade.trade_id] = trade
 
-    # Publish a kline event directly (simulating what DataIngestionService's
-    # live stream would produce) that breaches the stop loss.
-    from aitos.core.contracts import Event
+    try:
+        from aitos.core.contracts import Event
 
-    crash_price = trade.sl_price - 1.0
-    await event_bus.publish(
-        Event(
-            topic=f"market.kline.{trade.symbol}.15m",
-            payload={"symbol": trade.symbol, "close": crash_price},
-            source_module="test",
+        await asyncio.wait_for(
+            event_bus.publish(
+                Event(
+                    topic=f"market.kline.{trade.symbol}.15m",
+                    payload={"symbol": trade.symbol, "close": 94.0},
+                    source_module="test",
+                )
+            ),
+            timeout=5.0,
         )
-    )
 
-    closed = await _wait_for(
-        lambda: len(components.trade_lifecycle.get_open_trades()) == 0
-    )
-    assert closed is True
-    assert (
-        components.trade_lifecycle.get_closed_trades()[0].exit_reason == "sl_triggered"
-    )
-
-    await shutdown_all(components)
+        closed = await _wait_for(
+            lambda: len(components.trade_lifecycle.get_open_trades()) == 0,
+            timeout=5.0,
+        )
+        assert closed is True
+        assert (
+            components.trade_lifecycle.get_closed_trades()[0].exit_reason
+            == "sl_triggered"
+        )
+    finally:
+        await asyncio.wait_for(shutdown_all(components), timeout=10.0)
 
 
 def test_paper_portfolio_tracker_computes_equity_from_closed_trades():
