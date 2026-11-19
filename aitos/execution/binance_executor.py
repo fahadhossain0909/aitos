@@ -200,6 +200,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             ):
                 raise ValueError("invalid or non-open algo inventory identity")
             quantity = row.get("quantity")
+            if isinstance(quantity, bool):
+                raise ValueError("invalid algo inventory quantity")
             try:
                 quantity_value = float(quantity)
             except (TypeError, ValueError):
@@ -216,6 +218,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 trigger = row.get("activatePrice") or row.get("triggerPrice")
             else:
                 trigger = row.get("triggerPrice")
+            if isinstance(trigger, bool):
+                raise ValueError("invalid algo inventory trigger")
             try:
                 trigger_value = float(trigger)
             except (TypeError, ValueError):
