@@ -79,6 +79,9 @@ Implementation: `aitos/core/immutable.py`.
 - Applied to canonical market-data event payloads and stage timestamps,
   universal market-domain event payloads and stage timestamps, and
   `GlobalMarketState.features`.
+- The existing MarketDataBus wire serializer/deserializer now carries
+  `stage_timestamps`; older wire envelopes without that optional field still
+  deserialize with an empty mapping.
 - Tuples remain tuples; sets become tuples because JSON has no set type.
 
 Compatibility gates: mutation attempts must fail at every nested level;
@@ -116,6 +119,7 @@ Added tests cover:
   invalid price and instrument-count bounds;
 - nested immutable mappings/lists, JSON serialization and dataclass
   `asdict` compatibility for both event contracts and global state;
+- canonical event wire round-trip, including stage timestamps and old-field defaults;
 - pending reservation inclusion with conservative unknown side metadata;
 - SQLite reservation-policy serialization across independent ledger instances.
 
