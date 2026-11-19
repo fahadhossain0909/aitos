@@ -375,9 +375,7 @@ def build_spot_runtime(
         scanner,
         max_symbols=policy.max_symbols,
     )
-    lead_lag = FuturesSpotLeadLagAnalyzer(
-        symbol_aliases=futures_spot_symbol_aliases
-    )
+    lead_lag = FuturesSpotLeadLagAnalyzer(symbol_aliases=futures_spot_symbol_aliases)
     return SpotRuntime(
         market_data,
         executor,
