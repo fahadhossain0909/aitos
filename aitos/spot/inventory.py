@@ -106,7 +106,7 @@ class InventoryLedger:
             ).fetchall()
         return [{"symbol": row[0]} for row in rows]
 
-    def pending_fee_conversions(self) -> list[dict[str, str]]:
+    def pending_fee_conversions(self) -> list[dict[str, str | int | None]]:
         with self._lock:
             rows = self._db.execute(
                 """SELECT fill_key,symbol,commission,commission_asset,base_asset,
