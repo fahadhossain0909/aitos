@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import random
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import isfinite, sqrt
-from typing import Sequence
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,10 +7,11 @@ reports unfilled quantity and does not assume hidden liquidity or queue priority
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import isfinite, sqrt
-from typing import Literal, Sequence
+from typing import Literal
 
 Side = Literal["buy", "sell"]
 
