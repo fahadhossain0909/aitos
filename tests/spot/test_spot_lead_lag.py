@@ -1,0 +1,81 @@
+import math
+from datetime import datetime, timedelta, timezone
+
+from aitos.market_data.contracts import (
+    MarketEvent,
+    MarketEventType,
+    MarketSource,
+)
+from aitos.spot.lead_lag import FuturesSpotLeadLagAnalyzer
+
+
+def _ticker(market_type, symbol, price, at):
+    return MarketEvent(
+        event_type=MarketEventType.TICKER,
+        exchange="binance",
+        market=market_type,
+        market_type=market_type,
+        symbol=symbol,
+        event_time=at,
+        payload={"last_price": str(price)},
+        source=MarketSource.REPLAY,
+    )
+
+
+def test_futures_spot_lead_lag_detects_futures_leading_by_two_seconds():
+    analyzer = FuturesSpotLeadLagAnalyzer(
+        bucket_seconds=1,
+        max_lag_seconds=4,
+        window_seconds=240,
+        min_observations=40,
+        min_abs_correlation=0.2,
+        min_lead_advantage=0.02,
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    futures_returns = [
+        0.0005 * math.sin(index * 1.71)
+        + 0.0003 * math.cos(index * 0.37)
+        + 0.0001 * math.sin(index * 0.11)
+        for index in range(240)
+    ]
+    futures_prices = [100.0]
+    spot_prices = [100.0]
+    for index in range(1, 240):
+        futures_prices.append(
+            futures_prices[-1] * math.exp(futures_returns[index - 1])
+        )
+        delayed_return = futures_returns[index - 3] if index >= 3 else 0.0
+        spot_prices.append(spot_prices[-1] * math.exp(delayed_return))
+
+    estimate = None
+    for index in range(240):
+        at = start + timedelta(seconds=index)
+        analyzer.ingest(
+            _ticker("usd_m_futures", "BTCUSDT", futures_prices[index], at)
+        )
+        estimate = analyzer.ingest(_ticker("spot", "BTCUSDT", spot_prices[index], at))
+
+    assert estimate is not None
+    assert estimate.status == "futures_leads"
+    assert estimate.leader == "futures"
+    assert estimate.lag_seconds == 2
+    assert estimate.correlation is not None and estimate.correlation > 0.95
+    assert estimate.confidence_low is not None and estimate.confidence_low > 0.8
+
+
+def test_futures_spot_lead_lag_rejects_unmatched_markets_and_bad_prices():
+    analyzer = FuturesSpotLeadLagAnalyzer()
+    now = datetime.now(timezone.utc)
+    assert analyzer.ingest(_ticker("spot", "BTCUSDT", 0, now)) is None
+    assert analyzer.ingest(_ticker("options", "BTCUSDT", 100, now)) is None
+    assert analyzer.snapshot()["rejected_events"] == 2
+
+
+def test_futures_symbol_alias_maps_to_spot_underlying():
+    analyzer = FuturesSpotLeadLagAnalyzer(
+        symbol_aliases={"BTCUSDT_UMCBL": "BTCUSDT"}
+    )
+    now = datetime.now(timezone.utc)
+    analyzer.ingest(_ticker("usd_m_futures", "BTCUSDT_UMCBL", 100, now))
+    assert "BTCUSDT" in analyzer._pairs
+    assert "BTCUSDT_UMCBL" not in analyzer._pairs
