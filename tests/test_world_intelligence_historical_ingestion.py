@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -113,6 +114,7 @@ async def test_historical_ingestion_persists_raw_provenance_revisions_then_curso
         .sha256(provider.page.provenance[0].raw_payload)
         .hexdigest()
     )
+    assert base64.b64decode(provenance_row[8]) == provider.page.provenance[0].raw_payload
 
 
 @pytest.mark.asyncio
