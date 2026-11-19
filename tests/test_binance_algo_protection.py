@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from aitos.execution.binance_executor import BinanceAPIError, BinanceFuturesOrderExecutor
+from aitos.execution.binance_executor import (
+    BinanceAPIError,
+    BinanceFuturesOrderExecutor,
+)
 from aitos.execution.intent_store import ExecutionUncertainError
 from aitos.models.trade import TradeSide
 
