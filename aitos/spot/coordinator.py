@@ -7,6 +7,7 @@ from dataclasses import replace
 from decimal import Decimal
 
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.exit_intelligence.models import ExitAction, ExitDecision
 from aitos.market_data.venues import InstrumentKey, MarketType, Venue
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.spot.execution import SpotExecutionDisabled, SpotOrderExecutor
@@ -140,20 +141,23 @@ class SpotTradingCoordinator:
         *,
         symbol: str,
         quantity: Decimal,
-        exit_authorized: bool,
+        authorization: ExitDecision,
         client_order_id: str | None = None,
     ) -> SpotOrder:
-        """Submit an inventory-bounded Spot sell after lifecycle authorization.
+        """Submit an inventory-bounded Spot sell from a shared ExitDecision.
 
-        Spot has no exchange reduceOnly flag. The caller must pass an explicit
-        authorization from the Exit Intelligence/lifecycle boundary.
+        Spot has no exchange reduceOnly flag. Only an explicit EIE EXIT or
+        MANAGE decision can authorize a sell, and MANAGE is capped by its
+        suggested reduction fraction.
         """
         if not self.executor.enabled:
             raise SpotExecutionDisabled("Spot execution is disabled")
-        if not exit_authorized:
-            raise SpotAuthorizationRejected(
-                "Spot exits require explicit Exit Intelligence authorization"
-            )
+        if authorization.symbol.upper() != symbol.upper():
+            raise SpotAuthorizationRejected("ExitDecision symbol does not match Spot position")
+        if authorization.side.upper() != "LONG":
+            raise SpotAuthorizationRejected("Spot exits only support LONG inventory")
+        if authorization.action not in {ExitAction.EXIT, ExitAction.MANAGE}:
+            raise SpotAuthorizationRejected("ExitDecision does not authorize a Spot sell")
         if quantity <= 0:
             raise SpotAuthorizationRejected("exit quantity must be positive")
         if self._has_unresolved_order(symbol):
@@ -164,6 +168,12 @@ class SpotTradingCoordinator:
         position = self.inventory.get_position(symbol)
         if position is None or position.quantity < quantity:
             raise SpotAuthorizationRejected("sell exceeds AITOS-managed Spot inventory")
+        if authorization.action is ExitAction.MANAGE:
+            fraction = Decimal(str(authorization.suggested_reduce_fraction))
+            if not Decimal("0") < fraction <= Decimal("1"):
+                raise SpotAuthorizationRejected("MANAGE decision has no valid reduce fraction")
+            if quantity > position.quantity * fraction:
+                raise SpotAuthorizationRejected("Spot sell exceeds EIE suggested reduce fraction")
 
         client_order_id = client_order_id or ("aitos-" + uuid.uuid4().hex[:28])
         request = SpotOrderRequest(
