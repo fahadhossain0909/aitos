@@ -192,7 +192,6 @@ async def test_attempt_recovery_transitions_to_half_open_after_cooldown(event_bu
     assert engine.circuit_breaker.state.value == "half_open"
 
 
-
 def test_check_limits_includes_pending_orders_in_position_and_sector_projection():
     portfolio = PortfolioState(
         equity_usd=10_000.0,
