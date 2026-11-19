@@ -83,16 +83,13 @@ class InventoryLedger:
         )
         with self._lock:
             row = self._db.execute(
-                "SELECT symbol,side,order_type,quantity,quote_order_quantity "
-                "FROM spot_order_intents WHERE client_order_id=?",
+                "SELECT 1 FROM spot_order_intents WHERE client_order_id=?",
                 (client_order_id,),
             ).fetchone()
             if row is not None:
-                if tuple(row) != values[1:]:
-                    raise ValueError(
-                        "client order ID already belongs to a different intent"
-                    )
-                return
+                raise ValueError(
+                    "client order ID already exists; reconcile it instead of resubmitting"
+                )
             self._db.execute(
                 """INSERT INTO spot_order_intents
                 (client_order_id,symbol,side,order_type,quantity,quote_order_quantity,status)
