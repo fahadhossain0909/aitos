@@ -208,7 +208,6 @@ def test_spot_settings_reject_non_usdt_capital_numeraire():
         SpotSettings(_env_file=None, quote_asset="BTC")
 
 
-
 @pytest.mark.asyncio
 async def test_disabled_spot_execution_does_not_reserve_or_journal():
     gateway = FakeCapitalGateway()
