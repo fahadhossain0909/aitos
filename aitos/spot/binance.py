@@ -57,7 +57,7 @@ class BinanceSpotAdapter:
         return values
 
     async def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
-                       signed: bool = False) -> Any:
+                       signed: bool = False, api_key_only: bool = False) -> Any:
         await self.connect()
         assert self._session is not None
         headers = {}
@@ -65,6 +65,10 @@ class BinanceSpotAdapter:
         if signed:
             values = self._signed_params(values)
             headers["X-MBX-APIKEY"] = self.api_key or ""
+        elif api_key_only:
+            if not self.api_key:
+                raise RuntimeError("Binance Spot API key is required")
+            headers["X-MBX-APIKEY"] = self.api_key
         async with self._session.request(method, self.base_url + path,
                                          params=values, headers=headers) as response:
             payload = await response.json(content_type=None)
@@ -104,6 +108,19 @@ class BinanceSpotAdapter:
     async def ticker_24h(self, symbol: str | None = None) -> Any:
         params = {"symbol": symbol.upper()} if symbol else {}
         return await self._request("GET", "/api/v3/ticker/24hr", params=params)
+
+    async def create_listen_key(self) -> str:
+        """Create a private User Data Stream listen key."""
+        raw = await self._request("POST", "/api/v3/userDataStream", api_key_only=True)
+        return str(raw["listenKey"])
+
+    async def keepalive_listen_key(self, listen_key: str) -> None:
+        await self._request("PUT", "/api/v3/userDataStream",
+                            params={"listenKey": listen_key}, api_key_only=True)
+
+    async def close_listen_key(self, listen_key: str) -> None:
+        await self._request("DELETE", "/api/v3/userDataStream",
+                            params={"listenKey": listen_key}, api_key_only=True)
 
     async def account(self) -> list[SpotBalance]:
         raw = await self._request("GET", "/api/v3/account", signed=True)
