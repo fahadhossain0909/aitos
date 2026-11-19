@@ -58,7 +58,11 @@ class SpotCandidate:
                     "Futures-Spot correlation must be finite and in [-1, 1]"
                 )
         if self.last_price is not None:
-            price = self.last_price if isinstance(self.last_price, Decimal) else Decimal(str(self.last_price))
+            price = (
+                self.last_price
+                if isinstance(self.last_price, Decimal)
+                else Decimal(str(self.last_price))
+            )
             if not price.is_finite() or price <= 0:
                 raise ValueError("last_price must be positive and finite")
             object.__setattr__(self, "last_price", price)
