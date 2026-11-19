@@ -12,7 +12,11 @@ from aitos.spot.coordinator import SpotAuthorizationRejected, SpotTradingCoordin
 from aitos.spot.execution import SpotExecutionDisabled
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.runtime import SpotRuntime
-from aitos.spot.scanner import RankedSpotCandidate, SpotCandidate
+from aitos.spot.scanner import (
+    RankedSpotCandidate,
+    SpotCandidate,
+    SpotOpportunityScanner,
+)
 from aitos.spot.models import (
     SpotOrderRequest,
     SpotOrderSide,
@@ -355,7 +359,7 @@ async def test_spot_prefilter_candidate_uses_kernel_and_explicit_strategy_builde
         market_data=SimpleNamespace(),
         executor=FakeExecutor(),
         inventory=inventory,
-        scanner=__import__("aitos.spot.scanner", fromlist=["SpotOpportunityScanner"]).SpotOpportunityScanner(),
+        scanner=SpotOpportunityScanner(),
         coordinator=coordinator,
         market_consumer=SimpleNamespace(),
         lead_lag=SimpleNamespace(),
