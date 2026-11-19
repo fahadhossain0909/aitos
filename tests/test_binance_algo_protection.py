@@ -124,6 +124,7 @@ async def test_open_algo_inventory_is_read_only_and_validates_complete_rows():
         triggerPrice="98.5",
         algoStatus="NEW",
         closePosition=False,
+        reduceOnly=False,
     )
     value._signed_request = AsyncMock(return_value=[row])
 
@@ -165,6 +166,7 @@ async def test_open_algo_inventory_rejects_malformed_or_mismatched_rows(override
         triggerPrice="98.5",
         algoStatus="NEW",
         closePosition=False,
+        reduceOnly=False,
     )
     row.update(override)
     value._signed_request = AsyncMock(return_value=[row])
@@ -187,6 +189,7 @@ async def test_open_algo_inventory_rejects_duplicate_identities():
         triggerPrice="98.5",
         algoStatus="NEW",
         closePosition=False,
+        reduceOnly=False,
     )
     value._signed_request = AsyncMock(return_value=[row, dict(row)])
 
@@ -207,6 +210,7 @@ async def test_open_order_inventory_is_read_only_and_symbol_scoped():
         executedQty="0.5",
         reduceOnly=False,
         closePosition=False,
+        reduceOnly=False,
     )
     value._signed_request = AsyncMock(return_value=[row])
 
@@ -248,6 +252,7 @@ async def test_open_order_inventory_rejects_invalid_rows(override):
         executedQty="0.0",
         reduceOnly=False,
         closePosition=False,
+        reduceOnly=False,
     )
     row.update(override)
     value._signed_request = AsyncMock(return_value=[row])
