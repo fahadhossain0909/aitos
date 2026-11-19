@@ -8,6 +8,7 @@ from pathlib import Path
 from aitos.config.paths import get_data_dir
 from aitos.config.settings import AITOSSettings, get_settings
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_protection import CapitalReservation
 from aitos.market_data.binance_spot_adapter import BinanceSpotCanonicalMarketDataAdapter
 from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.coordinator import SpotTradingCoordinator
@@ -65,6 +66,9 @@ class SpotRuntime:
             raise ValueError("Spot subscription must contain 1 to 100 symbols")
         return values
 
+    def unresolved_order_intents(self):
+        return self.inventory.unresolved_order_intents()
+
     async def close(self) -> None:
         await self.market_data.close()
         self.inventory.close()
@@ -114,13 +118,20 @@ def build_spot_runtime(
     path = Path(database_path) if database_path else get_data_dir() / "spot" / "inventory.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     inventory = InventoryLedger(path)
+    if capital_gateway is None:
+        capital_gateway = CapitalGateway(
+            reservation=CapitalReservation(
+                path=path.parent / "capital_reservations.sqlite3",
+                owner_id="aitos-spot-runtime",
+            )
+        )
     scanner = SpotOpportunityScanner(
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
         max_spread_bps=Decimal(str(policy.max_spread_bps)),
         max_volatility_bps=Decimal(str(policy.max_volatility_bps)),
     )
     coordinator = SpotTradingCoordinator(
-        capital_gateway=capital_gateway or CapitalGateway(),
+        capital_gateway=capital_gateway,
         executor=executor,
         inventory=inventory,
         fee_bps=policy.fee_bps,
