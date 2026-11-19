@@ -148,8 +148,11 @@ class MarketDataShadowConsumer:
     async def _on_event(self, event: CanonicalMarketEvent) -> None:
         if event.event_type is not MarketEventType.TICKER:
             return
+        if event.event_time.tzinfo is None:
+            self._counts["rejected_stale"] += 1
+            return
         age = (datetime.now(timezone.utc) - event.event_time).total_seconds()
-        if event.event_time.tzinfo is None or age < -1.0 or age > self._max_age:
+        if age < -1.0 or age > self._max_age:
             self._counts["rejected_stale"] += 1
             return
         try:
@@ -195,7 +198,11 @@ class MarketDataShadowConsumer:
             self._counts["rejected_invalid_price"] += 1
             return
 
-        domain_event = market_data_event_to_domain(event, instrument)
+        try:
+            domain_event = market_data_event_to_domain(event, instrument)
+        except (TypeError, ValueError):
+            self._counts["rejected_unresolved"] += 1
+            return
         self._engine.ingest_price(domain_event, price)
         self._latest_event_time[instrument.id] = event.event_time
         self._seen[event.event_id] = None
@@ -213,6 +220,10 @@ class MarketDataShadowConsumer:
         if worker is not None:
             if drain:
                 await self._queue.join()
+            else:
+                while not self._queue.empty():
+                    self._queue.get_nowait()
+                    self._queue.task_done()
             worker.cancel()
             try:
                 await worker
