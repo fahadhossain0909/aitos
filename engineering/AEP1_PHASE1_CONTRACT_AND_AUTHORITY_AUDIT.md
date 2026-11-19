@@ -6,8 +6,11 @@ Baseline inspected: current `main` source as of this audit; PR #260 carries this
 
 ## Executive decision
 
-**Do not collapse the similarly named contracts into one Python class.** Source inspection shows that the names overlap, but the objects belong to different bounded contexts and carry different semantics:
+**Do not collapse the similarly named contracts into one Python class.** Source inspection shows two patterns: some same-named objects belong to different bounded contexts and carry different semantics; the market-data plane and universal-markets domain also contain separate event envelopes that need an explicit bridge:
 
+- `market_data.contracts.MarketEvent` is the actual canonical market-data bus envelope used by adapters, Redis/EventBus transport, scanner, Spot and persistence consumers.
+- `markets.contracts.MarketEvent` is a separate asset-class-neutral domain envelope with an explicit `Instrument`; no production bridge from the canonical market-data bus to this contract was established in the audit.
+- `statistics.financial_ml.MarketEvent` is a compact event-time research sample (timestamp/price/volume/signed volume), not a transport envelope.
 - `decision.MarketSnapshot` is a timestamped, versioned ADL evidence snapshot.
 - `strategy.MarketSnapshot` is a compact strategy feature/quote view.
 - `strategy.ExecutionIntent` is a strategy proposal.
@@ -23,7 +26,9 @@ The active Futures opportunity path already has a stronger central control bound
 | Contract | Fields / semantics | Known consumers | Decision |
 |---|---|---|---|
 | `aitos.markets.contracts.Instrument` | Venue + asset class + symbol identity; optional tick/lot/contract/margin metadata | Market adapters, portfolio and universal-market modules | Canonical market identity. Add validation only with compatibility tests. |
-| `aitos.markets.contracts.MarketEvent` | Event type, instrument, event time, payload, source, receive time, event ID, schema version, correlation ID | Market state builder, cross-market engine and ingestion adapters | Canonical market-event envelope. Keep payload schema/versioned; do not duplicate it in strategy types. |
+| `aitos.market_data.contracts.MarketEvent` | Exchange/market/symbol, event/ingest times, source, event ID, schema/revision, sequence, trace/correlation and payload | MarketDataBus, canonical adapters, live scanner, Spot consumers, persistence/deep-orderbook sinks | Actual canonical ingress/bus envelope. Keep this as transport contract. |
+| `aitos.markets.contracts.MarketEvent` | Event type + explicit `Instrument`, event/receive times, payload, source, event/schema/correlation IDs | `markets.engine.CrossMarketIntelligenceEngine` and universal-market tests | Separate downstream domain envelope. No production bridge/consumer from MarketDataBus was established; do not call it the live bus canonical event. |
+| `aitos.statistics.financial_ml.MarketEvent` | Timestamp, price, volume, signed volume, optional event ID | FinancialMLPipeline and event/volume/dollar/imbalance bar builders | Research sample, not a market-data bus contract. Translate only after side/quantity semantics are validated. |
 | `aitos.markets.state.GlobalMarketState` | Regime/scores/confidence/features/as-of | Cross-market intelligence, strategy and market risk | Aggregate market context, not an event or per-instrument quote. |
 | `aitos.decision.types.MarketSnapshot` | Symbol, timezone-aware timestamp, features, source versions, snapshot ID | ADL providers/runtime/replay and scanner bridge | Point-in-time decision evidence. Preserve ADL semantics. |
 | `aitos.strategy.contracts.MarketSnapshot` | Instrument ID, mid, spread, volatility, funding, basis, imbalance, liquidity and numeric features | StrategyContext and built-in strategy families | Compact strategy-facing market view. Do not replace with ADL snapshot. |
@@ -33,11 +38,12 @@ The active Futures opportunity path already has a stronger central control bound
 
 ### Important implementation observations
 
-1. The contracts are semantically different, not proven accidental duplicates. A future shared interface should be a protocol or explicit mapper, not a single flattened dataclass.
-2. `MarketEvent` is a frozen dataclass but its `payload` is a mutable dictionary. `GlobalMarketState` is frozen but its `features` dictionary is mutable. “Frozen” therefore does not provide deep immutability. Fixing this requires an additive serialization-compatible approach and tests for existing consumers; do not silently wrap or mutate these fields in place.
-3. `MarketEvent` currently assigns a correlation ID from its event ID when omitted. Event-time/receive-time validation and payload schema enforcement need a dedicated compatibility proposal.
-4. ADL `MarketSnapshot` already requires an aware timestamp and exposes snapshot ID/source versions. Strategy `MarketSnapshot` is deliberately lightweight and has no equivalent point-in-time metadata. A mapper must make missing provenance explicit rather than fabricate timestamps or source versions.
-5. The universal market `Portfolio` is a small in-memory view over `markets.Position`; the trading lifecycle uses a separate `PortfolioState` with equity, peak equity, positions and risk context. They are not interchangeable authorities.
+1. The two MarketSnapshot types and three ExecutionIntent types are semantically different, not proven accidental duplicates. A future shared interface should be a protocol or explicit mapper, not a single flattened dataclass.
+2. There are multiple MarketEvent types. The market_data contract is the active live bus envelope; the markets contract is a separate domain projection; the statistics contract is a compact research sample. The current code search did not establish a production adapter from MarketDataBus to CrossMarketIntelligenceEngine, and the engine's only direct constructor hit was its universal-market test. This is a real integration/provenance gap, not a reason to replace the live bus contract.
+3. Both market event envelopes are frozen dataclasses but their `payload` dictionaries are mutable. `market_data.MarketEvent.stage_timestamps` and `GlobalMarketState.features` are mutable dictionaries too. “Frozen” therefore does not provide deep immutability. Fixing this requires an additive serialization-compatible approach and tests for existing consumers; do not silently wrap or mutate these fields in place.
+4. The universal-markets event currently assigns a correlation ID from its event ID when omitted. Event-time/receive-time validation and payload schema enforcement need a dedicated compatibility proposal.
+5. ADL `MarketSnapshot` already requires an aware timestamp and exposes snapshot ID/source versions. Strategy `MarketSnapshot` is deliberately lightweight and has no equivalent point-in-time metadata. A mapper must make missing provenance explicit rather than fabricate timestamps or source versions.
+6. The universal market `Portfolio` is a small in-memory view over `markets.Position`; the trading lifecycle uses a separate `PortfolioState` with equity, peak equity, positions and risk context. They are not interchangeable authorities.
 
 ## 2. Risk and capital authority map
 
@@ -133,7 +139,7 @@ The Market Data Contract Audit job stopped at its formatting step for the same r
 
 ## 6. Required next implementation sequence
 
-1. **Complete consumer/call-site graph:** use repository-wide import and call-site inventory for all contract constructors, serializers, event bus boundaries, persistence payloads, direct executor calls and Spot/Futures order paths.
+1. **Complete consumer/call-site graph:** use repository-wide import and call-site inventory for all contract constructors, serializers, event bus boundaries, persistence payloads, direct executor calls and Spot/Futures order paths. Specifically design and test the MarketDataBus → universal-markets domain bridge; resolve `Instrument` metadata explicitly and preserve sequence/revision/trace provenance.
 2. **Add explicit mappers, not a universal mega-contract:** strategy proposal → authorized execution request; ADL snapshot ↔ strategy view only where a caller needs it; canonical event → bounded feature snapshot. Each mapper must be pure, versioned and reject missing/ambiguous identity.
 3. **Deep immutability compatibility proposal:** make event payload and global-state feature maps safely immutable without breaking JSON encoding, dataclass/asdict consumers or historical persisted payloads. Add round-trip and mutation-rejection tests before wiring.
 4. **Reservation namespace and in-flight projection:** test same symbol across venue/asset class/account, concurrent proposals, expired leases, pinned exposure, duplicate workers and pending-order correlation risk.
