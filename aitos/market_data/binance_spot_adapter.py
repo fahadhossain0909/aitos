@@ -34,6 +34,14 @@ def _event(
     event_revision: int = 1,
 ) -> MarketEvent:
     key = InstrumentKey(Venue.BINANCE, MarketType.SPOT, symbol.upper())
+    event_token = (
+        str(sequence)
+        if sequence is not None
+        else str(int(event_time.timestamp() * 1000))
+    )
+    correlation_token = (
+        str(sequence) if sequence is not None else event_time.isoformat()
+    )
     return MarketEvent(
         event_type=kind,
         exchange=Venue.BINANCE.value,
@@ -46,12 +54,9 @@ def _event(
         payload=payload,
         source=source,
         sequence=sequence,
-        event_id=(
-            event_id
-            or f"{key.value}:{kind.value}:{sequence if sequence is not None else int(event_time.timestamp() * 1000)}"
-        ),
+        event_id=event_id or ":".join((key.value, kind.value, event_token)),
         event_revision=event_revision,
-        correlation_id=f"{key.value}:{kind.value}:{sequence if sequence is not None else event_time.isoformat()}",
+        correlation_id=":".join((key.value, kind.value, correlation_token)),
     )
 
 
