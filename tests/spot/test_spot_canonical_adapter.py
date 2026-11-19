@@ -63,6 +63,27 @@ class FakeWebSocket:
                     "A": "3",
                 }
             }
+        elif channels == ("@kline_1m",):
+            for last_trade_id in (20, 21):
+                yield {
+                    "data": {
+                        "k": {
+                            "t": 1699999980000,
+                            "T": 1700000039999,
+                            "L": last_trade_id,
+                            "x": True,
+                            "o": "99",
+                            "h": "102",
+                            "l": "98",
+                            "c": "101",
+                            "v": "10",
+                            "q": "1000",
+                            "n": 20,
+                            "V": "5",
+                            "Q": "500",
+                        }
+                    }
+                }
         elif channels == ("@depth@100ms",):
             first = 14 if self.gap else 11
             yield {
@@ -167,3 +188,17 @@ async def test_spot_events_never_enter_futures_live_scanner_cache():
     )
     await cache._on_trade_event(event)
     assert cache.snapshot("BTCUSDT") is None
+
+
+
+@pytest.mark.asyncio
+async def test_spot_closed_kline_has_stable_identity_and_increasing_revision():
+    adapter = BinanceSpotCanonicalMarketDataAdapter(FakeRest(), FakeWebSocket())
+    events = [
+        event async for event in adapter.stream_klines(["BTCUSDT"], timeframe="1m")
+    ]
+    assert len(events) == 2
+    assert all(event.event_type is MarketEventType.KLINE for event in events)
+    assert events[0].event_id == events[1].event_id
+    assert [event.event_revision for event in events] == [20, 21]
+    assert events[0].instrument_id == "binance:spot:BTCUSDT"
