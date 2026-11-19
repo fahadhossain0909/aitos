@@ -71,6 +71,7 @@ from aitos.world_intelligence.point_in_time import (
     PointInTimeLabelReport,
     RealizedEventLabel,
     build_point_in_time_labels,
+    to_event_impact_training_rows,
 )
 from aitos.world_intelligence.providers import (
     FREDSeriesAdapter,
@@ -168,6 +169,7 @@ __all__ = [
     "assess_source_batch",
     "build_asset_intelligence_snapshot",
     "build_point_in_time_labels",
+    "to_event_impact_training_rows",
     "calibration_cohorts",
     "calibration_report",
     "chronological_walk_forward_splits",
