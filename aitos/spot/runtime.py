@@ -7,7 +7,7 @@ import inspect
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 
 from aitos.config.paths import get_data_dir
 from aitos.config.settings import AITOSSettings, get_settings
@@ -233,7 +233,8 @@ class SpotRuntime:
         self,
         *,
         futures_account_equity_quote: Decimal,
-        marks: dict[str, Decimal],
+        marks: Mapping[str, Decimal],
+        asset_marks: Mapping[str, Decimal] | None = None,
     ) -> SpotPortfolioSnapshot:
         """Mark managed Spot inventory and Spot quote cash beside Futures equity."""
         if self.portfolio_valuator is None:
@@ -244,6 +245,7 @@ class SpotRuntime:
             spot_adapter=self.market_data.rest,
             futures_account_equity_quote=futures_account_equity_quote,
             marks=marks,
+            asset_marks=asset_marks,
         )
 
     async def resolve_pending_commissions(self) -> dict[str, int]:
@@ -342,9 +344,15 @@ class SpotRuntime:
             "features": self.market_consumer.health(),
             "futures_spot_lead_lag": self.lead_lag.snapshot(),
             "user_data_stream": (
-                self._user_stream.health if self._user_stream is not None
+                self._user_stream.health
+                if self._user_stream is not None
                 else {"running": False, "configured": False}
             ),
+            "exchange": {
+                "rate_limit": self.market_data.rest.rate_limit_snapshot,
+                "server_time_synced": self.market_data.rest._server_time_synced,
+                "server_time_offset_ms": self.market_data.rest._server_time_offset_ms,
+            },
         }
 
     async def start_market_data(self, market_bus) -> list[asyncio.Task]:
