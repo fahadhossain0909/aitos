@@ -101,7 +101,6 @@ def test_futures_spot_synchronous_correlation_is_not_misreported_as_lead():
     assert estimate.lag_seconds is None
 
 
-
 def test_futures_spot_lead_lag_is_scoped_to_discovered_spot_universe():
     analyzer = FuturesSpotLeadLagAnalyzer()
     analyzer.set_symbols(["BTCUSDT"])
