@@ -271,7 +271,7 @@ class HistoricalIngestionStore:
 
     async def load_cursor(self, source_id: str) -> str | None:
         result = await self.client.query(
-            f"SELECT argMax(cursor, (fencing_token, updated_at)) FROM {self.cursors_table} "
+            f"SELECT argMax(cursor, (fencing_token, updated_at)) FROM {self.cursors_table} "  # nosec B608 - database identifier is validated by ClickHousePointInTimeStore
             "WHERE source_id = {source_id:String}",
             parameters={"source_id": source_id},
         )
