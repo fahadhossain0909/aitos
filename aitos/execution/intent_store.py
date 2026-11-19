@@ -193,6 +193,58 @@ class ExecutionIntentStore:
                     "protection preclaim changed before durable acceptance"
                 )
 
+    def mark_protection_terminal(
+        self,
+        order_id: str,
+        *,
+        symbol: str,
+        status: str,
+        executed_quantity: float = 0.0,
+    ) -> bool:
+        """Persist confirmed terminal venue evidence for a protective order."""
+        terminal_states = {
+            "CANCELED",
+            "FILLED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }
+        if (
+            not order_id
+            or not symbol
+            or status not in terminal_states
+            or not math.isfinite(executed_quantity)
+            or executed_quantity < 0
+        ):
+            raise ValueError("valid terminal protective-order evidence required")
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT client_id,result_json,state FROM execution_intents "
+                "WHERE scope=? AND symbol=? AND state IN ('PROTECTED','APPLIED')",
+                (self.scope, symbol),
+            ).fetchall()
+            matches = []
+            for row in rows:
+                result = json.loads(row["result_json"] or "{}")
+                if result.get("order_id") == order_id:
+                    matches.append((row["client_id"], result))
+            if len(matches) > 1:
+                raise ValueError("protective venue order identity is ambiguous")
+            if not matches:
+                return False
+            client_id, result = matches[0]
+            result["terminal_status"] = status
+            result["terminal_executed_quantity"] = executed_quantity
+            payload = json.dumps(result, sort_keys=True, allow_nan=False)
+            cursor = conn.execute(
+                "UPDATE execution_intents SET state='TERMINAL',result_json=?,"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND client_id=? "
+                "AND state IN ('PROTECTED','APPLIED')",
+                (payload, self.scope, client_id),
+            )
+            return cursor.rowcount == 1
+
     def mark_applied(self, client_id: str, trade_id: str) -> None:
         if not trade_id:
             raise ValueError("applied execution requires durable trade identity")
@@ -209,7 +261,7 @@ class ExecutionIntentStore:
         with self._connection() as conn:
             rows = conn.execute(
                 "SELECT client_id,symbol,state,request_json,result_json FROM execution_intents "
-                "WHERE scope=? AND state NOT IN ('APPLIED','REJECTED') ORDER BY client_id",
+                "WHERE scope=? AND state NOT IN ('APPLIED','REJECTED','TERMINAL') ORDER BY client_id",
                 (self.scope,),
             ).fetchall()
         return [dict(row) for row in rows if symbol is None or row["symbol"] == symbol]
@@ -220,7 +272,7 @@ class ExecutionIntentStore:
             rows = conn.execute(
                 "SELECT client_id,symbol,state,request_json,result_json,trade_id "
                 "FROM execution_intents WHERE scope=? "
-                "AND state IN ('SUBMITTING','PROTECTED','APPLIED') "
+                "AND state IN ('SUBMITTING','PROTECTED','APPLIED','TERMINAL') "
                 "ORDER BY client_id",
                 (self.scope,),
             ).fetchall()
