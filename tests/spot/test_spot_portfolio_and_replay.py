@@ -43,6 +43,7 @@ def test_spot_portfolio_marks_managed_inventory_and_separate_account_cash():
     assert snapshot.managed_inventory_market_value == Decimal("12.0")
     assert snapshot.spot_wallet_non_quote_asset_value == Decimal("1080")
     assert snapshot.total_equity_quote == Decimal("2140")
+    assert snapshot.total_equity_usd == Decimal("2140.0")
     assert snapshot.accounting_complete
     ledger.close()
 
@@ -146,3 +147,15 @@ def test_spot_replay_uses_first_book_after_order_latency():
     )
     assert result.average_price == Decimal("102")
     assert result.latency_ms == 100
+
+
+
+def test_spot_portfolio_quote_conversion_is_explicit():
+    from aitos.spot.portfolio import SpotPortfolioValuator
+
+    valuator = SpotPortfolioValuator(
+        InventoryLedger(),
+        quote_asset="USDT",
+        quote_to_usd_rate=Decimal("0.998"),
+    )
+    assert valuator.quote_to_usd_rate == Decimal("0.998")
