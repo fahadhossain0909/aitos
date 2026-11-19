@@ -23,6 +23,10 @@ def test_l2_market_order_walks_multiple_levels_with_latency_fees_and_impact():
         fee_bps=5.0,
         impact_coefficient_bps=8.0,
         max_participation=0.5,
+        slippage_bps=2.0,
+        funding_bps=1.0,
+        borrow_bps=0.5,
+        holding_hours=4.0,
     )
     assert result.complete
     assert result.filled_quantity == pytest.approx(1.0)
@@ -31,6 +35,17 @@ def test_l2_market_order_walks_multiple_levels_with_latency_fees_and_impact():
     assert result.fees > 0.0
     assert result.impact_cost > 0.0
     assert result.spread_cost > 0.0
+    assert result.slippage_cost > 0.0
+    assert result.funding_cost > 0.0
+    assert result.borrow_cost > 0.0
+    assert result.total_cost == pytest.approx(
+        result.fees
+        + result.spread_cost
+        + result.impact_cost
+        + result.slippage_cost
+        + result.funding_cost
+        + result.borrow_cost
+    )
 
 
 def test_l2_market_order_keeps_unfilled_remainder_when_depth_is_insufficient():
@@ -61,3 +76,21 @@ def test_passive_queue_replay_consumes_ahead_queue_before_own_fill():
     assert result.filled_quantity == pytest.approx(2.0)
     assert result.complete
     assert result.fills == ((1100, 2.0),)
+
+def test_l2_market_order_does_not_reuse_later_snapshot_depth():
+    books = [
+        DepthBookSnapshot(1000, ((99.0, 1.0),), ((101.0, 0.2),)),
+        DepthBookSnapshot(1100, ((100.0, 1.0),), ((100.5, 1.0),)),
+    ]
+    result = replay_l2_market_order(
+        books,
+        side="BUY",
+        quantity=0.5,
+        submitted_at_ms=1000,
+        latency_ms=0,
+        fee_bps=0.0,
+    )
+    assert result.filled_quantity == pytest.approx(0.2)
+    assert result.remaining_quantity == pytest.approx(0.3)
+    assert not result.complete
+
