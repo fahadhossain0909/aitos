@@ -361,10 +361,7 @@ def test_spot_and_futures_reservations_have_distinct_market_namespaces(
         )
         assert ledger.reserved_capital_usd == 200.0
         assert ledger.reserved_risk_usd == 20.0
-        assert {item.symbol for item in ledger.snapshot()} == {
-            "BTCUSDT",
-            "BINANCE:SPOT:BTCUSDT",
-        } if not durable else {
+        assert {item.symbol.upper() for item in ledger.snapshot()} == {
             "BTCUSDT",
             "BINANCE:SPOT:BTCUSDT",
         }
