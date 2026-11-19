@@ -6,9 +6,11 @@ import asyncio
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 
 from aitos.config.paths import get_data_dir
 from aitos.config.settings import AITOSSettings, get_settings
+from aitos.logging_setup import get_logger
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation
 from aitos.intelligence.exit_intelligence.models import ExitDecision
@@ -24,6 +26,8 @@ from aitos.spot.market_state import SpotMarketDataConsumer
 from aitos.spot.models import SpotOrder, SpotOrderRequest, SpotOrderSide, SpotOrderType
 from aitos.spot.scanner import SpotOpportunityScanner
 from aitos.spot.websocket import BinanceSpotWebSocket
+
+logger = get_logger("aitos.spot.runtime")
 
 
 @dataclass(slots=True)
@@ -41,6 +45,7 @@ class SpotRuntime:
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     quote_volumes_24h: dict[str, Decimal] = field(default_factory=dict)
+    _market_stream_health: dict[str, dict[str, object]] = field(default_factory=dict, repr=False)
 
     async def eligible_instruments(self):
         """Return the highest-turnover supported Spot symbols for this runtime."""
@@ -161,6 +166,9 @@ class SpotRuntime:
     def market_data_health(self) -> dict[str, object]:
         return {
             "tasks": self.market_data_task_status(),
+            "stream_health": {
+                name: dict(value) for name, value in self._market_stream_health.items()
+            },
             "features": self.market_consumer.health(),
             "futures_spot_lead_lag": self.lead_lag.snapshot(),
         }
@@ -179,25 +187,69 @@ class SpotRuntime:
         await self.lead_lag.start(market_bus)
         book_symbols = symbols[:5]
         kline_symbols = symbols[:5]
+        self._market_stream_health.clear()
         self._market_tasks = [
             asyncio.create_task(
-                self.publish_trades(market_bus, symbols),
+                self._supervise_market_stream(
+                    "trades", lambda: self.publish_trades(market_bus, symbols)
+                ),
                 name="aitos-spot-trades",
             ),
             asyncio.create_task(
-                self.publish_tickers(market_bus, symbols),
+                self._supervise_market_stream(
+                    "tickers", lambda: self.publish_tickers(market_bus, symbols)
+                ),
                 name="aitos-spot-tickers",
             ),
             asyncio.create_task(
-                self.publish_order_books(market_bus, book_symbols, levels=20),
+                self._supervise_market_stream(
+                    "order_books",
+                    lambda: self.publish_order_books(market_bus, book_symbols, levels=20),
+                ),
                 name="aitos-spot-order-books",
             ),
             asyncio.create_task(
-                self.publish_klines(market_bus, kline_symbols, timeframe="1m"),
+                self._supervise_market_stream(
+                    "klines",
+                    lambda: self.publish_klines(market_bus, kline_symbols, timeframe="1m"),
+                ),
                 name="aitos-spot-klines",
             ),
         ]
         return list(self._market_tasks)
+
+    async def _supervise_market_stream(
+        self, name: str, publish: Callable[[], Awaitable[None]]
+    ) -> None:
+        delay = 1.0
+        health = self._market_stream_health.setdefault(
+            name, {"state": "starting", "restarts": 0, "last_error": None}
+        )
+        while True:
+            try:
+                health["state"] = "running"
+                await publish()
+                health["state"] = "restarting"
+                health["last_error"] = "stream ended unexpectedly"
+            except asyncio.CancelledError:
+                health["state"] = "stopped"
+                raise
+            except Exception as exc:
+                health["state"] = "degraded"
+                health["last_error"] = str(exc)[:500]
+                logger.warning(
+                    "Spot market-data stream failed; restarting",
+                    extra={
+                        "aitos_extra": {
+                            "stream": name,
+                            "error": str(exc),
+                            "retry_delay_seconds": delay,
+                        }
+                    },
+                )
+            health["restarts"] = int(health["restarts"]) + 1
+            await asyncio.sleep(delay)
+            delay = min(delay * 2.0, 30.0)
 
     async def stop_market_data(self) -> None:
         tasks, self._market_tasks = self._market_tasks, []
