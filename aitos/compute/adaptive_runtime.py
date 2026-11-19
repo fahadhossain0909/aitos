@@ -1,4 +1,5 @@
 """Safe assembly of opt-in adaptive compute primitives from validated tuning."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
