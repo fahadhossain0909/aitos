@@ -99,11 +99,12 @@ async def audit_exchange_protection_inventory(
         "symbols": sorted(symbols),
         "orders": orders,
     }
-    return audit_protection_inventory(
+    report = audit_protection_inventory(
         rows,
         evidence,
         scope=scope,
         now=captured_at,
         max_age_seconds=max_age_seconds,
-        evidence_source="AUTHENTICATED_READ_ONLY_EXCHANGE_API",
     )
+    report["evidence"] = "AUTHENTICATED_READ_ONLY_EXCHANGE_API"
+    return report
