@@ -187,6 +187,7 @@ async def test_account_exposure_audit_verifies_full_position_snapshot(protected_
         symbol="BTCUSDT",
         side=TradeSide.LONG,
         quantity=1.0,
+        sl_order_id="algo:123",
     )
 
     report = await audit_exchange_protection_inventory(
@@ -378,6 +379,7 @@ async def test_live_guard_accepts_only_reconciled_account_and_owned_protection(
         symbol="BTCUSDT",
         side=TradeSide.LONG,
         quantity=1.0,
+        sl_order_id="algo:123",
     )
     executor.get_position_risk = AsyncMock(
         return_value=[
