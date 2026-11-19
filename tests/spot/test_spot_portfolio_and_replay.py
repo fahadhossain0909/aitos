@@ -4,7 +4,11 @@ from aitos.spot.binance import BinanceSpotAdapter
 from aitos.spot.inventory import InventoryLedger
 from aitos.spot.models import SpotBalance
 from aitos.spot.portfolio import SpotPortfolioValuator
-from aitos.spot.replay import BookLevel, replay_spot_market_order
+from aitos.spot.replay import (
+    BookLevel,
+    replay_spot_limit_order,
+    replay_spot_market_order,
+)
 
 
 def test_spot_portfolio_marks_managed_inventory_and_separate_account_cash():
@@ -90,3 +94,19 @@ def test_spot_execution_replay_walks_depth_and_preserves_partial_fill():
     assert result.latency_ms == 125
     assert result.market_impact_bps > 0
     assert not result.complete
+
+
+
+def test_spot_maker_replay_uses_observed_queue_ahead():
+    result = replay_spot_limit_order(
+        side="BUY",
+        quantity=Decimal("5"),
+        limit_price=Decimal("100"),
+        queue_ahead=Decimal("2"),
+        traded_quantity_at_price=Decimal("4"),
+        maker_fee_bps=Decimal("5"),
+    )
+    assert result.filled_quantity == Decimal("2")
+    assert result.unfilled_quantity == Decimal("3")
+    assert result.fees_quote == Decimal("0.10")
+    assert result.fills[0].maker
