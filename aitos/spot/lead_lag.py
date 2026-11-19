@@ -65,7 +65,7 @@ class FuturesSpotLeadLagAnalyzer:
         if not 0 <= min_lead_advantage < 1:
             raise ValueError("min_lead_advantage must be in [0, 1)")
         self.bucket_seconds = bucket_seconds
-        self.max_lag_buckets = max_lag_seconds
+        self.max_lag_buckets = math.ceil(max_lag_seconds / bucket_seconds)
         self.window_buckets = math.ceil(window_seconds / bucket_seconds)
         self.min_observations = min_observations
         self.min_abs_correlation = min_abs_correlation
