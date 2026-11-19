@@ -3,6 +3,7 @@
 This test is skipped unless dedicated Spot Testnet credentials are supplied.
 It never targets mainnet.
 """
+
 import os
 import uuid
 from decimal import Decimal, ROUND_UP
@@ -54,9 +55,11 @@ async def test_binance_spot_testnet_limit_order_cancel_and_reconcile():
         step = symbol_filters.lot_step_size
         minimum = max(
             symbol_filters.lot_min_qty,
-            (symbol_filters.min_notional / price)
-            if symbol_filters.min_notional > 0
-            else Decimal("0"),
+            (
+                (symbol_filters.min_notional / price)
+                if symbol_filters.min_notional > 0
+                else Decimal("0")
+            ),
         )
         quantity = (
             (minimum / step).to_integral_value(rounding=ROUND_UP) * step
