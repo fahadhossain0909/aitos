@@ -1079,8 +1079,20 @@ class PersistentLivePortfolioTracker(LivePortfolioTracker):
         order_executor: Any,
         state_store: DurableTradingStateStore,
         asset: str = "USDT",
+        *,
+        pending_order_snapshot_provider: Any | None = None,
+        pending_order_max_age_seconds: float = 5.0,
+        pending_order_max_snapshot_skew_seconds: float = 2.0,
     ) -> None:
-        super().__init__(order_executor=order_executor, asset=asset)
+        super().__init__(
+            order_executor=order_executor,
+            asset=asset,
+            pending_order_snapshot_provider=pending_order_snapshot_provider,
+            pending_order_max_age_seconds=pending_order_max_age_seconds,
+            pending_order_max_snapshot_skew_seconds=(
+                pending_order_max_snapshot_skew_seconds
+            ),
+        )
         self._state_store = state_store
 
     async def restore(self) -> None:
