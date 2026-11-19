@@ -41,7 +41,13 @@ from aitos.knowledge_graph.writer import GraphDriver, KnowledgeGraphWriter
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeLifecycleState
 from aitos.markets.shadow_consumer import MarketDataShadowConsumer
-from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
+from aitos.exchange.binance_pending_exposure import pending_exposures_from_open_orders
+from aitos.risk.models import (
+    PendingOrderExposure,
+    PortfolioState,
+    PositionExposure,
+    RiskLimits,
+)
 from aitos.risk.risk_engine import RiskEngine
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionManager
@@ -621,10 +627,24 @@ def _parse_iso(value: str) -> datetime:
 
 
 class LivePortfolioTracker:
-    def __init__(self, order_executor, asset: str = "USDT"):
+    def __init__(
+        self,
+        order_executor,
+        asset: str = "USDT",
+        *,
+        pending_order_snapshot_provider: Callable[[], Any] | None = None,
+        pending_order_max_age_seconds: float = 5.0,
+        pending_order_max_snapshot_skew_seconds: float = 2.0,
+    ):
         self._order_executor, self._asset = order_executor, asset
         self._peak_equity_usd: float | None = None
         self._last_known_equity_usd = 0.0
+        self._pending_order_snapshot_provider = pending_order_snapshot_provider
+        self._pending_order_max_age_seconds = pending_order_max_age_seconds
+        self._pending_order_max_snapshot_skew_seconds = (
+            pending_order_max_snapshot_skew_seconds
+        )
+        self._pending_order_exposures: tuple[PendingOrderExposure, ...] = ()
 
     async def refresh_equity(self) -> float:
         equity_reader = getattr(self._order_executor, "get_account_equity", None)
@@ -632,19 +652,65 @@ class LivePortfolioTracker:
             equity = await equity_reader(self._asset)
         else:
             equity = await self._order_executor.get_account_balance(self._asset)
-        self._last_known_equity_usd = equity
+        if not isfinite(float(equity)) or float(equity) <= 0:
+            raise ValueError("live account equity must be finite and positive")
+
+        pending = self._pending_order_exposures
+        if self._pending_order_snapshot_provider is not None:
+            # A configured provider is authoritative: errors or stale inputs
+            # abort the scan cycle instead of silently treating pending risk as 0.
+            snapshot = await self._pending_order_snapshot_provider()
+            if not isinstance(snapshot, dict):
+                raise TypeError("pending-order provider must return a mapping")
+            required = {
+                "orders",
+                "mark_prices",
+                "stop_prices",
+                "leverage_by_symbol",
+                "orders_observed_at",
+                "risk_inputs_observed_at",
+            }
+            missing = required.difference(snapshot)
+            if missing:
+                raise ValueError(
+                    "pending-order snapshot missing fields: "
+                    + ", ".join(sorted(missing))
+                )
+            pending = pending_exposures_from_open_orders(
+                snapshot["orders"],
+                mark_prices=snapshot["mark_prices"],
+                stop_prices=snapshot["stop_prices"],
+                leverage_by_symbol=snapshot["leverage_by_symbol"],
+                orders_observed_at=snapshot["orders_observed_at"],
+                risk_inputs_observed_at=snapshot["risk_inputs_observed_at"],
+                now=snapshot.get("now"),
+                max_age_seconds=self._pending_order_max_age_seconds,
+                max_snapshot_skew_seconds=(
+                    self._pending_order_max_snapshot_skew_seconds
+                ),
+            )
+
+        self._pending_order_exposures = tuple(pending)
+        self._last_known_equity_usd = float(equity)
         self._peak_equity_usd = (
-            equity
+            float(equity)
             if self._peak_equity_usd is None
-            else max(self._peak_equity_usd, equity)
+            else max(self._peak_equity_usd, float(equity))
         )
-        return equity
+        return float(equity)
 
     def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
         open_trades = trade_lifecycle.get_open_trades()
         positions = tuple(
             PositionExposure(
-                symbol=t.symbol, notional_usd=t.position_size_usd, leverage=t.leverage
+                symbol=t.symbol,
+                notional_usd=t.position_size_usd,
+                leverage=t.leverage,
+                side=t.side.value,
+                risk_amount_usd=abs(
+                    t.entry_price - float(t.emergency_sl_price or t.sl_price)
+                )
+                * t.quantity,
             )
             for t in open_trades
         )
@@ -659,6 +725,7 @@ class LivePortfolioTracker:
             peak_equity_usd=self._peak_equity_usd or self._last_known_equity_usd,
             positions=positions,
             regime=dominant_regime,
+            pending_orders=self._pending_order_exposures,
         )
 
 
