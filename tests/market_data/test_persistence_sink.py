@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -279,7 +280,6 @@ def test_market_event_rejects_non_positive_revision():
         )
 
 
-
 @pytest.mark.asyncio
 async def test_canonical_only_spot_persistence_skips_legacy_symbol_tables():
     repo = FakeRepository()
@@ -337,9 +337,7 @@ async def test_shutdown_flushes_queued_canonical_events_before_worker_exit():
         source=MarketSource.WEBSOCKET,
     )
     await sink._queue.put(spot_ticker)
-    sink._workers = [
-        __import__("asyncio").create_task(sink._worker(0))
-    ]
+    sink._workers = [asyncio.create_task(sink._worker(0))]
     await sink.shutdown()
     assert repo.versioned_events == [spot_ticker]
     assert sink.snapshot()["shutdown_dropped"] == 0
