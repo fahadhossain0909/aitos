@@ -1,4 +1,5 @@
 """Explicit Spot runtime factory; never imported by the Futures live runner."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,15 +48,17 @@ class SpotRuntime:
         async for event in self.market_data.stream_tickers(self._bounded(symbols)):
             await market_bus.publish(event)
 
-    async def publish_klines(self, market_bus, symbols: list[str],
-                             timeframe: str = "1m") -> None:
+    async def publish_klines(
+        self, market_bus, symbols: list[str], timeframe: str = "1m"
+    ) -> None:
         async for event in self.market_data.stream_klines(
             self._bounded(symbols), timeframe
         ):
             await market_bus.publish(event)
 
-    async def publish_order_books(self, market_bus, symbols: list[str],
-                                  levels: int = 20) -> None:
+    async def publish_order_books(
+        self, market_bus, symbols: list[str], levels: int = 20
+    ) -> None:
         async for event in self.market_data.stream_order_books(
             self._bounded(symbols), levels
         ):
@@ -102,7 +105,9 @@ def build_spot_runtime(
         )
     if not policy.testnet and policy.execution_enabled:
         if not (policy.allow_mainnet and mainnet_approved):
-            raise RuntimeError("Spot mainnet execution requires separate operator approval")
+            raise RuntimeError(
+                "Spot mainnet execution requires separate operator approval"
+            )
     spot_api_key = policy.api_key.get_secret_value()
     spot_api_secret = policy.api_secret.get_secret_value()
     if policy.execution_enabled and not (spot_api_key and spot_api_secret):
@@ -122,7 +127,11 @@ def build_spot_runtime(
         allow_mainnet=bool(policy.allow_mainnet and mainnet_approved),
         symbol_filters=symbol_filters,
     )
-    path = Path(database_path) if database_path else get_data_dir() / "spot" / "inventory.sqlite3"
+    path = (
+        Path(database_path)
+        if database_path
+        else get_data_dir() / "spot" / "inventory.sqlite3"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     inventory = InventoryLedger(path)
     owns_capital_gateway = capital_gateway is None
@@ -146,7 +155,11 @@ def build_spot_runtime(
         slippage_bps=policy.slippage_bps,
     )
     return SpotRuntime(
-        market_data, executor, inventory, scanner, coordinator,
+        market_data,
+        executor,
+        inventory,
+        scanner,
+        coordinator,
         quote_asset=policy.quote_asset.upper(),
         max_symbols=policy.max_symbols,
         min_quote_volume=Decimal(str(policy.min_quote_volume)),
