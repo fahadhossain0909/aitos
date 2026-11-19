@@ -105,6 +105,9 @@ def test_same_symbol_open_position_and_pending_order_keep_one_slot():
         {"origQty": "NaN"},
         {"executedQty": "3"},
         {"reduceOnly": "maybe"},
+        {"reduceOnly": None},
+        {"closePosition": None},
+        {"positionSide": None},
     ],
 )
 def test_invalid_order_rows_fail_closed(override):
