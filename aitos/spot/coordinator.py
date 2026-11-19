@@ -34,19 +34,23 @@ class SpotTradingCoordinator:
         inventory: InventoryLedger,
         fee_bps: float = 10.0,
         slippage_bps: float = 8.0,
+        quote_to_usd_rate: Decimal = Decimal("1"),
     ) -> None:
         if fee_bps < 0 or slippage_bps < 0:
             raise ValueError("Spot costs cannot be negative")
+        if quote_to_usd_rate <= 0:
+            raise ValueError("Spot quote-to-USD rate must be positive")
         self.capital_gateway = capital_gateway
         self.executor = executor
         self.inventory = inventory
         self.fee_bps = fee_bps
         self.slippage_bps = slippage_bps
+        self.quote_to_usd_rate = quote_to_usd_rate
 
     async def submit_entry(
         self,
         *,
-        equity_quote: float,
+        equity_usd: float,
         opportunity: Opportunity,
         request: SpotOrderRequest,
     ) -> SpotOrder:
@@ -82,7 +86,7 @@ class SpotTradingCoordinator:
             opportunity, symbol=key.value, agent_consensus=scoped_consensus
         )
         decision, allocation = self.capital_gateway.authorize_opportunity(
-            equity_quote,
+            equity_usd,
             scoped_opportunity,
             fee_bps=self.fee_bps,
             slippage_bps=self.slippage_bps,
@@ -94,7 +98,9 @@ class SpotTradingCoordinator:
                 f"capital gateway rejected Spot entry: {reasons}"
             )
 
-        approved_budget = Decimal(str(allocation.capital_usd))
+        approved_budget = (
+            Decimal(str(allocation.capital_usd)) / self.quote_to_usd_rate
+        )
         if request.quote_order_quantity > approved_budget:
             self.capital_gateway.release(key.value)
             raise SpotAuthorizationRejected(
