@@ -66,9 +66,8 @@ async def test_binance_spot_testnet_limit_order_cancel_and_reconcile():
             if step > 0
             else minimum
         )
-        if (
-            quantity <= 0
-            or (symbol_filters.lot_max_qty > 0 and quantity > symbol_filters.lot_max_qty)
+        if quantity <= 0 or (
+            symbol_filters.lot_max_qty > 0 and quantity > symbol_filters.lot_max_qty
         ):
             pytest.skip("testnet symbol filters do not allow a safe minimum test order")
         symbol_filters.validate(quantity, price)
