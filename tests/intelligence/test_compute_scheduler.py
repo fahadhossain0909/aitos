@@ -128,3 +128,15 @@ def test_pending_task_ids_must_be_unique():
         assert "unique" in str(exc)
     else:
         raise AssertionError("duplicate pending task id was accepted")
+
+
+def test_task_larger_than_cycle_budget_is_rejected():
+    scheduler = ComputeAwareScheduler(capacity_units=3)
+    try:
+        scheduler.submit(
+            task("oversized", TaskPriority.CANDIDATE_ANALYSIS, cost=4), now=0
+        )
+    except ValueError as exc:
+        assert "exceeds" in str(exc)
+    else:
+        raise AssertionError("oversized task was accepted")
