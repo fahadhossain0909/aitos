@@ -50,7 +50,7 @@ def test_walk_forward_refits_each_fold_and_purges_by_label_maturity():
     for fold in report.folds:
         assert fold.training_count >= 40
         assert fold.training_as_of == fold.test_start
-        assert fold.evaluation.sample_count == fold.test_count
+        assert fold.evaluation.sample_count == fold.test_count - 1
         assert fold.evaluation.brier_score is not None
 
 
@@ -68,17 +68,18 @@ def test_embargo_removes_overlapping_training_labels():
 
 def test_unseen_event_types_are_excluded_and_counted():
     rows = [row(index) for index in range(80)]
-    rows[40] = row(40, event_type="new_geopolitical_category")
+    rows[41] = row(41, event_type="new_geopolitical_category")
     report = run(rows)
     assert report.folds[0].excluded_unseen_event_types == 1
-    assert report.folds[0].evaluation.sample_count == 19
+    assert report.folds[0].evaluation.sample_count == 18
 
 
 def test_unmatured_test_labels_are_excluded_at_evaluation_cutoff():
     rows = [row(index) for index in range(80)]
     rows[45] = row(45, available_hours=100)
     report = run(rows, as_of=BASE + timedelta(hours=60))
-    assert report.folds[0].evaluation.sample_count == 19
+    assert report.folds[0].evaluation.sample_count == 18
+    assert report.folds[0].evaluation.excluded_unmatured == 1
     assert report.excluded_outcomes_after_evaluation_cutoff >= 1
 
 
