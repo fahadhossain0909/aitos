@@ -40,6 +40,7 @@ from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
 from aitos.knowledge_graph.writer import GraphDriver, KnowledgeGraphWriter
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeLifecycleState
+from aitos.markets.shadow_consumer import MarketDataShadowConsumer
 from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
 from aitos.risk.risk_engine import RiskEngine
 from aitos.trading.lifecycle import TradeLifecycle
@@ -80,6 +81,7 @@ class SystemComponents:
     knowledge_graph: KnowledgeGraphWriter | None = None
     correlation_updater: SymbolCorrelationUpdater | None = None
     _price_feed_subscriptions: list[SubscriptionProtocol] = field(default_factory=list)
+    market_shadow_consumer: MarketDataShadowConsumer | None = None
 
     def reload_runtime_tuning(self) -> dict[str, object]:
         """Reload tunings that can be changed without rebuilding infrastructure.
@@ -167,6 +169,7 @@ async def build_system(
     enable_exit_intelligence: bool = False,
     position_switching_factory: PositionSwitchingFactory | None = None,
     world_intelligence_provider: Any | None = None,
+    market_shadow_consumer: MarketDataShadowConsumer | None = None,
 ) -> SystemComponents:
     settings = get_settings()
     tuning = settings.tuning
@@ -415,6 +418,7 @@ async def build_system(
         reconciliation=reconciliation,
         knowledge_graph=knowledge_graph,
         correlation_updater=correlation_updater,
+        market_shadow_consumer=market_shadow_consumer,
     )
 
 
@@ -486,6 +490,13 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
                 topic, components.trade_lifecycle.handle_event, group=group
             )
         )
+    if components.market_shadow_consumer is not None:
+        market_bus = components.data_ingestion.market_data_bus
+        if market_bus is None:
+            raise RuntimeError(
+                "market shadow consumer requires canonical market-data ingestion"
+            )
+        await components.market_shadow_consumer.start(market_bus)
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         statuses = [await _health_status(module) for module in components.all_modules()]
@@ -498,6 +509,14 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
 async def shutdown_all(
     components: SystemComponents, grace_period_seconds: float = 30.0
 ) -> None:
+    if components.market_shadow_consumer is not None:
+        try:
+            await components.market_shadow_consumer.stop(drain=True)
+        except Exception as exc:
+            logger.error(
+                "market shadow consumer shutdown failed",
+                extra={"aitos_extra": {"error": str(exc)}},
+            )
     for sub in components._price_feed_subscriptions:
         sub.cancel()
     for module in reversed(components.all_modules()):
