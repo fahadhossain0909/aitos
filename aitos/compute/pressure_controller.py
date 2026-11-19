@@ -4,6 +4,7 @@ The controller never pauses market-data integrity, position monitoring, risk,
 or execution responsibilities. Callers may use its decision only to defer
 optional/background work; it does not resize trading risk or mutate strategy.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -80,9 +81,11 @@ class ResourcePressureController:
             required = (
                 0.0
                 if observed == PressureLevel.CRITICAL
-                else self.policy.high_hold_seconds
-                if observed == PressureLevel.HIGH
-                else self.policy.warning_hold_seconds
+                else (
+                    self.policy.high_hold_seconds
+                    if observed == PressureLevel.HIGH
+                    else self.policy.warning_hold_seconds
+                )
             )
             if self._candidate != observed:
                 self._candidate = observed
