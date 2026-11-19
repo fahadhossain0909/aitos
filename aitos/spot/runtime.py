@@ -236,7 +236,7 @@ class SpotRuntime:
             opportunity.symbol.upper() != symbol
             or opportunity.side is not TradeSide.LONG
         ):
-            raise ValueError(
+            raise TypeError(
                 "Spot opportunity builder returned a mismatched or non-LONG thesis"
             )
         opportunity = replace(
