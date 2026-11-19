@@ -2,7 +2,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aitos.world_intelligence.research_validation import OOSPrediction, evaluate_regime_oos
+from aitos.world_intelligence.research_validation import (
+    OOSPrediction,
+    evaluate_regime_oos,
+)
 
 BASE = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
@@ -12,21 +15,27 @@ def make_rows(count=80):
     for i in range(count):
         label = i % 2 == 0
         event_time = BASE + timedelta(hours=i + 1)
-        rows.append(OOSPrediction(
-            event_id=f"event-{i}", regime="trend" if i < 40 else "range",
-            event_time=event_time,
-            label_available_at=event_time + timedelta(hours=2 if i != 3 else 500),
-            candidate_probability=0.9 if label else 0.1,
-            benchmark_probability=0.6 if label else 0.4,
-            label_up=label,
-        ))
+        rows.append(
+            OOSPrediction(
+                event_id=f"event-{i}",
+                regime="trend" if i < 40 else "range",
+                event_time=event_time,
+                label_available_at=event_time + timedelta(hours=2 if i != 3 else 500),
+                candidate_probability=0.9 if label else 0.1,
+                benchmark_probability=0.6 if label else 0.4,
+                label_up=label,
+            )
+        )
     return rows
 
 
 def test_oos_reports_candidate_vs_benchmark_with_regime_confidence_intervals():
     report = evaluate_regime_oos(
-        make_rows(), as_of=BASE + timedelta(days=10),
-        training_cutoff=BASE, min_samples=20, iterations=300,
+        make_rows(),
+        as_of=BASE + timedelta(days=10),
+        training_cutoff=BASE,
+        min_samples=20,
+        iterations=300,
     )
     assert len(report.reports) == 2
     assert report.excluded_unmatured == 1

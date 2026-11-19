@@ -86,9 +86,7 @@ class ClickHousePointInTimeStore:
             """
         )
 
-    async def append_event_revisions(
-        self, revisions: list[EventRevision]
-    ) -> int:
+    async def append_event_revisions(self, revisions: list[EventRevision]) -> int:
         keys = [(item.event_id, item.revision_id) for item in revisions]
         if len(keys) != len(set(keys)):
             raise ValueError("duplicate event revision identity in batch")
@@ -170,8 +168,14 @@ class ClickHousePointInTimeStore:
                 self.market_bar_revisions_table,
                 rows,
                 column_names=[
-                    "asset", "open_time", "revision_id", "close_time",
-                    "available_at", "ingested_at", "open_price", "close_price",
+                    "asset",
+                    "open_time",
+                    "revision_id",
+                    "close_time",
+                    "available_at",
+                    "ingested_at",
+                    "open_price",
+                    "close_price",
                     "payload_json",
                 ],
             )

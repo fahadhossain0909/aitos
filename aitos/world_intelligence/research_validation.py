@@ -1,4 +1,5 @@
 """Leakage-aware OOS evaluation, paired benchmarks and confidence intervals."""
+
 from __future__ import annotations
 
 import random
@@ -74,13 +75,23 @@ def _wilson(successes, count, z=1.959963984540054):
 
 
 def evaluate_regime_oos(
-    predictions: Sequence[OOSPrediction], *, as_of: datetime,
-    training_cutoff: datetime, min_samples: int = 30,
-    iterations: int = 2000, confidence: float = 0.95, seed: int = 23,
+    predictions: Sequence[OOSPrediction],
+    *,
+    as_of: datetime,
+    training_cutoff: datetime,
+    min_samples: int = 30,
+    iterations: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 23,
 ) -> OOSValidationReport:
     if as_of.tzinfo is None or training_cutoff.tzinfo is None:
         raise ValueError("evaluation and training cutoffs must be timezone-aware")
-    if as_of < training_cutoff or min_samples < 3 or iterations < 100 or not 0.5 < confidence < 1:
+    if (
+        as_of < training_cutoff
+        or min_samples < 3
+        or iterations < 100
+        or not 0.5 < confidence < 1
+    ):
         raise ValueError("invalid OOS validation policy")
     ids = [p.event_id for p in predictions]
     if len(ids) != len(set(ids)):

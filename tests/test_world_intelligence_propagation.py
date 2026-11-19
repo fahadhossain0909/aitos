@@ -1,13 +1,19 @@
 import pytest
 
-from aitos.world_intelligence.propagation import PropagationSample, validate_event_propagation
+from aitos.world_intelligence.propagation import (
+    PropagationSample,
+    validate_event_propagation,
+)
 
 
 def test_cross_asset_propagation_estimates_pairwise_regime_lead_lag():
     rows = [
         PropagationSample(
-            event_id=f"event-{i}", source_asset="BTCUSDT", target_asset="ETHUSDT",
-            regime="risk_on", source_return=(i - 15) / 1000,
+            event_id=f"event-{i}",
+            source_asset="BTCUSDT",
+            target_asset="ETHUSDT",
+            regime="risk_on",
+            source_return=(i - 15) / 1000,
             target_return=2 * (i - 15) / 1000 + 0.0001,
             lag_seconds=60 + i % 3,
         )

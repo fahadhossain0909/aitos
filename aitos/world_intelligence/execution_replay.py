@@ -4,6 +4,7 @@ Uses timestamped visible L2 snapshots and explicit latency, maker/taker fees,
 funding observations, partial fills and square-root impact. It deliberately
 reports unfilled quantity and does not assume hidden liquidity or queue priority.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,15 +50,24 @@ class ReplayOrder:
     position_end_at: datetime | None = None
 
     def __post_init__(self):
-        if not self.order_id.strip() or self.side not in {"buy", "sell"} or self.liquidity not in {"maker", "taker"}:
+        if (
+            not self.order_id.strip()
+            or self.side not in {"buy", "sell"}
+            or self.liquidity not in {"maker", "taker"}
+        ):
             raise ValueError("order identity and side are required")
         if not isfinite(self.quantity) or self.quantity <= 0:
             raise ValueError("order quantity must be positive and finite")
         if self.created_at.tzinfo is None or self.max_wait <= timedelta(0):
             raise ValueError("order time must be aware and max_wait positive")
         if self.position_end_at is not None:
-            if self.position_end_at.tzinfo is None or self.position_end_at <= self.created_at:
-                raise ValueError("position_end_at must be aware and after order creation")
+            if (
+                self.position_end_at.tzinfo is None
+                or self.position_end_at <= self.created_at
+            ):
+                raise ValueError(
+                    "position_end_at must be aware and after order creation"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,20 +136,33 @@ def replay_execution(
     unfilled = 0.0
     for order in sorted(orders, key=lambda o: (o.created_at, o.order_id)):
         eligible_at = order.created_at + config.latency
-        book = next((b for b in ordered_books if eligible_at <= b.timestamp <= eligible_at + order.max_wait), None)
+        book = next(
+            (
+                b
+                for b in ordered_books
+                if eligible_at <= b.timestamp <= eligible_at + order.max_wait
+            ),
+            None,
+        )
         if book is None:
             unfilled += order.quantity
             continue
         if order.liquidity == "maker":
             # Maker fills require explicit queue-adjusted trade evidence. Never
             # pretend a resting limit order immediately consumes the opposite book.
-            maker_qty = book.maker_bid_fillable_qty if order.side == "buy" else book.maker_ask_fillable_qty
+            maker_qty = (
+                book.maker_bid_fillable_qty
+                if order.side == "buy"
+                else book.maker_ask_fillable_qty
+            )
             maker_levels = book.bids if order.side == "buy" else book.asks
             levels = maker_levels[:1] if maker_qty > 0 and maker_levels else ()
             available = min(maker_qty, levels[0].quantity) if levels else 0.0
             depth = available
         else:
-            levels = (book.asks if order.side == "buy" else book.bids)[:config.max_levels]
+            levels = (book.asks if order.side == "buy" else book.bids)[
+                : config.max_levels
+            ]
             depth = sum(max(0.0, level.quantity) for level in levels)
         remaining = order.quantity
         participation = order.quantity / max(depth, 1e-12)
@@ -147,15 +170,37 @@ def replay_execution(
         for index, level in enumerate(levels):
             if remaining <= 0:
                 break
-            available = min(level.quantity, depth) if order.liquidity == "maker" else level.quantity
+            available = (
+                min(level.quantity, depth)
+                if order.liquidity == "maker"
+                else level.quantity
+            )
             qty = min(remaining, available)
             if qty <= 0:
                 continue
-            adverse = 1.0 + impact_bps / 10_000 if order.side == "buy" else 1.0 - impact_bps / 10_000
+            adverse = (
+                1.0 + impact_bps / 10_000
+                if order.side == "buy"
+                else 1.0 - impact_bps / 10_000
+            )
             price = level.price * adverse
-            fee_rate = config.maker_fee_rate if order.liquidity == "maker" else config.taker_fee_rate
+            fee_rate = (
+                config.maker_fee_rate
+                if order.liquidity == "maker"
+                else config.taker_fee_rate
+            )
             fee = qty * price * fee_rate
-            fills.append(ReplayFill(order.order_id, order.side, qty, price, fee, impact_bps, book.timestamp))
+            fills.append(
+                ReplayFill(
+                    order.order_id,
+                    order.side,
+                    qty,
+                    price,
+                    fee,
+                    impact_bps,
+                    book.timestamp,
+                )
+            )
             fees += fee
             impact_total += abs(price - level.price) * qty
             remaining -= qty

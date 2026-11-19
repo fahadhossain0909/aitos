@@ -43,21 +43,6 @@ class Provider:
         self.page = HistoricalProviderPage(
             source_id=self.source_id,
             next_cursor="next-page",
-            event_revisions=(EventRevision(
-                event_id="e1", revision_id="r1", asset="BTCUSDT",
-                event_type="macro", published_at=NOW-timedelta(minutes=2),
-                known_at=NOW-timedelta(minutes=1), sentiment=0.2, severity=0.7,
-                novelty=0.5, confidence=0.8, source_reliability=0.9,
-            ),),
-            market_bar_revisions=(MarketBarRevision(
-                asset="BTCUSDT", revision_id="b1", open_time=NOW,
-                close_time=NOW+timedelta(minutes=1), available_at=NOW+timedelta(minutes=1),
-                open_price=90000, close_price=90100,
-            ),),
-            provenance=(SourceProvenance(
-                source_id=self.source_id, source_kind="official",
-                record_id="record-1", uri="https://example.test/story?token=secret",
-                published_at=NOW-timedelta(minutes=2), known_at=NOW-timedelta(minutes=1),
                 raw_payload=json.dumps({"headline":"macro"}).encode(),
                 metadata={"provider_revision":"v2"},
             ),),
@@ -87,7 +72,12 @@ async def test_historical_ingestion_persists_raw_provenance_revisions_then_curso
     provenance_row = client.inserts[0][1][0]
     assert provenance_row[3] == "https://example.test/story"
     assert "secret" not in provenance_row[3]
-    assert provenance_row[7] == __import__("hashlib").sha256(provider.page.provenance[0].raw_payload).hexdigest()
+    assert (
+        provenance_row[7]
+        == __import__("hashlib")
+        .sha256(provider.page.provenance[0].raw_payload)
+        .hexdigest()
+    )
 
 
 @pytest.mark.asyncio
@@ -95,9 +85,11 @@ async def test_historical_cursor_load_uses_durable_checkpoint():
     client = FakeClient()
     store = HistoricalIngestionStore(client)
     client.query = lambda query, parameters=None: _async_result([("cursor-42",)])
+
     async def load():
         result = await store.load_cursor("official-feed")
         assert result == "cursor-42"
+
     await load()
 
 
@@ -107,6 +99,17 @@ async def _async_result(rows):
 
 def test_source_provenance_rejects_naive_time_and_oversized_payload():
     with pytest.raises(ValueError, match="timezone-aware"):
-        SourceProvenance("s", "kind", "r", "https://example.test", NOW, datetime(2026, 11, 19), b"x", {})
+        SourceProvenance(
+            "s",
+            "kind",
+            "r",
+            "https://example.test",
+            NOW,
+            datetime(2026, 11, 19),
+            b"x",
+            {},
+        )
     with pytest.raises(ValueError, match="512KB"):
-        SourceProvenance("s", "kind", "r", "https://example.test", NOW, NOW, b"x" * 512001, {})
+        SourceProvenance(
+            "s", "kind", "r", "https://example.test", NOW, NOW, b"x" * 512001, {}
+        )

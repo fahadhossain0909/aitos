@@ -9,8 +9,6 @@ from aitos.world_intelligence.model_governance import EventImpactModelGovernance
 
 def evidence(version="2.0.0", approved=True):
     return PromotionEvidence(
-        model_id="event-impact", model_version=version, observations=2000,
-        shadow_days=45, brier=0.18, qlike=1.2, pbo=0.08,
         max_drawdown=0.05, drift_score=0.02,
         paired_oos_improvement_lower_bound=0.01, dsr_probability=0.99,
         mcs_included=True, reality_check_p_value=0.01, dm_p_value=0.01,

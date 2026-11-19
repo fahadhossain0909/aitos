@@ -1,8 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 from aitos.world_intelligence.execution_replay import (
-    ExecutionReplayConfig, FundingObservation, ReplayBookLevel,
-    ReplayBookSnapshot, ReplayOrder, replay_execution,
+    ExecutionReplayConfig,
+    FundingObservation,
+    ReplayBookLevel,
+    ReplayBookSnapshot,
+    ReplayOrder,
+    replay_execution,
 )
 
 NOW = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
@@ -38,12 +42,15 @@ def test_execution_replay_models_latency_partial_fills_fees_impact_and_funding()
 
 def test_maker_orders_need_queue_adjusted_fill_evidence_and_short_funding_sign():
     book = ReplayBookSnapshot(
-        NOW, (ReplayBookLevel(100, 2),), (ReplayBookLevel(101, 2),),
+        NOW,
+        (ReplayBookLevel(100, 2),),
+        (ReplayBookLevel(101, 2),),
         maker_bid_fillable_qty=0.5,
     )
     order = ReplayOrder("maker", "buy", 1, NOW, liquidity="maker")
     report = replay_execution(
-        [order], [book],
+        [order],
+        [book],
         funding=[FundingObservation(NOW + timedelta(seconds=1), 0.01)],
         config=ExecutionReplayConfig(latency=timedelta(0)),
     )
@@ -53,7 +60,12 @@ def test_maker_orders_need_queue_adjusted_fill_evidence_and_short_funding_sign()
 
     short = ReplayOrder("short", "sell", 1, NOW)
     short_report = replay_execution(
-        [short], [ReplayBookSnapshot(NOW, (ReplayBookLevel(100, 2),), (ReplayBookLevel(101, 2),))],
+        [short],
+        [
+            ReplayBookSnapshot(
+                NOW, (ReplayBookLevel(100, 2),), (ReplayBookLevel(101, 2),)
+            )
+        ],
         funding=[FundingObservation(NOW + timedelta(seconds=1), 0.01)],
         config=ExecutionReplayConfig(latency=timedelta(0)),
     )

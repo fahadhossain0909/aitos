@@ -4,6 +4,7 @@ Adapters must implement fetch_page(cursor). A page is persisted before its
 checkpoint is advanced; retries are at-least-once and revision identities make
 the point-in-time dataset replayable. Raw responses are bounded and hashed.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -94,36 +95,40 @@ class NormalizedProviderHistoryAdapter:
             assets.add(str(asset).upper())
             payload = event.to_json().encode("utf-8")
             digest = hashlib.sha256(payload).hexdigest()
-            revisions.append(EventRevision(
-                event_id=event.event_id,
-                revision_id=digest,
-                asset=str(asset).upper(),
-                event_type=event.event_type,
-                published_at=event.published_at,
-                known_at=event.first_seen_at,
-                sentiment=event.sentiment,
-                severity=event.severity,
-                novelty=event.novelty,
-                confidence=event.confidence,
-                source_reliability=event.source.reliability,
-                regime=str(event.metadata.get("regime", "unknown")),
-                beta=float(event.metadata.get("beta", 0.0)),
-            ))
-            provenance.append(SourceProvenance(
-                source_id=self.source_id,
-                source_kind=event.source.source_kind,
-                record_id=event.event_id,
-                uri=event.source.uri,
-                published_at=event.source.published_at,
-                known_at=event.first_seen_at,
-                raw_payload=payload,
-                metadata={
-                    "payload_kind": "normalized_event_json",
-                    "schema_version": event.schema_version,
-                    "deduplication_key": event.deduplication_key,
-                    "original_story_id": event.source.original_story_id,
-                },
-            ))
+            revisions.append(
+                EventRevision(
+                    event_id=event.event_id,
+                    revision_id=digest,
+                    asset=str(asset).upper(),
+                    event_type=event.event_type,
+                    published_at=event.published_at,
+                    known_at=event.first_seen_at,
+                    sentiment=event.sentiment,
+                    severity=event.severity,
+                    novelty=event.novelty,
+                    confidence=event.confidence,
+                    source_reliability=event.source.reliability,
+                    regime=str(event.metadata.get("regime", "unknown")),
+                    beta=float(event.metadata.get("beta", 0.0)),
+                )
+            )
+            provenance.append(
+                SourceProvenance(
+                    source_id=self.source_id,
+                    source_kind=event.source.source_kind,
+                    record_id=event.event_id,
+                    uri=event.source.uri,
+                    published_at=event.source.published_at,
+                    known_at=event.first_seen_at,
+                    raw_payload=payload,
+                    metadata={
+                        "payload_kind": "normalized_event_json",
+                        "schema_version": event.schema_version,
+                        "deduplication_key": event.deduplication_key,
+                        "original_story_id": event.source.original_story_id,
+                    },
+                )
+            )
         bars = ()
         if assets:
             bars = await self.bar_provider.fetch_revisions(
@@ -177,10 +182,14 @@ class HistoricalIngestionStore:
             ENGINE = ReplacingMergeTree(ingested_at)
             PARTITION BY toYYYYMM(known_at)
             ORDER BY (source_id, record_id, payload_sha256)
-        """)
+        """
+        )
 
     async def append_provenance(self, records: tuple[SourceProvenance, ...]) -> int:
-        keys = [(r.source_id, r.record_id, hashlib.sha256(r.raw_payload).hexdigest()) for r in records]
+        keys = [
+            (r.source_id, r.record_id, hashlib.sha256(r.raw_payload).hexdigest())
+            for r in records
+        ]
         if len(keys) != len(set(keys)):
             raise ValueError("duplicate source provenance identity in batch")
         now = datetime.now(timezone.utc)
@@ -190,22 +199,49 @@ class HistoricalIngestionStore:
             safe_uri = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 raise ValueError("provenance URI must be HTTP(S)")
-            rows.append((
-                record.source_id, record.source_kind, record.record_id, safe_uri,
-                record.published_at, record.known_at, now,
-                hashlib.sha256(record.raw_payload).hexdigest(),
-                record.raw_payload.decode("utf-8", errors="replace"),
-                json.dumps(record.metadata, sort_keys=True, separators=(",", ":"), allow_nan=False),
-            ))
+            rows.append(
+                (
+                    record.source_id,
+                    record.source_kind,
+                    record.record_id,
+                    safe_uri,
+                    record.published_at,
+                    record.known_at,
+                    now,
+                    hashlib.sha256(record.raw_payload).hexdigest(),
+                    record.raw_payload.decode("utf-8", errors="replace"),
+                    json.dumps(
+                        record.metadata,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ),
+                )
+            )
         if rows:
-            await self.client.insert(self.table, rows, column_names=[
-                "source_id", "source_kind", "record_id", "safe_uri", "published_at",
-                "known_at", "ingested_at", "payload_sha256", "raw_payload", "metadata_json",
-            ])
+            await self.client.insert(
+                self.table,
+                rows,
+                column_names=[
+                    "source_id",
+                    "source_kind",
+                    "record_id",
+                    "safe_uri",
+                    "published_at",
+                    "known_at",
+                    "ingested_at",
+                    "payload_sha256",
+                    "raw_payload",
+                    "metadata_json",
+                ],
+            )
         return len(rows)
 
     async def backfill(
-        self, provider: HistoricalProvider, *, start_cursor: str | None = None,
+        self,
+        provider: HistoricalProvider,
+        *,
+        start_cursor: str | None = None,
         max_pages: int = 1000,
     ) -> tuple[int, str | None]:
         """Run a bounded provider cursor to exhaustion; date semantics stay in adapter."""
@@ -237,8 +273,12 @@ class HistoricalIngestionStore:
             column_names=["source_id", "cursor", "updated_at"],
         )
 
-    async def ingest(self, provider: HistoricalProvider, *, cursor: str | None = None) -> str | None:
-        current_cursor = cursor if cursor is not None else await self.load_cursor(provider.source_id)
+    async def ingest(
+        self, provider: HistoricalProvider, *, cursor: str | None = None
+    ) -> str | None:
+        current_cursor = (
+            cursor if cursor is not None else await self.load_cursor(provider.source_id)
+        )
         page = await provider.fetch_page(cursor=current_cursor)
         if page.source_id != provider.source_id:
             raise ValueError("provider/page source identity mismatch")
@@ -248,9 +288,18 @@ class HistoricalIngestionStore:
         # save_cursor safely replays the page; stable revision IDs deduplicate it.
         await self.append_provenance(page.provenance)
         await self.revisions.append_event_revisions(list(page.event_revisions))
-        await self.revisions.append_market_bar_revisions(list(page.market_bar_revisions))
+        await self.revisions.append_market_bar_revisions(
+            list(page.market_bar_revisions)
+        )
         await self.save_cursor(page.source_id, page.next_cursor)
         return page.next_cursor
 
 
-__all__ = ["HistoricalBarProvider", "HistoricalIngestionStore", "HistoricalProvider", "HistoricalProviderPage", "NormalizedProviderHistoryAdapter", "SourceProvenance"]
+__all__ = [
+    "HistoricalBarProvider",
+    "HistoricalIngestionStore",
+    "HistoricalProvider",
+    "HistoricalProviderPage",
+    "NormalizedProviderHistoryAdapter",
+    "SourceProvenance",
+]

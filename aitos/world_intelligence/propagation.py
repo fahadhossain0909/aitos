@@ -4,6 +4,7 @@ This module evaluates observed event-window returns only. It does not infer
 causality from correlation; results are stratified by regime and bootstrapped
 with deterministic seeds for reproducibility.
 """
+
 from __future__ import annotations
 
 import random
@@ -76,14 +77,24 @@ def _bootstrap_ci(values, *, seed, iterations=1000, confidence=0.95, statistic=N
             estimates.append(result)
     estimates.sort()
     alpha = (1.0 - confidence) / 2.0
-    return (estimates[int(alpha * (len(estimates) - 1))],
-            estimates[int((1.0 - alpha) * (len(estimates) - 1))]) if estimates else None
+    return (
+        (
+            estimates[int(alpha * (len(estimates) - 1))],
+            estimates[int((1.0 - alpha) * (len(estimates) - 1))],
+        )
+        if estimates
+        else None
+    )
 
 
 def validate_event_propagation(
-    samples: Sequence[PropagationSample], *, min_samples: int = 30,
-    max_abs_lag_seconds: float = 86_400.0, iterations: int = 1000,
-    confidence: float = 0.95, seed: int = 17,
+    samples: Sequence[PropagationSample],
+    *,
+    min_samples: int = 30,
+    max_abs_lag_seconds: float = 86_400.0,
+    iterations: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 17,
 ) -> tuple[PropagationEstimate, ...]:
     if min_samples < 3 or iterations < 100 or not 0.5 < confidence < 1:
         raise ValueError("invalid propagation validation policy")
@@ -92,12 +103,23 @@ def validate_event_propagation(
     grouped = defaultdict(list)
     seen = set()
     for sample in samples:
-        key = (sample.event_id, sample.source_asset.upper(), sample.target_asset.upper(), sample.regime)
+        key = (
+            sample.event_id,
+            sample.source_asset.upper(),
+            sample.target_asset.upper(),
+            sample.regime,
+        )
         if key in seen:
             raise ValueError("duplicate event propagation sample")
         seen.add(key)
         if abs(sample.lag_seconds) <= max_abs_lag_seconds:
-            grouped[(sample.source_asset.upper(), sample.target_asset.upper(), sample.regime)].append(sample)
+            grouped[
+                (
+                    sample.source_asset.upper(),
+                    sample.target_asset.upper(),
+                    sample.regime,
+                )
+            ].append(sample)
     reports = []
     for (source, target, regime), rows in sorted(grouped.items()):
         if len(rows) < min_samples:
@@ -106,15 +128,43 @@ def validate_event_propagation(
         ys = [r.target_return for r in rows]
         lags = [r.lag_seconds for r in rows]
         corr = _corr(xs, ys)
-        corr_ci = _bootstrap_ci(rows, seed=seed, iterations=iterations, confidence=confidence,
-                                statistic=lambda rs: _corr([r.source_return for r in rs], [r.target_return for r in rs]))
+        corr_ci = _bootstrap_ci(
+            rows,
+            seed=seed,
+            iterations=iterations,
+            confidence=confidence,
+            statistic=lambda rs: _corr(
+                [r.source_return for r in rs], [r.target_return for r in rs]
+            ),
+        )
         mean_target = sum(ys) / len(ys)
-        target_ci = _bootstrap_ci(ys, seed=seed + 1, iterations=iterations, confidence=confidence)
+        target_ci = _bootstrap_ci(
+            ys, seed=seed + 1, iterations=iterations, confidence=confidence
+        )
         lag_mean = sum(lags) / len(lags)
-        lag_ci = _bootstrap_ci(lags, seed=seed + 2, iterations=iterations, confidence=confidence)
-        label = "source_leads_target" if lag_mean > 0 else "target_leads_source" if lag_mean < 0 else "synchronous"
-        reports.append(PropagationEstimate(source, target, regime, len(rows), corr, corr_ci,
-                                            mean_target, target_ci, lag_mean, lag_ci, label))
+        lag_ci = _bootstrap_ci(
+            lags, seed=seed + 2, iterations=iterations, confidence=confidence
+        )
+        label = (
+            "source_leads_target"
+            if lag_mean > 0
+            else "target_leads_source" if lag_mean < 0 else "synchronous"
+        )
+        reports.append(
+            PropagationEstimate(
+                source,
+                target,
+                regime,
+                len(rows),
+                corr,
+                corr_ci,
+                mean_target,
+                target_ci,
+                lag_mean,
+                lag_ci,
+                label,
+            )
+        )
     return tuple(reports)
 
 
