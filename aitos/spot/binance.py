@@ -10,6 +10,8 @@ from urllib.parse import urlencode
 
 import aiohttp
 
+from aitos.exchange.rate_limiter import TokenBucketRateLimiter
+
 from aitos.spot.filters import D, SpotSymbolFilters, parse_spot_exchange_info
 from aitos.spot.models import (SpotBalance, SpotFill, SpotInstrument, SpotOrder,
     SpotOrderRequest, SpotOrderSide, SpotOrderStatus)
@@ -21,7 +23,8 @@ class BinanceSpotAdapter:
 
     def __init__(self, *, api_key: str | None = None, api_secret: str | None = None,
                  testnet: bool = True, session: aiohttp.ClientSession | None = None,
-                 timeout_seconds: float = 10.0) -> None:
+                 timeout_seconds: float = 10.0,
+                 rate_limiter: TokenBucketRateLimiter | None = None) -> None:
         self.api_key, self.api_secret = api_key, api_secret
         self.testnet = testnet
         self.base_url = self.TESTNET if testnet else self.MAINNET
@@ -29,6 +32,10 @@ class BinanceSpotAdapter:
         self._owns_session = session is None
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.filters: dict[str, SpotSymbolFilters] = {}
+        self._rate_limiter = rate_limiter or TokenBucketRateLimiter(
+            capacity=1200, refill_per_second=20.0, reserved_capacity=100
+        )
+        self._server_time_offset_ms = 0
 
     async def __aenter__(self) -> "BinanceSpotAdapter":
         await self.connect()
@@ -57,7 +64,9 @@ class BinanceSpotAdapter:
         return values
 
     async def _request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
-                       signed: bool = False, api_key_only: bool = False) -> Any:
+                       signed: bool = False, api_key_only: bool = False,
+                       weight: int = 1) -> Any:
+        await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
         headers = {}
