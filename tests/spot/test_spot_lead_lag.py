@@ -120,3 +120,23 @@ def test_futures_spot_lead_lag_does_not_overwrite_newer_bucket_sample():
     sample = analyzer._pairs["BTCUSDT"].spot[int(at.timestamp())]
     assert sample[1] == 101
     assert analyzer.snapshot()["rejected_events"] == 1
+
+
+
+def test_futures_spot_lead_lag_estimates_expire_when_market_feed_stales():
+    from aitos.spot.lead_lag import LeadLagEstimate
+
+    analyzer = FuturesSpotLeadLagAnalyzer()
+    now = datetime.now(timezone.utc)
+    analyzer._estimates["BTCUSDT"] = LeadLagEstimate(
+        symbol="BTCUSDT",
+        status="futures_leads",
+        leader="futures",
+        lag_seconds=2,
+        correlation=0.8,
+        confidence_low=0.7,
+        confidence_high=0.9,
+        observations=100,
+        as_of=now - timedelta(seconds=30),
+    )
+    assert analyzer.estimate("BTCUSDT", max_age_seconds=15) is None
