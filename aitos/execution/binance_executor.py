@@ -164,9 +164,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             if not re.fullmatch(r"[A-Z0-9]{1,30}", normalized_symbol):
                 raise ValueError("invalid symbol for algo inventory")
             params["symbol"] = normalized_symbol
-        response = await self._signed_request(
-            "GET", "/fapi/v1/openAlgoOrders", params
-        )
+        response = await self._signed_request("GET", "/fapi/v1/openAlgoOrders", params)
         if not isinstance(response, list):
             raise ValueError("algo inventory must be a complete list")
         seen_ids: set[str] = set()
