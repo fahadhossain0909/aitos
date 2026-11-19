@@ -347,7 +347,7 @@ class CapitalGateway:
                 )
                 return (
                     current.allowed
-                    and current.allowed_risk_pct + 1e-12 >= candidate_risk_pct
+                    and current.allowed_risk_pct + 1e-9 >= candidate_risk_pct
                 )
 
             if self.reservation.reserve(
