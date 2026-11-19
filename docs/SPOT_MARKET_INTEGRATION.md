@@ -138,8 +138,8 @@ score, create a trade signal, override the shared Strategy/HTF/CVD/flow gates,
 or authorize an order. A Futures lead can be a price-discovery confirmation;
 a Spot lead can indicate Spot-originated flow; disagreement or unstable
 correlation is a caution/uncertainty signal. Strategy weighting must wait for
-historical replay, fees/slippage-aware execution tests, confidence calibration,
-and symbol/regime out-of-sample validation. The analyzer is observational
+historical replay, fees/slippage-aware execution tests, autocorrelation-aware
+confidence calibration, and symbol/regime out-of-sample validation. The analyzer is observational
 telemetry until those gates pass.
 
 ## Testnet execution
