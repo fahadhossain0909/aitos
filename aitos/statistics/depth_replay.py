@@ -175,9 +175,6 @@ def replay_l2_market_order(
         if remaining <= 1e-12:
             break
         levels = book.asks if direction == "BUY" else book.bids
-        opposite = book.bids if direction == "BUY" else book.asks
-        if not levels or not opposite:
-            continue
         visible = sum(size for _, size in levels)
         if visible <= 0:
             break
