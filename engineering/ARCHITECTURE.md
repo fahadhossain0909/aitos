@@ -135,3 +135,6 @@ financial-authority audit is maintained in
 [`engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`](AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md).
 Runtime health and production latency remain unverified unless a dated evidence
 record says otherwise.
+
+
+Architecture evolution evidence: `engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md`, `engineering/AEP1_PHASE1_CONTRACT_AND_AUTHORITY_AUDIT.md`, and `engineering/AEP1_PHASE2_SHADOW_AND_IMMUTABILITY.md`.
