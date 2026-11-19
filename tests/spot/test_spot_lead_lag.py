@@ -108,3 +108,16 @@ def test_futures_spot_lead_lag_is_scoped_to_discovered_spot_universe():
     assert analyzer.ingest(_ticker("usd_m_futures", "ETHUSDT", 100, now)) is None
     assert analyzer.ingest(_ticker("usd_m_futures", "BTCUSDT", 100, now)) is not None
     assert set(analyzer._pairs) == {"BTCUSDT"}
+
+
+
+def test_futures_spot_lead_lag_does_not_overwrite_newer_bucket_sample():
+    analyzer = FuturesSpotLeadLagAnalyzer()
+    at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    newer = _ticker("spot", "BTCUSDT", 101, at + timedelta(milliseconds=800))
+    older = _ticker("spot", "BTCUSDT", 99, at + timedelta(milliseconds=200))
+    analyzer.ingest(newer)
+    analyzer.ingest(older)
+    sample = analyzer._pairs["BTCUSDT"].spot[int(at.timestamp())]
+    assert sample[1] == 101
+    assert analyzer.snapshot()["rejected_events"] == 1
