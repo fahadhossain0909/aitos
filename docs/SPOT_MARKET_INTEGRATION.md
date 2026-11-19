@@ -83,17 +83,55 @@ AITOS-managed inventory before sending.
 External wallet holdings are never adopted as strategy-owned inventory.
 
 The SQLite inventory ledger is durable, fill-idempotent and records commission
-asset. Base-asset and quote-asset commissions are reflected in quantity/cost
-basis. Third-asset fees remain explicitly pending until a caller supplies their
-point-in-time quote-currency valuation through
-`resolve_commission_conversion()`; the ledger never substitutes a current
-price for a historical fee. Pending conversions are queryable and survive
-process restart. Reconciliation uses exchange trade IDs as idempotency keys. Client order IDs and order intents are journaled before exchange
+asset and exchange fill timestamp. Base-asset and quote-asset commissions are
+reflected in quantity/cost basis. Third-asset fees are resolved by
+`SpotCommissionConversionService` from the latest historical aggregate trade
+at or before the fill timestamp, within a strict five-second age bound, using
+a direct or inverse Spot quote pair. Missing history/pairs remain pending; the
+service never substitutes a current ticker price. Pending conversions survive
+process restart. Reconciliation uses exchange trade IDs as idempotency keys.
+
+`SpotUserDataStreamSupervisor` renews listen keys every 25 minutes, rotates a
+key after keepalive failure, reconnects with bounded backoff and closes old
+keys best-effort. `SpotRuntime.start_user_data_stream()` first reconciles
+durable unresolved client order IDs through REST, then consumes private
+execution reports and reconciles fills again. Private stream events are
+notifications; REST order/trade state remains authoritative. Client order IDs and order intents are journaled before exchange
 submission. Ambiguous submissions remain unresolved in that journal across
 process restarts. The default Spot runtime also uses a durable capital
 reservation database with a stable owner identity so pinned exposure can be
 reconciled after restart. REST calls share a weighted token-bucket limiter and
 signed requests support explicit server-time offset synchronization.
+
+### Shared strategy, portfolio and execution replay
+
+`SpotRuntime.submit_strategy_candidate()` is the explicit bridge from the
+shared AITOS scanner and AI Kernel into Spot. It requires the candidate to be
+inside the discovered Spot universe, applies the same kernel direction and
+confidence gate, rejects non-LONG candidates, then sends the resulting
+Opportunity through the shared CapitalGateway. Exits continue to require the
+shared ExitDecision contract and AITOS-managed inventory; the Futures
+TradeLifecycle is not repurposed to pretend Spot sells support reduce-only.
+
+`SpotPortfolioValuator` combines the separate Spot account's quote cash,
+mark-to-market value of AITOS-managed Spot inventory, and the separately
+supplied Futures account equity. It never adopts external base-asset wallet
+holdings and rejects unsupported quote currencies rather than inventing FX
+rates. Missing marks or unresolved third-asset fees make the snapshot
+explicitly incomplete. The Futures equity input must not already include Spot
+cash or Spot inventory.
+
+`aitos.spot.replay` provides depth-walking taker fills, queue-ahead passive
+maker fills, partial-fill accounting, maker/taker fees, adverse market impact
+and latency-aware selection of the first historical book snapshot available
+after modeled order latency. Missing depth remains unfilled; the replay never
+fabricates liquidity or silently assumes a full fill.
+
+`validate_futures_spot_lead_lag_oos()` selects leader and lag on a chronological
+training segment, then evaluates the frozen hypothesis out of sample. It
+reports Newey-West/HAC confidence bounds, synchronous benchmark lift and
+regime-specific test correlations. This validation harness is research
+evidence only; it cannot modify scanner weights or promote a strategy.
 
 ## Enabling read-only Spot market data
 
@@ -170,20 +208,21 @@ fees and execution-cost replay have passed operator review.
 
 ## Remaining production gates
 
-- Bind the existing strategy scanner's Spot candidate flow into the Spot
-  coordinator and existing lifecycle's entry/exit callbacks; current scanner
-  is a pre-filter only.
-- Validate end-to-end MarketDataBus consumers and all Python 3.10-3.12 CI jobs.
-- Add exchange-specific rate-limit budgeting and server-time offset monitoring.
-- Test live User Data Stream keepalive/reconnect and account/order event recovery.
-- Add order lifecycle integration tests against Spot Testnet, including
-  partial fills, cancel/replace, ambiguous POST recovery and process restart.
-- Wire a point-in-time third-asset fee-price source into the pending fee-conversion
-  ledger; until resolved, net PnL remains provisional for affected fills.
-- Extend execution replay with Spot maker/taker fees, spread crossing,
-  partial fills, market impact and latency; validate by symbol and regime OOS.
-- Verify the existing portfolio mark-to-market aggregates Spot inventory,
-  quote cash and Futures margin without double-counting shared quote assets.
+- Run the complete Python 3.10-3.12 CI matrix and full Market Data Contract
+  Audit on the final PR head; formatting, unit tests and static checks must be
+  green before this integration is treated as verified.
+- Run the opt-in Binance Spot Testnet lifecycle test with dedicated testnet
+  credentials, including cancel/reconcile and process-restart recovery.
+- Validate the portfolio valuator against independently reconciled Spot and
+  Futures account statements, including open-order locked balances and
+  third-asset fee completeness.
+- Replay representative historical Spot books and maker queue observations
+  across symbols, volatility/liquidity regimes and walk-forward windows.
+- Validate Futures↔Spot lead-lag using source-provenance historical data,
+  serial-dependence-aware confidence and regime-wise OOS results before any
+  signal weighting is proposed.
+- Keep mainnet execution disabled until operator review accepts the above
+  evidence and dedicated API permissions.
 
 Options are intentionally not implemented. `MarketType.OPTIONS` remains
 available for a future dedicated options design and strategy package.
