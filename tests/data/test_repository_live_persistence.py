@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,16 @@ def make_event() -> MarketEvent:
 class FakeClient:
     def __init__(self) -> None:
         self.inserts = []
+        self.queries = []
+
+    async def query(self, sql, parameters, settings):
+        self.queries.append((sql, parameters, settings))
+        return SimpleNamespace(
+            column_names=["event_time", "event_id", "payload_json"],
+            result_rows=[
+                (parameters["start_time"], "evt-spot-1", '{"last_price":"101"}')
+            ],
+        )
 
     async def insert(self, table, rows, column_names):
         self.inserts.append((table, rows, column_names))
@@ -141,3 +152,47 @@ def test_versioned_event_schema_uses_replacing_revision_semantics():
     assert "event_revision UInt64" in CREATE_VERSIONED_MARKET_EVENTS
     assert "ReplacingMergeTree(event_revision)" in CREATE_VERSIONED_MARKET_EVENTS
     assert "ORDER BY (instrument_id, event_id)" in CREATE_VERSIONED_MARKET_EVENTS
+
+
+
+@pytest.mark.asyncio
+async def test_load_versioned_events_filters_exact_spot_instrument_and_decodes_payload():
+    repo = MarketDataRepository.__new__(MarketDataRepository)
+    repo._client = FakeClient()
+    repo._initialized = True
+    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    end = start + timedelta(hours=1)
+
+    rows = await repo.load_versioned_market_events(
+        market_type="spot",
+        instrument_id="binance:spot:BTCUSDT",
+        event_types=("ticker",),
+        start_time=start,
+        end_time=end,
+        limit=1000,
+    )
+
+    sql, parameters, _settings = repo._client.queries[0]
+    assert "market_event_versions FINAL" in sql
+    assert parameters["market_type"] == "spot"
+    assert parameters["instrument_id"] == "binance:spot:BTCUSDT"
+    assert parameters["event_types"] == ["ticker"]
+    assert rows[0]["payload"] == {"last_price": "101"}
+
+
+def test_versioned_event_loader_rejects_naive_or_reversed_time_ranges():
+    repo = MarketDataRepository.__new__(MarketDataRepository)
+    repo._initialized = True
+    start = datetime(2026, 11, 1)
+    end = start + timedelta(hours=1)
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        awaitable = repo.load_versioned_market_events(
+            market_type="spot",
+            instrument_id="binance:spot:BTCUSDT",
+            start_time=start,
+            end_time=end,
+        )
+        import asyncio
+
+        asyncio.run(awaitable)
