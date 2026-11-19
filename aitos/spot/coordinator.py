@@ -1,4 +1,5 @@
 """Capital-gated Spot entry and inventory-bounded exit orchestration."""
+
 from __future__ import annotations
 
 import uuid
@@ -87,9 +88,7 @@ class SpotTradingCoordinator:
                 "requested quote notional exceeds approved Spot allocation"
             )
 
-        client_order_id = request.client_order_id or (
-            "aitos-" + uuid.uuid4().hex[:28]
-        )
+        client_order_id = request.client_order_id or ("aitos-" + uuid.uuid4().hex[:28])
         request = replace(request, client_order_id=client_order_id)
         self.inventory.record_order_intent(
             client_order_id=client_order_id,
@@ -107,16 +106,12 @@ class SpotTradingCoordinator:
                 client_order_id, status=SpotOrderStatus.REJECTED.value
             )
             self.capital_gateway.release(key.value)
-            raise SpotAuthorizationRejected(
-                "could not pin Spot capital reservation"
-            )
+            raise SpotAuthorizationRejected("could not pin Spot capital reservation")
 
         try:
             order = await self.executor.submit(request)
         except Exception:
-            self.inventory.update_order_intent(
-                client_order_id, status="UNKNOWN"
-            )
+            self.inventory.update_order_intent(client_order_id, status="UNKNOWN")
             raise
 
         self.inventory.update_order_intent(
@@ -154,13 +149,9 @@ class SpotTradingCoordinator:
 
         position = self.inventory.get_position(symbol)
         if position is None or position.quantity < quantity:
-            raise SpotAuthorizationRejected(
-                "sell exceeds AITOS-managed Spot inventory"
-            )
+            raise SpotAuthorizationRejected("sell exceeds AITOS-managed Spot inventory")
 
-        client_order_id = client_order_id or (
-            "aitos-" + uuid.uuid4().hex[:28]
-        )
+        client_order_id = client_order_id or ("aitos-" + uuid.uuid4().hex[:28])
         request = SpotOrderRequest(
             symbol=symbol,
             side=SpotOrderSide.SELL,
@@ -178,9 +169,7 @@ class SpotTradingCoordinator:
         try:
             order = await self.executor.submit(request)
         except Exception:
-            self.inventory.update_order_intent(
-                client_order_id, status="UNKNOWN"
-            )
+            self.inventory.update_order_intent(client_order_id, status="UNKNOWN")
             raise
 
         self.inventory.update_order_intent(
@@ -192,9 +181,7 @@ class SpotTradingCoordinator:
             self.release_after_confirmed_flat(symbol)
         return order
 
-    async def reconcile(
-        self, symbol: str, client_order_id: str
-    ) -> SpotOrder:
+    async def reconcile(self, symbol: str, client_order_id: str) -> SpotOrder:
         order = await self.executor.reconcile_order(
             symbol, client_order_id, self.inventory
         )
