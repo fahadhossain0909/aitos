@@ -53,6 +53,7 @@ class SpotRuntime:
     owns_capital_gateway: bool = False
     _market_tasks: list[asyncio.Task] = field(default_factory=list, repr=False)
     _user_stream: SpotUserDataStreamSupervisor | None = field(default=None, repr=False)
+    _commission_task: asyncio.Task | None = field(default=None, repr=False)
     commission_service: SpotCommissionConversionService | None = field(
         default=None, repr=False
     )
@@ -319,10 +320,13 @@ class SpotRuntime:
         on_event: Callable[[dict[str, object]], Awaitable[None] | None] | None = None,
         *,
         keepalive_seconds: float = 25 * 60,
+        commission_retry_seconds: float = 60.0,
     ) -> None:
         """Start private Spot updates with durable REST reconciliation."""
         if self._user_stream is not None:
             raise RuntimeError("Spot User Data Stream is already configured")
+        if commission_retry_seconds <= 0:
+            raise ValueError("commission retry interval must be positive")
         if not (self.market_data.rest.api_key and self.market_data.rest.api_secret):
             raise RuntimeError(
                 "Spot User Data Stream requires dedicated API credentials"
@@ -441,6 +445,10 @@ class SpotRuntime:
 
     async def stop_user_data_stream(self) -> None:
         stream, self._user_stream = self._user_stream, None
+        task, self._commission_task = self._commission_task, None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
         if stream is not None:
             await stream.stop()
 
