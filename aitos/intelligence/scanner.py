@@ -603,6 +603,15 @@ class OpportunityScanner(AITOSModule):
             and trade.trade_id != previous_trade_id
         )
         if accepted:
+            collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+            if collector is not None:
+                try:
+                    collector.record_event(trade.symbol)
+                except (TypeError, ValueError):
+                    logger.debug(
+                        "adaptive compute trade telemetry sample rejected",
+                        extra={"aitos_extra": {"symbol": trade.symbol}},
+                    )
             timestamp = getattr(trade, "timestamp", None)
             quantity = float(getattr(trade, "quantity", 0.0) or 0.0)
             trade_side = str(
@@ -641,6 +650,22 @@ class OpportunityScanner(AITOSModule):
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
+        collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+        if collector is not None:
+            try:
+                depth = len(getattr(book, "bids", ())) + len(
+                    getattr(book, "asks", ())
+                )
+                collector.record_book_depth(book.symbol, depth)
+            except (AttributeError, TypeError, ValueError):
+                logger.debug(
+                    "adaptive compute book telemetry sample rejected",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": getattr(book, "symbol", "unknown")
+                        }
+                    },
+                )
 
     async def _record_funnel(self, **event: Any) -> None:
         """Persist diagnostics off-loop; telemetry must not change trade decisions."""
@@ -743,6 +768,15 @@ class OpportunityScanner(AITOSModule):
         import time
 
         started = time.perf_counter()
+        collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+        if collector is not None:
+            try:
+                collector.record_analysis(symbol)
+            except (TypeError, ValueError):
+                logger.debug(
+                    "adaptive compute analysis telemetry sample rejected",
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
         trace_token = None
         try:
             from aitos.forensics.data_flow_hooks import (
