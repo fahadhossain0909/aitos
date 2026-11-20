@@ -45,6 +45,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from aitos.config.paths import get_model_data_dir
@@ -2743,8 +2744,6 @@ class TradeLifecycle(AITOSModule):
             previous_quantity = marker.get("cumulative_quantity", "0")
             previous_quote = marker.get("cumulative_quote", "0")
             if watermark is not None:
-                from decimal import Decimal
-
                 if (
                     Decimal(str(watermark["cumulative_quantity"]))
                     > Decimal(str(previous_quantity))
