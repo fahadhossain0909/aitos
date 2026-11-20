@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from aitos.compute.pressure_controller import (
     PressurePolicy,
+    ProcessPressureSampler,
     ResourcePressureController,
 )
 from aitos.compute.work_scheduler import (
@@ -47,6 +48,21 @@ class AdaptiveComputeRuntime:
             cpu_utilization_pct=cpu_utilization_pct,
             memory_utilization_pct=memory_utilization_pct,
             queue_lag_seconds=queue_lag_seconds,
+        )
+
+    def observe_process_pressure(
+        self,
+        sampler: ProcessPressureSampler,
+        *,
+        queue_lag_seconds: float,
+    ):
+        """Sample host process pressure and update the shared hysteresis state."""
+        sample = sampler.sample(queue_lag_seconds=queue_lag_seconds)
+        return self.update_pressure(
+            now_seconds=sample.observed_at,
+            cpu_utilization_pct=sample.cpu_utilization_pct,
+            memory_utilization_pct=sample.memory_utilization_pct,
+            queue_lag_seconds=sample.queue_lag_seconds,
         )
 
     def admit_optional_work(
