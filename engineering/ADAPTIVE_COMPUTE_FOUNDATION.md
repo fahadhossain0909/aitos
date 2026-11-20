@@ -174,3 +174,15 @@ The resulting hysteretic pressure state scales only the optional scanner
 capacity: NORMAL=100%, WARNING=50%, HIGH=25%, CRITICAL=0%. Protected symbols
 remain protected and may cause an explicit overcommit; no market-data,
 position-monitoring, risk, order-update, or execution-recovery work is shed.
+
+
+## Dynamic optional-scan concurrency
+
+The paper scanner now uses an adjustable async concurrency gate in addition to
+its existing configured semaphore. Each candidate-analysis cycle samples
+process pressure and lowers or restores the gate from the pressure-scaled CPU
+worker budget. Reducing the limit never cancels in-flight work; it only blocks
+new optional scans until active work falls below the new limit. Cancellation
+always releases a slot. Background and deep-analysis admission counts are also
+scaled in the optional budget. The gate is not attached to ingestion, order
+updates, position monitoring, risk checks, or execution recovery.
