@@ -889,7 +889,6 @@ def test_uncalibrated_workload_estimator_preserves_requested_symbol():
     assert estimate.workload.symbol == "ETHUSDT"
 
 
-
 def test_optional_scheduler_rejects_boolean_and_invalid_capacity_limits():
     from aitos.compute.work_scheduler import admit_optional_work
 
@@ -936,7 +935,6 @@ def test_detect_resources_honors_nested_cgroup_v1_controller_paths(tmp_path):
     assert result.effective_cpus == pytest.approx(2.0)
     assert result.memory_limit_mb == 3072
     assert result.memory_available_mb == 2048
-
 
 
 def test_pressure_classification_supports_unavailable_queue_lag():
@@ -1016,7 +1014,6 @@ def test_adaptive_runtime_automatically_samples_process_pressure():
     assert runtime.pressure_sampler.resources == runtime.resources
 
 
-
 def test_compute_models_reject_non_numeric_and_boolean_values():
     from aitos.compute.resource_governor import SymbolWorkload, classify_pressure
     from aitos.compute.work_scheduler import WorkloadClass, WorkloadRequest
@@ -1037,13 +1034,10 @@ def test_compute_models_reject_non_numeric_and_boolean_values():
         )
 
 
-
 def test_resource_budget_disables_deep_analysis_without_memory_headroom():
     from aitos.compute.resource_governor import build_resource_budget
 
-    budget = build_resource_budget(
-        ResourceSnapshot(2, 2.0, 1024, 128, 0, False, True)
-    )
+    budget = build_resource_budget(ResourceSnapshot(2, 2.0, 1024, 128, 0, False, True))
     assert budget.memory_budget_mb == 0
     assert budget.deep_analysis_slots == 0
     assert budget.cpu_workers == 2
@@ -1060,15 +1054,11 @@ def test_detect_resources_resolves_nested_cgroup_v2_process_membership(tmp_path)
     (proc / "meminfo").write_text(
         "MemTotal: 8388608 kB\nMemAvailable: 4194304 kB\n", encoding="ascii"
     )
-    (proc / "self" / "cgroup").write_text(
-        "0::/docker/container-id\n", encoding="ascii"
-    )
+    (proc / "self" / "cgroup").write_text("0::/docker/container-id\n", encoding="ascii")
     nested = cgroup / "docker" / "container-id"
     (nested / "cpu.max").write_text("150000 100000", encoding="ascii")
     (nested / "memory.max").write_text(str(2 * 1024 * 1024 * 1024), encoding="ascii")
-    (nested / "memory.current").write_text(
-        str(512 * 1024 * 1024), encoding="ascii"
-    )
+    (nested / "memory.current").write_text(str(512 * 1024 * 1024), encoding="ascii")
 
     result = detect_resources(proc_root=proc, cgroup_root=cgroup, device_root=devices)
     assert result.effective_cpus == pytest.approx(1.5)
