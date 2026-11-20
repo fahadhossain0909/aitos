@@ -596,14 +596,15 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
             scanner = getattr(components, "scanner", None)
             background_gate = getattr(scanner, "_aitos_adaptive_background_gate", None)
 
-            async def governed_drift_provider():
-                # Drift evaluation is optional background work. Acquire a slot
-                # per batch (not for the lifetime of the worker) so pressure
-                # changes can defer the next batch without cancelling this one.
-                if background_gate is None:
-                    return await drift_provider()
-                async with background_gate.slot():
-                    return await drift_provider()
+            if background_gate is None:
+                governed_drift_provider = drift_provider
+            else:
+                async def governed_drift_provider():
+                    # Drift evaluation is optional background work. Acquire a
+                    # slot per batch (not for the worker lifetime) so pressure
+                    # can defer the next batch without cancelling this one.
+                    async with background_gate.slot():
+                        return await drift_provider()
 
             components._governance_drift_task = asyncio.create_task(
                 drift_scheduler.run_forever(stop_event, governed_drift_provider),
