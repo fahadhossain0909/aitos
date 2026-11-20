@@ -1,0 +1,55 @@
+name: Three-Store Execution Recovery Integration
+
+on:
+  pull_request:
+    paths:
+      - "aitos/execution/**"
+      - "aitos/trading/lifecycle.py"
+      - "aitos/trading/persistent_state.py"
+      - "tests/integration/test_execution_recovery_three_store.py"
+      - "tests/test_protection_child_*.py"
+      - ".github/workflows/three-store-recovery-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clickhouse-sqlite-venue-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project and integration dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-asyncio pytest-timeout clickhouse-connect aiohttp
+      - name: Run real ClickHouse + SQLite + Binance adapter crash matrix
+        env:
+          PYTHONPATH: .
+          AITOS_ENABLE_THREE_STORE_FAULT_TESTS: "1"
+          AITOS_FAULT_CLICKHOUSE_HOST: 127.0.0.1
+          AITOS_FAULT_CLICKHOUSE_PORT: "8123"
+          AITOS_FAULT_CLICKHOUSE_USER: default
+          AITOS_FAULT_CLICKHOUSE_PASSWORD: ""
+        run: |
+          pytest -q --timeout=120 tests/integration/test_execution_recovery_three_store.py
+      - name: Run restart and ambiguity regression matrix
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q --timeout=120 tests/test_protection_child_lifecycle.py tests/test_protection_child_reconciliation.py tests/test_strategy_opportunity_bridge.py
