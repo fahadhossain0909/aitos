@@ -592,14 +592,17 @@ def test_symbol_telemetry_collector_rejects_non_finite_window():
 
 
 def test_resource_budget_rejects_invalid_direct_construction():
-    try:
-        from aitos.compute.resource_governor import ResourceBudget
+    from aitos.compute.resource_governor import ResourceBudget
 
-        ResourceBudget(0, 0, 0, 0, 0.0)
+    # Zero is valid only as an explicit optional-work pause at CRITICAL pressure.
+    assert ResourceBudget(0, 0, 0, 0, 0.0).cpu_workers == 0
+
+    try:
+        ResourceBudget(-1, 0, 0, 0, 0.0)
     except ValueError:
         pass
     else:
-        raise AssertionError("zero CPU workers must be rejected")
+        raise AssertionError("negative CPU worker budgets must be rejected")
 
     try:
         ResourceBudget(1, 0, 0, 0, float("nan"))
