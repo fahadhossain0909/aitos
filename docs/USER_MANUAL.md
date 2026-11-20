@@ -107,6 +107,10 @@ Some views intentionally have bounded scope:
 
 For platform installation, package checksums, uninstall behavior and detailed backend setup, see [INSTALLATION.md](../INSTALLATION.md). For gateway security and authentication details, see [Operator Gateway](OPERATOR_GATEWAY.md).
 
-## 7. What the desktop application does not certify
+## 7. Strategy and research boundary
+
+The StrategyEngine can evaluate strategy families and allocate a research capital budget, but it is not an end-to-end order router. Its results must pass through the canonical Opportunity and TradeLifecycle boundary before any execution adapter can be considered. Do not interpret a StrategyEngine result, allocation, or Research Lab display as an approved order or live position.
+
+## 8. What the desktop application does not certify
 
 The desktop UI does not certify exchange connectivity, account reconciliation, execution correctness, paper-soak stability, profitability, external TLS, trusted code signing, production remote signing, live-trading readiness or disaster recovery. Those require separate source, CI, runtime and operational acceptance evidence.
