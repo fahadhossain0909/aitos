@@ -116,7 +116,7 @@ def test_shadow_strategy_candidate_becomes_typed_canonical_opportunity():
         plans,
         shadow_gateway_factory=lambda: gateway,
         equity_usd=1_000.0,
-        live_reservation=object(),
+        live_gateway=ShadowGateway(),
     )
 
     assert len(report.opportunities) == 1
@@ -146,7 +146,7 @@ def test_shadow_gateway_must_not_share_live_reservation_ledger():
             plans,
             shadow_gateway_factory=lambda: live,
             equity_usd=1_000.0,
-            live_reservation=live.reservation,
+            live_gateway=live,
         )
 
 
@@ -158,7 +158,7 @@ def test_capital_veto_produces_no_canonical_opportunity():
         plans,
         shadow_gateway_factory=lambda: ShadowGateway(eligible=False),
         equity_usd=1_000.0,
-        live_reservation=object(),
+        live_gateway=ShadowGateway(),
     )
     assert report.opportunities == ()
     assert report.rejected == (
@@ -184,7 +184,7 @@ def test_missing_or_directionally_invalid_protection_is_rejected(plan):
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
-        live_reservation=object(),
+        live_gateway=ShadowGateway(),
     )
     assert report.opportunities == ()
 
@@ -198,7 +198,7 @@ def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
             plans,
             shadow_gateway_factory=ShadowGateway,
             equity_usd=1_000.0,
-            live_reservation=object(),
+            live_gateway=ShadowGateway(),
         )
 
 
@@ -215,7 +215,7 @@ def test_shadow_opportunity_cannot_exceed_strategy_projected_loss_cap():
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
-        live_reservation=object(),
+        live_gateway=ShadowGateway(),
     )
     governed = report.opportunities[0]
     assert governed.risk_receipt.risk_budget_usd == 2.0
@@ -270,7 +270,7 @@ def test_multiple_intents_do_not_reuse_one_strategy_allocation():
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
-        live_reservation=object(),
+        live_gateway=ShadowGateway(),
     )
     assert len(report.opportunities) == 1
     assert any("multiple intents" in reason for _, reason in report.rejected)
@@ -280,7 +280,10 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
     from aitos.intelligence.capital_protection import CapitalReservation
 
     cycle, context, plans = inputs()
-    live_reservation = CapitalReservation(path=tmp_path / "live-capital.sqlite")
+    live_gateway = ShadowGateway()
+    live_gateway.reservation = CapitalReservation(
+        path=tmp_path / "live-capital.sqlite"
+    )
     shadow_gateway = ShadowGateway()
     shadow_gateway.reservation = CapitalReservation(
         path=tmp_path / "live-capital.sqlite"
@@ -292,8 +295,10 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
             plans,
             shadow_gateway_factory=lambda: shadow_gateway,
             equity_usd=1_000.0,
-            live_reservation=live_reservation,
+            live_gateway=live_gateway,
         )
+    live_gateway.reservation.close()
+    shadow_gateway.reservation.close()
 
 
 def test_real_capital_gateway_reviews_candidate_without_live_authorization():
@@ -304,7 +309,7 @@ def test_real_capital_gateway_reviews_candidate_without_live_authorization():
         plans,
         shadow_gateway_factory=CapitalGateway,
         equity_usd=1_000.0,
-        live_reservation=object(),
+        live_gateway=ShadowGateway(),
     )
     assert len(report.opportunities) == 1
     governed = report.opportunities[0]
