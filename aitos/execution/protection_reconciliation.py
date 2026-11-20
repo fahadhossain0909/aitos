@@ -468,11 +468,12 @@ async def recover_accepted_initial_stop_submissions(
 ) -> dict[str, Any]:
     """Recover a confirmed initial stop whose venue ACK/local write was interrupted.
 
-    Recovery is deliberately narrow: only STOP_MARKET preclaims with an
-    explicit owner_trade_id, a unique matching open trade, exact quantity/side,
-    a fresh authenticated client-algo lookup, and an exact NEW reduce-only algo
-    identity are eligible. Replacement stops, take-profits, triggered orders,
-    missing identities and mismatches remain quarantined for manual review.
+    Recovery is deliberately narrow: only initial STOP_MARKET and
+    TAKE_PROFIT_MARKET preclaims with an explicit owner_trade_id, a unique
+    matching open trade, exact quantity/side, a fresh authenticated client-algo
+    lookup, and an exact NEW reduce-only algo identity are eligible. Replacement
+    stops, triggered orders, missing identities and mismatches remain
+    quarantined for manual review.
 
     The trade snapshot is persisted before the journal transitions to APPLIED.
     A crash between those writes is idempotently recoverable on the next start.
@@ -512,11 +513,12 @@ async def recover_accepted_initial_stop_submissions(
             request = json.loads(request)
         if not isinstance(request, dict):
             raise ValueError("malformed protective preclaim request")
-        if request.get("order_type") != "STOP_MARKET":
+        order_type = request.get("order_type")
+        if order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
             blocked.append(
                 {
                     "client_id": str(row.get("client_id", "")),
-                    "reason": "automatic recovery is limited to initial STOP_MARKET intents",
+                    "reason": "automatic recovery is limited to initial STOP_MARKET and TAKE_PROFIT_MARKET intents",
                 }
             )
             continue
@@ -569,7 +571,7 @@ async def recover_accepted_initial_stop_submissions(
             blocked.append(
                 {
                     "client_id": client_id,
-                    "reason": "venue has no confirmed NEW resting stop",
+                    "reason": "venue has no confirmed NEW resting protective order",
                 }
             )
             continue
@@ -620,7 +622,7 @@ async def recover_accepted_initial_stop_submissions(
             algo.get("clientAlgoId") == client_id
             and algo.get("symbol") == symbol
             and algo.get("algoType") == "CONDITIONAL"
-            and algo.get("orderType") == "STOP_MARKET"
+            and algo.get("orderType") == order_type
             and algo.get("side") == expected_side
             and algo.get("closePosition") in (False, "false")
             and quantity_matches
@@ -630,25 +632,38 @@ async def recover_accepted_initial_stop_submissions(
             blocked.append(
                 {
                     "client_id": client_id,
-                    "reason": "authenticated venue stop identity mismatch",
+                    "reason": "authenticated venue protective-order identity mismatch",
                 }
             )
             continue
 
-        existing_stop_id = getattr(trade, "sl_order_id", None)
-        if existing_stop_id not in (None, "", order_id):
-            blocked.append(
-                {
-                    "client_id": client_id,
-                    "reason": "trade already owns a different stop; replacement recovery is manual",
-                }
-            )
-            continue
+        if order_type == "STOP_MARKET":
+            existing_stop_id = getattr(trade, "sl_order_id", None)
+            if existing_stop_id not in (None, "", order_id):
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "trade already owns a different stop; replacement recovery is manual",
+                    }
+                )
+                continue
+            trade.sl_order_id = order_id
+        else:
+            existing_tp_ids = getattr(trade, "tp_order_ids", None)
+            if not isinstance(existing_tp_ids, list):
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "trade has no durable take-profit order collection",
+                    }
+                )
+                continue
+            if order_id not in existing_tp_ids:
+                existing_tp_ids.append(order_id)
 
         # Write the venue identity to the durable trade snapshot first. If
         # the process dies before journal acknowledgement, the next pass sees
         # the same ID and safely completes the journal transition.
-        trade.sl_order_id = order_id
         trade.updated_at = datetime.now(timezone.utc).isoformat()
         await persist_trade(trade)
         if row.get("state") == "SUBMITTING":
