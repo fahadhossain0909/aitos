@@ -1108,6 +1108,133 @@ async def recover_protection_handovers(
     }
 
 
+async def recover_triggered_protection_child_fills(
+    executor: Any,
+    intent_store: Any,
+    lifecycle: Any,
+    *,
+    max_orders: int = 1000,
+) -> dict[str, Any]:
+    """Apply authenticated triggered child fills through the durable lifecycle.
+
+    Only already-owned protective algo IDs are considered. The lifecycle writes
+    the cumulative child marker with the trade snapshot before SQLite advances
+    its mirror watermark. Any ambiguous child or persistence failure remains
+    quarantined and the report never authorizes fresh exposure by itself.
+    """
+    scope = getattr(intent_store, "scope", None)
+    if (
+        not isinstance(scope, str)
+        or not scope
+        or getattr(executor, "execution_scope", None) != scope
+    ):
+        raise ValueError("executor and child-fill journal account scope mismatch")
+    lookup = getattr(executor, "get_algo_order_by_client_id", None)
+    child_reader = getattr(executor, "get_order_status", None)
+    if not callable(lookup) or not callable(child_reader):
+        raise TypeError("authenticated algo and child-order readers are required")
+    if not isinstance(max_orders, int) or isinstance(max_orders, bool) or not 1 <= max_orders <= 5000:
+        raise ValueError("child-fill recovery query budget must be between 1 and 5000")
+
+    rows = await asyncio.to_thread(intent_store.protection_intents)
+    if not isinstance(rows, list) or len(rows) > 10000:
+        raise ValueError("bounded protective intent history is required")
+    by_order_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        result = row.get("result_json")
+        if isinstance(result, str):
+            result = json.loads(result)
+        if isinstance(result, dict) and result.get("order_id"):
+            by_order_id[str(result["order_id"])] = row
+
+    inspected = 0
+    applied: list[dict[str, Any]] = []
+    blocked: list[dict[str, str]] = []
+    for trade in lifecycle.get_open_trades():
+        owned_ids = []
+        stop_id = getattr(trade, "sl_order_id", None)
+        if isinstance(stop_id, str) and stop_id.startswith("algo:"):
+            owned_ids.append(stop_id)
+        tp_ids = getattr(trade, "tp_order_ids", [])
+        if isinstance(tp_ids, list):
+            owned_ids.extend(
+                value for value in tp_ids
+                if isinstance(value, str) and value.startswith("algo:")
+            )
+        for order_id in dict.fromkeys(owned_ids):
+            row = by_order_id.get(order_id)
+            if row is None:
+                blocked.append(
+                    {
+                        "trade_id": str(trade.trade_id),
+                        "order_id": order_id,
+                        "reason": "owned protective algo has no matching durable intent result",
+                    }
+                )
+                continue
+            if row.get("state") not in {"APPLIED", "TERMINAL", "PROTECTED"}:
+                blocked.append(
+                    {
+                        "trade_id": str(trade.trade_id),
+                        "order_id": order_id,
+                        "reason": "protective intent is not durably owned yet",
+                    }
+                )
+                continue
+            result = row.get("result_json")
+            if isinstance(result, str):
+                result = json.loads(result)
+            client_id = str(result.get("client_order_id") or row.get("client_id") or "")
+            if not client_id:
+                blocked.append(
+                    {
+                        "trade_id": str(trade.trade_id),
+                        "order_id": order_id,
+                        "reason": "protective client identity is missing",
+                    }
+                )
+                continue
+            inspected += 1
+            if inspected > max_orders:
+                raise ValueError("protective child-fill query budget exceeded")
+            try:
+                algo = await lookup(trade.symbol, client_id)
+                if not isinstance(algo, dict):
+                    blocked.append(
+                        {
+                            "trade_id": str(trade.trade_id),
+                            "order_id": order_id,
+                            "reason": "authenticated protective algo lookup returned no evidence",
+                        }
+                    )
+                    continue
+                if algo.get("algoStatus") not in {"TRIGGERED", "FINISHED"}:
+                    continue
+                child = await child_reader(trade.symbol, order_id)
+                if not isinstance(child, dict):
+                    raise ValueError("authenticated child-order lookup returned malformed evidence")
+                outcome = await lifecycle.apply_triggered_protection_child_fill(
+                    trade.trade_id, algo, child
+                )
+                applied.append(outcome)
+            except Exception as exc:  # noqa: BLE001
+                blocked.append(
+                    {
+                        "trade_id": str(trade.trade_id),
+                        "order_id": order_id,
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+    return {
+        "inspected": inspected,
+        "applied": applied,
+        "blocked": blocked,
+        "safe_to_resume": False,
+    }
+
+
 async def require_live_account_exposure_reconciled(
     executor: Any,
     intent_store: Any,
