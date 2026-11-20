@@ -129,7 +129,6 @@ async def test_queue_lag_seconds_includes_oldest_unread_stream_entry(monkeypatch
     assert await bus.queue_lag_seconds() == 3.5
 
 
-
 @pytest.mark.asyncio
 async def test_queue_lag_seconds_returns_unknown_for_missing_consumer_group():
     class MissingGroupRedis:
