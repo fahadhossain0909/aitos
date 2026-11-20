@@ -552,3 +552,26 @@ def test_symbol_telemetry_collector_rejects_invalid_samples():
         pass
     else:
         raise AssertionError("non-finite timestamp must be rejected")
+
+
+
+def test_symbol_telemetry_collector_expires_stale_book_depth_samples():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    collector = SymbolTelemetryCollector(window_seconds=5, clock=lambda: 10.0)
+    collector.record_book_depth("BTCUSDT", 500, timestamp=1)
+    collector.record_book_depth("BTCUSDT", 20, timestamp=9)
+    snapshot = collector.snapshot("BTCUSDT", now=10)
+    assert snapshot is not None
+    assert snapshot.p95_book_depth_levels == 20
+
+
+def test_symbol_telemetry_collector_rejects_subsecond_window():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    try:
+        SymbolTelemetryCollector(window_seconds=0.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("subsecond windows must not mislabel rates as per-second")
