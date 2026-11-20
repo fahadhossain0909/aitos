@@ -230,7 +230,8 @@ class EventBus(AITOSModule):
                     (
                         item
                         for item in groups
-                        if item.get("name", item.get(b"name")) in (group, group.encode())
+                        if item.get("name", item.get(b"name"))
+                    in (group, group.encode())
                     ),
                     None,
                 )
