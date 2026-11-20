@@ -12,7 +12,7 @@ from typing import Any
 from aitos.logging_setup import get_logger
 
 from .backpressure import BoundedMarketQueue
-from .contracts import MarketEvent, MarketSource
+from .contracts import MarketEvent, MarketEventType, MarketSource
 from .gateway_health import GatewayHealth
 
 logger = get_logger("aitos.market_data.gateway")
@@ -132,7 +132,15 @@ class MarketDataGateway:
 
     def _accept_latest(self, event: MarketEvent) -> bool:
         replaced_before = self.queue.stats.replaced_oldest
-        if self.queue.put_latest_nowait(event):
+        sequence_critical = event.event_type in {
+            MarketEventType.BOOK_DELTA,
+            MarketEventType.BOOK_SNAPSHOT,
+        }
+        if self.queue.put_latest_nowait(
+            event,
+            can_replace=lambda queued: queued.event_type
+            not in {MarketEventType.BOOK_DELTA, MarketEventType.BOOK_SNAPSHOT},
+        ):
             self.health.record_accept()
             symbol = self._data_flow_symbol(event)
             try:
@@ -174,6 +182,16 @@ class MarketDataGateway:
                 except Exception:
                     pass
             return True
+        if sequence_critical:
+            # A dropped sequence-critical event invalidates incremental book
+            # continuity. Mark the gateway degraded so downstream recovery can
+            # request a fresh snapshot; never evict an older book delta to hide it.
+            self.state = GatewayState.DEGRADED
+            self.health.degraded = True
+            self.health.record_reject(
+                "orderbook_queue_saturated",
+                "sequence-critical event rejected; order-book resynchronization required",
+            )
         self.health.record_freshness_drop("unable to enqueue newest market event")
         try:
             from aitos.forensics.data_flow_hooks import record_drop
