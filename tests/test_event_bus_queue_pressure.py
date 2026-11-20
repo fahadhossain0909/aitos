@@ -11,6 +11,12 @@ class PendingRedis:
         self.idle_ms = idle_ms
         self.calls = []
 
+    async def xinfo_groups(self, stream):
+        return [{"name": "scanner", "lag": 0, "last-delivered-id": "0-0"}]
+
+    async def xrange(self, stream, *, min, max, count):
+        return []
+
     async def xpending_range(self, stream, group, *, min, max, count):
         self.calls.append((stream, group, min, max, count))
         values = self.idle_ms if isinstance(self.idle_ms, list) else [self.idle_ms]
@@ -49,7 +55,7 @@ async def test_queue_lag_seconds_returns_none_when_no_subscribed_topics():
 @pytest.mark.asyncio
 async def test_queue_lag_seconds_keeps_unknown_when_pending_api_unavailable():
     class UnsupportedRedis:
-        async def xpending_range(self, *args, **kwargs):
+        async def xinfo_groups(self, *args, **kwargs):
             raise NotImplementedError
 
     bus = EventBus(UnsupportedRedis())
@@ -95,3 +101,29 @@ async def test_queue_lag_seconds_uses_max_idle_not_first_stream_id():
 
     assert await bus.queue_lag_seconds() == 18.0
     assert redis.calls[0][4] == 100
+
+
+
+@pytest.mark.asyncio
+async def test_queue_lag_seconds_includes_oldest_unread_stream_entry(monkeypatch):
+    import aitos.eventbus.redis_bus as redis_bus
+
+    now_ms = 1_800_000_000_000
+    monkeypatch.setattr(redis_bus.time, "time", lambda: now_ms / 1000)
+
+    class UnreadRedis(PendingRedis):
+        async def xinfo_groups(self, stream):
+            return [{"name": "scanner", "lag": 4, "last-delivered-id": "1000-0"}]
+
+        async def xrange(self, stream, *, min, max, count):
+            assert min == "(1000-0"
+            assert count == 1
+            return [(f"{now_ms - 3_500}-0", {b"payload": b"unread"})]
+
+    bus = EventBus(UnreadRedis())
+    bus._known_topics.add("market.trade.BTCUSDT")
+    bus._subscriptions = [
+        SimpleNamespace(topic_pattern="market.trade.*", group="scanner")
+    ]
+
+    assert await bus.queue_lag_seconds() == 3.5
