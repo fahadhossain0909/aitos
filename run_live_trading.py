@@ -249,6 +249,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 }
             },
         )
+    components.trade_lifecycle._account_reconciliation_error = (
+        not account_reconciliation_ready
+    )
     gateway = components.trade_lifecycle._aitos_capital_gateway
     restored_trades = components.trade_lifecycle.get_open_trades()
     active_symbols = {trade.symbol for trade in restored_trades}
