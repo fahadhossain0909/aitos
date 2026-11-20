@@ -26,12 +26,26 @@ npm ci
 npm run dev -- --port 5173
 ```
 
-Open port 5173. The initial **Sample workspace** is explicitly illustrative.
-Switch to **Runtime view**: an unattached adapter has empty financial state,
-not sample positions. API failures clear snapshots instead of retaining stale
-financial records. Polling is sequential, cancellable and bounded to 8 seconds.
-The browser uses same-origin `/console` requests, never browser localhost for a
-separate backend.
+The dev server binds to `127.0.0.1` by default. The initial **Sample
+workspace** is explicitly illustrative. Switch to **Runtime view**: an
+unattached adapter has empty financial state, not sample positions. API failures
+clear snapshots instead of retaining stale financial records. Polling is
+sequential, cancellable and bounded to 8 seconds. The browser uses same-origin
+`/console` requests, never browser localhost for a separate backend.
+
+For an isolated Codespaces/public preview only, set an explicit host and exact
+allowed hostname; never use a wildcard host allowlist or attach real financial
+data to this unauthenticated development proxy:
+
+```sh
+AITOS_VITE_HOST=0.0.0.0 \
+AITOS_VITE_ALLOWED_HOSTS=YOUR-CODESPACE-FORWARDED-HOST \
+npm run dev -- --port 5173
+```
+
+The development proxy strips browser authorization and cookies and refuses
+`AITOS_CONSOLE_TOKEN`; it is not a production gateway. Keep the workspace
+unattached and use the authenticated gateway for any approved runtime reads.
 
 ## Attach an already-approved runtime
 
