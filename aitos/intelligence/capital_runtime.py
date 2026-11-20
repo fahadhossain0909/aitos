@@ -171,21 +171,44 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
     # The live portfolio is authoritative; scanner-supplied exposure snapshots
     # may be stale by the time the final lifecycle gate is reached.
-    consensus["position_risk_pct"] = {}
-    consensus["position_sides"] = {}
+    # Preserve all same-symbol exposures. A single exposure keeps the
+    # historical symbol key; hedge/multi-position symbols use side-qualified
+    # keys and same-side rows are conservatively aggregated.
+    grouped_positions: dict[str, dict[str, float | str | None]] = {}
     for position in positions:
         symbol = str(getattr(position, "symbol", "") or "").strip().upper()
         if not symbol:
-            continue
-        risk_amount = getattr(position, "risk_amount_usd", None)
-        if risk_amount is None or float(risk_amount) <= 0 or equity <= 0:
-            risk_pct = 1.0
-        else:
-            risk_pct = float(risk_amount) / equity * 100.0
-        consensus["position_risk_pct"][symbol] = risk_pct
-        side = getattr(position, "side", None)
-        if side is not None:
-            consensus["position_sides"][symbol] = str(side).upper()
+            raise ValueError("open position is missing its instrument identity")
+        risk_amount_raw = getattr(position, "risk_amount_usd", None)
+        if risk_amount_raw is None or equity <= 0:
+            raise ValueError(f"open position risk is unknown: {symbol}")
+        risk_amount = float(risk_amount_raw)
+        if not isfinite(risk_amount) or risk_amount <= 0:
+            raise ValueError(f"open position risk must be finite and positive: {symbol}")
+        side_raw = getattr(position, "side", None)
+        side = str(side_raw).upper() if side_raw is not None else None
+        if side not in {None, "LONG", "SHORT"}:
+            raise ValueError(f"open position side is invalid: {symbol}")
+        group = f"{symbol}:{side or 'UNKNOWN'}"
+        current = grouped_positions.setdefault(
+            group, {"symbol": symbol, "side": side, "risk_amount_usd": 0.0}
+        )
+        current["risk_amount_usd"] = float(current["risk_amount_usd"]) + risk_amount
+
+    by_symbol: dict[str, list[tuple[str, dict[str, float | str | None]]]] = {}
+    for group, exposure in grouped_positions.items():
+        by_symbol.setdefault(str(exposure["symbol"]), []).append((group, exposure))
+    consensus["position_risk_pct"] = {}
+    consensus["position_sides"] = {}
+    consensus["position_instruments"] = {}
+    for symbol, exposures in by_symbol.items():
+        for group, exposure in exposures:
+            key = symbol if len(exposures) == 1 else group
+            risk_pct = float(exposure["risk_amount_usd"]) / equity * 100.0
+            consensus["position_risk_pct"][key] = risk_pct
+            consensus["position_instruments"][key] = symbol
+            if exposure["side"] is not None:
+                consensus["position_sides"][key] = str(exposure["side"])
     pending_orders = tuple(getattr(portfolio, "pending_orders", ()) or ())
     pending_ids: set[str] = set()
     consensus["pending_order_risk_pct"] = {}
@@ -202,10 +225,14 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
             or not symbol
             or side not in {"LONG", "SHORT"}
             or not isfinite(risk_amount)
-            or risk_amount < 0
             or equity <= 0
+            or (
+                float(getattr(pending, "remaining_notional_usd", 0.0) or 0.0) > 0
+                and risk_amount <= 0
+            )
+            or risk_amount < 0
         ):
-            raise ValueError("invalid or duplicate pending order exposure")
+            raise ValueError("invalid, unpriced, or duplicate pending order exposure")
         pending_ids.add(order_id)
         consensus["pending_order_risk_pct"][f"pending:{order_id}"] = (
             risk_amount / equity * 100.0
