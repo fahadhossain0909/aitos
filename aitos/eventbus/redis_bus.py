@@ -193,6 +193,50 @@ class EventBus(AITOSModule):
             },
         )
 
+    async def queue_lag_seconds(self, *, max_groups: int = 32) -> float | None:
+        """Return oldest pending-delivery idle age across active subscriptions.
+
+        Redis pending idle age is a conservative pressure signal, not the age
+        of every unread stream entry. Query at most max_groups and one oldest
+        pending entry per group. Unknown remains None, never a fabricated zero.
+        """
+        if isinstance(max_groups, bool) or not isinstance(max_groups, int) or max_groups < 1:
+            raise ValueError("max_groups must be a positive integer")
+        pairs: set[tuple[str, str]] = set()
+        for subscription in self._subscriptions:
+            for topic in self._known_topics:
+                if fnmatch.fnmatch(topic, subscription.topic_pattern):
+                    pairs.add((_stream_key(topic), subscription.group))
+                    if len(pairs) >= max_groups:
+                        break
+            if len(pairs) >= max_groups:
+                break
+        oldest_idle_ms = 0
+        for stream_key, group in pairs:
+            try:
+                pending = await self._redis.xpending_range(
+                    stream_key, group, min="-", max="+", count=1
+                )
+            except (AttributeError, NotImplementedError):
+                return None
+            except Exception as exc:
+                self._last_error = str(exc)[:500]
+                logger.debug("queue pressure sample unavailable", extra={"aitos_extra": {
+                    "stream": stream_key, "group": group, "error": str(exc)
+                }})
+                return None
+            if not pending:
+                continue
+            entry = pending[0]
+            idle_ms = entry.get("time_since_delivered", entry.get(b"time_since_delivered"))
+            if idle_ms is None:
+                continue
+            try:
+                oldest_idle_ms = max(oldest_idle_ms, int(idle_ms))
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return oldest_idle_ms / 1000.0 if pairs else None
+
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for sub in self._subscriptions:
             sub.cancel()
