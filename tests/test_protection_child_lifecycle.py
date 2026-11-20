@@ -1,0 +1,229 @@
+from unittest.mock import AsyncMock
+
+import pytest
+
+from aitos.execution.intent_store import ExecutionIntentStore
+from aitos.execution.order_executor import OrderRequest, OrderResult
+from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
+from aitos.trading.lifecycle import TradeLifecycle
+
+
+class TriggeredChildExecutor:
+    requires_exchange_execution = True
+    supports_exchange_side_stops = True
+    execution_scope = "child-account"
+    hedge_mode = False
+
+    def __init__(self, journal):
+        self.intent_store = journal
+        self.statuses = {"algo:123": "FINISHED"}
+        self.cancelled = []
+
+    async def place_stop_loss_order(
+        self,
+        symbol,
+        side,
+        quantity,
+        stop_price,
+        *,
+        owner_trade_id=None,
+        client_order_id=None,
+    ):
+        request = OrderRequest(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            reference_price=stop_price,
+            order_type="STOP_MARKET",
+            client_order_id=client_order_id,
+            reduce_only=True,
+            owner_trade_id=owner_trade_id,
+        )
+        self.intent_store.begin(request)
+        result = OrderResult(
+            "algo:999",
+            symbol,
+            side,
+            0.0,
+            stop_price,
+            client_order_id=client_order_id,
+        )
+        self.intent_store.record_protection(client_order_id, result)
+        self.statuses[result.order_id] = "NEW"
+        return result
+
+    async def cancel_resting_order(self, symbol, order_id):
+        self.cancelled.append(order_id)
+        self.statuses[order_id] = "CANCELED"
+
+    def acknowledge_protection(self, result, trade_id):
+        self.intent_store.mark_applied(result.client_order_id, trade_id)
+
+
+def make_trade():
+    return Trade(
+        trade_id="trade-child-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=2.0,
+        position_size_usd=100.0,
+        risk_amount_usd=10.0,
+        strategy_id="test",
+        agent_consensus={},
+        explanation="test protective child fill",
+        sl_price=90.0,
+        tp_price=110.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-11-20T00:00:00+00:00",
+    )
+
+
+def seed_stop(journal):
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="stop-child-client",
+            reduce_only=True,
+            owner_trade_id="trade-child-1",
+        )
+    )
+    journal.record_protection(
+        "stop-child-client",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="stop-child-client",
+        ),
+    )
+    journal.mark_applied("stop-child-client", "trade-child-1")
+
+
+def algo_snapshot():
+    return {
+        "algoId": 123,
+        "actualOrderId": 456,
+        "clientAlgoId": "stop-child-client",
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "algoType": "CONDITIONAL",
+        "orderType": "STOP_MARKET",
+        "algoStatus": "FINISHED",
+        "positionSide": "BOTH",
+        "reduceOnly": True,
+        "closePosition": False,
+    }
+
+
+def child_snapshot(*, status="PARTIALLY_FILLED", quantity="0.25", quote="22.5"):
+    return {
+        "orderId": 456,
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "positionSide": "BOTH",
+        "status": status,
+        "origQty": "1.0",
+        "executedQty": quantity,
+        "cumQuote": quote,
+        "avgPrice": "90",
+    }
+
+
+@pytest.mark.asyncio
+async def test_child_fill_applies_only_new_cumulative_delta_and_replays_idempotently(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "child.sqlite", scope="child-account")
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    lifecycle._open_trades[trade.trade_id] = trade
+    snapshots = []
+
+    async def persist(value):
+        snapshots.append(value.to_dict())
+
+    lifecycle._execution_state_writer = persist
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    first = await lifecycle.apply_triggered_protection_child_fill(
+        trade.trade_id, algo_snapshot(), child_snapshot()
+    )
+    assert first["delta_quantity"] == "0.25"
+    assert trade.quantity == pytest.approx(0.75)
+    assert trade.position_size_usd == pytest.approx(75.0)
+    assert trade.gross_realized_pnl_usd == pytest.approx(-2.5)
+    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
+
+    second = await lifecycle.apply_triggered_protection_child_fill(
+        trade.trade_id,
+        algo_snapshot(),
+        child_snapshot(quantity="0.5", quote="45.0"),
+    )
+    assert second["delta_quantity"] == "0.25"
+    assert trade.quantity == pytest.approx(0.5)
+    assert trade.gross_realized_pnl_usd == pytest.approx(-5.0)
+
+    replay = await lifecycle.apply_triggered_protection_child_fill(
+        trade.trade_id,
+        algo_snapshot(),
+        child_snapshot(quantity="0.5", quote="45.0"),
+    )
+    assert replay["delta_quantity"] == "0"
+    assert trade.quantity == pytest.approx(0.5)
+    assert len(trade.partial_exits) == 2
+    assert snapshots[-1]["agent_consensus"]["_applied_protection_child_fills"][
+        "123:456"
+    ]["cumulative_quantity"] == "0.5"
+
+
+@pytest.mark.asyncio
+async def test_terminal_partial_stop_fill_reprotects_remaining_position_make_before_break(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "child-terminal.sqlite", scope="child-account")
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    trade.sl_order_id = "algo:123"
+    lifecycle._open_trades[trade.trade_id] = trade
+
+    async def persist(_trade):
+        return None
+
+    lifecycle._execution_state_writer = persist
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    result = await lifecycle.apply_triggered_protection_child_fill(
+        trade.trade_id,
+        algo_snapshot(),
+        child_snapshot(status="CANCELED"),
+    )
+
+    assert result["terminal"] is True
+    assert trade.quantity == pytest.approx(0.75)
+    assert trade.sl_order_id == "algo:999"
+    assert executor.cancelled == ["algo:123"]
+    assert trade.agent_consensus.get("_pending_stop_cancellations", []) == []
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
