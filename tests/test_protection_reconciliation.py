@@ -739,3 +739,55 @@ async def test_restart_recovery_rejects_venue_stop_quantity_mismatch(tmp_path):
     assert "identity mismatch" in report["blocked"][0]["reason"]
     assert trade.sl_order_id is None
     assert store.unresolved()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_accepted_initial_take_profit_without_duplicate_order(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover-tp.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=110.0,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id="aitos-tp-1",
+            reduce_only=True,
+            owner_trade_id="trade-tp-1",
+        )
+    )
+    venue_tp = inventory_row()
+    venue_tp.update(
+        algoId=456,
+        clientAlgoId="aitos-tp-1",
+        orderType="TAKE_PROFIT_MARKET",
+        triggerPrice="110.0",
+    )
+    executor = ReadOnlyExecutor("paper-account", [venue_tp])
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=venue_tp)
+    trade = SimpleNamespace(
+        trade_id="trade-tp-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append((value.sl_order_id, list(value.tp_order_ids)))
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert persisted == [("algo:123", ["algo:456"])]
+    assert trade.tp_order_ids == ["algo:456"]
+    assert store.unresolved() == []
+    assert store.protection_intents()[0]["state"] == "APPLIED"
