@@ -88,6 +88,14 @@ async def accept_replacement_stop(
     venue.intent_store.record_protection(client_order_id, result)
     return result
 
+async def replacement_stop_side_effect(
+    venue, symbol, side, quantity, stop_price, **kwargs
+):
+    return await accept_replacement_stop(
+        venue, symbol, side, quantity, stop_price, **kwargs
+    )
+
+
 
 def trade():
     return Trade(
@@ -266,7 +274,7 @@ async def test_terminal_partial_stop_reconciles_without_second_market_reduction(
         return_value=dict(status="CANCELED", executedQty="1", avgPrice="97.5")
     )
     venue.place_stop_loss_order = AsyncMock(
-        side_effect=lambda symbol, side, quantity, stop_price, **kwargs: accept_replacement_stop(
+        side_effect=lambda symbol, side, quantity, stop_price, **kwargs: replacement_stop_side_effect(
             venue,
             symbol,
             side,
@@ -328,7 +336,7 @@ async def test_failed_old_stop_cancellation_keeps_durable_recovery_identity(
     venue = Venue()
     attach_protection_journal(venue, tmp_path)
     venue.place_stop_loss_order = AsyncMock(
-        side_effect=lambda symbol, side, quantity, stop_price, **kwargs: accept_replacement_stop(
+        side_effect=lambda symbol, side, quantity, stop_price, **kwargs: replacement_stop_side_effect(
             venue,
             symbol,
             side,
