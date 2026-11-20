@@ -68,6 +68,15 @@ class ExecutionIntentStore:
                     UNIQUE(scope, new_client_id)
                 )"""
             )
+            handover_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(protection_handovers)")
+            }
+            if "order_type" not in handover_columns:
+                conn.execute(
+                    "ALTER TABLE protection_handovers ADD COLUMN order_type TEXT "
+                    "NOT NULL DEFAULT 'STOP_MARKET'"
+                )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -217,6 +226,7 @@ class ExecutionIntentStore:
         symbol: str,
         old_order_id: str,
         new_client_id: str,
+        order_type: str = "STOP_MARKET",
     ) -> dict:
         """Durably claim a replacement before its venue submission.
 
@@ -224,6 +234,8 @@ class ExecutionIntentStore:
         blocked handover for the same trade prevents a second replacement.
         """
         values = (handover_id, trade_id, symbol, old_order_id, new_client_id)
+        if order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+            raise ValueError("unsupported protective handover order type")
         if any(not isinstance(value, str) or not value.strip() for value in values):
             raise ValueError("complete protective handover identity is required")
         if old_order_id == new_client_id:
@@ -245,6 +257,7 @@ class ExecutionIntentStore:
                     "symbol": symbol,
                     "old_order_id": old_order_id,
                     "new_client_id": new_client_id,
+                    "order_type": order_type,
                 }
                 if any(row[key] != value for key, value in expected.items()):
                     raise ValueError(
@@ -264,7 +277,8 @@ class ExecutionIntentStore:
                 )
             conn.execute(
                 "INSERT INTO protection_handovers(scope,handover_id,trade_id,symbol,"
-                "old_order_id,new_client_id,state) VALUES (?,?,?,?,?,?,'PREPARED')",
+                "old_order_id,new_client_id,order_type,state) "
+                "VALUES (?,?,?,?,?,?,?,'PREPARED')",
                 (
                     self.scope,
                     handover_id,
@@ -272,6 +286,7 @@ class ExecutionIntentStore:
                     symbol,
                     old_order_id,
                     new_client_id,
+                    order_type,
                 ),
             )
             row = conn.execute(
