@@ -75,9 +75,10 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError("child symbol mismatch")
     if child.get("side") != expected_side:
         raise ProtectionChildReconciliationError("child side mismatch")
-    if algo.get("actualOrderId") is not None and str(
-        algo.get("actualOrderId")
-    ) != child_id:
+    if (
+        algo.get("actualOrderId") is not None
+        and str(algo.get("actualOrderId")) != child_id
+    ):
         raise ProtectionChildReconciliationError("algo-to-child linkage mismatch")
 
     status = str(child.get("status", "")).upper()
