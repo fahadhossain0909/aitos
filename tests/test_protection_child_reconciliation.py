@@ -18,7 +18,9 @@ def snapshots(*, status="PARTIALLY_FILLED", executed="0.4", average="101.5"):
         "orderType": "STOP_MARKET",
         "algoStatus": "TRIGGERED",
         "positionSide": "BOTH",
+        "reduceOnly": True,
         "closePosition": False,
+        "reduceOnly": True,
     }
     child = {
         "orderId": 456,
@@ -173,4 +175,18 @@ def test_executed_quantity_cannot_exceed_child_original_quantity():
             expected_side="SELL",
             expected_algo_id="123",
             previously_applied_quantity="0",
+        )
+
+def test_child_reduce_only_semantics_are_enforced_when_requested():
+    algo, child = snapshots()
+    with pytest.raises(ProtectionChildReconciliationError, match="reduce-only"):
+        calculate_protection_child_fill_delta(
+            algo,
+            child,
+            expected_symbol="BTCUSDT",
+            expected_side="SELL",
+            expected_algo_id="123",
+            previously_applied_quantity="0",
+            expected_position_side="BOTH",
+            expected_reduce_only=False,
         )
