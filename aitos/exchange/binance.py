@@ -445,9 +445,8 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             response.raise_for_status()
             return await response.json()
 
-    @staticmethod
-    def _ws_base_url(streams: list[str]) -> str:
-        return BinanceFuturesAdapter._get_ws_base_url(streams)[0]
+    def _ws_base_url(self, streams: list[str]) -> str:
+        return self._get_ws_base_url(streams)[0]
 
     async def _raw_stream(
         self, streams: list[str], emit_reconnect: bool = False
