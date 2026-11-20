@@ -206,12 +206,17 @@ def build_risk_governed_opportunities(
             slippage_bps=float(plan.slippage_bps),
             funding_bps=float(plan.funding_bps),
         )
-        if not isfinite(float(snapshot.liquidity_score)):
+        try:
+            liquidity_score = float(snapshot.liquidity_score)
+        except (TypeError, ValueError, OverflowError):
+            rejected.append((key, "market liquidity score is invalid"))
+            continue
+        if not isfinite(liquidity_score):
             rejected.append((key, "market liquidity score is non-finite"))
             continue
         consensus = {
             "loss_probability": max(0.0, min(1.0, 1.0 - confidence)),
-            "liquidity_score": float(snapshot.liquidity_score),
+            "liquidity_score": liquidity_score,
             "leverage": normalized_plan.leverage,
             "side": side.value,
             "runtime_regime": context.global_regime,
@@ -286,19 +291,35 @@ def build_risk_governed_opportunities(
             reasons = decision.rejection_reasons if decision else ("risk_review_missing",)
             rejected.append((key, ";".join(reasons)))
             continue
+        try:
+            approved_capital = float(approved.capital_usd)
+            approved_risk = float(approved.risk_budget_usd)
+            strategy_capital = float(strategy_allocation.notional)
+            strategy_risk_cap = float(strategy_allocation.projected_loss)
+        except (TypeError, ValueError, OverflowError):
+            rejected.append((key, "risk gateway returned malformed allocation values"))
+            continue
+        if not all(
+            isfinite(value)
+            for value in (
+                approved_capital,
+                approved_risk,
+                strategy_capital,
+                strategy_risk_cap,
+            )
+        ):
+            rejected.append((key, "risk gateway returned non-finite allocation values"))
+            continue
         amount = min(
-            float(approved.capital_usd),
-            float(strategy_allocation.notional),
+            approved_capital,
+            strategy_capital,
             float(requested_capital_cap),
         )
-        if amount <= 0 or approved.capital_usd <= 0 or approved.risk_budget_usd <= 0:
+        if amount <= 0 or approved_capital <= 0 or approved_risk <= 0:
             rejected.append((key, "risk gateway returned zero capital or risk budget"))
             continue
-        risk_budget = float(approved.risk_budget_usd) * (
-            amount / float(approved.capital_usd)
-        )
-        strategy_risk_cap = float(strategy_allocation.projected_loss)
-        if not isfinite(strategy_risk_cap) or strategy_risk_cap <= 0:
+        risk_budget = approved_risk * (amount / approved_capital)
+        if strategy_risk_cap <= 0:
             rejected.append((key, "strategy projected-loss cap is invalid"))
             continue
         if risk_budget > strategy_risk_cap:
