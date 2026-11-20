@@ -2527,13 +2527,32 @@ class OpportunityScanner(AITOSModule):
         """Analyse bounded batches, yielding each to downstream gates before refill."""
         self._require_initialized()
         adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
-        if adaptive_runtime is not None:
+
+        async def sample_adaptive_pressure() -> float | None:
+            """Sample optional-work pressure without blocking protected services."""
+            if adaptive_runtime is None:
+                return None
+            queue_lag_seconds = None
             try:
+                queue_lag_provider = getattr(
+                    self._event_bus, "queue_lag_seconds", None
+                )
+                if callable(queue_lag_provider):
+                    try:
+                        queue_lag_seconds = await queue_lag_provider()
+                    except Exception:
+                        logger.debug(
+                            "event-bus queue pressure sample unavailable",
+                            exc_info=True,
+                        )
                 observe_pressure = getattr(
                     adaptive_runtime, "observe_process_pressure", None
                 )
                 if callable(observe_pressure):
-                    observe_pressure()
+                    try:
+                        observe_pressure(queue_lag_seconds=queue_lag_seconds)
+                    except TypeError:
+                        observe_pressure()
                 concurrency_gate = getattr(
                     self, "_aitos_adaptive_concurrency_gate", None
                 )
@@ -2552,6 +2571,9 @@ class OpportunityScanner(AITOSModule):
                 logger.exception(
                     "adaptive process pressure sampling failed; retaining last pressure state"
                 )
+            return queue_lag_seconds
+
+        queue_lag_seconds = await sample_adaptive_pressure()
         reference_klines = None
         if self._reference_symbol:
             try:
@@ -2618,6 +2640,10 @@ class OpportunityScanner(AITOSModule):
             results = await asyncio.gather(*(scan_one(symbol) for symbol in batch))
             scanned += len(batch)
             candidates = [item for item in results if item is not None]
+            # Re-sample after each expensive batch so the next batch's admission
+            # reflects actual work pressure, not only the previous idle interval.
+            if adaptive_runtime is not None:
+                queue_lag_seconds = await sample_adaptive_pressure()
             ranked = await self.rank(candidates, top_n=len(candidates))
             found += len(ranked)
             self._last_scan_at, self._last_candidate_count = _utc_now_iso(), found
@@ -2631,6 +2657,21 @@ class OpportunityScanner(AITOSModule):
                 "analysis_budget": budget,
                 "candidates_found": found,
                 "ranked_symbols": [item.symbol for item in ranked],
+                "compute_pressure_level": (
+                    int(adaptive_runtime.pressure_controller.level)
+                    if adaptive_runtime is not None
+                    else None
+                ),
+                "queue_pending_idle_seconds": queue_lag_seconds,
+                "adaptive_concurrency_limit": (
+                    getattr(
+                        getattr(self, "_aitos_adaptive_concurrency_gate", None),
+                        "limit",
+                        None,
+                    )
+                    if adaptive_runtime is not None
+                    else None
+                ),
                 "rotation": self._candidate_rotation.snapshot(),
             }
             logger.info(
