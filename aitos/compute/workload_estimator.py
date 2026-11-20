@@ -99,8 +99,10 @@ def estimate_symbol_workload(
     cost_model = model or WorkloadCostModel()
     if telemetry is None or telemetry.sample_count < cost_model.minimum_samples:
         fallback_symbol = (
-            telemetry.symbol if telemetry is not None else str(symbol or "UNKNOWN")
-        ).strip().upper()
+            (telemetry.symbol if telemetry is not None else str(symbol or "UNKNOWN"))
+            .strip()
+            .upper()
+        )
         if not fallback_symbol:
             raise ValueError("symbol cannot be empty for an uncalibrated workload")
         return WorkloadEstimate(
