@@ -52,15 +52,10 @@ async def clickhouse_store():
     client = await clickhouse_connect.get_async_client(
         host=host, port=port, username=user, password=password, database=database
     )
-    from aitos.trading.persistent_state import (
-        CREATE_PAPER_CLOSED_TRADE_LEDGER,
-        CREATE_RUNTIME_STATE,
-        DurableTradingStateStore,
-    )
+    from aitos.trading.persistent_state import DurableTradingStateStore
 
-    await client.command(CREATE_RUNTIME_STATE)
-    await client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
     store = DurableTradingStateStore(SimpleNamespace(_client=client))
+    await store.initialize()
     try:
         yield store
     finally:
