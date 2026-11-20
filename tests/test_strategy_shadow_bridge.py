@@ -53,16 +53,10 @@ def test_strategy_shadow_bridge_rejects_unpriced_or_unallocated_intents():
     result = StrategyResult(
         strategy_id="s",
         family=StrategyFamily.DIRECTIONAL,
-        intents=(
-            ExecutionIntent(
-                instrument_id="missing", side="sell", quantity=1
-            ),
-        ),
+        intents=(ExecutionIntent(instrument_id="missing", side="sell", quantity=1),),
     )
     report = build_strategy_shadow_report(
         StrategyCycle("unknown", (result,), ()), context
     )
     assert report.proposals == ()
-    assert report.rejected == (
-        ("s:0", "missing point-in-time instrument snapshot"),
-    )
+    assert report.rejected == (("s:0", "missing point-in-time instrument snapshot"),)
