@@ -457,3 +457,10 @@ multiple simultaneous instrument intents is rejected until it supplies
 per-instrument allocations; one strategy-level budget is never reused for each
 intent. Shadow and live CapitalGateway reservation stores are checked by object, connection
 and SQLite database path identity before review.
+
+The bridge additionally requires a typed `StrategyPortfolioRiskContext` with a
+non-empty snapshot identity, current/peak equity, open-position risk, pending
+order risk, side/instrument identity, correlation, daily PnL and loss-streak
+evidence. Its observation timestamp must be within five seconds of the
+StrategyContext cycle timestamp. Missing, stale or malformed account-risk
+evidence fails closed before a canonical Opportunity is emitted.
