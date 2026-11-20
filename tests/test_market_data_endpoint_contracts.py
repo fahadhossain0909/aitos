@@ -105,6 +105,5 @@ def test_testnet_instance_routes_market_streams_to_demo_websocket():
     # The legacy class-level helper intentionally remains the mainnet compatibility
     # contract; runtime connections use the instance method.
     assert (
-        BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"])
-        == WS_MARKET_BASE_URL
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
     )
