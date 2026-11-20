@@ -21,6 +21,7 @@ def test_log_level_is_loaded_from_environment(monkeypatch):
 
 
 def test_binance_credentials_are_selected_by_environment(monkeypatch):
+    monkeypatch.delenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", raising=False)
     monkeypatch.setenv("BINANCE_API_KEY", "mainnet-key")
     monkeypatch.setenv("BINANCE_API_SECRET", "mainnet-secret")
     monkeypatch.setenv("BINANCE_FUTURES_TESTNET_API_KEY", "testnet-key")
@@ -33,6 +34,7 @@ def test_binance_credentials_are_selected_by_environment(monkeypatch):
 
 
 def test_mainnet_requires_mainnet_credentials_even_when_testnet_keys_exist(monkeypatch):
+    monkeypatch.delenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", raising=False)
     monkeypatch.setenv("BINANCE_API_KEY", "mainnet-key")
     monkeypatch.setenv("BINANCE_API_SECRET", "mainnet-secret")
     monkeypatch.setenv("BINANCE_FUTURES_TESTNET_API_KEY", "testnet-key")
