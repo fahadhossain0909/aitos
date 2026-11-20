@@ -2143,9 +2143,7 @@ class OpportunityScanner(AITOSModule):
                             ),
                             "pressure_level": int(
                                 getattr(
-                                    getattr(
-                                    adaptive_runtime, "pressure_controller", None
-                                ),
+                                    getattr(adaptive_runtime, "pressure_controller", None),
                                     "level",
                                     0,
                                 )
