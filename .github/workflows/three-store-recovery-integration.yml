@@ -56,3 +56,26 @@ jobs:
           PYTHONPATH: .
         run: |
           pytest -q --timeout=120 tests/test_protection_child_lifecycle.py tests/test_protection_child_reconciliation.py tests/test_strategy_opportunity_bridge.py
+
+  binance-demo-testnet-read-only:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-asyncio
+      - name: Verify authenticated demo-testnet inventory (read-only)
+        env:
+          PYTHONPATH: .
+          AITOS_ENABLE_BINANCE_TESTNET_READONLY: "1"
+          BINANCE_FUTURES_TESTNET_API_KEY: ${{ secrets.BINANCE_FUTURES_TESTNET_API_KEY }}
+          BINANCE_FUTURES_TESTNET_API_SECRET: ${{ secrets.BINANCE_FUTURES_TESTNET_API_SECRET }}
+        run: |
+          pytest -q tests/integration/test_execution_recovery_three_store.py -k authenticated_binance_demo_testnet_read_only_preflight
