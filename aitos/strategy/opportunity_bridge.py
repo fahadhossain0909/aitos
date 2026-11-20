@@ -65,27 +65,41 @@ class StrategyOpportunityBridgeReport:
 def _validate_protection(
     side: TradeSide, entry: float, plan: StrategyProtectionPlan
 ) -> str | None:
-    values = (plan.stop_loss_price, plan.leverage, plan.fee_bps,
-              plan.slippage_bps, plan.funding_bps, *plan.take_profit_levels)
     if not plan.take_profit_levels:
         return "explicit take-profit levels are required"
-    if not all(isfinite(float(value)) for value in values):
+    raw_values = (
+        plan.stop_loss_price,
+        plan.leverage,
+        plan.fee_bps,
+        plan.slippage_bps,
+        plan.funding_bps,
+        *plan.take_profit_levels,
+    )
+    if any(isinstance(value, bool) for value in raw_values):
+        return "protection plan values must be numeric, not boolean"
+    try:
+        stop, leverage, fees, slippage, funding, *targets = (
+            float(value) for value in raw_values
+        )
+    except (TypeError, ValueError, OverflowError):
+        return "protection plan contains non-numeric values"
+    if not all(isfinite(value) for value in (stop, leverage, fees, slippage, funding, *targets)):
         return "protection plan contains non-finite values"
-    if plan.stop_loss_price <= 0 or plan.leverage < 1:
+    if stop <= 0 or leverage < 1:
         return "stop and leverage must be positive (leverage >= 1)"
-    if plan.fee_bps < 0 or plan.slippage_bps < 0:
+    if fees < 0 or slippage < 0:
         return "fee and slippage assumptions cannot be negative"
     if side is TradeSide.LONG:
-        if not plan.stop_loss_price < entry:
+        if not stop < entry:
             return "LONG stop must be below entry"
-        if any(price <= entry for price in plan.take_profit_levels):
+        if any(price <= entry for price in targets):
             return "LONG take-profit levels must be above entry"
     else:
-        if not plan.stop_loss_price > entry:
+        if not stop > entry:
             return "SHORT stop must be above entry"
-        if any(price >= entry for price in plan.take_profit_levels):
+        if any(price >= entry for price in targets):
             return "SHORT take-profit levels must be below entry"
-    if any(price <= 0 for price in plan.take_profit_levels):
+    if any(price <= 0 for price in targets):
         return "take-profit levels must be positive"
     return None
 
@@ -129,18 +143,30 @@ def build_risk_governed_opportunities(
     candidates: list[tuple[str, Opportunity, object]] = []
     rejected = [(key, reason) for key, reason in shadow.rejected]
     seen_symbols: set[str] = set()
+    seen_strategies: set[str] = set()
     estimates = []
 
     for proposal in shadow.proposals:
         key = f"{proposal.strategy_id}:{proposal.instrument_id}"
         result = results.get(proposal.strategy_id)
         allocation = allocations.get(proposal.strategy_id)
+        if proposal.strategy_id in seen_strategies:
+            rejected.append(
+                (key, "multiple intents require explicit per-instrument capital allocation")
+            )
+            continue
+        seen_strategies.add(proposal.strategy_id)
         if result is None or result.capital_request is None or allocation is None:
             rejected.append((key, "typed capital request/allocation is missing"))
             continue
         snapshot = context.snapshots[proposal.instrument_id]
         symbol = proposal.instrument_id.rsplit(":", 1)[-1].upper()
-        if not symbol or symbol in seen_symbols:
+        if (
+            not symbol
+            or not symbol.isalnum()
+            or len(symbol) > 30
+            or symbol in seen_symbols
+        ):
             rejected.append((key, "duplicate or invalid canonical symbol"))
             continue
         seen_symbols.add(symbol)
@@ -153,7 +179,11 @@ def build_risk_governed_opportunities(
         if invalid:
             rejected.append((key, invalid))
             continue
-        confidence = float(result.capital_request.confidence)
+        try:
+            confidence = float(result.capital_request.confidence)
+        except (TypeError, ValueError, OverflowError):
+            rejected.append((key, "strategy confidence must be numeric"))
+            continue
         if not isfinite(confidence) or not 0.0 <= confidence <= 1.0:
             rejected.append((key, "strategy confidence must be within [0, 1]"))
             continue
@@ -221,7 +251,16 @@ def build_risk_governed_opportunities(
             context.now_ns, (), tuple(rejected), execution_eligible=False
         )
 
-    reviewed = gateway.evaluate(equity_usd, estimates, max_positions=max_positions)
+    try:
+        reviewed = gateway.evaluate(equity_usd, estimates, max_positions=max_positions)
+    except Exception as exc:
+        rejected.extend(
+            (key, f"capital risk review failed closed: {type(exc).__name__}")
+            for key, _opportunity, _allocation, _cap in candidates
+        )
+        return StrategyOpportunityBridgeReport(
+            context.now_ns, (), tuple(rejected), execution_eligible=False
+        )
     decisions = {item.symbol: item for item in reviewed.decisions}
     capital = {item.symbol: item for item in reviewed.allocations}
     governed: list[GovernedOpportunity] = []
