@@ -271,3 +271,23 @@ def test_multiple_intents_do_not_reuse_one_strategy_allocation():
     )
     assert len(report.opportunities) == 1
     assert any("multiple intents" in reason for _, reason in report.rejected)
+
+
+def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
+    from aitos.intelligence.capital_protection import CapitalReservation
+
+    cycle, context, plans = inputs()
+    live_reservation = CapitalReservation(path=tmp_path / "live-capital.sqlite")
+    shadow_gateway = ShadowGateway()
+    shadow_gateway.reservation = CapitalReservation(
+        path=tmp_path / "live-capital.sqlite"
+    )
+    with pytest.raises(ValueError, match="share the live reservation"):
+        build_risk_governed_opportunities(
+            cycle,
+            context,
+            plans,
+            shadow_gateway_factory=lambda: shadow_gateway,
+            equity_usd=1_000.0,
+            live_reservation=live_reservation,
+        )
