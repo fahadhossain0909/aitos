@@ -594,9 +594,7 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
             stop_event = asyncio.Event()
             components._governance_drift_stop_event = stop_event
             scanner = getattr(components, "scanner", None)
-            background_gate = getattr(
-                scanner, "_aitos_adaptive_background_gate", None
-            )
+            background_gate = getattr(scanner, "_aitos_adaptive_background_gate", None)
 
             async def governed_drift_provider():
                 # Drift evaluation is optional background work. Acquire a slot
