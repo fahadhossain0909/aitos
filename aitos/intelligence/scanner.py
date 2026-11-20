@@ -653,17 +653,13 @@ class OpportunityScanner(AITOSModule):
         collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
         if collector is not None:
             try:
-                depth = len(getattr(book, "bids", ())) + len(
-                    getattr(book, "asks", ())
-                )
+                depth = len(getattr(book, "bids", ())) + len(getattr(book, "asks", ()))
                 collector.record_book_depth(book.symbol, depth)
             except (AttributeError, TypeError, ValueError):
                 logger.debug(
                     "adaptive compute book telemetry sample rejected",
                     extra={
-                        "aitos_extra": {
-                            "symbol": getattr(book, "symbol", "unknown")
-                        }
+                        "aitos_extra": {"symbol": getattr(book, "symbol", "unknown")}
                     },
                 )
 
@@ -2081,9 +2077,7 @@ class OpportunityScanner(AITOSModule):
                 }
                 if self._reference_symbol in self._symbols:
                     protected_symbols.add(self._reference_symbol)
-                ranked_scores = {
-                    symbol: score for symbol, score in eligible
-                }
+                ranked_scores = {symbol: score for symbol, score in eligible}
                 for symbol in protected_symbols:
                     if symbol in self._symbols and symbol not in ranked_scores:
                         ranked_scores[symbol] = 0.0
