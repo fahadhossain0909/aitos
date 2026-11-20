@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getDevServerPolicy } from "./devServerPolicy";
+import { getDevServerPolicy } from "../devServerPolicy";
 
 describe("Vite development server security policy", () => {
   it("binds to loopback by default", () => {
