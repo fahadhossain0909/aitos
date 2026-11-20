@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Any
 
 from .contracts import StrategyContext, StrategyCycle
 
@@ -38,7 +37,7 @@ class StrategyShadowReport:
 def build_strategy_shadow_report(
     cycle: StrategyCycle, context: StrategyContext
 ) -> StrategyShadowReport:
-    """Map fully evidenced strategy intents to non-executable shadow proposals.
+    """Map evidenced strategy intents to non-executable shadow proposals.
 
     Invalid, unpriced, unallocated, or unsupported intents are rejected rather
     than assigned guessed prices, sizes, stops, accounts, or venue semantics.
@@ -46,6 +45,7 @@ def build_strategy_shadow_report(
     allocations = {item.strategy_id: item for item in cycle.allocations}
     if len(allocations) != len(cycle.allocations):
         raise ValueError("duplicate strategy allocation identity")
+
     proposals: list[ShadowStrategyProposal] = []
     rejected: list[tuple[str, str]] = []
     for result in cycle.results:
@@ -62,7 +62,11 @@ def build_strategy_shadow_report(
             if not isfinite(snapshot.mid) or snapshot.mid <= 0:
                 rejected.append((key, "missing or invalid reference price"))
                 continue
-            if allocation is None or not isfinite(allocation.notional) or allocation.notional <= 0:
+            if (
+                allocation is None
+                or not isfinite(allocation.notional)
+                or allocation.notional <= 0
+            ):
                 rejected.append((key, "missing positive capital allocation"))
                 continue
             if not isfinite(intent.quantity) or intent.quantity <= 0:
@@ -82,7 +86,9 @@ def build_strategy_shadow_report(
                     side="LONG" if intent.side == "buy" else "SHORT",
                     reference_price=float(snapshot.mid),
                     requested_notional=float(requested_notional),
-                    allocated_notional=float(min(requested_notional, allocation.notional)),
+                    allocated_notional=float(
+                        min(requested_notional, allocation.notional)
+                    ),
                     projected_loss=float(allocation.projected_loss),
                     rationale=str(intent.rationale)[:1000],
                 )
