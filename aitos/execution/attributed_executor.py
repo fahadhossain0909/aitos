@@ -66,6 +66,21 @@ class AttributedOrderExecutor(OrderExecutor):
         return self.delegate.requires_exchange_execution
 
     @property
+    def execution_scope(self) -> str:
+        return self.delegate.execution_scope
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return self.delegate.has_unresolved_orders(symbol)
+
+    def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        self.delegate.acknowledge_execution(client_order_id, trade_id)
+
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict | None:
+        return await self.delegate.get_order_by_client_id(symbol, client_order_id)
+
+    @property
     def supports_exchange_side_stops(self) -> bool:
         return self.delegate.supports_exchange_side_stops
 
@@ -109,6 +124,7 @@ class AttributedOrderExecutor(OrderExecutor):
             "fill_price": result.fill_price,
             "reference_price": request.reference_price,
             "reduce_only": request.reduce_only,
+            "owner_trade_id": request.owner_trade_id,
             "execution_success": result.success,
             "execution_error": result.error,
             "filled_at": result.filled_at,
