@@ -984,8 +984,12 @@ async def recover_protection_handovers(
                     }
                 )
                 continue
-            old_matches = [index for index, value in enumerate(tp_ids) if value == old_id]
-            new_matches = [index for index, value in enumerate(tp_ids) if value == new_id]
+            old_matches = [
+                index for index, value in enumerate(tp_ids) if value == old_id
+            ]
+            new_matches = [
+                index for index, value in enumerate(tp_ids) if value == new_id
+            ]
             if len(old_matches) > 1 or len(new_matches) > 1 or (
                 not old_matches and not new_matches
             ):
@@ -1180,7 +1184,10 @@ async def recover_triggered_protection_child_fills(
                     {
                         "trade_id": str(trade.trade_id),
                         "order_id": order_id,
-                        "reason": "owned protective algo has no matching durable intent result",
+                        "reason": (
+                            "owned protective algo has no matching durable "
+                            "intent result"
+                        ),
                     }
                 )
                 continue
@@ -1219,7 +1226,10 @@ async def recover_triggered_protection_child_fills(
                     {
                         "trade_id": str(trade.trade_id),
                         "order_id": order_id,
-                        "reason": "protective intent owner or order type does not match restored trade",
+                        "reason": (
+                            "protective intent owner or order type does not "
+                            "match restored trade"
+                        ),
                     }
                 )
                 continue
@@ -1245,7 +1255,10 @@ async def recover_triggered_protection_child_fills(
                         {
                             "trade_id": str(trade.trade_id),
                             "order_id": order_id,
-                            "reason": "authenticated protective algo lookup returned no evidence",
+                            "reason": (
+                                "authenticated protective algo lookup returned "
+                                "no evidence"
+                            ),
                         }
                     )
                     continue
