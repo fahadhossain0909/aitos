@@ -2496,14 +2496,11 @@ class TradeLifecycle(AITOSModule):
             await self._execution_state_writer(trade)
             intent_store.complete_protection_handover(handover_id)
             self._order_executor.acknowledge_protection(result, trade.trade_id)
-        except BaseException as exc:
+        except BaseException:
+            # Preserve the last durable handover stage. Startup recovery must
+            # query the deterministic client ID before deciding whether the
+            # replacement was accepted or whether old-stop cancellation ran.
             self._execution_recovery_required = True
-            try:
-                intent_store.block_protection_handover(
-                    handover_id, f"{type(exc).__name__}: {exc}"
-                )
-            except (TypeError, ValueError):
-                pass
             raise
 
     async def _commit_live_execution(self, trade: Trade) -> None:
