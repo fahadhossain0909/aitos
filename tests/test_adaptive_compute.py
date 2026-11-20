@@ -1014,3 +1014,24 @@ def test_adaptive_runtime_automatically_samples_process_pressure():
     decision = runtime.observe_process_pressure()
     assert isinstance(decision.level, PressureLevel)
     assert runtime.pressure_sampler.resources == runtime.resources
+
+
+
+def test_compute_models_reject_non_numeric_and_boolean_values():
+    from aitos.compute.resource_governor import SymbolWorkload, classify_pressure
+    from aitos.compute.work_scheduler import WorkloadClass, WorkloadRequest
+
+    with pytest.raises(ValueError):
+        ResourceSnapshot(2, "2", 1024, 1024, 512, False, False)
+    with pytest.raises(ValueError):
+        SymbolWorkload("BTCUSDT", cpu_cost_units="1")
+    with pytest.raises(ValueError):
+        SymbolWorkload("BTCUSDT", opportunity_score=True)
+    with pytest.raises(ValueError):
+        WorkloadRequest("x", WorkloadClass.BULK, True)
+    with pytest.raises(ValueError):
+        classify_pressure(
+            cpu_utilization_pct=True,
+            memory_utilization_pct=20,
+            queue_lag_seconds=None,
+        )
