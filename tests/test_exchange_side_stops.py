@@ -778,7 +778,12 @@ async def test_tp_handover_restart_after_cancel_ack_does_not_cancel_twice(
             {
                 "tp_order_ids": list(_trade.tp_order_ids),
                 "take_profit_levels": list(_trade.take_profit_levels),
-                "agent_consensus": dict(_trade.agent_consensus),
+                "agent_consensus": {
+                    **_trade.agent_consensus,
+                    "_pending_stop_cancellations": list(
+                        _trade.agent_consensus.get("_pending_stop_cancellations", [])
+                    ),
+                },
             }
         )
         if writes == 2:
