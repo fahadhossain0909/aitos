@@ -575,3 +575,15 @@ def test_symbol_telemetry_collector_rejects_subsecond_window():
         pass
     else:
         raise AssertionError("subsecond windows must not mislabel rates as per-second")
+
+
+
+def test_symbol_telemetry_collector_rejects_non_finite_window():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    try:
+        SymbolTelemetryCollector(window_seconds=float("nan"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite telemetry window must be rejected")
