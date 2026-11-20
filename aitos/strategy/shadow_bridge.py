@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
-from .contracts import StrategyContext, StrategyCycle
+from .contracts import StrategyContext
+from .engine import StrategyCycle
 
 
 @dataclass(frozen=True)
