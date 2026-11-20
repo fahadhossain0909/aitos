@@ -21,6 +21,7 @@ from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,
+    recover_protection_handovers,
     require_live_account_exposure_reconciled,
 )
 from aitos.health_server import HealthServer
@@ -189,6 +190,27 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         logger.error(
             "protective-order preclaims remain quarantined after startup recovery",
             extra={"aitos_extra": {"blocked": protection_recovery["blocked"]}},
+        )
+    handover_recovery = await recover_protection_handovers(
+        raw_order_executor,
+        raw_order_executor.execution_intent_store,
+        components.trade_lifecycle.get_open_trades(),
+        trade_state_persistence.persist_execution_state,
+    )
+    if handover_recovery["recovered"]:
+        logger.warning(
+            "recovered interrupted protective-order handovers",
+            extra={
+                "aitos_extra": {
+                    "recovered": handover_recovery["recovered"],
+                    "handover_ids": handover_recovery["recovered_handover_ids"],
+                }
+            },
+        )
+    if handover_recovery["blocked"]:
+        logger.error(
+            "protective-order handovers remain quarantined after startup recovery",
+            extra={"aitos_extra": {"blocked": handover_recovery["blocked"]}},
         )
     await require_live_account_exposure_reconciled(
         raw_order_executor,
