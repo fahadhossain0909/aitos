@@ -5,6 +5,9 @@ import pytest
 
 from aitos.execution.intent_store import ExecutionIntentStore, ExecutionRecoveryRequired
 from aitos.execution.order_executor import OrderRequest, OrderResult
+from aitos.execution.protection_reconciliation import (
+    recover_triggered_protection_child_fills,
+)
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -318,3 +321,43 @@ async def test_sqlite_watermark_ahead_of_trade_snapshot_is_quarantined(
         )
     assert trade.quantity == pytest.approx(1.0)
     lifecycle._execution_state_writer.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_startup_child_recovery_routes_owned_triggered_algo_to_lifecycle(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "child-startup.sqlite", scope="child-account")
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=algo_snapshot())
+    executor.get_order_status = AsyncMock(return_value=child_snapshot())
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    trade.sl_order_id = "algo:123"
+    lifecycle._open_trades[trade.trade_id] = trade
+    lifecycle.apply_triggered_protection_child_fill = AsyncMock(
+        return_value={
+            "trade_id": trade.trade_id,
+            "algo_order_id": "algo:123",
+            "child_order_id": "456",
+            "delta_quantity": "0.25",
+            "safe_to_resume": False,
+        }
+    )
+
+    report = await recover_triggered_protection_child_fills(
+        executor, journal, lifecycle
+    )
+
+    assert report["inspected"] == 1
+    assert report["blocked"] == []
+    assert report["safe_to_resume"] is False
+    assert report["applied"][0]["delta_quantity"] == "0.25"
+    lifecycle.apply_triggered_protection_child_fill.assert_awaited_once_with(
+        trade.trade_id, algo_snapshot(), child_snapshot()
+    )
