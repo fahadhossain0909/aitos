@@ -263,7 +263,9 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
                     raise OSError("injected SQLite watermark outage")
                 return original_watermark(**kwargs)
 
-            monkeypatch.setattr(journal, "mark_protection_child_applied", fail_watermark)
+            monkeypatch.setattr(
+                journal, "mark_protection_child_applied", fail_watermark
+            )
 
         first_report = await recover_triggered_protection_child_fills(
             executor, journal, first
