@@ -1147,7 +1147,10 @@ async def recover_triggered_protection_child_fills(
         if isinstance(result, str):
             result = json.loads(result)
         if isinstance(result, dict) and result.get("order_id"):
-            by_order_id[str(result["order_id"])] = row
+            order_identity = str(result["order_id"])
+            if order_identity in by_order_id:
+                raise ValueError("duplicate durable protective order identity")
+            by_order_id[order_identity] = row
 
     inspected = 0
     applied: list[dict[str, Any]] = []
@@ -1184,8 +1187,29 @@ async def recover_triggered_protection_child_fills(
                 )
                 continue
             result = row.get("result_json")
+            request = row.get("request_json")
             if isinstance(result, str):
                 result = json.loads(result)
+            if isinstance(request, str):
+                request = json.loads(request)
+            if (
+                not isinstance(result, dict)
+                or not isinstance(request, dict)
+                or row.get("trade_id") != str(trade.trade_id)
+                or request.get("owner_trade_id") != str(trade.trade_id)
+                or request.get("symbol") != trade.symbol
+                or request.get("order_type")
+                != ("STOP_MARKET" if order_id == getattr(trade, "sl_order_id", None)
+                    else "TAKE_PROFIT_MARKET")
+            ):
+                blocked.append(
+                    {
+                        "trade_id": str(trade.trade_id),
+                        "order_id": order_id,
+                        "reason": "protective intent owner or order type does not match restored trade",
+                    }
+                )
+                continue
             client_id = str(result.get("client_order_id") or row.get("client_id") or "")
             if not client_id:
                 blocked.append(
