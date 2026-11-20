@@ -618,3 +618,45 @@ def test_second_active_handover_for_trade_is_blocked(tmp_path):
             old_order_id="algo:100",
             new_client_id="aitos-rpl-0004",
         )
+
+def test_existing_protection_handover_database_migrates_order_type(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy-handover.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """CREATE TABLE protection_handovers (
+                scope TEXT NOT NULL,
+                handover_id TEXT NOT NULL,
+                trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                old_order_id TEXT NOT NULL,
+                new_client_id TEXT NOT NULL,
+                new_order_id TEXT,
+                state TEXT NOT NULL,
+                blocked_reason TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(scope, handover_id),
+                UNIQUE(scope, new_client_id)
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO protection_handovers(scope,handover_id,trade_id,symbol,"
+            "old_order_id,new_client_id,state) VALUES (?,?,?,?,?,?,?)",
+            ("scope", "legacy", "trade", "BTCUSDT", "algo:1", "new-stop", "PREPARED"),
+        )
+
+    journal = ExecutionIntentStore(path, scope="scope")
+    rows = journal.protection_handovers()
+    assert rows[0]["order_type"] == "STOP_MARKET"
+    journal.begin_protection_handover(
+        handover_id="tp-new",
+        trade_id="trade-2",
+        symbol="BTCUSDT",
+        old_order_id="algo:2",
+        new_client_id="new-tp",
+        order_type="TAKE_PROFIT_MARKET",
+    )
+    assert journal.protection_handovers(trade_id="trade-2")[0]["order_type"] == (
+        "TAKE_PROFIT_MARKET"
+    )
