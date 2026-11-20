@@ -856,9 +856,9 @@ async def run_scan_and_trade_cycle(
         for order in (portfolio.pending_orders or ())
         if getattr(order, "symbol", None)
     )
-    protected_symbols.add(
-        getattr(components.scanner, "_reference_symbol", "BTCUSDT")
-    )
+    reference_symbol = getattr(components.scanner, "_reference_symbol", None)
+    if reference_symbol:
+        protected_symbols.add(reference_symbol)
     if getattr(components.scanner, "_aitos_adaptive_compute_runtime", None) is not None:
         components.scanner._aitos_protected_symbols = protected_symbols
 
