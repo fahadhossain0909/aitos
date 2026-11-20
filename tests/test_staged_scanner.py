@@ -68,8 +68,6 @@ async def test_staged_scan_calls_expensive_path_only_for_top_ten(monkeypatch):
     assert len(scanner.scan_calls) == 10
     assert len(result) == 2
 
-
-
 @pytest.mark.asyncio
 async def test_adaptive_scanner_capacity_preserves_anchor_and_open_position():
     from types import SimpleNamespace
