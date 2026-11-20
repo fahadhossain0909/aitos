@@ -905,9 +905,7 @@ async def test_restart_recovers_crash_after_old_stop_was_already_cancelled(tmp_p
     async def persist(_trade):
         return None
 
-    report = await recover_protection_handovers(
-        executor, journal, [trade], persist
-    )
+    report = await recover_protection_handovers(executor, journal, [trade], persist)
 
     assert report["recovered"] == 1
     executor.cancel_resting_order.assert_not_awaited()
@@ -959,9 +957,7 @@ async def test_replacement_recovery_keeps_old_stop_when_new_algo_is_missing(tmp_
         updated_at="",
     )
 
-    report = await recover_protection_handovers(
-        executor, journal, [trade], AsyncMock()
-    )
+    report = await recover_protection_handovers(executor, journal, [trade], AsyncMock())
 
     assert report["recovered"] == 0
     assert trade.sl_order_id == "algo:123"
