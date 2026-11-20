@@ -738,6 +738,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         take_profit_price: float,
         *,
         owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         return await self._place_reduce_only_stop(
             symbol,
@@ -747,6 +748,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             order_type="TAKE_PROFIT_MARKET",
             label="tp",
             owner_trade_id=owner_trade_id,
+            client_order_id=client_order_id,
         )
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
