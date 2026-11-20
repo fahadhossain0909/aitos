@@ -965,7 +965,9 @@ async def test_replacement_recovery_keeps_old_stop_when_new_algo_is_missing(tmp_
     assert journal.protection_handovers()[0]["state"] == "PREPARED"
 
 @pytest.mark.asyncio
-async def test_handover_crash_before_cancel_is_recovered_without_duplicate_post(tmp_path):
+async def test_handover_crash_before_cancel_is_recovered_without_duplicate_post(
+    tmp_path,
+):
     journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
     begin_replacement_handover(journal)
     executor = HandoverExecutor(
@@ -1056,8 +1058,12 @@ async def test_handover_crash_after_cancel_ack_replays_without_second_cancel(tmp
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
 
 @pytest.mark.asyncio
-async def test_restart_recovers_replacement_take_profit_without_cancelling_early(tmp_path):
-    journal = ExecutionIntentStore(tmp_path / "handover-tp.sqlite", scope="paper-account")
+async def test_restart_recovers_replacement_take_profit_without_cancelling_early(
+    tmp_path,
+):
+    journal = ExecutionIntentStore(
+        tmp_path / "handover-tp.sqlite", scope="paper-account"
+    )
     journal.begin(
         OrderRequest(
             symbol="BTCUSDT",
@@ -1142,7 +1148,9 @@ async def test_restart_recovers_replacement_take_profit_without_cancelling_early
 
 
 def test_protection_handover_rejects_order_type_identity_reuse(tmp_path):
-    journal = ExecutionIntentStore(tmp_path / "handover-type.sqlite", scope="paper-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "handover-type.sqlite", scope="paper-account"
+    )
     journal.begin_protection_handover(
         handover_id="same-id",
         trade_id="trade-1",
