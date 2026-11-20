@@ -62,6 +62,7 @@ def calculate_protection_child_fill_delta(
     previously_applied_quote: Any = "0",
     expected_position_side: str | None = None,
     expected_reduce_only: bool | None = None,
+    expected_original_quantity: Any | None = None,
 ) -> ProtectionChildFillDelta:
     """Validate one authenticated triggered-algo child and calculate new fills.
 
@@ -134,6 +135,14 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "executed child quantity exceeds original quantity"
         )
+    if expected_original_quantity is not None:
+        expected_original = _decimal_value(
+            expected_original_quantity, "expected_original_quantity"
+        )
+        if original != expected_original:
+            raise ProtectionChildReconciliationError(
+                "child original quantity does not match durable protective intent"
+            )
     applied = _decimal_value(
         previously_applied_quantity,
         "previously_applied_quantity",
