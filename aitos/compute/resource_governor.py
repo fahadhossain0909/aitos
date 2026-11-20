@@ -34,9 +34,14 @@ class ResourceSnapshot:
             or self.effective_cpus <= 0
         ):
             raise ValueError("CPU capacity must be finite and positive")
-        if (
-            min(self.memory_total_mb, self.memory_limit_mb, self.memory_available_mb)
-            < 0
+        memory_values = (
+            self.memory_total_mb,
+            self.memory_limit_mb,
+            self.memory_available_mb,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in memory_values
         ):
             raise ValueError("memory values cannot be negative")
 
@@ -48,6 +53,21 @@ class ResourceBudget:
     background_task_limit: int
     deep_analysis_slots: int
     cpu_capacity_units: float
+
+    def __post_init__(self) -> None:
+        integer_limits = (
+            self.cpu_workers,
+            self.memory_budget_mb,
+            self.background_task_limit,
+            self.deep_analysis_slots,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in integer_limits
+        ) or self.cpu_workers < 1:
+            raise ValueError("resource budget limits must be non-negative integers")
+        if not isfinite(self.cpu_capacity_units) or self.cpu_capacity_units < 0:
+            raise ValueError("CPU capacity units must be finite and non-negative")
 
 
 @dataclass(frozen=True)
@@ -73,6 +93,8 @@ class SymbolWorkload:
             or not isfinite(self.opportunity_score)
             or not isfinite(self.liquidity_score)
             or self.cpu_cost_units < 0
+            or isinstance(self.memory_cost_mb, bool)
+            or not isinstance(self.memory_cost_mb, int)
             or self.memory_cost_mb < 0
         ):
             raise ValueError(
