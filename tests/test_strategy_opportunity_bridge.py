@@ -331,3 +331,22 @@ def test_real_capital_gateway_reviews_candidate_without_live_authorization():
     assert governed.opportunity.is_production is False
     assert governed.risk_receipt.execution_authorized is False
     assert report.execution_eligible is False
+
+
+def test_stale_portfolio_risk_snapshot_fails_closed():
+    cycle, context, plans, portfolio_risk = inputs()
+    stale = StrategyPortfolioRiskContext(
+        snapshot_id=portfolio_risk.snapshot_id,
+        observed_at_ns=context.now_ns - 6_000_000_000,
+        equity_peak_usd=portfolio_risk.equity_peak_usd,
+    )
+    with pytest.raises(ValueError, match="missing, invalid, or stale"):
+        build_risk_governed_opportunities(
+            cycle,
+            context,
+            stale,
+            plans,
+            shadow_gateway_factory=ShadowGateway,
+            equity_usd=1_000.0,
+            live_gateway=ShadowGateway(),
+        )
