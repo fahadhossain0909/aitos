@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
@@ -555,3 +556,167 @@ async def test_intelligent_dynamic_tp_extension_veto_keeps_existing_target(
 
     assert trade.take_profit_levels == [104.0, 110.0]
     assert trade.state == TradeLifecycleState.POSITION_OPENED
+
+class LiveTakeProfitHandoverExecutor(FakeExchangeCapableExecutor):
+    def __init__(self, journal):
+        super().__init__()
+        self._journal = journal
+        self.statuses = {"algo:123": "NEW"}
+        self.cancel_calls = []
+
+    @property
+    def requires_exchange_execution(self):
+        return True
+
+    @property
+    def intent_store(self):
+        return self._journal
+
+    async def place_take_profit_order(
+        self,
+        symbol,
+        side,
+        quantity,
+        take_profit_price,
+        *,
+        owner_trade_id=None,
+        client_order_id=None,
+    ):
+        request = OrderRequest(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            reference_price=take_profit_price,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id=client_order_id,
+            reduce_only=True,
+            owner_trade_id=owner_trade_id,
+        )
+        self._journal.begin(request)
+        result = OrderResult(
+            "algo:456",
+            symbol,
+            side,
+            0.0,
+            take_profit_price,
+            client_order_id=client_order_id,
+        )
+        self._journal.record_protection(client_order_id, result)
+        self.statuses[result.order_id] = "NEW"
+        return result
+
+    async def get_resting_order_status(self, symbol, order_id):
+        return self.statuses.get(order_id)
+
+    async def cancel_resting_order(self, symbol, order_id):
+        self.cancel_calls.append(order_id)
+        self.statuses[order_id] = "CANCELED"
+
+    def acknowledge_protection(self, result, trade_id):
+        self._journal.mark_applied(result.client_order_id, trade_id)
+
+
+def seed_owned_take_profit(journal, trade_id="trade-tp"):
+    request = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.5,
+        reference_price=104.0,
+        order_type="TAKE_PROFIT_MARKET",
+        client_order_id="old-tp-client",
+        reduce_only=True,
+        owner_trade_id=trade_id,
+    )
+    journal.begin(request)
+    journal.record_protection(
+        "old-tp-client",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            104.0,
+            client_order_id="old-tp-client",
+        ),
+    )
+    journal.mark_applied("old-tp-client", trade_id)
+
+
+@pytest.mark.asyncio
+async def test_live_take_profit_replacement_is_make_before_break(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "tp-handover.sqlite", scope="account")
+    seed_owned_take_profit(journal)
+    executor = LiveTakeProfitHandoverExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        tp_order_ids=["algo:123"],
+        take_profit_levels=[104.0],
+        sl_order_id="algo:999",
+        agent_consensus={},
+        updated_at="",
+    )
+    lifecycle._open_trades[trade.trade_id] = trade
+
+    async def persist(_trade):
+        return None
+
+    lifecycle._execution_state_writer = persist
+    lifecycle._execution_position_verifier = AsyncMock()
+    await lifecycle._replace_exchange_side_take_profit(trade, 0, 110.0)
+
+    assert trade.tp_order_ids == ["algo:456"]
+    assert trade.take_profit_levels == [110.0]
+    assert executor.cancel_calls == ["algo:123"]
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+    assert journal.protection_handovers()[0]["order_type"] == "TAKE_PROFIT_MARKET"
+    assert journal.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_live_take_profit_replacement_keeps_old_order_if_snapshot_write_fails(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "tp-handover-fault.sqlite", scope="account")
+    seed_owned_take_profit(journal)
+    executor = LiveTakeProfitHandoverExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        tp_order_ids=["algo:123"],
+        take_profit_levels=[104.0],
+        sl_order_id="algo:999",
+        agent_consensus={},
+        updated_at="",
+    )
+    lifecycle._open_trades[trade.trade_id] = trade
+
+    async def fail_persist(_trade):
+        raise OSError("simulated durable snapshot failure")
+
+    lifecycle._execution_state_writer = fail_persist
+    lifecycle._execution_position_verifier = AsyncMock()
+    with pytest.raises(OSError, match="snapshot failure"):
+        await lifecycle._replace_exchange_side_take_profit(trade, 0, 110.0)
+
+    assert trade.tp_order_ids == ["algo:456"]
+    assert executor.cancel_calls == []
+    assert journal.protection_handovers()[0]["state"] == "NEW_ACCEPTED"
