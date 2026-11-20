@@ -412,3 +412,87 @@ def test_workload_estimator_rejects_invalid_telemetry():
         pass
     else:
         raise AssertionError("non-finite telemetry must be rejected")
+
+
+
+def test_optional_scheduler_applies_priority_and_hard_budgets():
+    from aitos.compute.work_scheduler import (
+        WorkloadClass,
+        WorkloadRequest,
+        admit_optional_work,
+    )
+
+    result = admit_optional_work(
+        [
+            WorkloadRequest("backfill", WorkloadClass.BULK, 10, 10),
+            WorkloadRequest("scan-a", WorkloadClass.INTERACTIVE, 30, 20, 2),
+            WorkloadRequest("scan-b", WorkloadClass.INTERACTIVE, 30, 20, 1),
+            WorkloadRequest("metrics", WorkloadClass.BACKGROUND, 10, 10),
+        ],
+        cpu_capacity_units=60,
+        memory_capacity_mb=40,
+    )
+    assert result.admitted == ("scan-a", "scan-b")
+    assert set(result.deferred) == {"metrics", "backfill"}
+    assert result.cpu_reserved_units == 60
+
+
+def test_optional_scheduler_reduces_work_during_warning_and_high_pressure():
+    from aitos.compute.work_scheduler import (
+        WorkloadClass,
+        WorkloadRequest,
+        admit_optional_work,
+    )
+
+    requests = [
+        WorkloadRequest("interactive", WorkloadClass.INTERACTIVE, 20, 10),
+        WorkloadRequest("background", WorkloadClass.BACKGROUND, 20, 10),
+    ]
+    warning = admit_optional_work(
+        requests,
+        cpu_capacity_units=40,
+        memory_capacity_mb=20,
+        pressure_level=1,
+    )
+    assert warning.admitted == ("interactive",)
+    high = admit_optional_work(
+        requests,
+        cpu_capacity_units=40,
+        memory_capacity_mb=20,
+        pressure_level=2,
+    )
+    assert high.admitted == ("interactive",)
+    assert high.deferred == ("background",)
+    critical = admit_optional_work(
+        requests,
+        cpu_capacity_units=40,
+        memory_capacity_mb=20,
+        pressure_level=3,
+    )
+    assert critical.admitted == ()
+    assert set(critical.deferred) == {"interactive", "background"}
+
+
+def test_optional_scheduler_rejects_duplicate_ids_and_invalid_budgets():
+    from aitos.compute.work_scheduler import (
+        WorkloadClass,
+        WorkloadRequest,
+        admit_optional_work,
+    )
+
+    request = WorkloadRequest("same", WorkloadClass.INTERACTIVE, 1)
+    try:
+        admit_optional_work(
+            [request, request], cpu_capacity_units=1, memory_capacity_mb=1
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("duplicate request ids must be rejected")
+
+    try:
+        admit_optional_work([], cpu_capacity_units=float("nan"), memory_capacity_mb=1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite capacity must be rejected")
