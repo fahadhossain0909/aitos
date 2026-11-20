@@ -244,9 +244,7 @@ class EventBus(AITOSModule):
                 if idle_ms is None:
                     continue
                 try:
-                    max_observed_idle_ms = max(
-                        max_observed_idle_ms, int(idle_ms)
-                    )
+                    max_observed_idle_ms = max(max_observed_idle_ms, int(idle_ms))
                 except (TypeError, ValueError, OverflowError):
                     continue
         return max_observed_idle_ms / 1000.0 if pairs else None
