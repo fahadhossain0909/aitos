@@ -2765,7 +2765,10 @@ class TradeLifecycle(AITOSModule):
                 raise ExecutionRecoveryRequired(
                     trade.symbol,
                     algo_order_id,
-                    "SQLite child-fill watermark is ahead of the durable trade snapshot",
+                    (
+                        "SQLite child-fill watermark is ahead of the durable "
+                        "trade snapshot"
+                    ),
                 )
             previous_quantity = marker.get("cumulative_quantity", "0")
             previous_quote = marker.get("cumulative_quote", "0")
