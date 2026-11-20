@@ -163,7 +163,7 @@ README previously described Futures as the only exchange and contained branch-sp
 - Console-quality, Windows-console, Linux-console and Tauri packaging workflows now run on matching changes pushed to `main`, in addition to their relevant PR/manual paths.
 - A regression test protects those post-merge mainline validation triggers.
 - Apply a Black-only formatting correction to the merged compute workload preference expression exposed by the first CI run; no logic changed.
-- No trading strategy, risk-limit, order-routing, credential, database schema, production deployment or live-execution behavior was changed.
+- No trading strategy, risk-limit, signal-sizing or database schema was changed. Futures testnet endpoint selection and credential isolation were changed; mainnet routing remains on its existing endpoint and no live order or production deployment was performed.
 
 ## Acceptance gates still open
 
