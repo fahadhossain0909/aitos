@@ -414,7 +414,6 @@ def test_workload_estimator_rejects_invalid_telemetry():
         raise AssertionError("non-finite telemetry must be rejected")
 
 
-
 def test_optional_scheduler_applies_priority_and_hard_budgets():
     from aitos.compute.work_scheduler import (
         WorkloadClass,
@@ -445,7 +444,7 @@ def test_optional_scheduler_reduces_work_during_warning_and_high_pressure():
     )
 
     requests = [
-        WorkloadRequest("interactive", WorkloadClass.INTERACTIVE, 20, 10),
+        WorkloadRequest("interactive", WorkloadClass.INTERACTIVE, 5, 2),
         WorkloadRequest("background", WorkloadClass.BACKGROUND, 20, 10),
     ]
     warning = admit_optional_work(
