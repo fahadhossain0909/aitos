@@ -27,6 +27,7 @@ class StrategyPortfolioRiskContext:
 
     snapshot_id: str
     observed_at_ns: int
+    equity_usd: float
     equity_peak_usd: float
     position_risk_pct: Mapping[str, float] = field(default_factory=dict)
     position_sides: Mapping[str, str] = field(default_factory=dict)
@@ -146,7 +147,6 @@ def build_risk_governed_opportunities(
     protection_plans: Mapping[str, StrategyProtectionPlan],
     *,
     shadow_gateway_factory: Callable[[], CapitalGateway],
-    equity_usd: float,
     max_positions: int = 3,
     live_gateway: CapitalGateway,
 ) -> StrategyOpportunityBridgeReport:
@@ -164,8 +164,9 @@ def build_risk_governed_opportunities(
         or context.now_ns <= 0
     ):
         raise ValueError("point-in-time strategy timestamp is required")
+    equity_usd = float(portfolio_risk.equity_usd)
     if not isfinite(equity_usd) or equity_usd <= 0:
-        raise ValueError("shadow portfolio equity must be finite and positive")
+        raise ValueError("portfolio snapshot equity must be finite and positive")
     if (
         isinstance(max_positions, bool)
         or not isinstance(max_positions, int)
