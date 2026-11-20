@@ -709,7 +709,9 @@ async def test_live_take_profit_replacement_is_make_before_break(
 async def test_live_take_profit_replacement_keeps_old_order_if_snapshot_write_fails(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "tp-handover-fault.sqlite", scope="account")
+    journal = ExecutionIntentStore(
+        tmp_path / "tp-handover-fault.sqlite", scope="account"
+    )
     seed_owned_take_profit(journal)
     executor = LiveTakeProfitHandoverExecutor(journal)
     lifecycle = TradeLifecycle(
@@ -747,7 +749,9 @@ async def test_live_take_profit_replacement_keeps_old_order_if_snapshot_write_fa
 async def test_tp_handover_restart_after_cancel_ack_does_not_cancel_twice(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "tp-handover-after-cancel.sqlite", scope="account")
+    journal = ExecutionIntentStore(
+        tmp_path / "tp-handover-after-cancel.sqlite", scope="account"
+    )
     seed_owned_take_profit(journal)
     executor = LiveTakeProfitHandoverExecutor(journal)
     lifecycle = TradeLifecycle(
