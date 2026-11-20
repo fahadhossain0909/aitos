@@ -235,7 +235,10 @@ async def test_terminal_partial_stop_fill_reprotects_remaining_position(
     assert executor.cancelled == ["algo:123"]
     assert trade.agent_consensus.get("_pending_stop_cancellations", []) == []
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
-    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
+    assert (
+        journal.protection_child_watermark("123", "456")["cumulative_quantity"]
+        == "0.25"
+    )
 
 @pytest.mark.asyncio
 async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduction(
@@ -335,7 +338,9 @@ async def test_sqlite_watermark_ahead_of_trade_snapshot_is_quarantined(
 async def test_startup_child_recovery_routes_owned_triggered_algo_to_lifecycle(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "child-startup.sqlite", scope="child-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "child-startup.sqlite", scope="child-account"
+    )
     seed_stop(journal)
     executor = TriggeredChildExecutor(journal)
     executor.get_algo_order_by_client_id = AsyncMock(return_value=algo_snapshot())
@@ -375,7 +380,9 @@ async def test_startup_child_recovery_routes_owned_triggered_algo_to_lifecycle(
 async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "child-full-close.sqlite", scope="child-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "child-full-close.sqlite", scope="child-account"
+    )
     seed_stop(journal)
     executor = TriggeredChildExecutor(journal)
     lifecycle = TradeLifecycle(
@@ -399,7 +406,13 @@ async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
 
     assert result["terminal"] is True
     assert trade.trade_id not in lifecycle._open_trades
-    assert lifecycle._closed_trades[-1].exit_reason == "exchange_protective_child_filled"
+    assert (
+        lifecycle._closed_trades[-1].exit_reason
+        == "exchange_protective_child_filled"
+    )
     assert lifecycle._closed_trades[-1].gross_realized_pnl_usd == pytest.approx(-10.0)
     assert executor.cancelled == ["algo:123"]
-    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "1.0"
+    assert (
+        journal.protection_child_watermark("123", "456")["cumulative_quantity"]
+        == "1.0"
+    )
