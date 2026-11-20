@@ -358,10 +358,17 @@ def plan_symbol_capacity(
     for item in workloads:
         key = item.symbol.strip().upper()
         previous = unique.get(key)
-        if previous is None or item.protected and not previous.protected or item.protected == previous.protected and (
-            item.opportunity_score,
-            item.liquidity_score,
-        ) > (previous.opportunity_score, previous.liquidity_score):
+        if (
+            previous is None
+            or item.protected
+            and not previous.protected
+            or item.protected == previous.protected
+            and (
+                item.opportunity_score,
+                item.liquidity_score,
+            )
+            > (previous.opportunity_score, previous.liquidity_score)
+        ):
             unique[key] = item
 
     ordered = sorted(
