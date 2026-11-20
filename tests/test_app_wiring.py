@@ -680,7 +680,6 @@ async def test_live_portfolio_tracker_fails_closed_on_stale_pending_risk():
         tracker.build_portfolio_state(EmptyLifecycle())
 
 
-
 @pytest.mark.asyncio
 async def test_runtime_reload_rejects_adaptive_compute_policy_changes(
     event_bus, monkeypatch
