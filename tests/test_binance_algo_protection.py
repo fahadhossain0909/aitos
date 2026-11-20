@@ -1,5 +1,6 @@
 """Current official USD-M conditional-order schema; offline HTTP boundary."""
 
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,7 +9,7 @@ from aitos.execution.binance_executor import (
     BinanceAPIError,
     BinanceFuturesOrderExecutor,
 )
-from aitos.execution.intent_store import ExecutionUncertainError
+from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
 from aitos.models.trade import TradeSide
 
 
@@ -321,3 +322,25 @@ async def test_algo_client_id_lookup_rejects_cross_symbol_or_client_identity():
 
     with pytest.raises(ExecutionUncertainError):
         await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1")
+
+
+async def test_protective_preclaim_persists_owner_trade_identity(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "protective.sqlite", scope="test-account")
+    value = BinanceFuturesOrderExecutor(
+        "dummy", "dummy", intent_store=store
+    )
+    value._signed_request = AsyncMock(return_value=dict(algoId=321, algoStatus="NEW"))
+
+    result = await value.place_stop_loss_order(
+        "BTCUSDT",
+        TradeSide.LONG,
+        1.0,
+        98.0,
+        owner_trade_id="trade-owner-1",
+    )
+
+    assert result.success is True
+    row = store.protection_intents()[0]
+    request = json.loads(row["request_json"])
+    assert request["owner_trade_id"] == "trade-owner-1"
+    assert row["state"] == "PROTECTED"
