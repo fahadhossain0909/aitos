@@ -619,3 +619,31 @@ async def test_runtime_guard_returns_rejection_for_unknown_open_position_risk(
     assert "portfolio exposure unavailable" in trade.rejection_reason
     assert lifecycle.get_open_trades() == []
     await lifecycle.shutdown()
+
+
+def test_portfolio_consensus_fails_closed_for_non_finite_equity():
+    portfolio = make_portfolio(equity_usd=float("nan"))
+    with pytest.raises(ValueError, match="equity must be finite and positive"):
+        _portfolio_consensus(portfolio, make_opportunity())
+
+
+def test_gateway_snapshot_rejects_non_finite_equity_and_peak():
+    gateway = CapitalGateway()
+    estimate = gateway.estimate_opportunity(make_opportunity())
+    with pytest.raises(ValueError, match="equity must be finite and positive"):
+        gateway._snapshot(float("nan"), estimate)
+    bad_peak = gateway.estimate_opportunity(
+        make_opportunity(agent_consensus={"equity_peak_usd": float("inf")})
+    )
+    with pytest.raises(ValueError, match="peak equity must be finite and positive"):
+        gateway._snapshot(10_000.0, bad_peak)
+
+
+def test_gateway_snapshot_rejects_unknown_or_non_positive_position_risk():
+    gateway = CapitalGateway()
+    for risk in (0.0, -1.0, float("nan"), float("inf")):
+        estimate = gateway.estimate_opportunity(
+            make_opportunity(agent_consensus={"position_risk_pct": {"BTCUSDT": risk}})
+        )
+        with pytest.raises(ValueError, match="open position risk projection"):
+            gateway._snapshot(10_000.0, estimate)
