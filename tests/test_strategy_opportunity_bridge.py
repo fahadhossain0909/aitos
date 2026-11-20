@@ -309,7 +309,7 @@ def test_real_capital_gateway_reviews_candidate_without_live_authorization():
         plans,
         shadow_gateway_factory=CapitalGateway,
         equity_usd=1_000.0,
-        live_gateway=ShadowGateway(),
+        live_gateway=CapitalGateway(),
     )
     assert len(report.opportunities) == 1
     governed = report.opportunities[0]
