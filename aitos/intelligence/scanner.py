@@ -2221,7 +2221,9 @@ class OpportunityScanner(AITOSModule):
                     except Exception as exc:
                         logger.error(
                             "scan failed for symbol",
-                            extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
                         )
                         return None
 
