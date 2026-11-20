@@ -2181,6 +2181,20 @@ class OpportunityScanner(AITOSModule):
                 )
                 if callable(observe_pressure):
                     observe_pressure()
+                concurrency_gate = getattr(
+                    self, "_aitos_adaptive_concurrency_gate", None
+                )
+                budget_for_optional = getattr(
+                    adaptive_runtime, "budget_for_optional_work", None
+                )
+                if concurrency_gate is not None and callable(budget_for_optional):
+                    optional_budget = budget_for_optional()
+                    await concurrency_gate.set_limit(
+                        min(
+                            concurrency_gate.max_concurrency,
+                            max(1, optional_budget.cpu_workers),
+                        )
+                    )
             except Exception:
                 logger.exception(
                     "adaptive process pressure sampling failed; retaining last pressure state"
@@ -2450,33 +2464,43 @@ class OpportunityScanner(AITOSModule):
             batch = selected[offset : offset + batch_size]
 
             async def scan_one(symbol: str) -> ScanCandidate | None:
-                async with self._scan_semaphore:
-                    try:
-                        return await asyncio.wait_for(
-                            self.scan_symbol(symbol, reference_klines),
-                            timeout=cfg.timeout_seconds,
-                        )
-                    except Exception as exc:
-                        for rejected_side in ("LONG", "SHORT"):
-                            await self._record_funnel(
-                                symbol=symbol,
-                                side=rejected_side,
-                                stage="scanner_batch",
-                                accepted=False,
-                                reason=(
-                                    "scan_timeout"
-                                    if isinstance(exc, asyncio.TimeoutError)
-                                    else "scan_exception"
-                                ),
-                                details={"error": str(exc)[:500]},
+                async def run_scan() -> ScanCandidate | None:
+                    async with self._scan_semaphore:
+                        try:
+                            return await asyncio.wait_for(
+                                self.scan_symbol(symbol, reference_klines),
+                                timeout=cfg.timeout_seconds,
                             )
-                        logger.error(
-                            "candidate batch scan failed",
-                            extra={
-                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
-                            },
-                        )
-                        return None
+                        except Exception as exc:
+                            for rejected_side in ("LONG", "SHORT"):
+                                await self._record_funnel(
+                                    symbol=symbol,
+                                    side=rejected_side,
+                                    stage="scanner_batch",
+                                    accepted=False,
+                                    reason=(
+                                        "scan_timeout"
+                                        if isinstance(exc, asyncio.TimeoutError)
+                                        else "scan_exception"
+                                    ),
+                                    details={"error": str(exc)[:500]},
+                                )
+                            logger.error(
+                                "candidate batch scan failed",
+                                extra={
+                                    "aitos_extra": {
+                                        "symbol": symbol,
+                                        "error": str(exc),
+                                    }
+                                },
+                            )
+                            return None
+
+                gate = getattr(self, "_aitos_adaptive_concurrency_gate", None)
+                if gate is None:
+                    return await run_scan()
+                async with gate.slot():
+                    return await run_scan()
 
             results = await asyncio.gather(*(scan_one(symbol) for symbol in batch))
             scanned += len(batch)
