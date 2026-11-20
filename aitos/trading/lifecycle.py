@@ -2539,7 +2539,9 @@ class TradeLifecycle(AITOSModule):
         ) or (
             trade.side == TradeSide.SHORT and new_price >= trade.entry_price
         ):
-            raise ValueError("replacement take-profit must remain on the profitable side")
+            raise ValueError(
+                "replacement take-profit must remain on the profitable side"
+            )
         self._require_execution_writer()
         self._assert_execution_unlatched(trade.trade_id)
         if self._open_trades.get(trade.trade_id) is not trade:
@@ -2608,7 +2610,10 @@ class TradeLifecycle(AITOSModule):
             raise ExecutionRecoveryRequired(
                 trade.symbol,
                 str(old_id),
-                "old take-profit quantity or trigger is inconsistent with trade snapshot",
+                (
+                    "old take-profit quantity or trigger is inconsistent "
+                    "with trade snapshot"
+                ),
             )
         status_reader = getattr(self._order_executor, "get_resting_order_status", None)
         if not callable(status_reader):
