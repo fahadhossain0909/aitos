@@ -139,7 +139,7 @@ The current open-PR search returned both #215 and #244, with nearly identical st
 
 README previously described Futures as the only exchange and contained branch-specific integration statements. Desktop and installation docs did not clearly distinguish the two desktop products. Historical validation reports could be mistaken for current-main certification.
 
-**Remediation in this branch:** update the README's product scope, capabilities, desktop tracks, architecture links and historical-evidence caveat; update installation and Tauri build instructions; add this audit report.
+**Remediation in this branch:** update the README's product scope, capabilities, desktop tracks, architecture links and historical-evidence caveat; update installation and Tauri build instructions; add a page-by-page Desktop Operator User Manual, local resource guidance and this audit report.
 
 ## Safe changes made in this audit branch
 
