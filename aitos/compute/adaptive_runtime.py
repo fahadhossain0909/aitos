@@ -9,6 +9,11 @@ from aitos.compute.pressure_controller import (
     PressurePolicy,
     ResourcePressureController,
 )
+from aitos.compute.work_scheduler import (
+    WorkloadAdmission,
+    WorkloadRequest,
+    admit_optional_work,
+)
 from aitos.compute.resource_governor import (
     ResourceBudget,
     ResourceSnapshot,
@@ -27,6 +32,33 @@ class AdaptiveComputeRuntime:
     resources: ResourceSnapshot
     budget: ResourceBudget
     pressure_controller: ResourcePressureController
+
+    def update_pressure(
+        self,
+        *,
+        now_seconds: float,
+        cpu_utilization_pct: float,
+        memory_utilization_pct: float,
+        queue_lag_seconds: float,
+    ):
+        """Update hysteretic pressure state from host/service telemetry."""
+        return self.pressure_controller.update(
+            now_seconds=now_seconds,
+            cpu_utilization_pct=cpu_utilization_pct,
+            memory_utilization_pct=memory_utilization_pct,
+            queue_lag_seconds=queue_lag_seconds,
+        )
+
+    def admit_optional_work(
+        self, requests: list[WorkloadRequest] | tuple[WorkloadRequest, ...]
+    ) -> WorkloadAdmission:
+        """Admit optional work against the latest pressure state and hard budget."""
+        return admit_optional_work(
+            requests,
+            cpu_capacity_units=self.budget.cpu_capacity_units,
+            memory_capacity_mb=self.budget.memory_budget_mb,
+            pressure_level=int(self.pressure_controller.level),
+        )
 
 
 def create_adaptive_compute_runtime(
