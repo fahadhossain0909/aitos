@@ -315,10 +315,21 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await tracker.restore()
     await income_reconciler.initialize({})
     stop_event = asyncio.Event()
-    if not position_recovery_ready or not income_reconciliation_ready:
-        # Fail closed through the managed shutdown path; never scan or submit
-        # orders while restored positions or financial costs remain unverified.
-        stop_event.set()
+    new_entries_allowed = position_recovery_ready and income_reconciliation_ready
+    if not new_entries_allowed:
+        # Keep market ingestion, lifecycle price management, exchange protection
+        # reconciliation and existing-position supervision alive, but do not
+        # run a fresh-exposure scan until an operator restarts after remediation.
+        logger.critical(
+            "live runtime entering manage-only mode; fresh exposure is disabled",
+            extra={
+                "aitos_extra": {
+                    "position_recovery_ready": position_recovery_ready,
+                    "income_reconciliation_ready": income_reconciliation_ready,
+                    "new_entries_allowed": False,
+                }
+            },
+        )
     install_signal_handlers(stop_event)
     # One teardown owner on both startup failure and normal exit. Draining is
     # last registered so durable writers/executor remain available until done.
@@ -340,12 +351,29 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 raw_order_executor.execution_intent_store,
                 components.trade_lifecycle.get_open_trades(),
             )
-            submitted = await run_scan_and_trade_cycle(
-                components,
-                tracker,
-                is_production=True,
-                approved_by=approved_by,
-            )
+            if new_entries_allowed:
+                submitted = await run_scan_and_trade_cycle(
+                    components,
+                    tracker,
+                    is_production=True,
+                    approved_by=approved_by,
+                )
+            else:
+                # Market events continue to drive TradeLifecycle price/EIE
+                # management; this loop still reconciles fills, positions and
+                # protective orders, but never creates new exposure.
+                submitted = 0
+                logger.warning(
+                    "manage-only cycle: fresh-exposure scan remains disabled",
+                    extra={
+                        "aitos_extra": {
+                            "open_trades": len(
+                                components.trade_lifecycle.get_open_trades()
+                            ),
+                            "new_entries_allowed": False,
+                        }
+                    },
+                )
             # These do blocking pickle.dump()+file-replace I/O. Run them
             # off the event loop -- a synchronous call here previously
             # stalled *all* concurrent async work (websocket recv,
