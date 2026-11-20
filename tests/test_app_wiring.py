@@ -702,3 +702,40 @@ async def test_runtime_reload_rejects_adaptive_compute_policy_changes(
 
     with pytest.raises(ValueError, match="adaptive compute policy"):
         components.reload_runtime_tuning()
+
+
+@pytest.mark.asyncio
+async def test_build_system_wires_adaptive_concurrency_gate(event_bus, monkeypatch):
+    from types import SimpleNamespace
+
+    import aitos.app as app_module
+
+    adaptive_runtime = SimpleNamespace(
+        resources=SimpleNamespace(effective_cpus=2.0, memory_limit_mb=4096),
+        budget=SimpleNamespace(
+            cpu_workers=2,
+            memory_budget_mb=1024,
+            cpu_capacity_units=2.0,
+        ),
+        pressure_controller=SimpleNamespace(level=0),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "create_adaptive_compute_runtime",
+        lambda _settings: adaptive_runtime,
+    )
+
+    components = await build_system(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        order_executor=SimulatedOrderExecutor(),
+        symbols=["BTCUSDT", "ETHUSDT"],
+        min_score_threshold=0.0,
+    )
+
+    gate = components.scanner._aitos_adaptive_concurrency_gate
+    assert gate.max_concurrency == max(
+        1, int(components.scanner._tuning.analysis.lightweight_concurrency)
+    )
+    assert (await gate.snapshot()).limit == min(gate.max_concurrency, 2)
+    assert components.scanner._aitos_adaptive_compute_runtime is adaptive_runtime
