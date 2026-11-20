@@ -8,7 +8,7 @@ reservations.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Callable, Mapping
@@ -249,16 +249,19 @@ def build_risk_governed_opportunities(
             evaluated_at_ns=context.now_ns,
             execution_authorized=False,
         )
-        opportunity.agent_consensus = {
-            **opportunity.agent_consensus,
-            "capital_governance": {
-                "capital_usd": amount,
-                "risk_budget_usd": risk_budget,
-                "expected_net_edge_pct": receipt.expected_net_edge_pct,
-                "rationale": list(receipt.rationale),
-                "execution_authorized": False,
+        opportunity = replace(
+            opportunity,
+            agent_consensus={
+                **opportunity.agent_consensus,
+                "capital_governance": {
+                    "capital_usd": amount,
+                    "risk_budget_usd": risk_budget,
+                    "expected_net_edge_pct": receipt.expected_net_edge_pct,
+                    "rationale": list(receipt.rationale),
+                    "execution_authorized": False,
+                },
             },
-        }
+        )
         governed.append(GovernedOpportunity(opportunity, receipt, False))
 
     return StrategyOpportunityBridgeReport(
