@@ -127,5 +127,6 @@ async def test_adaptive_scanner_capacity_preserves_anchor_and_open_position():
     selected = await OpportunityScanner._lightweight_rank_symbols(scanner, limit=5)
 
     assert "S1" in selected
-    assert "S2" in selected
-    assert len(selected) == 3
+    assert "S2" not in selected
+    assert "S2" in scanner._aitos_last_capacity_plan.protected_symbols
+    assert len(selected) == 2
