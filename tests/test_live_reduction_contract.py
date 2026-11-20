@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
-from aitos.execution.order_executor import OrderRequest, OrderResult, SimulatedOrderExecutor
+from aitos.execution.order_executor import (
+    OrderRequest,
+    OrderResult,
+    SimulatedOrderExecutor,
+)
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -179,7 +183,7 @@ async def test_concurrent_live_closes_cannot_submit_two_reductions(
             value.close_trade(position.trade_id, 105, "isolated close")
             for _ in range(2)
         ],
-        return_exceptions=True
+        return_exceptions=True,
     )
     assert len(venue.requests) == 1
     assert sum(not isinstance(result, BaseException) for result in results) == 1
