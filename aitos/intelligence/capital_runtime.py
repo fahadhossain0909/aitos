@@ -319,7 +319,28 @@ def install_capital_guard() -> None:
             event["details"] = details
             await _record_funnel(self, **event)
 
+        # Validate the financial snapshot before choosing a user-facing rejection
+        # reason. Still run the RiskEngine gate below even when the snapshot is
+        # malformed so its emergency assessment side effects are not skipped.
+        portfolio_error: str | None = None
+        portfolio_consensus: dict[str, Any] | None = None
+        try:
+            portfolio_consensus = _portfolio_consensus(portfolio, opportunity)
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            portfolio_error = (
+                f"capital_objective: portfolio exposure unavailable: {exc}"
+            )
+
         hard_limit_reason = await _hard_limit_reason(self, portfolio, opportunity)
+        if portfolio_error is not None:
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=portfolio_error,
+            )
+            return _rejected_trade(opportunity, portfolio_error)
         if hard_limit_reason is not None:
             await record_gate(
                 symbol=opportunity.symbol,
@@ -349,18 +370,7 @@ def install_capital_guard() -> None:
             )
             return _rejected_trade(opportunity, reason)
 
-        try:
-            portfolio_consensus = _portfolio_consensus(portfolio, opportunity)
-        except (TypeError, ValueError, ArithmeticError) as exc:
-            reason = f"capital_objective: portfolio exposure unavailable: {exc}"
-            await record_gate(
-                symbol=opportunity.symbol,
-                side=opportunity.side.value,
-                stage="capital_gate",
-                accepted=False,
-                reason=reason,
-            )
-            return _rejected_trade(opportunity, reason)
+        assert portfolio_consensus is not None
         protected_opportunity = replace(
             opportunity,
             agent_consensus=portfolio_consensus,
