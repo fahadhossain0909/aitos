@@ -560,6 +560,9 @@ async def test_intelligent_dynamic_tp_extension_veto_keeps_existing_target(
     assert trade.state == TradeLifecycleState.POSITION_OPENED
 
 class LiveTakeProfitHandoverExecutor(FakeExchangeCapableExecutor):
+    execution_scope = "account"
+    hedge_mode = False
+
     def __init__(self, journal):
         super().__init__()
         self._journal = journal
