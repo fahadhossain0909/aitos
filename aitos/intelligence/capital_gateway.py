@@ -140,11 +140,18 @@ class CapitalGateway:
         equity_usd: float, estimate: OpportunityEstimate
     ) -> PortfolioRiskSnapshot:
         metadata = estimate.metadata
+        if not isfinite(float(equity_usd)) or float(equity_usd) <= 0:
+            raise ValueError("portfolio equity must be finite and positive")
         peak = float(metadata.get("equity_peak_usd") or equity_usd)
-        positions = {
-            str(k): float(v)
-            for k, v in dict(metadata.get("position_risk_pct") or {}).items()
-        }
+        if not isfinite(peak) or peak <= 0:
+            raise ValueError("portfolio peak equity must be finite and positive")
+        positions: dict[str, float] = {}
+        for key, value in dict(metadata.get("position_risk_pct") or {}).items():
+            identity = str(key).strip()
+            risk_pct = float(value)
+            if not identity or not isfinite(risk_pct) or risk_pct <= 0:
+                raise ValueError("open position risk projection must be finite and positive")
+            positions[identity] = risk_pct
         correlations: dict[tuple[str, str], float] = {}
         for key, value in dict(metadata.get("correlations") or {}).items():
             if isinstance(key, (tuple, list)) and len(key) == 2:
