@@ -180,8 +180,9 @@ impl FixedPointOrderBook {
         // Run the CPU-heavy batch without holding Python's GIL. Work against a
         // private clone so a later sequence failure cannot partially mutate
         // the authoritative book.
+        let current = self.book.clone();
         let (candidate, applied) = py.detach(move || -> PyResult<(Book, usize)> {
-            let mut candidate = self.book.clone();
+            let mut candidate = current;
             let mut applied = 0;
             for (first, final_id, bids, asks, previous) in updates {
                 if candidate.apply(first, final_id, previous, bids, asks)? {
