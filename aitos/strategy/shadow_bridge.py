@@ -4,6 +4,7 @@ The bridge intentionally does not create TradeLifecycle orders. Strategy intents
 lack canonical stop, account, venue and Opportunity semantics; these proposals
 are evidence for review and evaluation only.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
