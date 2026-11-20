@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -57,7 +58,7 @@ class ShadowGateway(CapitalGateway):
 
 def inputs(mode=StrategyMode.SHADOW):
     context = StrategyContext(
-        now_ns=1_795_000_000_000_000_000,
+        now_ns=time.time_ns(),
         mode=mode,
         snapshots={
             "binance:futures:BTCUSDT": MarketSnapshot(
@@ -293,3 +294,22 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
             equity_usd=1_000.0,
             live_reservation=live_reservation,
         )
+
+
+def test_real_capital_gateway_reviews_candidate_without_live_authorization():
+    cycle, context, plans = inputs()
+    report = build_risk_governed_opportunities(
+        cycle,
+        context,
+        plans,
+        shadow_gateway_factory=CapitalGateway,
+        equity_usd=1_000.0,
+        live_reservation=object(),
+    )
+    assert len(report.opportunities) == 1
+    governed = report.opportunities[0]
+    assert governed.risk_receipt.capital_usd > 0
+    assert 0 < governed.risk_receipt.risk_budget_usd <= 5.0
+    assert governed.opportunity.is_production is False
+    assert governed.risk_receipt.execution_authorized is False
+    assert report.execution_eligible is False
