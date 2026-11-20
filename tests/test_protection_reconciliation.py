@@ -9,6 +9,7 @@ from aitos.execution.order_executor import OrderRequest, OrderResult
 from aitos.execution.protection_reconciliation import (
     audit_exchange_protection_inventory,
     recover_accepted_initial_stop_submissions,
+    recover_protection_handovers,
     require_live_account_exposure_reconciled,
 )
 from aitos.models.trade import TradeSide
@@ -791,3 +792,173 @@ async def test_restart_recovers_accepted_initial_take_profit_without_duplicate_o
     assert trade.tp_order_ids == ["algo:456"]
     assert store.unresolved() == []
     assert store.protection_intents()[0]["state"] == "APPLIED"
+
+
+class HandoverExecutor(ReadOnlyExecutor):
+    def __init__(self, scope, algo, old_statuses):
+        super().__init__(scope, [])
+        self.algo = algo
+        self.get_algo_order_by_client_id = AsyncMock(return_value=algo)
+        self.get_resting_order_status = AsyncMock(side_effect=old_statuses)
+        self.cancel_resting_order = AsyncMock()
+        self.acknowledge_protection = AsyncMock()
+        self.hedge_mode = False
+
+
+def replacement_algo(client_id="aitos-rpl-0001"):
+    row = inventory_row()
+    row.update(
+        algoId=456,
+        clientAlgoId=client_id,
+        orderType="STOP_MARKET",
+        triggerPrice="95.0",
+    )
+    return row
+
+
+def begin_replacement_handover(journal, trade_id="trade-1"):
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=95.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-rpl-0001",
+            reduce_only=True,
+            owner_trade_id=trade_id,
+        )
+    )
+    journal.begin_protection_handover(
+        handover_id="rpl-0001",
+        trade_id=trade_id,
+        symbol="BTCUSDT",
+        old_order_id="algo:123",
+        new_client_id="aitos-rpl-0001",
+    )
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_replacement_stop_before_cancelling_old_stop(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["NEW", "CANCELED"]
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append(
+            (value.sl_order_id, list(value.agent_consensus.get("_pending_stop_cancellations", [])))
+        )
+
+    report = await recover_protection_handovers(
+        executor, journal, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert executor.cancel_resting_order.await_count == 1
+    assert persisted == [
+        ("algo:456", ["algo:123"]),
+        ("algo:456", []),
+    ]
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+    assert journal.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_crash_after_old_stop_was_already_cancelled(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    journal.record_handover_new_order("rpl-0001", "algo:456")
+    journal.mark_handover_old_cancel_requested("rpl-0001")
+    executor = HandoverExecutor("paper-account", replacement_algo(), ["CANCELED"])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+
+    async def persist(_trade):
+        return None
+
+    report = await recover_protection_handovers(
+        executor, journal, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    executor.cancel_resting_order.assert_not_awaited()
+    assert trade.sl_order_id == "algo:456"
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_replacement_recovery_quarantines_old_stop_partial_fill(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    journal.record_handover_new_order("rpl-0001", "algo:456")
+    journal.mark_handover_old_cancel_requested("rpl-0001")
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["PARTIALLY_FILLED_TERMINAL"]
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+
+    report = await recover_protection_handovers(
+        executor, journal, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "partial" in report["blocked"][0]["reason"]
+    executor.cancel_resting_order.assert_not_awaited()
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCEL_REQUESTED"
+
+
+@pytest.mark.asyncio
+async def test_replacement_recovery_keeps_old_stop_when_new_algo_is_missing(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor("paper-account", None, [])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+
+    report = await recover_protection_handovers(
+        executor, journal, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert trade.sl_order_id == "algo:123"
+    executor.cancel_resting_order.assert_not_awaited()
+    assert journal.protection_handovers()[0]["state"] == "PREPARED"
