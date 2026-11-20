@@ -159,3 +159,18 @@ the resulting sample to `AdaptiveComputeRuntime.observe_process_pressure()`;
 the controller still applies its configured hysteresis before optional
 admission changes. This sampler does not create a background task or pause
 services by itself.
+
+
+## Automatic pressure feedback
+
+The paper scanner samples process CPU time and RSS once at the start of each
+candidate-analysis cycle. CPU utilization is normalized against the effective
+cgroup/affinity CPU count; memory utilization uses process RSS where available,
+with a conservative snapshot fallback. Queue lag is optional: when no queue
+telemetry provider is wired, it remains explicitly unknown rather than being
+reported as zero. The pressure controller still evaluates CPU and memory.
+
+The resulting hysteretic pressure state scales only the optional scanner
+capacity: NORMAL=100%, WARNING=50%, HIGH=25%, CRITICAL=0%. Protected symbols
+remain protected and may cause an explicit overcommit; no market-data,
+position-monitoring, risk, order-update, or execution-recovery work is shed.
