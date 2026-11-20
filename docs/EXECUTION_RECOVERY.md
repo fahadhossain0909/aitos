@@ -365,3 +365,85 @@ state, existing-position price/EIE management and reconciliation remain
 running; reservation release/promotion is skipped and new entries remain
 disabled. This is a safety fallback, not a substitute for an operator resolving
 the venue/local discrepancy.
+
+
+## Three-store crash/restart matrix and strategy shadow governance (2026-11-20)
+
+### Coordinated integration harness
+
+The opt-in integration test
+`tests/integration/test_execution_recovery_three_store.py` uses:
+
+- A real, isolated ClickHouse database created and dropped for the test.
+- A real SQLite `ExecutionIntentStore` on a temporary filesystem.
+- The production `BinanceFuturesOrderExecutor` request/signature/response path,
+  pointed only at a deterministic local Binance-compatible HTTP fixture. The
+  fixture verifies the API-key header and HMAC signature and returns controlled
+  algo/child snapshots. It never forwards a request to Binance and rejects any
+  non-GET route.
+- Full lifecycle application and process-object replacement, restoring only
+  from ClickHouse trade snapshots and the durable SQLite journal.
+
+The current fault matrix injects failure before the ClickHouse trade snapshot
+write and after that snapshot but before the SQLite child-fill watermark ACK.
+Both paths discard in-memory lifecycle state, reconstruct a new lifecycle from
+the durable snapshot, replay authenticated-style venue evidence, and assert
+that cumulative quantity/PnL are applied exactly once. A separate opt-in
+read-only smoke test can query authenticated Binance Futures demo-testnet
+positions and open algo inventory; it never submits, cancels, or replaces an
+order.
+
+Run the ClickHouse-backed matrix against an isolated ClickHouse server:
+
+```sh
+AITOS_ENABLE_THREE_STORE_FAULT_TESTS=1 \
+AITOS_FAULT_CLICKHOUSE_HOST=127.0.0.1 \
+AITOS_FAULT_CLICKHOUSE_PORT=8123 \
+pytest -q tests/integration/test_execution_recovery_three_store.py
+```
+
+The dedicated GitHub Actions workflow provisions ClickHouse and runs this
+matrix plus the repeated-restart/ambiguous-child and typed Opportunity tests.
+The external demo-testnet read-only preflight is separately opt-in through
+`AITOS_ENABLE_BINANCE_TESTNET_READONLY=1` and dedicated
+`BINANCE_FUTURES_TESTNET_API_KEY/SECRET` credentials.
+
+**Evidence boundary:** the local HTTP fixture validates the actual Binance
+executor's signed HTTP contract, not Binance's remote matching engine or
+exchange-side persistence semantics. The testnet smoke test verifies read-only
+connectivity only. An approved isolated testnet order/protection lifecycle
+and real venue-side crash reconciliation remain separate acceptance gates.
+
+### Repeated restart and ambiguous child handling
+
+Child-fill application now resolves exactly one durable protective intent by
+venue algo ID and owner trade ID before applying a fill. The actual child
+`origQty` must exactly equal the quantity recorded in that intent; matching
+symbol/side and `executedQty <= origQty` alone are insufficient. Client algo ID,
+owner, symbol, order type, reduce-only semantics, position side, and algo-to-child
+linkage are all validated. Missing, duplicate, cross-owner, or quantity-mismatched
+evidence remains quarantined.
+
+Regression tests replay a still-triggered partial child across four fresh
+lifecycle instances and exercise mismatched client ID, algo-child link, child
+order ID, symbol, side, original quantity, position side, and duplicate durable
+algo identity. No ambiguous case is allowed to change the trade snapshot.
+
+### Typed StrategyEngine to canonical Opportunity bridge
+
+`aitos/strategy/opportunity_bridge.py` converts a StrategyCycle shadow proposal
+to the canonical `aitos.models.trade.Opportunity` only when a typed explicit
+protection plan provides directionally valid stop and take-profit levels. It
+runs the candidate through an isolated `CapitalGateway` supplied by a factory,
+then attaches a typed `OpportunityRiskReceipt` containing the approved shadow
+capital and risk budget. The shadow gateway must not share the live reservation
+ledger. Duplicate canonical symbols, missing capital requests/allocations,
+missing protection, invalid confidence, and CapitalGateway vetoes are rejected.
+
+Even an accepted canonical Opportunity is always `is_production=False`,
+`approved_by=None`, `execution_authorized=False`, and
+`execution_eligible=False`. This bridge does not call TradeLifecycle, create
+orders, reserve live capital, or change StrategyEngine's existing run-cycle
+behavior. A later live integration requires a separately reviewed execution
+authorization and account/venue-specific contract; this bridge is not that
+authorization.
