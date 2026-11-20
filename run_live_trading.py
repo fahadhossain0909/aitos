@@ -255,26 +255,33 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         for reservation in gateway.reservation.snapshot():
             if reservation.symbol not in active_symbols:
                 gateway.release(reservation.symbol)
-    for trade in restored_trades:
-        if trade.leverage <= 0:
-            raise ValueError("restored exposure has invalid leverage")
-        gateway.reservation.restore_confirmed_exposure(
-            Reservation(
-                trade.symbol,
-                trade.position_size_usd / trade.leverage,
-                trade.risk_amount_usd,
+    if account_reconciliation_ready:
+        for trade in restored_trades:
+            if trade.leverage <= 0:
+                raise ValueError("restored exposure has invalid leverage")
+            gateway.reservation.restore_confirmed_exposure(
+                Reservation(
+                    trade.symbol,
+                    trade.position_size_usd / trade.leverage,
+                    trade.risk_amount_usd,
+                )
             )
+        gateway.assert_reservations_cover(
+            [
+                Reservation(
+                    trade.symbol,
+                    trade.position_size_usd / trade.leverage,
+                    trade.risk_amount_usd,
+                )
+                for trade in restored_trades
+            ]
         )
-    gateway.assert_reservations_cover(
-        [
-            Reservation(
-                trade.symbol,
-                trade.position_size_usd / trade.leverage,
-                trade.risk_amount_usd,
-            )
-            for trade in restored_trades
-        ]
-    )
+    else:
+        logger.critical(
+            "capital reservations were not reconciled because venue exposure is unverified; "
+            "runtime remains manage-only",
+            extra={"aitos_extra": {"new_entries_allowed": False}},
+        )
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
