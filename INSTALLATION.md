@@ -24,6 +24,8 @@ A separate **Tauri Embedded Desktop** candidate is also built for engineering ev
 
 # Method 1 — Install the Desktop Operator Console
 
+For page-by-page usage, sample/runtime workspace behavior, security boundaries and troubleshooting, see the [Desktop Operator User Manual](docs/USER_MANUAL.md).
+
 ## 1.1 What the desktop app does
 
 The native desktop package installs the AITOS read-only Operator Console session manager. It opens the bundled web interface in your default browser and runs a small authenticated gateway on loopback.
