@@ -462,8 +462,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             response.raise_for_status()
             return await response.json()
 
-    def _ws_base_url(self, streams: list[str]) -> str:
-        return self._get_ws_base_url(streams)[0]
+    @staticmethod
+    def _ws_base_url(streams: list[str]) -> str:
+        """Return the default USDⓈ-M market stream URL for legacy callers.
+
+        Environment-specific routing is performed by _get_ws_base_url on an
+        adapter instance. Keep this helper static for existing integrations
+        that use it as a class-level endpoint contract.
+        """
+        del streams  # All supported USDⓈ-M public streams use the market path.
+        return WS_MARKET_BASE_URL
 
     async def _raw_stream(
         self, streams: list[str], emit_reconnect: bool = False
