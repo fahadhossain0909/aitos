@@ -111,15 +111,35 @@ class SystemComponents:
             or current.event_bus != updated.event_bus
             or current.risk != updated.risk
             or current.hardware != updated.hardware
+            or (
+                current.runtime.adaptive_compute_enabled
+                != updated.runtime.adaptive_compute_enabled
+            )
+            or (
+                current.runtime.pressure_warning_hold_seconds
+                != updated.runtime.pressure_warning_hold_seconds
+            )
+            or (
+                current.runtime.pressure_high_hold_seconds
+                != updated.runtime.pressure_high_hold_seconds
+            )
+            or (
+                current.runtime.pressure_recovery_hold_seconds
+                != updated.runtime.pressure_recovery_hold_seconds
+            )
+            or (
+                current.runtime.pressure_minimum_transition_interval_seconds
+                != updated.runtime.pressure_minimum_transition_interval_seconds
+            )
             or current.storage != updated.storage
             or current.telemetry != updated.telemetry
             or current.positions != updated.positions
         )
         if restart_required:
             raise ValueError(
-                "Runtime reload changed mode, infrastructure, hardware, storage, "
-                "telemetry, risk ceilings or position-management tuning; restart AITOS "
-                "to apply this profile safely"
+                "Runtime reload changed mode, infrastructure, hardware, adaptive "
+                "compute policy, storage, telemetry, risk ceilings or position "
+                "management tuning; restart AITOS to apply this profile safely"
             )
         self.scanner.apply_tuning_settings(updated)
         self.trade_lifecycle.apply_tuning_settings(updated)
