@@ -119,6 +119,8 @@ The main CI workflow currently:
 - installs Pylint but does not run it;
 - runs Bandit and Safety checks and validates/builds the Docker image.
 
+Both production and staging image-build workflows explicitly set Docker Buildx `provenance: false` and `sbom: false`; the current release pipeline therefore does not publish those supply-chain attestations/SBOMs.
+
 **Observed in this PR:** the first full CI run failed at the repository-wide Black check because the newly merged compute workload preference condition in `aitos/compute/resource_governor.py` was not Black-formatted. The condition has been reformatted without changing its logic; a fresh full run is required on the updated head.
 
 **Required action:** introduce a measured, staged coverage threshold; run a maintainable full lint policy (for example Ruff or a scoped Flake8 profile) without enabling a repository-wide noisy gate; add container SBOM/vulnerability and provenance checks; add migration/restore and contract compatibility gates. Do not turn on a strict global lint threshold without first baselining existing violations.
