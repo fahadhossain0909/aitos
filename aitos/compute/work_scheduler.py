@@ -64,16 +64,34 @@ def admit_optional_work(
     position, risk, and execution services require separate capacity ownership.
     """
     if (
-        not isfinite(cpu_capacity_units)
+        isinstance(cpu_capacity_units, bool)
+        or not isinstance(cpu_capacity_units, (int, float))
+        or not isfinite(cpu_capacity_units)
         or cpu_capacity_units < 0
+        or isinstance(memory_capacity_mb, bool)
+        or not isinstance(memory_capacity_mb, int)
         or memory_capacity_mb < 0
+        or isinstance(pressure_level, bool)
+        or not isinstance(pressure_level, int)
         or pressure_level not in (0, 1, 2, 3)
-        or (max_admitted is not None and max_admitted < 0)
+        or (
+            max_admitted is not None
+            and (
+                isinstance(max_admitted, bool)
+                or not isinstance(max_admitted, int)
+                or max_admitted < 0
+            )
+        )
     ):
         raise ValueError("invalid optional-work admission limits")
 
+    if not isinstance(requests, (list, tuple)):
+        raise ValueError("requests must be a list or tuple")
+
     seen: set[str] = set()
     for request in requests:
+        if not isinstance(request, WorkloadRequest):
+            raise ValueError("requests must contain WorkloadRequest values")
         key = request.request_id.strip()
         if key in seen:
             raise ValueError(f"duplicate workload request_id: {key}")
