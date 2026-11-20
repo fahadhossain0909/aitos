@@ -1162,3 +1162,25 @@ def test_pressure_scaled_budget_also_scales_optional_worker_slots():
     assert critical.cpu_workers == 0
     assert critical.background_task_limit == 0
     assert critical.deep_analysis_slots == 0
+
+
+def test_resource_budget_can_pause_optional_workers_at_critical_pressure():
+    from aitos.compute.resource_governor import ResourceBudget
+
+    budget = ResourceBudget(
+        cpu_workers=0,
+        memory_budget_mb=0,
+        background_task_limit=0,
+        deep_analysis_slots=0,
+        cpu_capacity_units=0.0,
+    )
+    assert budget.cpu_workers == 0
+    assert budget.memory_budget_mb == 0
+    with pytest.raises(ValueError):
+        ResourceBudget(
+            cpu_workers=-1,
+            memory_budget_mb=0,
+            background_task_limit=0,
+            deep_analysis_slots=0,
+            cpu_capacity_units=0.0,
+        )
