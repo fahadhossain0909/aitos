@@ -114,6 +114,7 @@ def test_shadow_strategy_candidate_becomes_typed_canonical_opportunity():
         plans,
         shadow_gateway_factory=lambda: gateway,
         equity_usd=1_000.0,
+        live_reservation=object(),
     )
 
     assert len(report.opportunities) == 1
@@ -155,6 +156,7 @@ def test_capital_veto_produces_no_canonical_opportunity():
         plans,
         shadow_gateway_factory=lambda: ShadowGateway(eligible=False),
         equity_usd=1_000.0,
+        live_reservation=object(),
     )
     assert report.opportunities == ()
     assert report.rejected == (("amt-flow:binance:futures:BTCUSDT", "portfolio_risk_limit"),)
@@ -178,6 +180,7 @@ def test_missing_or_directionally_invalid_protection_is_rejected(plan):
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
+        live_reservation=object(),
     )
     assert report.opportunities == ()
 
@@ -191,4 +194,5 @@ def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
             plans,
             shadow_gateway_factory=ShadowGateway,
             equity_usd=1_000.0,
+            live_reservation=object(),
         )
