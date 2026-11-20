@@ -207,11 +207,16 @@ reconciliation invariants, not that report field. Do not bypass quarantine based
 a report or a model recommendation.
 
 The live runner also performs one signed Binance fee/funding history reconciliation
-before allowing fresh exposure. A transport/API failure or any income row that
-cannot be uniquely attributed to one internal trade keeps startup blocked; the
-durable cursor remains held before unresolved rows for later operator-led
-reconciliation. The background reconciler continues only after the startup gate
-has been evaluated.
+before allowing fresh exposure. Each income row is applied idempotently through
+the lifecycle and written through to the durable open/closed trade snapshot before
+the exchange-income cursor can advance; the subsequent event is a replayable
+notification, not the only persistence path. If the process fails after the trade
+write but before cursor advancement, the stable Binance transaction ID makes the
+retry idempotent. A trade-write, event-publication or transport/API failure, or any
+income row that cannot be uniquely attributed to one internal trade, keeps startup
+blocked; the durable cursor remains held before unresolved rows for later
+operator-led reconciliation. The background reconciler continues only after the
+startup gate has been evaluated.
 
 ## Closed-ledger integrity and SQL verification (2026-11-07)
 
