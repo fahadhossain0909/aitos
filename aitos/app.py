@@ -299,6 +299,16 @@ async def build_system(
             max_symbols=min(5000, max(100, len(scanner._symbols) * 2)),
             max_samples_per_metric=4096,
         )
+        # The scanner already has a fixed semaphore for its absolute ceiling.
+        # This second gate is the adaptive admission limit; lowering it never
+        # cancels in-flight scans and CRITICAL pressure pauses new optional work.
+        scanner._aitos_adaptive_concurrency_gate = AdaptiveConcurrencyGate(
+            max(1, int(tuning.analysis.lightweight_concurrency)),
+            initial_limit=min(
+                max(1, int(tuning.analysis.lightweight_concurrency)),
+                adaptive_compute.budget.cpu_workers,
+            ),
+        )
         scanner._aitos_protected_symbols = {scanner._reference_symbol}
         logger.info(
             "paper adaptive compute enabled",
