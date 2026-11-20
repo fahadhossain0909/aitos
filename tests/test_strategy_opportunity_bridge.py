@@ -152,7 +152,6 @@ def test_shadow_gateway_must_not_share_live_reservation_ledger():
             context,
             plans,
             shadow_gateway_factory=lambda: live,
-            equity_usd=1_000.0,
             live_gateway=live,
         )
 
@@ -205,7 +204,6 @@ def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
             context,
             plans,
             shadow_gateway_factory=ShadowGateway,
-            equity_usd=1_000.0,
             live_gateway=ShadowGateway(),
         )
 
@@ -302,7 +300,6 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
             context,
             plans,
             shadow_gateway_factory=lambda: shadow_gateway,
-            equity_usd=1_000.0,
             live_gateway=live_gateway,
         )
     live_gateway.reservation.close()
@@ -343,6 +340,5 @@ def test_stale_portfolio_risk_snapshot_fails_closed():
             stale,
             plans,
             shadow_gateway_factory=ShadowGateway,
-            equity_usd=1_000.0,
             live_gateway=ShadowGateway(),
         )
