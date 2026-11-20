@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from aitos.execution.intent_store import ExecutionUncertainError
-from aitos.execution.order_executor import OrderResult, SimulatedOrderExecutor
+from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
+from aitos.execution.order_executor import OrderRequest, OrderResult, SimulatedOrderExecutor
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -20,6 +20,20 @@ class Venue(SimulatedOrderExecutor):
         self.fraction = fraction
         self.success = success
         self.acknowledged = []
+        self._intent_store = None
+
+    @property
+    def intent_store(self):
+        return self._intent_store
+
+    @property
+    def execution_scope(self):
+        return self._intent_store.scope if self._intent_store is not None else None
+
+    def acknowledge_execution(self, client_order_id, trade_id):
+        self.acknowledged.append((client_order_id, trade_id))
+        if self._intent_store is not None:
+            self._intent_store.mark_applied(client_order_id, trade_id)
 
     async def submit_order(self, request):
         self.requests.append(request)
@@ -36,6 +50,39 @@ class Venue(SimulatedOrderExecutor):
 
     def acknowledge_execution(self, client_order_id, trade_id):
         self.acknowledged.append((client_order_id, trade_id))
+
+
+def attach_protection_journal(venue, tmp_path):
+    venue._intent_store = ExecutionIntentStore(
+        tmp_path / "protection-intents.sqlite", scope="live-one"
+    )
+    return venue._intent_store
+
+
+async def accept_replacement_stop(
+    venue, symbol, side, quantity, stop_price, *, owner_trade_id, client_order_id
+):
+    request = OrderRequest(
+        symbol=symbol,
+        side=side,
+        quantity=quantity,
+        reference_price=stop_price,
+        order_type="STOP_MARKET",
+        client_order_id=client_order_id,
+        reduce_only=True,
+        owner_trade_id=owner_trade_id,
+    )
+    venue.intent_store.begin(request)
+    result = OrderResult(
+        f"algo:{456}",
+        symbol,
+        side,
+        0,
+        stop_price,
+        client_order_id=client_order_id,
+    )
+    venue.intent_store.record_protection(client_order_id, result)
+    return result
 
 
 def trade():
@@ -206,15 +253,23 @@ async def test_full_fraction_reduction_uses_full_close_transition(
 
 
 async def test_terminal_partial_stop_reconciles_without_second_market_reduction(
-    event_bus, risk_engine
+    event_bus, risk_engine, tmp_path
 ):
     venue = Venue()
+    attach_protection_journal(venue, tmp_path)
     venue.get_resting_order_status = AsyncMock(return_value="PARTIALLY_FILLED_TERMINAL")
     venue.get_order_status = AsyncMock(
         return_value=dict(status="CANCELED", executedQty="1", avgPrice="97.5")
     )
     venue.place_stop_loss_order = AsyncMock(
-        return_value=OrderResult("replacement-sl", "BTCUSDT", TradeSide.LONG, 0, 98)
+        side_effect=lambda symbol, side, quantity, stop_price, **kwargs: accept_replacement_stop(
+            venue,
+            symbol,
+            side,
+            quantity,
+            stop_price,
+            **kwargs,
+        )
     )
     venue.cancel_resting_order = AsyncMock()
     value, position = await lifecycle(event_bus, risk_engine, venue)
@@ -264,11 +319,19 @@ async def test_failed_live_stop_replacement_never_cancels_existing_protection(
 
 
 async def test_failed_old_stop_cancellation_keeps_durable_recovery_identity(
-    event_bus, risk_engine
+    event_bus, risk_engine, tmp_path
 ):
     venue = Venue()
+    attach_protection_journal(venue, tmp_path)
     venue.place_stop_loss_order = AsyncMock(
-        return_value=OrderResult("replacement", "BTCUSDT", TradeSide.LONG, 0, 98)
+        side_effect=lambda symbol, side, quantity, stop_price, **kwargs: accept_replacement_stop(
+            venue,
+            symbol,
+            side,
+            quantity,
+            stop_price,
+            **kwargs,
+        )
     )
     venue.cancel_resting_order = AsyncMock(side_effect=OSError("isolated cancel fault"))
     value, position = await lifecycle(event_bus, risk_engine, venue)
