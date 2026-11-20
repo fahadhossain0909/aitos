@@ -241,7 +241,7 @@ class EventBus(AITOSModule):
                 last_id = group_info.get(
                     "last-delivered-id", group_info.get(b"last-delivered-id")
                 )
-                if lag is not None and int(lag) > 0 and last_id is not None:
+                if (lag is None or int(lag) > 0) and last_id is not None:
                     last_id_text = (
                         last_id.decode()
                         if isinstance(last_id, bytes)
