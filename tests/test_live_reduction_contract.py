@@ -88,6 +88,7 @@ async def accept_replacement_stop(
     venue.intent_store.record_protection(client_order_id, result)
     return result
 
+
 def replacement_stop_side_effect(venue):
     async def submit(symbol, side, quantity, stop_price, **kwargs):
         return await accept_replacement_stop(
@@ -95,7 +96,6 @@ def replacement_stop_side_effect(venue):
         )
 
     return submit
-
 
 
 def trade():
