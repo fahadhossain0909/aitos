@@ -62,6 +62,10 @@ class AttributedOrderExecutor(OrderExecutor):
         ] = {}
 
     @property
+    def requires_exchange_execution(self) -> bool:
+        return self.delegate.requires_exchange_execution
+
+    @property
     def supports_exchange_side_stops(self) -> bool:
         return self.delegate.supports_exchange_side_stops
 
