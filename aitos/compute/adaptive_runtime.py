@@ -33,6 +33,7 @@ class AdaptiveComputeRuntime:
     resources: ResourceSnapshot
     budget: ResourceBudget
     pressure_controller: ResourcePressureController
+    pressure_sampler: ProcessPressureSampler
 
     def update_pressure(
         self,
@@ -51,18 +52,25 @@ class AdaptiveComputeRuntime:
         )
 
     def observe_process_pressure(
-        self,
-        sampler: ProcessPressureSampler,
-        *,
-        queue_lag_seconds: float,
+        self, *, queue_lag_seconds: float | None = None
     ):
         """Sample host process pressure and update the shared hysteresis state."""
-        sample = sampler.sample(queue_lag_seconds=queue_lag_seconds)
+        sample = self.pressure_sampler.sample(queue_lag_seconds=queue_lag_seconds)
         return self.update_pressure(
             now_seconds=sample.observed_at,
             cpu_utilization_pct=sample.cpu_utilization_pct,
             memory_utilization_pct=sample.memory_utilization_pct,
             queue_lag_seconds=sample.queue_lag_seconds,
+        )
+
+    def budget_for_optional_work(self) -> ResourceBudget:
+        """Return a pressure-scaled budget for optional scanner/analysis work."""
+        level = int(self.pressure_controller.level)
+        scale = {0: 1.0, 1: 0.5, 2: 0.25, 3: 0.0}[level]
+        return replace(
+            self.budget,
+            memory_budget_mb=int(self.budget.memory_budget_mb * scale),
+            cpu_capacity_units=self.budget.cpu_capacity_units * scale,
         )
 
     def admit_optional_work(
@@ -123,4 +131,5 @@ def create_adaptive_compute_runtime(
         resources=constrained,
         budget=budget,
         pressure_controller=ResourcePressureController(policy),
+        pressure_sampler=ProcessPressureSampler(constrained),
     )
