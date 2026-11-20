@@ -54,9 +54,9 @@ Two different desktop tracks exist:
 1. Native Windows/Linux browser session manager, which launches the read-only console in the default browser and connects to an existing backend.
 2. Tauri embedded desktop shell, which packages the React workspace, a gateway sidecar and a separate local Trusted Signer Settings window.
 
-The installation guide previously described the session manager as the desktop application without explaining the Tauri candidate. The Tauri local build instructions omitted the required PyInstaller sidecar build, even though `tauri.conf.json` declares that sidecar as an external binary.
+The installation guide previously described the session manager as the desktop application without explaining the Tauri candidate. Its credential warning also generalized the session manager's no-exchange-key behavior to all desktop software, although the separate Tauri candidate has a local testnet credential-provisioning window. The Tauri local build instructions omitted the required PyInstaller sidecar build, even though `tauri.conf.json` declares that sidecar as an external binary.
 
-**Remediation in this branch:** clarify the two products, their release status and security boundaries; add a complete host-native sidecar build sequence and exact CI artifact names.
+**Remediation in this branch:** clarify the two products, their release status and security boundaries; distinguish operator-console credentials from testnet-only signer provisioning; add a complete host-native sidecar build sequence and exact CI artifact names.
 
 ### P1 — Unauthenticated Vite preview was exposed on all interfaces
 
