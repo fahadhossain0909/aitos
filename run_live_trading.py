@@ -228,7 +228,10 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
             "triggered protective child fills remain quarantined",
             extra={"aitos_extra": {"blocked": child_fill_recovery["blocked"]}},
         )
-    account_reconciliation_ready = True
+    child_reconciliation_ready = not child_fill_recovery["blocked"] and all(
+        item.get("terminal") is True for item in child_fill_recovery["applied"]
+    )
+    account_reconciliation_ready = child_reconciliation_ready
     try:
         await require_live_account_exposure_reconciled(
             raw_order_executor,
