@@ -193,12 +193,13 @@ class EventBus(AITOSModule):
             },
         )
 
-    async def queue_lag_seconds(self, *, max_groups: int = 32) -> float | None:
-        """Return oldest pending-delivery idle age across active subscriptions.
+    async def queue_lag_seconds(self, *, max_groups: int = 8) -> float | None:
+        """Return a bounded-sample pending-delivery idle-age pressure signal.
 
-        Redis pending idle age is a conservative pressure signal, not the age
-        of every unread stream entry. Query at most max_groups and one oldest
-        pending entry per group. Unknown remains None, never a fabricated zero.
+        XPENDING range ordering is by stream ID, not idle age. Inspect a bounded
+        prefix per group and take the maximum observed idle age instead of
+        incorrectly treating the first (lowest-ID) entry as the stalest one.
+        This is not total unread-stream lag; unknown remains None.
         """
         if (
             isinstance(max_groups, bool)
@@ -215,11 +216,11 @@ class EventBus(AITOSModule):
                         break
             if len(pairs) >= max_groups:
                 break
-        oldest_idle_ms = 0
+        max_observed_idle_ms = 0
         for stream_key, group in pairs:
             try:
                 pending = await self._redis.xpending_range(
-                    stream_key, group, min="-", max="+", count=1
+                    stream_key, group, min="-", max="+", count=100
                 )
             except (AttributeError, NotImplementedError):
                 return None
@@ -236,19 +237,19 @@ class EventBus(AITOSModule):
                     },
                 )
                 return None
-            if not pending:
-                continue
-            entry = pending[0]
-            idle_ms = entry.get(
-                "time_since_delivered", entry.get(b"time_since_delivered")
-            )
-            if idle_ms is None:
-                continue
-            try:
-                oldest_idle_ms = max(oldest_idle_ms, int(idle_ms))
-            except (TypeError, ValueError, OverflowError):
-                continue
-        return oldest_idle_ms / 1000.0 if pairs else None
+            for entry in pending or ():
+                idle_ms = entry.get(
+                    "time_since_delivered", entry.get(b"time_since_delivered")
+                )
+                if idle_ms is None:
+                    continue
+                try:
+                    max_observed_idle_ms = max(
+                        max_observed_idle_ms, int(idle_ms)
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    continue
+        return max_observed_idle_ms / 1000.0 if pairs else None
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for sub in self._subscriptions:
