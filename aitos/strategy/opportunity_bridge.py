@@ -205,6 +205,28 @@ def build_risk_governed_opportunities(
         or not isfinite(daily_pnl_pct)
     ):
         raise ValueError("portfolio loss-streak or daily PnL evidence is invalid")
+    risk_mappings = (
+        portfolio_risk.position_risk_pct,
+        portfolio_risk.position_sides,
+        portfolio_risk.position_instruments,
+        portfolio_risk.pending_order_risk_pct,
+        portfolio_risk.pending_order_symbols,
+        portfolio_risk.pending_order_sides,
+        portfolio_risk.correlations,
+    )
+    if any(not isinstance(value, Mapping) for value in risk_mappings):
+        raise TypeError("portfolio exposure and correlation maps must be typed mappings")
+    position_keys = set(portfolio_risk.position_risk_pct)
+    if (
+        set(portfolio_risk.position_sides) != position_keys
+        or set(portfolio_risk.position_instruments) != position_keys
+    ):
+        raise ValueError("open-position risk, side, and instrument identities differ")
+    for position_id, side_value in portfolio_risk.position_sides.items():
+        if str(side_value).upper() not in {"LONG", "SHORT"}:
+            raise ValueError("open-position side snapshot is invalid")
+        if not str(portfolio_risk.position_instruments[position_id]).strip():
+            raise ValueError("open-position instrument snapshot is invalid")
     for symbol, risk_pct in portfolio_risk.position_risk_pct.items():
         try:
             risk_value = float(risk_pct)
@@ -241,6 +263,7 @@ def build_risk_governed_opportunities(
         if (
             not isinstance(pair, str)
             or ":" not in pair
+            or not all(part.strip() for part in pair.split(":", 1))
             or not isfinite(correlation_value)
             or not -1.0 <= correlation_value <= 1.0
         ):
