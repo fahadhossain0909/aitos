@@ -223,7 +223,7 @@ def test_batch_rejects_abi_conversion_before_any_mutation():
     assert book.snapshot(5) == (10, [(100, 1)], [(102, 1)])
 
 
-def test_batch_keeps_prior_valid_events_when_later_delta_is_semantically_invalid():
+def test_batch_is_atomic_when_later_delta_is_semantically_invalid():
     book = PythonFixedPointOrderBook(10, [(100, 1)], [(102, 1)])
     updates = [
         (10, 11, [(101, 2)], [], None),
@@ -231,7 +231,7 @@ def test_batch_keeps_prior_valid_events_when_later_delta_is_semantically_invalid
     ]
     with pytest.raises(ValueError, match="quantity units"):
         book.apply_deltas(updates)
-    assert book.snapshot(5) == (11, [(101, 2), (100, 1)], [(102, 1)])
+    assert book.snapshot(5) == (10, [(100, 1)], [(102, 1)])
 
 
 def test_reference_batch_sequence_failure_is_atomic():
