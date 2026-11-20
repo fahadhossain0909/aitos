@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from math import ceil, isfinite
 from threading import RLock
 from time import monotonic
+from typing import Callable
 
 from aitos.compute.workload_estimator import SymbolTelemetry
 
@@ -30,10 +31,8 @@ class TelemetryCollectorStats:
 class SymbolTelemetryCollector:
     """Collect bounded monotonic-time samples and export estimator inputs.
 
-    This collector is process-local and intentionally has no persistence or
-    network side effects. A durable telemetry pipeline can feed the same
-    SymbolTelemetry contract later. Old samples are pruned on writes/snapshot;
-    the per-symbol registry is LRU-bounded to prevent unbounded cardinality.
+    Process-local and side-effect free. The registry is LRU-bounded, each
+    metric uses a bounded deque, and samples expire outside the rolling window.
     """
 
     def __init__(
@@ -42,31 +41,41 @@ class SymbolTelemetryCollector:
         window_seconds: float = 60.0,
         max_symbols: int = 5000,
         max_samples_per_metric: int = 4096,
-        clock=monotonic,
+        clock: Callable[[], float] = monotonic,
     ) -> None:
         if (
             not isfinite(window_seconds)
             or window_seconds < 1
+            or isinstance(max_symbols, bool)
+            or not isinstance(max_symbols, int)
             or max_symbols < 1
+            or isinstance(max_samples_per_metric, bool)
+            or not isinstance(max_samples_per_metric, int)
             or max_samples_per_metric < 1
         ):
             raise ValueError("telemetry collector bounds must be positive")
+        if not callable(clock):
+            raise TypeError("clock must be callable")
         self.window_seconds = float(window_seconds)
-        self.max_symbols = int(max_symbols)
-        self.max_samples_per_metric = int(max_samples_per_metric)
+        self.max_symbols = max_symbols
+        self.max_samples_per_metric = max_samples_per_metric
         self._clock = clock
         self._windows: OrderedDict[str, _SymbolWindow] = OrderedDict()
         self._lock = RLock()
 
     @staticmethod
     def _symbol_key(symbol: str) -> str:
+        if not isinstance(symbol, str):
+            raise TypeError("symbol must be a string")
         key = symbol.strip().upper()
         if not key:
             raise ValueError("symbol cannot be empty")
         return key
 
     def _timestamp(self, timestamp: float | None) -> float:
-        now = self._timestamp(timestamp)
+        now = self._clock() if timestamp is None else float(timestamp)
+        if not isfinite(now) or now < 0:
+            raise ValueError("timestamp must be finite and non-negative")
         return now
 
     def _window(self, symbol: str, now: float) -> _SymbolWindow:
@@ -86,6 +95,13 @@ class SymbolTelemetryCollector:
             self._windows.popitem(last=False)
         return window
 
+    @staticmethod
+    def _ensure_monotonic(samples: deque, now: float, metric: str) -> None:
+        if samples:
+            last = samples[-1][0] if metric == "depth" else samples[-1]
+            if now < last:
+                raise ValueError(f"{metric} timestamps must be monotonic per symbol")
+
     def _prune(self, window: _SymbolWindow, cutoff: float) -> None:
         for samples in (window.events, window.analyses):
             while samples and samples[0] < cutoff:
@@ -94,35 +110,34 @@ class SymbolTelemetryCollector:
             window.depths.popleft()
 
     def record_event(self, symbol: str, *, timestamp: float | None = None) -> None:
-        now = self._clock() if timestamp is None else float(timestamp)
-        if not isfinite(now) or now < 0:
-            raise ValueError("timestamp must be finite and non-negative")
+        now = self._timestamp(timestamp)
         with self._lock:
             window = self._window(symbol, now)
-            if window.events and now < window.events[-1]:
-                raise ValueError("event timestamps must be monotonic per symbol")
+            self._ensure_monotonic(window.events, now, "event")
             self._prune(window, now - self.window_seconds)
             window.events.append(now)
 
     def record_book_depth(
         self, symbol: str, depth_levels: int, *, timestamp: float | None = None
     ) -> None:
-        if depth_levels < 0:
-            raise ValueError("depth_levels must be non-negative")
+        if (
+            isinstance(depth_levels, bool)
+            or not isinstance(depth_levels, int)
+            or depth_levels < 0
+        ):
+            raise ValueError("depth_levels must be a non-negative integer")
         now = self._timestamp(timestamp)
         with self._lock:
             window = self._window(symbol, now)
-            if window.depths and now < window.depths[-1][0]:
-                raise ValueError("depth timestamps must be monotonic per symbol")
+            self._ensure_monotonic(window.depths, now, "depth")
             self._prune(window, now - self.window_seconds)
-            window.depths.append((now, int(depth_levels)))
+            window.depths.append((now, depth_levels))
 
     def record_analysis(self, symbol: str, *, timestamp: float | None = None) -> None:
         now = self._timestamp(timestamp)
         with self._lock:
             window = self._window(symbol, now)
-            if window.analyses and now < window.analyses[-1]:
-                raise ValueError("analysis timestamps must be monotonic per symbol")
+            self._ensure_monotonic(window.analyses, now, "analysis")
             self._prune(window, now - self.window_seconds)
             window.analyses.append(now)
 
@@ -143,17 +158,17 @@ class SymbolTelemetryCollector:
             window = self._windows.get(key)
             if window is None:
                 return None
-            self._prune(window, current - self.window_seconds)
+            cutoff = current - self.window_seconds
+            self._prune(window, cutoff)
             self._windows.move_to_end(key)
             bucket_count = max(1, ceil(self.window_seconds))
             buckets = [0] * bucket_count
-            cutoff = current - self.window_seconds
             for event_time in window.events:
                 age = current - event_time
                 if 0 <= age < self.window_seconds:
                     bucket = min(bucket_count - 1, int(age))
                     buckets[bucket] += 1
-            event_rate = self._percentile([float(v) for v in buckets], 0.95)
+            event_rate = self._percentile([float(value) for value in buckets], 0.95)
             analysis_count = sum(
                 1 for value in window.analyses if cutoff <= value <= current
             )
@@ -170,7 +185,9 @@ class SymbolTelemetryCollector:
                 symbol=key,
                 p95_event_rate_per_second=event_rate,
                 p95_book_depth_levels=depth,
-                analysis_runs_per_minute=(analysis_count * 60.0 / self.window_seconds),
+                analysis_runs_per_minute=(
+                    analysis_count * 60.0 / self.window_seconds
+                ),
                 sample_count=sample_count,
             )
 
@@ -179,12 +196,12 @@ class SymbolTelemetryCollector:
             return TelemetryCollectorStats(
                 tracked_symbols=len(self._windows),
                 retained_event_samples=sum(
-                    len(w.events) for w in self._windows.values()
+                    len(window.events) for window in self._windows.values()
                 ),
                 retained_depth_samples=sum(
-                    len(w.depths) for w in self._windows.values()
+                    len(window.depths) for window in self._windows.values()
                 ),
                 retained_analysis_samples=sum(
-                    len(w.analyses) for w in self._windows.values()
+                    len(window.analyses) for window in self._windows.values()
                 ),
             )
