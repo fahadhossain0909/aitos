@@ -63,6 +63,9 @@ from aitos.execution.intent_store import (
     ExecutionRecoveryRequired,
     ExecutionUncertainError,
 )
+from aitos.execution.protection_child_reconciliation import (
+    calculate_protection_child_fill_delta,
+)
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
@@ -2667,6 +2670,226 @@ class TradeLifecycle(AITOSModule):
         if hasattr(trade, "_aitos_filled_resting_order_ids"):
             del trade._aitos_filled_resting_order_ids
 
+    async def apply_triggered_protection_child_fill(
+        self, trade_id: str, algo: Mapping[str, Any], child: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Apply a verified cumulative child fill exactly once to the trade ledger.
+
+        The ClickHouse trade snapshot stores the cumulative child marker in the
+        same payload as quantity/PnL. SQLite's watermark is advanced only after
+        that snapshot write. On restart, a snapshot-ahead-of-SQLite state is
+        completed idempotently; SQLite-ahead-of-snapshot is quarantined.
+        """
+        if not self._order_executor.requires_exchange_execution:
+            raise RuntimeError("protective child reconciliation requires live execution")
+        self._require_execution_writer()
+        if not isinstance(algo, Mapping) or not isinstance(child, Mapping):
+            raise ValueError("authenticated algo and child snapshots are required")
+        async with self._execution_locks.setdefault(trade_id, asyncio.Lock()):
+            trade = self._open_trades.get(trade_id)
+            if trade is None:
+                raise TradeNotFoundError(trade_id)
+            intent_store = getattr(self._order_executor, "intent_store", None)
+            if intent_store is None:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, trade_id, "durable child-fill journal unavailable"
+                )
+            algo_id_raw = algo.get("algoId")
+            if isinstance(algo_id_raw, bool) or not str(algo_id_raw or "").isdigit():
+                raise ValueError("protective algo ID is invalid")
+            algo_id = str(int(algo_id_raw))
+            algo_order_id = f"algo:{algo_id}"
+            child_id = str(child.get("orderId", ""))
+            order_type = str(algo.get("orderType", ""))
+            if order_type == "STOP_MARKET":
+                if trade.sl_order_id != algo_order_id:
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol, algo_order_id, "triggered stop is not owned by restored trade"
+                    )
+            elif order_type == "TAKE_PROFIT_MARKET":
+                if algo_order_id not in trade.tp_order_ids:
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol, algo_order_id, "triggered TP is not owned by restored trade"
+                    )
+            else:
+                raise ValueError("unsupported protective algo type")
+
+            expected_side = "SELL" if trade.side == TradeSide.LONG else "BUY"
+            expected_position_side = (
+                trade.side.value if bool(getattr(self._order_executor, "hedge_mode", False))
+                else "BOTH"
+            )
+            marker_map = trade.agent_consensus.setdefault(
+                "_applied_protection_child_fills", {}
+            )
+            if not isinstance(marker_map, dict):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id, "trade child-fill marker is malformed"
+                )
+            marker_key = f"{algo_id}:{child_id}"
+            marker = marker_map.get(marker_key, {})
+            if not isinstance(marker, dict):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id, "trade child-fill marker identity is malformed"
+                )
+            watermark = await asyncio.to_thread(
+                intent_store.protection_child_watermark, algo_id, child_id
+            )
+            if watermark is not None and not marker:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id,
+                    "SQLite child-fill watermark is ahead of the durable trade snapshot",
+                )
+            previous_quantity = marker.get("cumulative_quantity", "0")
+            previous_quote = marker.get("cumulative_quote", "0")
+            if watermark is not None:
+                from decimal import Decimal
+
+                if (
+                    Decimal(str(watermark["cumulative_quantity"]))
+                    > Decimal(str(previous_quantity))
+                    or Decimal(str(watermark["cumulative_quote"]))
+                    > Decimal(str(previous_quote))
+                ):
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol, algo_order_id,
+                        "SQLite child-fill watermark exceeds trade snapshot marker",
+                    )
+            delta = calculate_protection_child_fill_delta(
+                dict(algo),
+                dict(child),
+                expected_symbol=trade.symbol,
+                expected_side=expected_side,
+                expected_algo_id=algo_id,
+                previously_applied_quantity=previous_quantity,
+                previously_applied_quote=previous_quote,
+                expected_position_side=expected_position_side,
+            )
+            if delta.delta_quantity > trade.quantity + max(1e-12, trade.quantity * 1e-9):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id,
+                    "child cumulative fill exceeds restored open trade quantity",
+                )
+
+            marker_map[marker_key] = {
+                "algo_id": algo_id,
+                "child_order_id": child_id,
+                "cumulative_quantity": str(delta.cumulative_quantity),
+                "cumulative_quote": str(delta.cumulative_quote),
+                "status": delta.status,
+            }
+            pending = trade.agent_consensus.setdefault(
+                "_pending_stop_cancellations", []
+            )
+            if not isinstance(pending, list):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id, "pending protection state is malformed"
+                )
+            if delta.status in {"NEW", "PARTIALLY_FILLED"} and algo_order_id not in pending:
+                pending.append(algo_order_id)
+
+            try:
+                if delta.delta_quantity > 0:
+                    result = OrderResult(
+                        order_id=child_id,
+                        symbol=trade.symbol,
+                        side=trade.side,
+                        filled_quantity=float(delta.delta_quantity),
+                        fill_price=float(delta.average_price),
+                    )
+                    if delta.delta_quantity >= trade.quantity - max(
+                        1e-12, trade.quantity * 1e-9
+                    ):
+                        if delta.status not in {
+                            "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH"
+                        }:
+                            raise ExecutionRecoveryRequired(
+                                trade.symbol, algo_order_id,
+                                "full-size child fill is not terminal",
+                            )
+                        self._confirmed_reductions[trade_id] = (
+                            f"resting:{algo_order_id}", result
+                        )
+                        try:
+                            await self._close_trade_unlocked(
+                                trade_id, float(delta.average_price),
+                                "exchange_protective_child_filled",
+                            )
+                        finally:
+                            self._confirmed_reductions.pop(trade_id, None)
+                    else:
+                        await self._partial_close_unlocked(
+                            trade,
+                            float(delta.average_price),
+                            float(delta.delta_quantity / Decimal(str(trade.quantity))),
+                            execution_result=result,
+                            refresh_protection=False,
+                        )
+                else:
+                    trade.updated_at = utc_now_iso()
+                    await self._execution_state_writer(trade)
+                    await self._execution_position_verifier()
+
+                # The durable trade snapshot (including its marker) must exist
+                # before either SQLite acknowledgement or terminal transition.
+                await asyncio.to_thread(
+                    intent_store.mark_protection_child_applied,
+                    algo_id=algo_id,
+                    child_order_id=child_id,
+                    trade_id=trade_id,
+                    symbol=trade.symbol,
+                    cumulative_quantity=str(delta.cumulative_quantity),
+                    cumulative_quote=str(delta.cumulative_quote),
+                    status=delta.status,
+                )
+                terminal = delta.status in {
+                    "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"
+                }
+                if terminal:
+                    await asyncio.to_thread(
+                        intent_store.mark_protection_terminal,
+                        algo_order_id,
+                        symbol=trade.symbol,
+                        status=delta.status,
+                        executed_quantity=float(delta.cumulative_quantity),
+                    )
+                    if trade_id in self._open_trades:
+                        if order_type == "STOP_MARKET" and trade.quantity > 0:
+                            # The old stop is terminal. A fresh stop is placed
+                            # make-before-break against the remaining position.
+                            await self._refresh_live_protection(trade)
+                        elif order_type == "TAKE_PROFIT_MARKET":
+                            while algo_order_id in trade.tp_order_ids:
+                                trade.tp_order_ids.remove(algo_order_id)
+                            index = next(
+                                (
+                                    i for i, value in enumerate(trade.take_profit_levels)
+                                    if i < len(trade.tp_order_ids)
+                                ),
+                                None,
+                            )
+                            if index is not None and trade.take_profit_levels:
+                                trade.take_profit_levels.pop(index)
+                            while algo_order_id in pending:
+                                pending.remove(algo_order_id)
+                            trade.updated_at = utc_now_iso()
+                            await self._execution_state_writer(trade)
+                return {
+                    "trade_id": trade_id,
+                    "algo_order_id": algo_order_id,
+                    "child_order_id": child_id,
+                    "delta_quantity": str(delta.delta_quantity),
+                    "delta_quote": str(delta.delta_quote),
+                    "status": delta.status,
+                    "terminal": terminal,
+                    "safe_to_resume": False,
+                }
+            except BaseException:
+                # Any failure after a venue fill leaves the trade/order
+                # relationship ambiguous. Do not accept new exposure in-process.
+                self._execution_recovery_required = True
+                raise
+
     async def _partial_close(
         self,
         trade: Trade,
@@ -2674,6 +2897,7 @@ class TradeLifecycle(AITOSModule):
         close_fraction: float,
         *,
         consume_tp: bool = False,
+        refresh_protection: bool = True,
     ) -> None:
         if not self._order_executor.requires_exchange_execution:
             return await self._partial_close_unlocked(trade, price, close_fraction)
@@ -2694,6 +2918,7 @@ class TradeLifecycle(AITOSModule):
         *,
         execution_result: OrderResult | None = None,
         consume_tp: bool = False,
+        refresh_protection: bool = True,
     ) -> None:
         if not _valid_market_price(price):
             raise ValueError(f"price must be a finite positive number, got {price!r}")
@@ -2754,7 +2979,11 @@ class TradeLifecycle(AITOSModule):
             ]
             if consumed_tp and trade.take_profit_levels:
                 trade.take_profit_levels.pop(0)
-            if self._use_exchange_side_stops and trade.quantity > 0:
+            if (
+                refresh_protection
+                and self._use_exchange_side_stops
+                and trade.quantity > 0
+            ):
                 await self._refresh_live_protection(trade)
             await self._commit_live_execution(trade)
         await self._event_bus.publish(
