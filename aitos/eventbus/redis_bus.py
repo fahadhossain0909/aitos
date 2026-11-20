@@ -243,7 +243,9 @@ class EventBus(AITOSModule):
                 )
                 if lag is not None and int(lag) > 0 and last_id is not None:
                     last_id_text = (
-                        last_id.decode() if isinstance(last_id, bytes) else str(last_id)
+                        last_id.decode()
+                        if isinstance(last_id, bytes)
+                        else str(last_id)
                     )
                     unread = await self._redis.xrange(
                         stream_key, min=f"({last_id_text}", max="+", count=1
