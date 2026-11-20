@@ -163,14 +163,16 @@ services by itself.
 
 ## Automatic pressure feedback
 
-The paper scanner samples process CPU time and RSS once at the start of each
-candidate-analysis cycle. CPU utilization is normalized against the effective
-cgroup/affinity CPU count; memory utilization uses process RSS where available,
-with a conservative snapshot fallback. Queue lag is sampled from the Redis EventBus pending-delivery idle age for a
-bounded number of active subscription groups. This is a conservative stuck-work
-signal, not a measurement of every unread stream entry; unsupported Redis
-clients and missing subscriptions remain explicitly unknown rather than being
-reported as zero. The pressure controller still evaluates CPU and memory.
+The paper scanner samples process CPU time and RSS at the start and end of
+each candidate-analysis batch. CPU utilization is normalized against the
+effective cgroup/affinity CPU count; memory utilization uses process RSS where
+available, with a conservative snapshot fallback. Redis queue age is sampled
+across a bounded number of active subscription groups: the sampler combines
+the oldest unread stream-entry age (from group last-delivered ID plus one
+XRANGE lookup) with the maximum idle age among a bounded set of pending
+deliveries. Unsupported Redis metadata and missing groups remain explicitly
+unknown rather than being reported as zero. The pressure controller evaluates
+CPU, memory, and this queue-age signal.
 
 The resulting hysteretic pressure state scales only the optional scanner
 capacity: NORMAL=100%, WARNING=50%, HIGH=25%, CRITICAL=0%. Protected symbols
