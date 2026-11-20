@@ -79,9 +79,24 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         environment: str | None = None,
     ) -> None:
         self._session_factory = session_factory
-        selected_environment = (
-            environment or os.getenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", "mainnet")
-        ).strip().lower()
+        configured_environment = (
+            environment
+            if environment is not None
+            else os.getenv("AITOS_BINANCE_FUTURES_ENVIRONMENT")
+        )
+        if configured_environment is None:
+            # Preserve the repository's existing paper/staging convention.
+            # The explicit AITOS variable always takes precedence.
+            legacy_testnet = os.getenv("BINANCE_TESTNET")
+            if legacy_testnet is None:
+                configured_environment = "mainnet"
+            elif legacy_testnet.strip().lower() in {"1", "true", "yes", "on"}:
+                configured_environment = "testnet"
+            elif legacy_testnet.strip().lower() in {"0", "false", "no", "off"}:
+                configured_environment = "mainnet"
+            else:
+                raise ValueError("BINANCE_TESTNET must be a boolean value")
+        selected_environment = configured_environment.strip().lower()
         if selected_environment not in {"mainnet", "testnet"}:
             raise ValueError(
                 "AITOS_BINANCE_FUTURES_ENVIRONMENT must be 'mainnet' or 'testnet'"
