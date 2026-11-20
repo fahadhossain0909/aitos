@@ -67,6 +67,7 @@ Click any topic below to jump directly to that section.
 - [Binance Spot integration and rollout limits](docs/SPOT_MARKET_INTEGRATION.md)
 - [Architecture Evolution Program](engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md)
 - [System audit and open acceptance gates](engineering/SYSTEM_AUDIT_2026-11-20.md)
+- [Financial state authority & reconciliation contract](engineering/FINANCIAL_STATE_AUTHORITY_AND_RECONCILIATION.md)
 
 ---
 
