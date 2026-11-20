@@ -13,7 +13,8 @@ class PendingRedis:
 
     async def xpending_range(self, stream, group, *, min, max, count):
         self.calls.append((stream, group, min, max, count))
-        return [{"time_since_delivered": self.idle_ms}]
+        values = self.idle_ms if isinstance(self.idle_ms, list) else [self.idle_ms]
+        return [{"time_since_delivered": value} for value in values[:count]]
 
 
 @pytest.mark.asyncio
@@ -30,7 +31,7 @@ async def test_queue_lag_seconds_reports_oldest_pending_idle_age():
 
     assert lag == 12.5
     assert len(redis.calls) == 2
-    assert all(call[4] == 1 for call in redis.calls)
+    assert all(call[4] == 100 for call in redis.calls)
 
 
 @pytest.mark.asyncio
@@ -80,3 +81,18 @@ def test_queue_lag_seconds_rejects_invalid_query_bound():
     bus = EventBus(PendingRedis())
     with pytest.raises(ValueError):
         asyncio.run(bus.queue_lag_seconds(max_groups=0))
+
+
+
+@pytest.mark.asyncio
+async def test_queue_lag_seconds_uses_max_idle_not_first_stream_id():
+    # XPENDING is ordered by stream ID, which is not the same as idle age.
+    redis = PendingRedis(idle_ms=[250, 18_000, 900])
+    bus = EventBus(redis)
+    bus._known_topics.add("market.trade.BTCUSDT")
+    bus._subscriptions = [
+        SimpleNamespace(topic_pattern="market.trade.*", group="scanner")
+    ]
+
+    assert await bus.queue_lag_seconds() == 18.0
+    assert redis.calls[0][4] == 100
