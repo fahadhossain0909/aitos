@@ -879,3 +879,12 @@ def test_process_pressure_sampler_rejects_clock_regression():
     wall[0] = 1.0
     with pytest.raises(ValueError, match="monotonic"):
         sampler.sample(queue_lag_seconds=0)
+
+
+
+def test_uncalibrated_workload_estimator_preserves_requested_symbol():
+    from aitos.compute.workload_estimator import estimate_symbol_workload
+
+    estimate = estimate_symbol_workload(None, symbol="ethusdt")
+    assert estimate.calibrated is False
+    assert estimate.workload.symbol == "ETHUSDT"
