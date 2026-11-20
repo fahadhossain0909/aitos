@@ -2136,12 +2136,8 @@ class OpportunityScanner(AITOSModule):
                             "protected_overcommit": (
                                 capacity_plan.overcommitted_by_protected_work
                             ),
-                            "cpu_capacity_units": (
-                                optional_budget.cpu_capacity_units
-                            ),
-                            "memory_budget_mb": (
-                                optional_budget.memory_budget_mb
-                            ),
+                            "cpu_capacity_units": (optional_budget.cpu_capacity_units),
+                            "memory_budget_mb": (optional_budget.memory_budget_mb),
                             "pressure_level": int(
                                 getattr(
                                     getattr(
