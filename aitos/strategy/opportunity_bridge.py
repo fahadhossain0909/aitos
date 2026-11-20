@@ -221,7 +221,9 @@ def build_risk_governed_opportunities(
         portfolio_risk.correlations,
     )
     if any(not isinstance(value, Mapping) for value in risk_mappings):
-        raise TypeError("portfolio exposure and correlation maps must be typed mappings")
+        raise TypeError(
+            "portfolio exposure and correlation maps must be typed mappings"
+        )
     position_keys = set(portfolio_risk.position_risk_pct)
     if (
         set(portfolio_risk.position_sides) != position_keys
@@ -391,7 +393,10 @@ def build_risk_governed_opportunities(
             and portfolio_risk.liquidation_buffer_pct is None
         ):
             rejected.append(
-                (key, "leveraged proposal requires a current liquidation-buffer snapshot")
+                (
+                    key,
+                    "leveraged proposal requires a current liquidation-buffer snapshot",
+                )
             )
             continue
         try:
