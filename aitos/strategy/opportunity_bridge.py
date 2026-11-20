@@ -8,7 +8,7 @@ reservations.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Callable, Mapping
@@ -19,6 +19,25 @@ from aitos.models.trade import Opportunity, TradeSide
 from .contracts import StrategyContext, StrategyMode
 from .engine import StrategyCycle
 from .shadow_bridge import build_strategy_shadow_report
+
+
+@dataclass(frozen=True)
+class StrategyPortfolioRiskContext:
+    """Point-in-time account exposure required for shadow capital governance."""
+
+    snapshot_id: str
+    observed_at_ns: int
+    equity_peak_usd: float
+    position_risk_pct: Mapping[str, float] = field(default_factory=dict)
+    position_sides: Mapping[str, str] = field(default_factory=dict)
+    position_instruments: Mapping[str, str] = field(default_factory=dict)
+    pending_order_risk_pct: Mapping[str, float] = field(default_factory=dict)
+    pending_order_symbols: Mapping[str, str] = field(default_factory=dict)
+    pending_order_sides: Mapping[str, str] = field(default_factory=dict)
+    correlations: Mapping[str, float] = field(default_factory=dict)
+    daily_pnl_pct: float = 0.0
+    consecutive_losses: int = 0
+    liquidation_buffer_pct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +142,7 @@ def _close_shadow_reservation(gateway: CapitalGateway) -> None:
 def build_risk_governed_opportunities(
     cycle: StrategyCycle,
     context: StrategyContext,
+    portfolio_risk: StrategyPortfolioRiskContext,
     protection_plans: Mapping[str, StrategyProtectionPlan],
     *,
     shadow_gateway_factory: Callable[[], CapitalGateway],
@@ -154,6 +174,61 @@ def build_risk_governed_opportunities(
         raise ValueError("max_positions must be a positive integer")
     if not callable(shadow_gateway_factory):
         raise TypeError("isolated shadow CapitalGateway factory is required")
+    if not isinstance(portfolio_risk, StrategyPortfolioRiskContext):
+        raise TypeError("typed point-in-time portfolio risk context is required")
+    if (
+        not portfolio_risk.snapshot_id.strip()
+        or isinstance(portfolio_risk.observed_at_ns, bool)
+        or not isinstance(portfolio_risk.observed_at_ns, int)
+        or portfolio_risk.observed_at_ns <= 0
+        or abs(context.now_ns - portfolio_risk.observed_at_ns) > 5_000_000_000
+    ):
+        raise ValueError("portfolio risk snapshot is missing, invalid, or stale")
+    if (
+        not isfinite(portfolio_risk.equity_peak_usd)
+        or portfolio_risk.equity_peak_usd < equity_usd
+    ):
+        raise ValueError("portfolio peak equity must be finite and cover current equity")
+    if (
+        isinstance(portfolio_risk.consecutive_losses, bool)
+        or not isinstance(portfolio_risk.consecutive_losses, int)
+        or portfolio_risk.consecutive_losses < 0
+        or not isfinite(portfolio_risk.daily_pnl_pct)
+    ):
+        raise ValueError("portfolio loss-streak or daily PnL evidence is invalid")
+    for symbol, risk_pct in portfolio_risk.position_risk_pct.items():
+        if not str(symbol).strip() or not isfinite(float(risk_pct)) or risk_pct <= 0:
+            raise ValueError("open-position risk snapshot is invalid")
+    pending_keys = (
+        set(portfolio_risk.pending_order_risk_pct),
+        set(portfolio_risk.pending_order_symbols),
+        set(portfolio_risk.pending_order_sides),
+    )
+    if not (pending_keys[0] == pending_keys[1] == pending_keys[2]):
+        raise ValueError("pending-order risk snapshot identities do not match")
+    for order_id, risk_pct in portfolio_risk.pending_order_risk_pct.items():
+        if (
+            not str(order_id).strip()
+            or not isfinite(float(risk_pct))
+            or risk_pct <= 0
+            or not str(portfolio_risk.pending_order_symbols[order_id]).strip()
+            or str(portfolio_risk.pending_order_sides[order_id]).upper()
+            not in {"LONG", "SHORT"}
+        ):
+            raise ValueError("pending-order risk snapshot is invalid")
+    for pair, correlation in portfolio_risk.correlations.items():
+        if (
+            not isinstance(pair, str)
+            or ":" not in pair
+            or not isfinite(float(correlation))
+            or not -1.0 <= float(correlation) <= 1.0
+        ):
+            raise ValueError("portfolio correlation snapshot is invalid")
+    if portfolio_risk.liquidation_buffer_pct is not None and (
+        not isfinite(portfolio_risk.liquidation_buffer_pct)
+        or portfolio_risk.liquidation_buffer_pct <= 0
+    ):
+        raise ValueError("liquidation buffer snapshot is invalid")
     if not isinstance(live_gateway, CapitalGateway):
         raise TypeError("live CapitalGateway identity is required for isolation")
 
@@ -275,25 +350,18 @@ def build_risk_governed_opportunities(
             "leverage": normalized_plan.leverage,
             "side": side.value,
             "runtime_regime": context.global_regime,
-            "position_risk_pct": dict(context.metadata.get("position_risk_pct", {})),
-            "position_sides": dict(context.metadata.get("position_sides", {})),
-            "position_instruments": dict(
-                context.metadata.get("position_instruments", {})
-            ),
-            "pending_order_risk_pct": dict(
-                context.metadata.get("pending_order_risk_pct", {})
-            ),
-            "pending_order_symbols": dict(
-                context.metadata.get("pending_order_symbols", {})
-            ),
-            "pending_order_sides": dict(
-                context.metadata.get("pending_order_sides", {})
-            ),
-            "correlations": dict(context.metadata.get("correlations", {})),
-            "equity_peak_usd": context.metadata.get("equity_peak_usd", equity_usd),
-            "daily_pnl_pct": context.metadata.get("daily_pnl_pct", 0.0),
-            "consecutive_losses": context.metadata.get("consecutive_losses", 0),
-            "liquidation_buffer_pct": context.metadata.get("liquidation_buffer_pct"),
+            "position_risk_pct": dict(portfolio_risk.position_risk_pct),
+            "position_sides": dict(portfolio_risk.position_sides),
+            "position_instruments": dict(portfolio_risk.position_instruments),
+            "pending_order_risk_pct": dict(portfolio_risk.pending_order_risk_pct),
+            "pending_order_symbols": dict(portfolio_risk.pending_order_symbols),
+            "pending_order_sides": dict(portfolio_risk.pending_order_sides),
+            "correlations": dict(portfolio_risk.correlations),
+            "equity_peak_usd": portfolio_risk.equity_peak_usd,
+            "daily_pnl_pct": portfolio_risk.daily_pnl_pct,
+            "consecutive_losses": portfolio_risk.consecutive_losses,
+            "liquidation_buffer_pct": portfolio_risk.liquidation_buffer_pct,
+            "portfolio_risk_snapshot_id": portfolio_risk.snapshot_id,
             "decision_at": detected_at,
             "strategy_instrument_id": proposal.instrument_id,
             "strategy_requested_notional": proposal.requested_notional,
