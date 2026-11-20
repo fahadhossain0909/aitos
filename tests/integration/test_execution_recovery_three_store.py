@@ -17,6 +17,8 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs
 
 import pytest
+import pytest_asyncio
+from unittest.mock import AsyncMock
 from aiohttp import web
 
 pytestmark = pytest.mark.integration
@@ -26,7 +28,7 @@ def _clickhouse_enabled() -> bool:
     return os.getenv("AITOS_ENABLE_THREE_STORE_FAULT_TESTS") == "1"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def clickhouse_store():
     if not _clickhouse_enabled():
         pytest.skip("set AITOS_ENABLE_THREE_STORE_FAULT_TESTS=1 to opt in")
@@ -72,7 +74,7 @@ async def clickhouse_store():
             await admin.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def venue_http():
     """A deterministic Binance-compatible HTTP endpoint, not an exchange."""
     secret = "integration-secret"
