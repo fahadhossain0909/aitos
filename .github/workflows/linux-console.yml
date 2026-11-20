@@ -1,7 +1,15 @@
 name: Linux console build and package validation
 on:
   push:
-    branches: [arena/ed127d35-aitos]
+    branches: [main, arena/ed127d35-aitos]
+    paths:
+      - 'native/linux/**'
+      - 'aitos/native/**'
+      - 'aitos/config/paths.py'
+      - 'tests/test_credential_vault.py'
+      - 'tests/test_portable_paths.py'
+      - 'desktop/**'
+      - '.github/workflows/linux-console.yml'
   pull_request:
     paths:
       - 'native/linux/**'

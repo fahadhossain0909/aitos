@@ -41,6 +41,7 @@ import asyncio
 import hashlib
 import math
 import time
+import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -1609,7 +1610,15 @@ class TradeLifecycle(AITOSModule):
             else trade.sl_price
         )
         sl_result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, exchange_stop_price
+            trade.symbol,
+            trade.side,
+            trade.quantity,
+            exchange_stop_price,
+            **(
+                {"owner_trade_id": trade.trade_id}
+                if self._order_executor.requires_exchange_execution
+                else {}
+            ),
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
@@ -1644,7 +1653,15 @@ class TradeLifecycle(AITOSModule):
             )
             remaining_qty -= leg_qty
             tp_result = await self._order_executor.place_take_profit_order(
-                trade.symbol, trade.side, leg_qty, level_price
+                trade.symbol,
+                trade.side,
+                leg_qty,
+                level_price,
+                **(
+                    {"owner_trade_id": trade.trade_id}
+                    if self._order_executor.requires_exchange_execution
+                    else {}
+                ),
             )
             if tp_result.success:
                 trade.tp_order_ids.append(tp_result.order_id)
@@ -2420,42 +2437,75 @@ class TradeLifecycle(AITOSModule):
         return result
 
     async def _refresh_live_protection(self, trade: Trade) -> None:
-        # Keep the old protective stop until its replacement is accepted and
-        # durably recorded. A failed replacement must not cancel protection.
+        # The handover journal is committed before the replacement POST. The old
+        # stop remains active until the new stop is accepted and durably owned.
         old_id = trade.sl_order_id
+        if not isinstance(old_id, str) or not old_id:
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                trade.trade_id,
+                "replacement requires an existing durable stop",
+            )
+        intent_store = getattr(self._order_executor, "intent_store", None)
+        if intent_store is None:
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                trade.trade_id,
+                "durable protective handover journal unavailable",
+            )
+        handover_token = uuid.uuid4().hex[:16]
+        handover_id = f"rpl-{handover_token}"
+        new_client_id = f"aitos-rpl-{handover_token}"
         stop_price = (
             self._emergency_stop_price(trade)
             if self._position_manager
             else trade.sl_price
         )
-        result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, stop_price
+        intent_store.begin_protection_handover(
+            handover_id=handover_id,
+            trade_id=trade.trade_id,
+            symbol=trade.symbol,
+            old_order_id=old_id,
+            new_client_id=new_client_id,
         )
-        if not result.success:
-            raise ExecutionUncertainError(
-                trade.symbol, trade.trade_id, "remaining exposure protection failed"
+        try:
+            result = await self._order_executor.place_stop_loss_order(
+                trade.symbol,
+                trade.side,
+                trade.quantity,
+                stop_price,
+                owner_trade_id=trade.trade_id,
+                client_order_id=new_client_id,
             )
-        trade.sl_order_id = result.order_id
-        if old_id and old_id != result.order_id:
+            if not result.success or result.client_order_id != new_client_id:
+                raise ExecutionUncertainError(
+                    trade.symbol,
+                    new_client_id,
+                    "replacement stop acceptance is uncertain",
+                )
+            intent_store.record_handover_new_order(handover_id, result.order_id)
+            trade.sl_order_id = result.order_id
             pending = trade.agent_consensus.setdefault(
                 "_pending_stop_cancellations", []
             )
             if old_id not in pending:
                 pending.append(old_id)
-        trade.updated_at = utc_now_iso()
-        try:
-            await self._execution_state_writer(trade)
-            for previous_id in list(
-                trade.agent_consensus.get("_pending_stop_cancellations", [])
-            ):
-                await self._order_executor.cancel_resting_order(
-                    trade.symbol, previous_id
-                )
-                trade.agent_consensus["_pending_stop_cancellations"].remove(previous_id)
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
+
+            # Only a durable, venue-confirmed replacement permits cancellation.
+            intent_store.mark_handover_old_cancel_requested(handover_id)
+            await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+            intent_store.mark_handover_old_cancelled(handover_id)
+            pending.remove(old_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+            intent_store.complete_protection_handover(handover_id)
             self._order_executor.acknowledge_protection(result, trade.trade_id)
         except BaseException:
+            # Preserve the last durable handover stage. Startup recovery must
+            # query the deterministic client ID before deciding whether the
+            # replacement was accepted or whether old-stop cancellation ran.
             self._execution_recovery_required = True
             raise
 

@@ -169,23 +169,50 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
                 consensus[field_name] = value
     positions = getattr(portfolio, "positions", ()) or ()
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
+    if not isfinite(equity) or equity <= 0:
+        raise ValueError("portfolio equity must be finite and positive")
     # The live portfolio is authoritative; scanner-supplied exposure snapshots
     # may be stale by the time the final lifecycle gate is reached.
-    consensus["position_risk_pct"] = {}
-    consensus["position_sides"] = {}
+    # Preserve all same-symbol exposures. A single exposure keeps the
+    # historical symbol key; hedge/multi-position symbols use side-qualified
+    # keys and same-side rows are conservatively aggregated.
+    grouped_positions: dict[str, dict[str, float | str | None]] = {}
     for position in positions:
         symbol = str(getattr(position, "symbol", "") or "").strip().upper()
         if not symbol:
-            continue
-        risk_amount = getattr(position, "risk_amount_usd", None)
-        if risk_amount is None or float(risk_amount) <= 0 or equity <= 0:
-            risk_pct = 1.0
-        else:
-            risk_pct = float(risk_amount) / equity * 100.0
-        consensus["position_risk_pct"][symbol] = risk_pct
-        side = getattr(position, "side", None)
-        if side is not None:
-            consensus["position_sides"][symbol] = str(side).upper()
+            raise ValueError("open position is missing its instrument identity")
+        risk_amount_raw = getattr(position, "risk_amount_usd", None)
+        if risk_amount_raw is None or equity <= 0:
+            raise ValueError(f"open position risk is unknown: {symbol}")
+        risk_amount = float(risk_amount_raw)
+        if not isfinite(risk_amount) or risk_amount <= 0:
+            raise ValueError(
+                f"open position risk must be finite and positive: {symbol}"
+            )
+        side_raw = getattr(position, "side", None)
+        side = str(side_raw).upper() if side_raw is not None else None
+        if side not in {None, "LONG", "SHORT"}:
+            raise ValueError(f"open position side is invalid: {symbol}")
+        group = f"{symbol}:{side or 'UNKNOWN'}"
+        current = grouped_positions.setdefault(
+            group, {"symbol": symbol, "side": side, "risk_amount_usd": 0.0}
+        )
+        current["risk_amount_usd"] = float(current["risk_amount_usd"]) + risk_amount
+
+    by_symbol: dict[str, list[tuple[str, dict[str, float | str | None]]]] = {}
+    for group, exposure in grouped_positions.items():
+        by_symbol.setdefault(str(exposure["symbol"]), []).append((group, exposure))
+    consensus["position_risk_pct"] = {}
+    consensus["position_sides"] = {}
+    consensus["position_instruments"] = {}
+    for symbol, exposures in by_symbol.items():
+        for group, exposure in exposures:
+            key = symbol if len(exposures) == 1 else group
+            risk_pct = float(exposure["risk_amount_usd"]) / equity * 100.0
+            consensus["position_risk_pct"][key] = risk_pct
+            consensus["position_instruments"][key] = symbol
+            if exposure["side"] is not None:
+                consensus["position_sides"][key] = str(exposure["side"])
     pending_orders = tuple(getattr(portfolio, "pending_orders", ()) or ())
     pending_ids: set[str] = set()
     consensus["pending_order_risk_pct"] = {}
@@ -202,10 +229,14 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
             or not symbol
             or side not in {"LONG", "SHORT"}
             or not isfinite(risk_amount)
-            or risk_amount < 0
             or equity <= 0
+            or (
+                float(getattr(pending, "remaining_notional_usd", 0.0) or 0.0) > 0
+                and risk_amount <= 0
+            )
+            or risk_amount < 0
         ):
-            raise ValueError("invalid or duplicate pending order exposure")
+            raise ValueError("invalid, unpriced, or duplicate pending order exposure")
         pending_ids.add(order_id)
         consensus["pending_order_risk_pct"][f"pending:{order_id}"] = (
             risk_amount / equity * 100.0
@@ -288,7 +319,28 @@ def install_capital_guard() -> None:
             event["details"] = details
             await _record_funnel(self, **event)
 
+        # Validate the financial snapshot before choosing a user-facing rejection
+        # reason. Still run the RiskEngine gate below even when the snapshot is
+        # malformed so its emergency assessment side effects are not skipped.
+        portfolio_error: str | None = None
+        portfolio_consensus: dict[str, Any] | None = None
+        try:
+            portfolio_consensus = _portfolio_consensus(portfolio, opportunity)
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            portfolio_error = (
+                f"capital_objective: portfolio exposure unavailable: {exc}"
+            )
+
         hard_limit_reason = await _hard_limit_reason(self, portfolio, opportunity)
+        if portfolio_error is not None:
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=portfolio_error,
+            )
+            return _rejected_trade(opportunity, portfolio_error)
         if hard_limit_reason is not None:
             await record_gate(
                 symbol=opportunity.symbol,
@@ -307,7 +359,7 @@ def install_capital_guard() -> None:
         )
 
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
-        if equity <= 0:
+        if not isfinite(equity) or equity <= 0:
             reason = "capital_objective: invalid or unavailable equity"
             await record_gate(
                 symbol=opportunity.symbol,
@@ -318,9 +370,10 @@ def install_capital_guard() -> None:
             )
             return _rejected_trade(opportunity, reason)
 
+        assert portfolio_consensus is not None
         protected_opportunity = replace(
             opportunity,
-            agent_consensus=_portfolio_consensus(portfolio, opportunity),
+            agent_consensus=portfolio_consensus,
         )
         gateway = getattr(self, _GATEWAY_ATTR, None)
         if gateway is None:

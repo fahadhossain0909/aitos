@@ -62,6 +62,29 @@ class AttributedOrderExecutor(OrderExecutor):
         ] = {}
 
     @property
+    def requires_exchange_execution(self) -> bool:
+        return self.delegate.requires_exchange_execution
+
+    @property
+    def execution_scope(self) -> str:
+        return self.delegate.execution_scope
+
+    @property
+    def intent_store(self):
+        return getattr(self.delegate, "intent_store", None)
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return self.delegate.has_unresolved_orders(symbol)
+
+    def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        self.delegate.acknowledge_execution(client_order_id, trade_id)
+
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict | None:
+        return await self.delegate.get_order_by_client_id(symbol, client_order_id)
+
+    @property
     def supports_exchange_side_stops(self) -> bool:
         return self.delegate.supports_exchange_side_stops
 
@@ -105,6 +128,7 @@ class AttributedOrderExecutor(OrderExecutor):
             "fill_price": result.fill_price,
             "reference_price": request.reference_price,
             "reduce_only": request.reduce_only,
+            "owner_trade_id": request.owner_trade_id,
             "execution_success": result.success,
             "execution_error": result.error,
             "filled_at": result.filled_at,
@@ -164,7 +188,14 @@ class AttributedOrderExecutor(OrderExecutor):
         return await self.delegate.get_order_status(symbol, order_id)
 
     async def place_stop_loss_order(
-        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        stop_price: float,
+        *,
+        owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         request = OrderRequest(
             symbol=symbol,
@@ -173,10 +204,17 @@ class AttributedOrderExecutor(OrderExecutor):
             reference_price=stop_price,
             order_type="STOP_MARKET",
             reduce_only=True,
+            owner_trade_id=owner_trade_id,
+            client_order_id=client_order_id,
         )
         context = self.context_resolver(request)
+        owner_kwargs = (
+            {"owner_trade_id": owner_trade_id} if owner_trade_id is not None else {}
+        )
+        if client_order_id is not None:
+            owner_kwargs["client_order_id"] = client_order_id
         result = await self.delegate.place_stop_loss_order(
-            symbol, side, quantity, stop_price
+            symbol, side, quantity, stop_price, **owner_kwargs
         )
         try:
             self._record_result(request, context, result, decision_type="MANAGE")
@@ -188,7 +226,13 @@ class AttributedOrderExecutor(OrderExecutor):
         return result
 
     async def place_take_profit_order(
-        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        take_profit_price: float,
+        *,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         request = OrderRequest(
             symbol=symbol,
@@ -197,10 +241,14 @@ class AttributedOrderExecutor(OrderExecutor):
             reference_price=take_profit_price,
             order_type="TAKE_PROFIT_MARKET",
             reduce_only=True,
+            owner_trade_id=owner_trade_id,
         )
         context = self.context_resolver(request)
+        owner_kwargs = (
+            {"owner_trade_id": owner_trade_id} if owner_trade_id is not None else {}
+        )
         result = await self.delegate.place_take_profit_order(
-            symbol, side, quantity, take_profit_price
+            symbol, side, quantity, take_profit_price, **owner_kwargs
         )
         try:
             self._record_result(request, context, result, decision_type="MANAGE")

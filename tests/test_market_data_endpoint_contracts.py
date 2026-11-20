@@ -94,3 +94,16 @@ def test_current_subscription_topics_are_documented_shapes():
     assert okx._args(["BTCUSDT"], "books") == [
         {"channel": "books", "instId": "BTC-USDT-SWAP"}
     ]
+
+
+def test_testnet_instance_routes_market_streams_to_demo_websocket():
+    adapter = BinanceFuturesAdapter(environment="testnet")
+    market_url, raw_url = adapter._get_ws_base_url(["btcusdt@aggTrade"])
+
+    assert market_url.startswith("wss://demo-fstream.binance.com")
+    assert raw_url.startswith("wss://demo-fstream.binance.com")
+    # The legacy class-level helper intentionally remains the mainnet compatibility
+    # contract; runtime connections use the instance method.
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
+    )

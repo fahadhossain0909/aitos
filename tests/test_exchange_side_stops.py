@@ -69,12 +69,12 @@ class FakeExchangeCapableExecutor(OrderExecutor):
         )
 
     async def place_stop_loss_order(
-        self, symbol, side, quantity, stop_price
+        self, symbol, side, quantity, stop_price, *, owner_trade_id=None
     ) -> OrderResult:
         return self._place_resting("sl", symbol, side, quantity, stop_price)
 
     async def place_take_profit_order(
-        self, symbol, side, quantity, take_profit_price
+        self, symbol, side, quantity, take_profit_price, *, owner_trade_id=None
     ) -> OrderResult:
         return self._place_resting("tp", symbol, side, quantity, take_profit_price)
 

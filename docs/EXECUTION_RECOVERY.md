@@ -148,7 +148,7 @@ hostname-verification dependency without violating the current SDK's cryptograph
 
 - Test real Binance-compatible request/response behavior without placing real orders
   in this environment; then approved isolated testnet/paper validation separately.
-- Implement and fault-test pre-submit protective intents/open-algo inventory recovery.
+- Implemented narrow restart recovery for accepted initial STOP_MARKET orders: durable preclaims carry `owner_trade_id`; the runner performs an authenticated client-algo lookup, checks exact account scope, trade identity, symbol/side/quantity/trigger/reduce-only semantics, persists the recovered stop ID to the trade snapshot, then marks the intent APPLIED. Fault-injection and idempotent restart tests cover the trade-write/journal-ack boundary. Replacement stops, take-profit orders, triggered/child-fill cases, legacy preclaims without owner IDs and mismatches remain quarantined; they are not blindly retried or automatically mutated.
 - Exercise real ClickHouse failure/restart/archive ordering with isolated data.
 - Perform complete account/position/protection recovery fault matrix and paper soak.
 - Run remote CI, supported Python/OS matrix and independent review.
@@ -190,16 +190,66 @@ APPLIED orders can legitimately be absent after fills/cancellation; the report
 does not infer that lifecycle context from an open-order snapshot.
 
 The offline analyzer targets modern algo exports, not a certified legacy/broker
-inventory adapter. The authenticated runtime diagnostic additionally reads the
-full position snapshot and ordinary open-order inventory, checks every active local
-trade has its matching algo stop in the venue inventory, and blocks live scans when
-positions differ, an entry order lacks a validated stop-risk projection, or a
-protective identity is missing/orphaned. This check runs at live startup and before
-each scan. It does not repair or acknowledge intents, release capital, or submit,
-cancel or replace orders. The report always has `safe_to_resume: false`; the live
-guard uses only explicit reconciliation invariants, not that report field, and
-never performs an automatic recovery action. Use the approved recovery process;
-do not bypass quarantine based on a report or a model recommendation.
+inventory adapter. The authenticated runtime diagnostic additionally reads the full position
+snapshot and ordinary open-order inventory, checks every active local trade has
+its matching algo stop in the venue inventory, and blocks live scans when positions
+differ, an entry order lacks a validated stop-risk projection, or a protective
+identity is missing/orphaned. At startup, a narrow recovery pass may bind an accepted initial STOP_MARKET or
+TAKE_PROFIT_MARKET only when a durable owner trade ID, exact preclaim, fresh
+authenticated client-algo lookup, and unique matching open trade all agree. Stop
+identity is written to `sl_order_id`; TP identity is appended idempotently to
+`tp_order_ids`. The durable trade snapshot is written before transitioning the
+journal to APPLIED, so a crash between those writes can be completed on the next
+restart. This pass never submits, cancels or replaces a venue order.
+
+Replacement-stop recovery is still deliberately quarantined: the current intent
+journal does not yet encode a durable old-stop/new-stop handover state and
+cancellation acknowledgement, so startup must not guess whether the old stop is
+still protective or whether a replacement is safe to activate. Triggered algo
+orders are not fills; the authenticated diagnostic can look up the linked child
+order and report its status/executed quantity, but it does not yet apply cumulative
+or partial child fills to the lifecycle ledger. Those cases, legacy preclaims
+without owner IDs and every mismatch remain blocking/manual-reconciliation cases.
+The diagnostic report always has `safe_to_resume: false`; the live guard uses
+explicit reconciliation invariants, not that report field. Do not bypass quarantine
+based on a report or a model recommendation.
+
+## Remaining restart and acceptance gates (2026-11-20)
+
+| Gate | Current evidence | Status |
+|---|---|---|
+| Initial STOP recovery | Owner-bound authenticated identity, durable snapshot-before-journal ordering, restart idempotency tests | Implemented; CI validation pending for current PR head |
+| Initial TP recovery | Owner-bound authenticated identity, idempotent `tp_order_ids` persistence, focused restart test | Implemented; CI validation pending for current PR head |
+| Replacement protective-order handover | No durable two-order handover/cancel-ack state machine yet | Not implemented; fail-closed quarantine |
+| Triggered algo / child partial fills | Child lookup is diagnostic only; no cumulative-fill lifecycle application/restart checkpoint | Not implemented; fail-closed quarantine |
+| Venue + SQLite + ClickHouse crash drill | Existing isolated Redis/persistence and embedded ClickHouse tests do not constitute a coordinated three-store crash/restart drill | Not yet accepted |
+| Authenticated testnet lifecycle | Hosted paper canary previously returned HTTP 451; no verified authenticated end-to-end testnet lifecycle receipt | Blocked by runner/network access; no mainnet fallback |
+| StrategyEngine typed bridge | StrategyEngine remains proposal/allocation/shadow-only pending typed Opportunity and validated risk/stop/account contracts | Intentionally not live-wired |
+
+A complete multi-store drill must inject termination after each durable boundary
+(venue acknowledgement, SQLite intent/result transition, ClickHouse trade snapshot,
+income cursor, and ClickHouse analytics/event append), restart with the same account
+scope, and prove no duplicate venue side effect, no lost/duplicated cumulative fill,
+no cursor advancement ahead of durable financial application, and no fresh exposure
+while any store is unavailable or contradictory. It must compare venue positions,
+open ordinary orders, open algo orders and terminal child-order fills against the
+restored SQLite journal and ClickHouse trade/closed-ledger state. Until that drill
+and authenticated testnet lifecycle acceptance pass, the feature remains gated.
+
+The live runner also performs one signed Binance fee/funding history reconciliation
+before allowing fresh exposure. Each income row is applied idempotently through
+the lifecycle and written through to the durable open/closed trade snapshot before
+the exchange-income cursor can advance; the subsequent event is a replayable
+notification, not the only persistence path. If the process fails after the trade
+write but before cursor advancement, the stable Binance transaction ID makes the
+retry idempotent. A trade-write, event-publication or transport/API failure, or any
+income row that cannot be uniquely attributed to one internal trade, keeps startup
+blocked; the durable cursor remains held before unresolved rows for later
+operator-led reconciliation. The background reconciler continues only after the startup gate has been evaluated.
+If either financial or restored-position readiness is false, the runtime stays in
+manage-only mode: market ingestion, lifecycle price/EIE management, exchange
+protection reconciliation and existing-position supervision remain active, while
+the fresh-exposure scan is disabled until an operator restarts after remediation.
 
 ## Closed-ledger integrity and SQL verification (2026-11-07)
 

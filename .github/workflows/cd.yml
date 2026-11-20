@@ -40,8 +40,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ steps.repo.outputs.repo }}:sha-${{ github.sha }}
             ${{ env.REGISTRY }}/${{ steps.repo.outputs.repo }}:latest
-          provenance: false
-          sbom: false
+          provenance: mode=max
+          sbom: true
 
   deploy:
     if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}

@@ -320,7 +320,7 @@ mod tests {
             "http://127.0.0.1:8780/?token=secret",
             "http://127.0.0.1:8780/#fragment",
             "http://user@127.0.0.1:8780/",
-            "http://127.0.0.1:8780.evil.example/",
+            "http://127.0.0.1.evil.example:8780/",
         ] {
             let url = rejected.parse().unwrap();
             assert!(

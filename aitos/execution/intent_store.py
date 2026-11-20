@@ -52,6 +52,22 @@ class ExecutionIntentStore:
                     PRIMARY KEY(scope, client_id)
                 )"""
             )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS protection_handovers (
+                    scope TEXT NOT NULL,
+                    handover_id TEXT NOT NULL,
+                    trade_id TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    old_order_id TEXT NOT NULL,
+                    new_client_id TEXT NOT NULL,
+                    new_order_id TEXT,
+                    state TEXT NOT NULL,
+                    blocked_reason TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(scope, handover_id),
+                    UNIQUE(scope, new_client_id)
+                )"""
+            )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -192,6 +208,151 @@ class ExecutionIntentStore:
                 raise ValueError(
                     "protection preclaim changed before durable acceptance"
                 )
+
+    def begin_protection_handover(
+        self,
+        *,
+        handover_id: str,
+        trade_id: str,
+        symbol: str,
+        old_order_id: str,
+        new_client_id: str,
+    ) -> dict:
+        """Durably claim a replacement before its venue submission.
+
+        Replays are accepted only when every identity matches. A pending or
+        blocked handover for the same trade prevents a second replacement.
+        """
+        values = (handover_id, trade_id, symbol, old_order_id, new_client_id)
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("complete protective handover identity is required")
+        if old_order_id == new_client_id:
+            raise ValueError("old and new protective identities must differ")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", handover_id):
+            raise ValueError("invalid protective handover identity")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", new_client_id):
+            raise ValueError("invalid replacement client identity")
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT * FROM protection_handovers WHERE scope=? AND handover_id=?",
+                (self.scope, handover_id),
+            ).fetchone()
+            if existing is not None:
+                row = dict(existing)
+                expected = {
+                    "trade_id": trade_id,
+                    "symbol": symbol,
+                    "old_order_id": old_order_id,
+                    "new_client_id": new_client_id,
+                }
+                if any(row[key] != value for key, value in expected.items()):
+                    raise ValueError(
+                        "protective handover ID reused for different identity"
+                    )
+                return row
+            active = conn.execute(
+                "SELECT handover_id FROM protection_handovers WHERE scope=? "
+                "AND trade_id=? AND state NOT IN ('APPLIED') LIMIT 1",
+                (self.scope, trade_id),
+            ).fetchone()
+            if active is not None:
+                raise ExecutionRecoveryRequired(
+                    symbol,
+                    str(active["handover_id"]),
+                    "another protective handover requires reconciliation",
+                )
+            conn.execute(
+                "INSERT INTO protection_handovers(scope,handover_id,trade_id,symbol,"
+                "old_order_id,new_client_id,state) VALUES (?,?,?,?,?,?,'PREPARED')",
+                (
+                    self.scope,
+                    handover_id,
+                    trade_id,
+                    symbol,
+                    old_order_id,
+                    new_client_id,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM protection_handovers WHERE scope=? AND handover_id=?",
+                (self.scope, handover_id),
+            ).fetchone()
+            return dict(row)
+
+    def record_handover_new_order(self, handover_id: str, new_order_id: str) -> None:
+        if not re.fullmatch(r"algo:[1-9][0-9]{0,29}", str(new_order_id or "")):
+            raise ValueError("valid replacement algo order ID required")
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET new_order_id=?,state='NEW_ACCEPTED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('PREPARED','NEW_ACCEPTED') "
+                "AND (new_order_id IS NULL OR new_order_id=?)",
+                (new_order_id, self.scope, handover_id, new_order_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("replacement acceptance conflicts with handover state")
+
+    def mark_handover_old_cancel_requested(self, handover_id: str) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='OLD_CANCEL_REQUESTED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('NEW_ACCEPTED','OLD_CANCEL_REQUESTED') "
+                "AND new_order_id IS NOT NULL",
+                (self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("old-stop cancellation requires accepted replacement")
+
+    def mark_handover_old_cancelled(self, handover_id: str) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='OLD_CANCELLED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('OLD_CANCEL_REQUESTED','OLD_CANCELLED')",
+                (self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("old-stop cancellation was not durably requested")
+
+    def complete_protection_handover(self, handover_id: str) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='APPLIED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('OLD_CANCELLED','APPLIED')",
+                (self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "handover cannot complete before old stop cancellation"
+                )
+
+    def block_protection_handover(self, handover_id: str, reason: str) -> None:
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("handover quarantine reason is required")
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='BLOCKED',blocked_reason=?,"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state!='APPLIED'",
+                (reason[:500], self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("handover cannot be quarantined")
+
+    def protection_handovers(self, *, trade_id: str | None = None) -> list[dict]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM protection_handovers WHERE scope=? "
+                "ORDER BY updated_at,handover_id",
+                (self.scope,),
+            ).fetchall()
+        return [
+            dict(row) for row in rows if trade_id is None or row["trade_id"] == trade_id
+        ]
 
     def mark_protection_terminal(
         self,

@@ -54,7 +54,7 @@ from aitos.models.trade import TradeSide
 logger = get_logger("aitos.execution.binance")
 
 MAINNET_URL = "https://fapi.binance.com"
-TESTNET_URL = "https://testnet.binancefuture.com"
+TESTNET_URL = "https://demo-fapi.binance.com"
 
 
 def round_step(value: float, precision: int) -> float:
@@ -100,6 +100,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             logger.warning(
                 "BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades"
             )
+
+    @property
+    def intent_store(self) -> ExecutionIntentStore | None:
+        return self._intent_store
 
     @property
     def hedge_mode(self) -> bool:
@@ -706,14 +710,34 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return True
 
     async def place_stop_loss_order(
-        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        stop_price: float,
+        *,
+        owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         return await self._place_reduce_only_stop(
-            symbol, side, quantity, stop_price, order_type="STOP_MARKET", label="sl"
+            symbol,
+            side,
+            quantity,
+            stop_price,
+            order_type="STOP_MARKET",
+            label="sl",
+            owner_trade_id=owner_trade_id,
+            client_order_id=client_order_id,
         )
 
     async def place_take_profit_order(
-        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        take_profit_price: float,
+        *,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         return await self._place_reduce_only_stop(
             symbol,
@@ -722,6 +746,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             take_profit_price,
             order_type="TAKE_PROFIT_MARKET",
             label="tp",
+            owner_trade_id=owner_trade_id,
         )
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
@@ -780,6 +805,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         trigger_price: float,
         order_type: str,
         label: str,
+        owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         """STOP_MARKET / TAKE_PROFIT_MARKET orders that only ever reduce the
         existing position. In one-way mode that's via ``reduceOnly``; in
@@ -795,7 +822,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     symbol, position_side, filters, trigger_price, quantity
                 )
 
-        client_order_id = f"aitos-{label}-{uuid.uuid4().hex[:16]}"
+        client_order_id = client_order_id or f"aitos-{label}-{uuid.uuid4().hex[:16]}"
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", client_order_id):
+            raise ValueError("invalid protective client order ID")
         if self._intent_store is not None:
             for pending in self._intent_store.unresolved(symbol):
                 if json.loads(pending["request_json"])["order_type"] in {
@@ -816,6 +845,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     order_type=order_type,
                     client_order_id=client_order_id,
                     reduce_only=True,
+                    owner_trade_id=owner_trade_id,
                 )
             )
         self._pending_execution[client_order_id] = symbol

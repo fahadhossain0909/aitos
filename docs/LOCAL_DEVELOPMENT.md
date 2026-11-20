@@ -36,6 +36,29 @@ bound to localhost only. Storage maintenance defaults to dry-run mode so a local
 full-stack run cannot automatically prune local data; explicitly set
 `STORAGE_MAINTENANCE_DRY_RUN=false` only when you intentionally want cleanup.
 
+## 2.1 Choose a local resource profile
+
+The default Compose stack is not a lightweight desktop bundle. Its configured
+container memory ceilings include Redis (2.5 GiB), ClickHouse (2.5 GiB),
+Neo4j (2.5 GiB), and the paper runner (2 GiB), before Docker Desktop, the OS,
+and any other workers. These are limits, not reserved memory, but they show
+why the full stack should not be started on a 4 GiB workstation.
+
+| Workstation capacity | Recommended local activity |
+|---|---|
+| 4 GiB RAM | Frontend/sample workspace, documentation, and focused Python unit tests without Docker services. Do not start the full Compose stack or a local paper runner. |
+| 8 GiB RAM | Selective backend development with only required services; monitor actual memory and avoid optional workers/observability. This is a planning guideline, not a measured minimum. |
+| 16 GiB+ RAM | More practical for the complete paper stack, optional learning/Neo4j/observability and backtest workloads; still enable services deliberately. |
+
+For a frontend-only preview, use the React sample workspace and the loopback-only
+Vite server described in [the desktop guide](../desktop/README.md). It does not
+need Docker, exchange credentials, or a running trading process.
+
+The paper Compose service currently declares Redis, ClickHouse initialization
+and Neo4j as dependencies. Do not remove or skip a dependency merely to fit a
+small machine; use a sufficiently provisioned test host for service-backed paper
+validation. Lowering memory limits is not a substitute for measuring stability.
+
 ## 3. Install Python dependencies
 
 Windows PowerShell:

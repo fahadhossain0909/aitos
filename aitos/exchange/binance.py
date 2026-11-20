@@ -76,10 +76,73 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         rate_limiter: TokenBucketRateLimiter | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
+        environment: str | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._api_key = api_key or os.getenv("BINANCE_API_KEY")
-        self._api_secret = api_secret or os.getenv("BINANCE_API_SECRET")
+        configured_environment = (
+            environment
+            if environment is not None
+            else os.getenv("AITOS_BINANCE_FUTURES_ENVIRONMENT")
+        )
+        if configured_environment is None:
+            # Preserve the repository's existing paper/staging convention.
+            # The explicit AITOS variable always takes precedence.
+            legacy_testnet = os.getenv("BINANCE_TESTNET")
+            if legacy_testnet is None:
+                configured_environment = "mainnet"
+            elif legacy_testnet.strip().lower() in {"1", "true", "yes", "on"}:
+                configured_environment = "testnet"
+            elif legacy_testnet.strip().lower() in {"0", "false", "no", "off"}:
+                configured_environment = "mainnet"
+            else:
+                raise ValueError("BINANCE_TESTNET must be a boolean value")
+        selected_environment = configured_environment.strip().lower()
+        if selected_environment not in {"mainnet", "testnet"}:
+            raise ValueError(
+                "AITOS_BINANCE_FUTURES_ENVIRONMENT must be 'mainnet' or 'testnet'"
+            )
+        self.environment = selected_environment
+        if self.environment == "testnet":
+            self._rest_base_url = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_REST_BASE_URL",
+                "https://demo-fapi.binance.com",
+            ).rstrip("/")
+            testnet_ws_base = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_WS_BASE_URL",
+                "wss://demo-fstream.binance.com",
+            ).rstrip("/")
+            self._ws_market_base_url = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_WS_COMBINED_URL",
+                f"{testnet_ws_base}/market/stream",
+            ).rstrip("/")
+            self._ws_market_raw_base_url = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_WS_RAW_URL",
+                f"{testnet_ws_base}/market/ws",
+            ).rstrip("/")
+            # Testnet credentials are intentionally isolated: never fall back
+            # to mainnet environment variables when testnet is selected.
+            self._api_key = (
+                api_key
+                if api_key is not None
+                else os.getenv("BINANCE_FUTURES_TESTNET_API_KEY")
+            )
+            self._api_secret = (
+                api_secret
+                if api_secret is not None
+                else os.getenv("BINANCE_FUTURES_TESTNET_API_SECRET")
+            )
+        else:
+            self._rest_base_url = REST_BASE_URL
+            self._ws_market_base_url = WS_MARKET_BASE_URL
+            self._ws_market_raw_base_url = WS_MARKET_RAW_BASE_URL
+            self._api_key = (
+                api_key if api_key is not None else os.getenv("BINANCE_API_KEY")
+            )
+            self._api_secret = (
+                api_secret
+                if api_secret is not None
+                else os.getenv("BINANCE_API_SECRET")
+            )
         self._session: aiohttp.ClientSession | None = None
         self._ws_transport: dict[str, Any] = {
             "state": "idle",
@@ -231,7 +294,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 await self.connect()
                 assert self._session is not None
                 async with self._session.get(
-                    f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
+                    f"{self._rest_base_url}/fapi/v1/income?{query}&signature={signature}",
                     headers={"X-MBX-APIKEY": self._api_key},
                 ) as response:
                     response.raise_for_status()
@@ -385,24 +448,30 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             for i in range(0, len(unique), max_per_connection)
         ]
 
-    @staticmethod
-    def _get_ws_base_url(streams: list[str]) -> tuple[str, str]:
-        """Route all Binance USDⓈ-M public streams through the market path."""
-        return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
+    def _get_ws_base_url(self, streams: list[str]) -> tuple[str, str]:
+        """Return the market/raw stream routes for the selected environment."""
+        return self._ws_market_base_url, self._ws_market_raw_base_url
 
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
         async with self._session.get(
-            f"{REST_BASE_URL}{path}", params=params
+            f"{self._rest_base_url}{path}", params=params
         ) as response:
             response.raise_for_status()
             return await response.json()
 
     @staticmethod
     def _ws_base_url(streams: list[str]) -> str:
-        return BinanceFuturesAdapter._get_ws_base_url(streams)[0]
+        """Return the default USDⓈ-M market stream URL for legacy callers.
+
+        Environment-specific routing is performed by _get_ws_base_url on an
+        adapter instance. Keep this helper static for existing integrations
+        that use it as a class-level endpoint contract.
+        """
+        del streams  # All supported USDⓈ-M public streams use the market path.
+        return WS_MARKET_BASE_URL
 
     async def _raw_stream(
         self, streams: list[str], emit_reconnect: bool = False

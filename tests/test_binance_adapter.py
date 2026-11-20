@@ -301,3 +301,130 @@ async def test_fetch_income_history_signs_request_and_deduplicates_transactions(
                 start_time_ms=1, end_time_ms=300, limit=10
             )
     assert [row["tranId"] for row in result] == [10, 11]
+
+
+def test_testnet_environment_uses_isolated_credentials(monkeypatch):
+    monkeypatch.setenv("BINANCE_API_KEY", "mainnet-key")
+    monkeypatch.setenv("BINANCE_API_SECRET", "mainnet-secret")
+    monkeypatch.delenv("BINANCE_FUTURES_TESTNET_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_FUTURES_TESTNET_API_SECRET", raising=False)
+
+    adapter = BinanceFuturesAdapter(environment="testnet")
+
+    assert adapter.environment == "testnet"
+    assert adapter._api_key is None
+    assert adapter._api_secret is None
+    assert adapter._rest_base_url == "https://demo-fapi.binance.com"
+    assert adapter._ws_market_base_url == (
+        "wss://demo-fstream.binance.com/market/stream"
+    )
+    assert adapter._ws_market_raw_base_url == (
+        "wss://demo-fstream.binance.com/market/ws"
+    )
+
+
+def test_testnet_environment_reads_only_testnet_credentials(monkeypatch):
+    monkeypatch.setenv("BINANCE_API_KEY", "mainnet-key")
+    monkeypatch.setenv("BINANCE_API_SECRET", "mainnet-secret")
+    monkeypatch.setenv("BINANCE_FUTURES_TESTNET_API_KEY", "testnet-key")
+    monkeypatch.setenv("BINANCE_FUTURES_TESTNET_API_SECRET", "testnet-secret")
+
+    adapter = BinanceFuturesAdapter(environment="testnet")
+
+    assert adapter._api_key == "testnet-key"
+    assert adapter._api_secret == "testnet-secret"
+
+
+def test_invalid_binance_futures_environment_fails_closed():
+    with pytest.raises(ValueError, match="must be 'mainnet' or 'testnet'"):
+        BinanceFuturesAdapter(environment="production")
+
+
+@pytest.mark.asyncio
+async def test_testnet_rest_requests_use_demo_endpoint():
+    from aitos.models.market import OpenInterest
+
+    adapter = BinanceFuturesAdapter(environment="testnet")
+    with aioresponses() as mocked:
+        mocked.get(
+            "https://demo-fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT",
+            payload=SAMPLE_OPEN_INTEREST,
+        )
+        result = await adapter.fetch_open_interest("BTCUSDT")
+
+    assert isinstance(result, OpenInterest)
+    assert result.open_interest == 45123.456
+
+
+@pytest.mark.asyncio
+async def test_testnet_websocket_stream_uses_demo_market_route():
+    from tests.test_binance_parsing import SAMPLE_AGG_TRADE_WS
+
+    fake_ws = FakeWebSocket(
+        [{"stream": "btcusdt@aggTrade", "data": SAMPLE_AGG_TRADE_WS}]
+    )
+    adapter = BinanceFuturesAdapter(environment="testnet", ws_connector=fake_ws)
+
+    received = []
+
+    async def consume():
+        async for trade in adapter.stream_trades(["BTCUSDT"]):
+            received.append(trade)
+            return
+
+    await asyncio.wait_for(consume(), timeout=5)
+
+    assert len(received) == 1
+    assert fake_ws.url == (
+        "wss://demo-fstream.binance.com/market/stream?streams=btcusdt@aggTrade"
+    )
+
+
+def test_legacy_binance_testnet_flag_selects_demo_endpoints(monkeypatch):
+    monkeypatch.delenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", raising=False)
+    monkeypatch.setenv("BINANCE_TESTNET", "true")
+
+    adapter = BinanceFuturesAdapter()
+
+    assert adapter.environment == "testnet"
+    assert adapter._rest_base_url == "https://demo-fapi.binance.com"
+
+
+def test_explicit_futures_environment_overrides_legacy_testnet_flag(monkeypatch):
+    monkeypatch.setenv("BINANCE_TESTNET", "true")
+    monkeypatch.setenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", "mainnet")
+
+    adapter = BinanceFuturesAdapter()
+
+    assert adapter.environment == "mainnet"
+    assert adapter._rest_base_url == REST_BASE_URL
+
+
+@pytest.mark.asyncio
+async def test_testnet_income_history_uses_testnet_credentials_and_demo_endpoint():
+    pattern = re.compile(
+        re.escape("https://demo-fapi.binance.com/fapi/v1/income")
+        + r"\\?.*signature=[a-f0-9]{64}"
+    )
+    rows = [
+        {
+            "incomeType": "COMMISSION",
+            "income": "-0.01",
+            "asset": "USDT",
+            "symbol": "BTCUSDT",
+            "time": 100,
+            "tranId": 901,
+        }
+    ]
+    adapter = BinanceFuturesAdapter(
+        environment="testnet",
+        api_key="testnet-key",
+        api_secret="testnet-secret",
+    )
+    with aioresponses() as mocked:
+        mocked.get(pattern, payload=rows)
+        result = await adapter.fetch_income_history(
+            start_time_ms=1, end_time_ms=300, limit=10
+        )
+
+    assert [row["tranId"] for row in result] == [901]

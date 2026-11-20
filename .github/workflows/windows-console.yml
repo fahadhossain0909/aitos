@@ -1,7 +1,15 @@
 name: Windows console build and vault verification
 on:
   push:
-    branches: [arena/ed127d35-aitos]
+    branches: [main, arena/ed127d35-aitos]
+    paths:
+      - 'native/windows/**'
+      - 'aitos/native/**'
+      - 'tests/test_native_console_host.py'
+      - 'aitos/console_gateway.py'
+      - 'tests/test_windows_vault.py'
+      - 'desktop/**'
+      - '.github/workflows/windows-console.yml'
   workflow_dispatch:
   pull_request:
     paths:

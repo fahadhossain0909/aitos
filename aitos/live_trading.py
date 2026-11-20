@@ -68,23 +68,28 @@ async def prepare_live_executor(
     rather than guessing), and loads real per-symbol precision from
     ``/fapi/v1/exchangeInfo`` before returning.
     """
-    if not settings.binance.api_key or not settings.binance.api_secret:
+    api_key, api_secret = settings.binance.execution_credentials
+    if not api_key or not api_secret:
+        credential_names = (
+            "BINANCE_FUTURES_TESTNET_API_KEY/BINANCE_FUTURES_TESTNET_API_SECRET"
+            if settings.binance.testnet
+            else "BINANCE_API_KEY/BINANCE_API_SECRET"
+        )
         logger.error(
-            "BINANCE_API_KEY/BINANCE_API_SECRET are not set — cannot trade live"
+            "%s are not set for the selected Binance environment — cannot trade live",
+            credential_names,
         )
         sys.exit(1)
 
-    scope = hashlib.sha256(
-        f"{settings.binance.testnet}:{settings.binance.api_key}".encode()
-    ).hexdigest()
+    scope = hashlib.sha256(f"{settings.binance.testnet}:{api_key}".encode()).hexdigest()
     intent_store = ExecutionIntentStore(
         get_model_data_dir() / "execution_intents.sqlite3", scope=scope
     )
     # Never infer that an absent runtime position means a submitted order failed.
     intent_store.assert_ready()
     executor = BinanceFuturesOrderExecutor(
-        api_key=settings.binance.api_key,
-        api_secret=settings.binance.api_secret,
+        api_key=api_key,
+        api_secret=api_secret,
         testnet=settings.binance.testnet,
         recv_window_ms=settings.binance.recv_window_ms,
         hedge_mode=settings.binance.hedge_mode,
@@ -112,7 +117,9 @@ async def _prepare_connected_executor(executor, settings, symbols):
         )
         sys.exit(1)
 
-    info_adapter = BinanceFuturesAdapter()
+    info_adapter = BinanceFuturesAdapter(
+        environment="testnet" if settings.binance.testnet else "mainnet"
+    )
     async with info_adapter:
         symbol_filters = await info_adapter.fetch_exchange_info(symbols=symbols)
     executor.load_symbol_filters(symbol_filters)

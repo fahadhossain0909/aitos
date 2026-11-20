@@ -5,23 +5,30 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/docker-compose%20ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose ready">
-  <img src="https://img.shields.io/badge/exchange-Binance%20USDT--M%20Futures-F0B90B?style=flat-square" alt="Binance USDT-M Futures">
+  <img src="https://img.shields.io/badge/markets-Binance%20Futures%20%2B%20Spot-F0B90B?style=flat-square" alt="Binance Futures and Spot">
   <img src="https://img.shields.io/badge/status-active%20development-blue?style=flat-square" alt="Active development">
 </p>
 
 # AITOS — AI Trading Operating System
 
-AITOS is an event-driven trading system for Binance USDT-M Futures. The current repository combines market-data ingestion, Redis Streams, ClickHouse persistence, optional Neo4j knowledge-graph support, risk controls, opportunity scanning, paper trading, guarded live execution, XAI/journaling, continual learning, historical replay/backtesting, health/metrics endpoints, and Docker-based deployment.
+AITOS is a Python-first, event-driven quantitative trading platform. Binance USDⓈ-M Futures is the established execution core; a separately isolated Binance Spot runtime is now present but remains opt-in, testnet-first, and execution-disabled by default. The repository combines canonical market-data contracts, Redis Streams, ClickHouse history, optional Neo4j knowledge-graph support, shared portfolio/capital controls, opportunity and research intelligence, paper trading, guarded Futures execution, XAI/journaling, continual learning, historical/L2 replay, observability, and Docker-based deployment. Options are an identity/architecture extension point only; no Options strategy or execution is available.
 
 > **Canonical documentation:** this README is the project overview. For installation, follow the [AITOS Installation & Deployment Guide](INSTALLATION.md), which documents both desktop installation and VPS runtime deployment.
 
 ## Credential security and remote signing
 
-Read [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md) before entering exchange credentials on a remote host. OS vaults protect local storage, not against a provider administrator with root/administrator access to that same machine. The remote signer and live order-dispatch path are not implemented or authorized by this RFC.
+Read [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md) before entering exchange credentials on a remote host. OS vaults protect local storage, not against a provider administrator with root/administrator access to that same machine. Paper-only signer and testnet adapter components exist, but production remote signing and live order dispatch are not enabled or certified.
 
-## Read-only desktop console (local-first)
+## Desktop application delivery
 
-The [desktop Operator Console](desktop/README.md) is a read-only desktop interface for an already-running AITOS backend. Windows and Linux unsigned test installers are built by the native packaging workflows. It does not install or start the trading engine. For step-by-step installation and VPS connection, see [INSTALLATION.md](INSTALLATION.md). The shared public preview must stay unattached; this is not an exchange-key vault or permission to activate live trading.
+AITOS currently has two distinct desktop delivery tracks; their installers and security boundaries are not interchangeable.
+
+| Track | What it provides | Current release status |
+|---|---|---|
+| Native Console Session Manager | Windows/Linux launcher for the authenticated read-only browser console; connects to an already-running backend | Unsigned test installers; no backend installation or trading runner |
+| Tauri Embedded Desktop | React operator workspace in a native shell, bundled read-only gateway sidecar, and a separate local Trusted Signer Settings window | Cross-platform unsigned CI candidates; not a signed/trusted production release |
+
+The [desktop guide](desktop/README.md) describes the Tauri application. The [installation guide](INSTALLATION.md) explains the session-manager packages and the separate Tauri evaluation path. Neither desktop track installs or starts the AITOS trading backend. Tauri signer settings are not proof of a production remote signer or authorization to enable live order dispatch. Do not run signer credential custody on a provider-managed VPS/RDP whose administrator is outside your trust boundary.
 
 ## 🧭 Interactive Index
 
@@ -56,36 +63,43 @@ Click any topic below to jump directly to that section.
 - [Project structure](#project-structure)
 - [Safety boundaries](#safety-boundaries)
 - [Credential security & remote signing](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md)
+- [Desktop Operator User Manual](docs/USER_MANUAL.md)
+- [Binance Spot integration and rollout limits](docs/SPOT_MARKET_INTEGRATION.md)
+- [Architecture Evolution Program](engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md)
+- [System audit and open acceptance gates](engineering/SYSTEM_AUDIT_2026-11-20.md)
+- [Financial state authority & reconciliation contract](engineering/FINANCIAL_STATE_AUTHORITY_AND_RECONCILIATION.md)
 
 ---
 
 ## System at a glance
 
 ```text
-                 Binance USDT-M Futures
-                   REST / WebSocket
-                          │
-                          ▼
-                 Market-data ingestion
-                          │
-                          ▼
-                 Redis Streams Event Bus
-                          │
-          ┌───────────────┼────────────────┐
-          ▼               ▼                ▼
-      Risk Engine   Opportunity Scanner   Data/Journal
-          │               │                │
-          └───────────────┼────────────────┘
-                          ▼
-                   Trade Lifecycle
-                     │         │
-                     ▼         ▼
-                   Paper      Live
-                  Execution  Execution
+ Binance USDⓈ-M Futures       Binance Spot (opt-in)
+   REST / WebSocket             REST / WebSocket
+          │                           │
+          ▼                           ▼
+   Futures market adapter      Isolated Spot adapter
+          │                           │
+          └────── canonical market-data contracts ──────┐
+                                                        ▼
+                                              Redis Streams / MarketDataBus
+                                                        │
+                         ┌──────────────────────────────┼──────────────────┐
+                         ▼                              ▼                  ▼
+                  Opportunity /                 Portfolio &          Data / Journal /
+                  Research Intelligence          CapitalGateway       Learning
+                         │                              │
+                         └───────────────┬──────────────┘
+                                         ▼
+                                  Trade / Order Lifecycle
+                                     │           │
+                                     ▼           ▼
+                                   Paper     Guarded Futures
+                                 Execution    Execution
 
-   ClickHouse ── market history / journals / learning data
-   Neo4j      ── optional knowledge graph
-   XAI/ML/RL  ── explanations and continual-learning feedback
+   ClickHouse ── versioned market history, journals and learning evidence
+   SQLite / scoped stores ── durable execution intents and capital reservations
+   Neo4j ── optional knowledge graph; Rust/PyO3 ── optional order-book kernel
 ```
 
 The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Production actions are additionally protected by risk controls and human-approval governance.
@@ -96,13 +110,15 @@ The core application is event-driven: components communicate through the Event B
 
 | Area | Current implementation |
 |---|---|
-| Exchange | Binance USDT-M Futures REST + WebSocket adapter |
-| Streaming | Redis Streams, consumer groups, ACK/DLQ handling, replay/request-reply |
-| Persistence | ClickHouse for market data, journals and learning experience |
+| Exchange | Binance USDⓈ-M Futures adapter; separate Binance Spot adapter (USDT quote scope, opt-in, testnet-first) |
+| Market contracts | Canonical market-data envelope, market-type-scoped Spot identity, provenance-preserving domain bridge |
+| Streaming | Redis Streams, consumer groups, ACK/DLQ handling, replay/request-reply, sequence-aware market-data handling |
+| Persistence | ClickHouse for versioned market history, journals and learning evidence; scoped durable execution/capital stores |
 | Knowledge graph | Optional Neo4j integration |
-| Intelligence | Opportunity scoring, market structure, volatility, CVD/order-flow, liquidity, funding, open interest and RL-related signals |
-| Risk | Risk score, hard/soft limits, circuit breaker, correlated/sector exposure checks, position sizing and adaptive leverage |
-| Execution | Simulated paper execution and separately guarded live execution |
+| Intelligence | Market structure, volatility, CVD/order-flow, liquidity, funding/open interest, cross-market lead-lag research, ML/RL and probabilistic decision research |
+| Portfolio & risk | Shared CapitalGateway, atomic reservations, open/pending exposure projection, circuit breaker and correlated/sector checks |
+| Compute | Optional adaptive CPU/memory budgets and pressure-aware admission for non-critical analysis; disabled by default and rejected in live mode |
+| Execution | Simulated paper execution; separately guarded Futures live path; Spot execution disabled by default |
 | Live protection | Exchange-side protection/reconciliation where configured |
 | Explainability | Trade explanations, counterfactuals and attention-based XAI |
 | Learning | Online RL/ML feedback and continual-learning worker |
@@ -130,10 +146,10 @@ cp .env.example .env
 ### 2. Start local infrastructure
 
 ```bash
-docker compose up -d redis clickhouse neo4j
+docker compose up -d redis clickhouse clickhouse-init neo4j
 ```
 
-The default paper-trading Docker service expects all three infrastructure services to become healthy. Redis is required for the Event Bus; ClickHouse and Neo4j are optional only for code paths that explicitly support running without persistence/graph storage.
+The paper runtime's documented local service set includes Redis, ClickHouse initialization and Neo4j. Wait for the selected services to become healthy before starting the runner; do not omit a declared dependency without a separately tested configuration. This service-backed setup is resource-intensive: review the [local resource profiles](docs/LOCAL_DEVELOPMENT.md#21-choose-a-local-resource-profile) first. A 4 GiB workstation should use the frontend/sample workspace and focused unit tests rather than the full paper stack.
 
 ### 3. Run paper trading locally
 
@@ -287,7 +303,7 @@ For desktop installation and connecting the read-only console to a VPS over SSH,
 
 ## CI/CD
 
-GitHub Actions validates formatting, tests and security checks before deployment. Production deployment uses the configured VPS environment and does not expose infrastructure ports publicly.
+GitHub Actions provides the Python 3.10–3.12 backend matrix, Redis/ClickHouse/Neo4j-backed integration coverage, formatting, critical Flake8 checks, Bandit/dependency scanning and Docker/Compose validation. Separate workflows validate the React console, native Windows/Linux session-manager packages, and the cross-platform Tauri shell. Relevant desktop workflows also run after matching changes reach `main`; Tauri/native artifacts remain unsigned test candidates. VPS CD is separately guarded by the repository variable `AITOS_VPS_ENABLED=true`; keep it unset while VPS deployment is paused. A successful CI run is not runtime, exchange, security-certification or live-readiness evidence.
 
 [↑ Back to Index](#-interactive-index)
 
@@ -348,22 +364,18 @@ Storage maintenance is profile/service based and should be run deliberately on p
 
 ```text
 aitos/
-├── aitos/
-│   ├── backtest/
-│   ├── core/
-│   ├── data/
-│   ├── execution/
-│   ├── learning/
-│   ├── monitoring/
-│   ├── risk/
-│   ├── strategy/
-│   └── xai/
+├── aitos/                 # Python trading, market-data, risk and learning platform
+├── desktop/               # React/TypeScript console and Tauri shell
+├── native/                # Windows/Linux packaging and shared desktop sidecar
+├── docs/                  # User, operator, security and integration guides
+├── engineering/           # Architecture decisions, audits and verification evidence
 ├── scripts/
 ├── tests/
+├── .github/workflows/     # CI, desktop validation and guarded deployment
 ├── docker-compose.yml
 ├── Dockerfile
-├── requirements.txt
-├── requirements-backtest.txt
+├── requirements*.txt
+├── pyproject.toml
 ├── .env.example
 └── README.md
 ```
@@ -403,20 +415,22 @@ recorded Binance-shaped paper/testnet responses. No account requests/credentials
 or financial mutations. See [contract and verification](engineering/BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md)
 for schema, supported subset, pagination limitations and pending real-provider gates.
 
-## Hosted Windows and service validation
+## Historical hosted Windows and service validation (2026-11-07)
 
-Actual hosted Windows vault/build/install/network/uninstall and disposable service
-restart/soak checks have now passed. An **unsigned Windows test candidate** is
-available; it is not a signed production release. Current artifact links, tested
-commit, seven workflow results, 300-second soak, review request and remaining gates:
-[remote validation evidence](engineering/REMOTE_VALIDATION_EVIDENCE.md). No main
-merge, production cutover, trusted signing or live capability was activated.
+The [remote validation evidence](engineering/REMOTE_VALIDATION_EVIDENCE.md)
+records Windows vault/build/install/network/uninstall and disposable service
+restart/soak checks for the exact older source SHAs listed in that report. Those
+runs produced unsigned test candidates, not signed production releases. The
+report's statement that no main merge had occurred describes the state at that
+time only; it must not be read as the current repository status or as validation
+of today's `main` head. Re-run the relevant workflows on the exact release
+candidate SHA before relying on the evidence.
 
-## Advanced-main integration evidence
+## Historical integration evidence
 
-Main `e332e2b9` is fully included on this arena branch in tested merge `58807516`.
-Eight isolated hosted validations passed, including real PostgreSQL/ClickHouse
-reconciliation and Windows unsigned install/uninstall. See the
-[main integration review](engineering/MAIN_INTEGRATION_REVIEW.md) for comparison,
-conflict decisions, current artifacts, exact evidence and remaining gates. This
-is not a main release, trusted signature or production/live activation.
+The older arena-branch integration review and its hosted workflow results are
+historical evidence for the exact source SHAs recorded in those reports. They do
+not certify the current `main` head, the merged Spot/architecture/compute changes,
+or a production runtime. Use the [Architecture Evolution Program](engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md)
+and the [current system audit](engineering/SYSTEM_AUDIT_2026-11-20.md) for the
+present acceptance gates.

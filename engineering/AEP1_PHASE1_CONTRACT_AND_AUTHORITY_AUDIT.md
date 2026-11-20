@@ -1,8 +1,8 @@
 # AEP-1 Phase 1 — Contract, Risk and Financial Authority Audit
 
-Date: 2026-11-19
+Date: 2026-11-19 (updated 2026-11-20)
 Status: source-level audit; no runtime or production certification.
-Baseline inspected: current `main` source as of this audit; PR #260 carries this audit forward on its feature branch.
+Baseline note: PR #260 was subsequently merged into `main` as `88083953931ea2f87c247df96c72d53d2be191e0`; this document's findings must be read with the post-merge corrections below.
 
 ## Executive decision
 
@@ -40,7 +40,7 @@ The active Futures opportunity path already has a stronger central control bound
 
 1. The two MarketSnapshot types and three ExecutionIntent types are semantically different, not proven accidental duplicates. A future shared interface should be a protocol or explicit mapper, not a single flattened dataclass.
 2. There are multiple MarketEvent types. The market_data contract is the active live bus envelope; the markets contract is a separate domain projection; the statistics contract is a compact research sample. The current code search did not establish a production adapter from MarketDataBus to CrossMarketIntelligenceEngine, and the engine's only direct constructor hit was its universal-market test. This is a real runtime integration/provenance gap, not a reason to replace the live bus contract. The new pure converter is additive and deliberately not wired into a production loop yet.
-3. Both market event envelopes are frozen dataclasses but their `payload` dictionaries are mutable. `market_data.MarketEvent.stage_timestamps` and `GlobalMarketState.features` are mutable dictionaries too. “Frozen” therefore does not provide deep immutability. Fixing this requires an additive serialization-compatible approach and tests for existing consumers; do not silently wrap or mutate these fields in place.
+3. **Historical finding, corrected by merged PR #260:** both market event envelopes now call `freeze_value()` for `payload` and `stage_timestamps`, and `GlobalMarketState` freezes `features`. The recursive JSON-compatible `FrozenDict`/`FrozenList` implementation is additive and has serialization/dataclass regression coverage. Treat the original mutable-payload observation as superseded for current `main`; retain the deep-immutability tests as a compatibility gate for future contract changes.
 4. The universal-markets event currently assigns a correlation ID from its event ID when omitted. Event-time/receive-time validation and payload schema enforcement need a dedicated compatibility proposal.
 5. ADL `MarketSnapshot` already requires an aware timestamp and exposes snapshot ID/source versions. Strategy `MarketSnapshot` is deliberately lightweight and has no equivalent point-in-time metadata. A mapper must make missing provenance explicit rather than fabricate timestamps or source versions.
 6. `StrategyEngine` deliberately stops before the risk gate and execution adapter; repository docs explicitly state built-in strategies are intent generators and are not wired to live execution. Repository search found no production consumer of `StrategyResult.intents` and no call to the universal `ExecutionAdapter.submit`. The strategy proposal and adapter request are separate planned stages, not a broken active dispatch path.
