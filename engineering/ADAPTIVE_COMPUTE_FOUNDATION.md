@@ -145,3 +145,17 @@ allocations, CPU utilization, and queue lag. Python remains the orchestration
 and strategy layer. A Go service is not justified for the current in-process
 book update path; reconsider Go only for a separately deployable network or
 control-plane service with measured concurrency/operational benefits.
+
+
+## Process pressure sampling
+
+`ProcessPressureSampler` samples process CPU time over monotonic wall time,
+process RSS from procfs where available, and queue lag supplied by the owning
+worker. It normalizes CPU use against effective cgroup/affinity CPU capacity
+and memory use against the detected memory limit. If process RSS is unavailable,
+it falls back to the conservative available-memory snapshot. The first CPU
+sample is a baseline only. Callers should sample at a stable cadence and pass
+the resulting sample to `AdaptiveComputeRuntime.observe_process_pressure()`;
+the controller still applies its configured hysteresis before optional
+admission changes. This sampler does not create a background task or pause
+services by itself.
