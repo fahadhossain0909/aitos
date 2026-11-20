@@ -108,6 +108,17 @@ def _validate_protection(
     return None
 
 
+def _close_shadow_reservation(gateway: CapitalGateway) -> None:
+    close = getattr(gateway.reservation, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            # A shadow-ledger cleanup failure cannot authorize execution; the
+            # report remains non-executable and the failure is surfaced by CI.
+            pass
+
+
 def build_risk_governed_opportunities(
     cycle: StrategyCycle,
     context: StrategyContext,
@@ -286,6 +297,7 @@ def build_risk_governed_opportunities(
             rejected.append((key, f"capital estimate rejected: {exc}"))
 
     if not estimates:
+        _close_shadow_reservation(gateway)
         return StrategyOpportunityBridgeReport(
             context.now_ns, (), tuple(rejected), execution_eligible=False
         )
@@ -300,6 +312,8 @@ def build_risk_governed_opportunities(
         return StrategyOpportunityBridgeReport(
             context.now_ns, (), tuple(rejected), execution_eligible=False
         )
+    finally:
+        _close_shadow_reservation(gateway)
     decisions = {item.symbol: item for item in reviewed.decisions}
     capital = {item.symbol: item for item in reviewed.allocations}
     governed: list[GovernedOpportunity] = []
