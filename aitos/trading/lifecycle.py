@@ -2767,9 +2767,11 @@ class TradeLifecycle(AITOSModule):
                     getattr(self._order_executor, "hedge_mode", False)
                 ),
             )
-            if delta.delta_quantity > trade.quantity + max(1e-12, trade.quantity * 1e-9):
+            remaining_quantity = Decimal(str(trade.quantity))
+            if delta.delta_quantity > remaining_quantity:
                 raise ExecutionRecoveryRequired(
-                    trade.symbol, algo_order_id,
+                    trade.symbol,
+                    algo_order_id,
                     "child cumulative fill exceeds restored open trade quantity",
                 )
 
@@ -2799,9 +2801,7 @@ class TradeLifecycle(AITOSModule):
                         filled_quantity=float(delta.delta_quantity),
                         fill_price=float(delta.average_price),
                     )
-                    if delta.delta_quantity >= trade.quantity - max(
-                        1e-12, trade.quantity * 1e-9
-                    ):
+                    if delta.delta_quantity == remaining_quantity:
                         if delta.status not in {
                             "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH"
                         }:
