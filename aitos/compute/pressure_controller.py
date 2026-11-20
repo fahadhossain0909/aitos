@@ -26,7 +26,7 @@ class ProcessPressureSample:
     observed_at: float
     cpu_utilization_pct: float
     memory_utilization_pct: float
-    queue_lag_seconds: float
+    queue_lag_seconds: float | None
 
 
 def _process_cpu_seconds() -> float:
@@ -73,7 +73,9 @@ class ProcessPressureSampler:
         self._previous_wall: float | None = None
         self._previous_cpu: float | None = None
 
-    def sample(self, *, queue_lag_seconds: float) -> ProcessPressureSample:
+    def sample(
+        self, *, queue_lag_seconds: float | None = None
+    ) -> ProcessPressureSample:
         now = float(self._clock())
         cpu_seconds = float(self._cpu_time_reader())
         if (
@@ -81,8 +83,12 @@ class ProcessPressureSampler:
             or now < 0
             or not isfinite(cpu_seconds)
             or cpu_seconds < 0
-            or not isfinite(queue_lag_seconds)
-            or queue_lag_seconds < 0
+            or (
+                queue_lag_seconds is not None
+                and (
+                    not isfinite(queue_lag_seconds) or queue_lag_seconds < 0
+                )
+            )
         ):
             raise ValueError("pressure sampler inputs must be finite and non-negative")
 
@@ -118,7 +124,9 @@ class ProcessPressureSampler:
             observed_at=now,
             cpu_utilization_pct=cpu_pct,
             memory_utilization_pct=memory_pct,
-            queue_lag_seconds=float(queue_lag_seconds),
+            queue_lag_seconds=(
+                float(queue_lag_seconds) if queue_lag_seconds is not None else None
+            ),
         )
 
 
@@ -170,7 +178,7 @@ class ResourcePressureController:
         now_seconds: float,
         cpu_utilization_pct: float,
         memory_utilization_pct: float,
-        queue_lag_seconds: float,
+        queue_lag_seconds: float | None = None,
     ) -> PressureDecision:
         """Observe pressure; CRITICAL is immediate, recovery is deliberately slow."""
         if not isfinite(now_seconds) or now_seconds < 0:
