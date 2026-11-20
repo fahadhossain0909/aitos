@@ -160,6 +160,8 @@ class SymbolTelemetryCollector:
                 return None
             cutoff = current - self.window_seconds
             self._prune(window, cutoff)
+            if not window.events and not window.depths and not window.analyses:
+                return None
             self._windows.move_to_end(key)
             bucket_count = max(1, ceil(self.window_seconds))
             buckets = [0] * bucket_count
