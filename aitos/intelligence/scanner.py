@@ -2261,6 +2261,39 @@ class OpportunityScanner(AITOSModule):
             *(_scan_one(symbol) for symbol in selected_symbols)
         )
         candidates = [candidate for candidate in results if candidate is not None]
+        if adaptive_runtime is not None:
+            try:
+                # The start-of-cycle sample is a CPU-time baseline. Sampling
+                # again after the expensive scan measures this cycle's actual
+                # process CPU/RSS pressure rather than diluting it with idle time
+                # between scans.
+                observe_pressure = getattr(
+                    adaptive_runtime, "observe_process_pressure", None
+                )
+                if callable(observe_pressure):
+                    try:
+                        observe_pressure(queue_lag_seconds=queue_lag_seconds)
+                    except TypeError:
+                        observe_pressure()
+                concurrency_gate = getattr(
+                    self, "_aitos_adaptive_concurrency_gate", None
+                )
+                budget_for_optional = getattr(
+                    adaptive_runtime, "budget_for_optional_work", None
+                )
+                if concurrency_gate is not None and callable(budget_for_optional):
+                    optional_budget = budget_for_optional()
+                    await concurrency_gate.set_limit(
+                        min(
+                            concurrency_gate.max_concurrency,
+                            optional_budget.cpu_workers,
+                        )
+                    )
+            except Exception:
+                logger.exception(
+                    "adaptive end-of-cycle pressure sampling failed; "
+                    "retaining last admission limit"
+                )
         self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
         self._last_candidate_symbols = tuple(
             sorted({item.symbol for item in candidates})
