@@ -17,6 +17,7 @@ def snapshots(*, status="PARTIALLY_FILLED", executed="0.4", average="101.5"):
         "status": status,
         "executedQty": executed,
         "avgPrice": average,
+        "cumQuote": "40.6" if executed == "0.4" else "30.45",
         "origQty": "1.0",
     }
     return algo, child
@@ -31,8 +32,11 @@ def test_child_fill_delta_uses_cumulative_quantity_and_is_idempotent():
         expected_side="SELL",
         expected_algo_id="123",
         previously_applied_quantity="0",
+        previously_applied_quote="0",
     )
     assert first.delta_quantity == Decimal("0.4")
+    assert first.delta_quote == Decimal("40.6")
+    assert first.average_price == Decimal("101.5")
     replay = calculate_protection_child_fill_delta(
         algo,
         child,
@@ -40,6 +44,7 @@ def test_child_fill_delta_uses_cumulative_quantity_and_is_idempotent():
         expected_side="SELL",
         expected_algo_id="123",
         previously_applied_quantity="0.4",
+        previously_applied_quote="40.6",
     )
     assert replay.delta_quantity == 0
     assert replay.has_new_fill is False
