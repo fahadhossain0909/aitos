@@ -131,9 +131,7 @@ class SymbolTelemetryCollector:
         if not values:
             return 0.0
         ordered = sorted(values)
-        index = max(
-            0, min(len(ordered) - 1, ceil(percentile * len(ordered)) - 1)
-        )
+        index = max(0, min(len(ordered) - 1, ceil(percentile * len(ordered)) - 1))
         return float(ordered[index])
 
     def snapshot(
@@ -157,9 +155,7 @@ class SymbolTelemetryCollector:
                     buckets[bucket] += 1
             event_rate = self._percentile([float(v) for v in buckets], 0.95)
             analysis_count = sum(
-                1
-                for value in window.analyses
-                if cutoff <= value <= current
+                1 for value in window.analyses if cutoff <= value <= current
             )
             depth_values = [
                 float(value)
@@ -174,9 +170,7 @@ class SymbolTelemetryCollector:
                 symbol=key,
                 p95_event_rate_per_second=event_rate,
                 p95_book_depth_levels=depth,
-                analysis_runs_per_minute=(
-                    analysis_count * 60.0 / self.window_seconds
-                ),
+                analysis_runs_per_minute=(analysis_count * 60.0 / self.window_seconds),
                 sample_count=sample_count,
             )
 
