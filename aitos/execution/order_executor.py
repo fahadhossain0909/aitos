@@ -62,6 +62,11 @@ class OrderExecutor(ABC):
         """Live positions must be reduced at the venue, never by local PnL alone."""
         return False
 
+    @property
+    def intent_store(self):
+        """Durable venue intent journal, when the adapter provides one."""
+        return None
+
     def has_unresolved_orders(self, symbol: str | None = None) -> bool:
         return False
 
@@ -99,6 +104,7 @@ class OrderExecutor(ABC):
         stop_price: float,
         *,
         owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support exchange-side stop orders"
