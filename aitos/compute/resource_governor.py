@@ -396,25 +396,29 @@ def classify_pressure(
     queue_lag_seconds: float,
 ) -> PressureLevel:
     """Classify operational pressure; this is advisory and never changes risk."""
-    values = (cpu_utilization_pct, memory_utilization_pct, queue_lag_seconds)
+    values = (cpu_utilization_pct, memory_utilization_pct)
     if any(not isfinite(value) or value < 0 for value in values):
         raise ValueError("pressure metrics must be finite and non-negative")
+    if queue_lag_seconds is not None and (
+        not isfinite(queue_lag_seconds) or queue_lag_seconds < 0
+    ):
+        raise ValueError("queue lag must be finite and non-negative when provided")
     if (
         cpu_utilization_pct >= 98
         or memory_utilization_pct >= 95
-        or queue_lag_seconds >= 10
+        or (queue_lag_seconds is not None and queue_lag_seconds >= 10)
     ):
         return PressureLevel.CRITICAL
     if (
         cpu_utilization_pct >= 90
         or memory_utilization_pct >= 90
-        or queue_lag_seconds >= 5
+        or (queue_lag_seconds is not None and queue_lag_seconds >= 5)
     ):
         return PressureLevel.HIGH
     if (
         cpu_utilization_pct >= 80
         or memory_utilization_pct >= 80
-        or queue_lag_seconds >= 2
+        or (queue_lag_seconds is not None and queue_lag_seconds >= 2)
     ):
         return PressureLevel.WARNING
     return PressureLevel.NORMAL
