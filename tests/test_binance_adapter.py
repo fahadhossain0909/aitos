@@ -378,3 +378,23 @@ async def test_testnet_websocket_stream_uses_demo_market_route():
     assert fake_ws.url == (
         "wss://demo-fstream.binance.com/market/stream?streams=btcusdt@aggTrade"
     )
+
+
+def test_legacy_binance_testnet_flag_selects_demo_endpoints(monkeypatch):
+    monkeypatch.delenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", raising=False)
+    monkeypatch.setenv("BINANCE_TESTNET", "true")
+
+    adapter = BinanceFuturesAdapter()
+
+    assert adapter.environment == "testnet"
+    assert adapter._rest_base_url == "https://demo-fapi.binance.com"
+
+
+def test_explicit_futures_environment_overrides_legacy_testnet_flag(monkeypatch):
+    monkeypatch.setenv("BINANCE_TESTNET", "true")
+    monkeypatch.setenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", "mainnet")
+
+    adapter = BinanceFuturesAdapter()
+
+    assert adapter.environment == "mainnet"
+    assert adapter._rest_base_url == REST_BASE_URL
