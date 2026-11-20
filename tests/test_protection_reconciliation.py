@@ -669,7 +669,9 @@ async def test_restart_does_not_recover_stop_for_different_existing_protection(
 
 
 @pytest.mark.asyncio
-async def test_restart_recovery_quarantines_legacy_preclaim_without_trade_owner(tmp_path):
+async def test_restart_recovery_quarantines_legacy_preclaim_without_trade_owner(
+    tmp_path,
+):
     store = ExecutionIntentStore(tmp_path / "legacy.sqlite", scope="paper-account")
     store.begin(
         OrderRequest(
