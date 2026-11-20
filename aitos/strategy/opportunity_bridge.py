@@ -125,7 +125,7 @@ def build_risk_governed_opportunities(
     shadow_gateway_factory: Callable[[], CapitalGateway],
     equity_usd: float,
     max_positions: int = 3,
-    live_reservation: object,
+    live_gateway: CapitalGateway,
 ) -> StrategyOpportunityBridgeReport:
     """Produce canonical Opportunity objects after isolated capital/risk review.
 
@@ -141,13 +141,14 @@ def build_risk_governed_opportunities(
         raise ValueError("shadow portfolio equity must be finite and positive")
     if not callable(shadow_gateway_factory):
         raise TypeError("isolated shadow CapitalGateway factory is required")
-    if live_reservation is None:
-        raise ValueError("live reservation identity is required for isolation")
+    if not isinstance(live_gateway, CapitalGateway):
+        raise TypeError("live CapitalGateway identity is required for isolation")
 
     gateway = shadow_gateway_factory()
     if not isinstance(gateway, CapitalGateway):
         raise TypeError("shadow gateway factory must return CapitalGateway")
     shadow_reservation = gateway.reservation
+    live_reservation = live_gateway.reservation
     same_ledger = (
         shadow_reservation is live_reservation
         or (
