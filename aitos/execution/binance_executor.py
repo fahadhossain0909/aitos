@@ -102,6 +102,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             )
 
     @property
+    def intent_store(self) -> ExecutionIntentStore | None:
+        return self._intent_store
+
+    @property
     def hedge_mode(self) -> bool:
         return self._hedge_mode
 
@@ -713,6 +717,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         stop_price: float,
         *,
         owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         return await self._place_reduce_only_stop(
             symbol,
@@ -722,6 +727,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             order_type="STOP_MARKET",
             label="sl",
             owner_trade_id=owner_trade_id,
+            client_order_id=client_order_id,
         )
 
     async def place_take_profit_order(
@@ -800,6 +806,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         order_type: str,
         label: str,
         owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         """STOP_MARKET / TAKE_PROFIT_MARKET orders that only ever reduce the
         existing position. In one-way mode that's via ``reduceOnly``; in
@@ -815,7 +822,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     symbol, position_side, filters, trigger_price, quantity
                 )
 
-        client_order_id = f"aitos-{label}-{uuid.uuid4().hex[:16]}"
+        client_order_id = client_order_id or f"aitos-{label}-{uuid.uuid4().hex[:16]}"
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", client_order_id):
+            raise ValueError("invalid protective client order ID")
         if self._intent_store is not None:
             for pending in self._intent_store.unresolved(symbol):
                 if json.loads(pending["request_json"])["order_type"] in {
