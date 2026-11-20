@@ -239,7 +239,9 @@ class EventBus(AITOSModule):
             if not pending:
                 continue
             entry = pending[0]
-            idle_ms = entry.get("time_since_delivered", entry.get(b"time_since_delivered"))
+            idle_ms = entry.get(
+                "time_since_delivered", entry.get(b"time_since_delivered")
+            )
             if idle_ms is None:
                 continue
             try:
