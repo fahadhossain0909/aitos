@@ -283,7 +283,7 @@ async def test_terminal_partial_stop_reconciles_without_second_market_reduction(
     assert result.quantity == 1
     assert result.state == TradeLifecycleState.POSITION_OPENED
     assert result.take_profit_levels == [120]
-    assert result.sl_order_id == "replacement-sl"
+    assert result.sl_order_id == "algo:456"
     assert not venue.requests
 
 
@@ -342,7 +342,7 @@ async def test_failed_old_stop_cancellation_keeps_durable_recovery_identity(
     position.sl_order_id = "original-protective-stop"
     with pytest.raises(OSError):
         await value._replace_exchange_side_stop_loss(position)
-    assert position.sl_order_id == "replacement"
+    assert position.sl_order_id == "algo:456"
     assert position.agent_consensus["_pending_stop_cancellations"] == [
         "original-protective-stop"
     ]
