@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from math import isfinite
 from typing import Any, Protocol
 
-from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime\nfrom aitos.compute.concurrency import AdaptiveConcurrencyGate
 from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
