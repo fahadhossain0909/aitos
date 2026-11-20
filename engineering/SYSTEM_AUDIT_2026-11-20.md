@@ -109,6 +109,12 @@ The main CI workflow currently:
 
 **Required action:** introduce a measured, staged coverage threshold; run a maintainable full lint policy (for example Ruff or a scoped Flake8 profile) without enabling a repository-wide noisy gate; add container SBOM/vulnerability and provenance checks; add migration/restore and contract compatibility gates. Do not turn on a strict global lint threshold without first baselining existing violations.
 
+### P2 — Overlapping open testnet PRs require explicit triage
+
+The current open-PR search returned both #215 and #244, with nearly identical stated scope: enabling Binance Futures Testnet routing for paper trading. Their descriptions overlap; this audit did not compare every branch diff or certify either PR as still needed.
+
+**Required action:** compare both diffs against current `main`, identify any unique changes, and close/supersede only after review. Do not merge both blindly or infer that either is already represented in main from its title alone.
+
 ### P2 — Documentation freshness and product truth
 
 README previously described Futures as the only exchange and contained branch-specific integration statements. Desktop and installation docs did not clearly distinguish the two desktop products. Historical validation reports could be mistaken for current-main certification.
