@@ -2212,6 +2212,16 @@ class OpportunityScanner(AITOSModule):
                             optional_budget.cpu_workers,
                         )
                     )
+                    background_gate = getattr(
+                        self, "_aitos_adaptive_background_gate", None
+                    )
+                    if background_gate is not None:
+                        await background_gate.set_limit(
+                            min(
+                                background_gate.max_concurrency,
+                                optional_budget.background_task_limit,
+                            )
+                        )
             except Exception:
                 logger.exception(
                     "adaptive process pressure sampling failed; retaining last pressure state"
@@ -2661,9 +2671,9 @@ class OpportunityScanner(AITOSModule):
                     else None
                 ),
                 "queue_pending_idle_seconds": queue_lag_seconds,
-                "adaptive_concurrency_limit": (
+                "adaptive_background_limit": (
                     getattr(
-                        getattr(self, "_aitos_adaptive_concurrency_gate", None),
+                        getattr(self, "_aitos_adaptive_background_gate", None),
                         "limit",
                         None,
                     )
