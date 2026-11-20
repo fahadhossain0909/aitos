@@ -587,3 +587,51 @@ def test_symbol_telemetry_collector_rejects_non_finite_window():
         pass
     else:
         raise AssertionError("non-finite telemetry window must be rejected")
+
+
+
+def test_resource_budget_rejects_invalid_direct_construction():
+    try:
+        from aitos.compute.resource_governor import ResourceBudget
+
+        ResourceBudget(0, 0, 0, 0, 0.0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("zero CPU workers must be rejected")
+
+    try:
+        ResourceBudget(1, 0, 0, 0, float("nan"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite CPU budget must be rejected")
+
+
+def test_resource_snapshot_rejects_non_integer_memory_values():
+    try:
+        ResourceSnapshot(2, 2.0, 4096, 4096, 100.5, False, False)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("fractional memory MB must be rejected")
+
+
+def test_symbol_workload_rejects_fractional_memory_cost():
+    try:
+        SymbolWorkload("BTCUSDT", memory_cost_mb=1.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("fractional memory cost must be rejected")
+
+
+def test_symbol_telemetry_rejects_invalid_integer_fields():
+    from aitos.compute.workload_estimator import SymbolTelemetry
+
+    try:
+        SymbolTelemetry("BTCUSDT", 1.0, 10.5, 1.0, 100)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("fractional book depth must be rejected")
