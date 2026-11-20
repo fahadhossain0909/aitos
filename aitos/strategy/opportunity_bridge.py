@@ -27,6 +27,7 @@ class StrategyProtectionPlan:
 
     stop_loss_price: float
     take_profit_levels: tuple[float, ...]
+    loss_probability: float
     leverage: float = 1.0
     fee_bps: float = 10.0
     slippage_bps: float = 5.0
@@ -73,12 +74,13 @@ def _validate_protection(
         plan.fee_bps,
         plan.slippage_bps,
         plan.funding_bps,
+        plan.loss_probability,
         *plan.take_profit_levels,
     )
     if any(isinstance(value, bool) for value in raw_values):
         return "protection plan values must be numeric, not boolean"
     try:
-        stop, leverage, fees, slippage, funding, *targets = (
+        stop, leverage, fees, slippage, funding, loss_probability, *targets = (
             float(value) for value in raw_values
         )
     except (TypeError, ValueError, OverflowError):
@@ -89,6 +91,8 @@ def _validate_protection(
         return "stop and leverage must be positive (leverage >= 1)"
     if fees < 0 or slippage < 0:
         return "fee and slippage assumptions cannot be negative"
+    if not 0.0 <= loss_probability <= 1.0:
+        return "explicit loss probability must be within [0, 1]"
     if side is TradeSide.LONG:
         if not stop < entry:
             return "LONG stop must be below entry"
@@ -205,6 +209,7 @@ def build_risk_governed_opportunities(
             fee_bps=float(plan.fee_bps),
             slippage_bps=float(plan.slippage_bps),
             funding_bps=float(plan.funding_bps),
+            loss_probability=float(plan.loss_probability),
         )
         try:
             liquidity_score = float(snapshot.liquidity_score)
@@ -215,7 +220,7 @@ def build_risk_governed_opportunities(
             rejected.append((key, "market liquidity score is non-finite"))
             continue
         consensus = {
-            "loss_probability": max(0.0, min(1.0, 1.0 - confidence)),
+            "loss_probability": normalized_plan.loss_probability,
             "liquidity_score": liquidity_score,
             "leverage": normalized_plan.leverage,
             "side": side.value,
