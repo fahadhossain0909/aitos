@@ -706,14 +706,32 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return True
 
     async def place_stop_loss_order(
-        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        stop_price: float,
+        *,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         return await self._place_reduce_only_stop(
-            symbol, side, quantity, stop_price, order_type="STOP_MARKET", label="sl"
+            symbol,
+            side,
+            quantity,
+            stop_price,
+            order_type="STOP_MARKET",
+            label="sl",
+            owner_trade_id=owner_trade_id,
         )
 
     async def place_take_profit_order(
-        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        take_profit_price: float,
+        *,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         return await self._place_reduce_only_stop(
             symbol,
@@ -722,6 +740,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             take_profit_price,
             order_type="TAKE_PROFIT_MARKET",
             label="tp",
+            owner_trade_id=owner_trade_id,
         )
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
@@ -780,6 +799,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         trigger_price: float,
         order_type: str,
         label: str,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         """STOP_MARKET / TAKE_PROFIT_MARKET orders that only ever reduce the
         existing position. In one-way mode that's via ``reduceOnly``; in
@@ -816,6 +836,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     order_type=order_type,
                     client_order_id=client_order_id,
                     reduce_only=True,
+                    owner_trade_id=owner_trade_id,
                 )
             )
         self._pending_execution[client_order_id] = symbol
