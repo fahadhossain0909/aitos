@@ -635,8 +635,6 @@ def test_symbol_telemetry_rejects_invalid_integer_fields():
     else:
         raise AssertionError("fractional book depth must be rejected")
 
-
-
 def test_telemetry_collector_rejects_out_of_order_samples_per_metric():
     from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 
@@ -705,8 +703,6 @@ def test_pressure_controller_recovery_honors_zero_timestamp_and_cooldown():
         queue_lag_seconds=0,
     )
     assert recovered.level == PressureLevel.NORMAL
-
-
 
 def test_adaptive_runtime_connects_pressure_state_to_optional_admission():
     from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
