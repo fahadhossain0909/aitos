@@ -448,6 +448,13 @@ class ExecutionIntentStore:
                 if (quantity == previous_quantity) != (quote == previous_quote):
                     raise ValueError("child-fill quantity/quote watermark diverged")
                 if quantity == previous_quantity:
+                    conn.execute(
+                        "UPDATE protection_child_fills SET status=?,"
+                        "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND algo_id=? "
+                        "AND child_order_id=?",
+                        (status, self.scope, algo_id, child_order_id),
+                    )
+                    current["status"] = status
                     return current
                 conn.execute(
                     "UPDATE protection_child_fills SET cumulative_quantity=?,"
