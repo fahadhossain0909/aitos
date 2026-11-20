@@ -398,3 +398,33 @@ def test_explicit_futures_environment_overrides_legacy_testnet_flag(monkeypatch)
 
     assert adapter.environment == "mainnet"
     assert adapter._rest_base_url == REST_BASE_URL
+
+
+@pytest.mark.asyncio
+async def test_testnet_income_history_uses_testnet_credentials_and_demo_endpoint():
+    pattern = re.compile(
+        re.escape("https://demo-fapi.binance.com/fapi/v1/income")
+        + r"\\?.*signature=[a-f0-9]{64}"
+    )
+    rows = [
+        {
+            "incomeType": "COMMISSION",
+            "income": "-0.01",
+            "asset": "USDT",
+            "symbol": "BTCUSDT",
+            "time": 100,
+            "tranId": 901,
+        }
+    ]
+    adapter = BinanceFuturesAdapter(
+        environment="testnet",
+        api_key="testnet-key",
+        api_secret="testnet-secret",
+    )
+    with aioresponses() as mocked:
+        mocked.get(pattern, payload=rows)
+        result = await adapter.fetch_income_history(
+            start_time_ms=1, end_time_ms=300, limit=10
+        )
+
+    assert [row["tranId"] for row in result] == [901]
