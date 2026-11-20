@@ -2173,6 +2173,7 @@ class OpportunityScanner(AITOSModule):
 
     async def scan_all(self) -> list[ScanCandidate]:
         self._require_initialized()
+        queue_lag_seconds = None
         adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
         if adaptive_runtime is not None:
             try:
@@ -2180,7 +2181,6 @@ class OpportunityScanner(AITOSModule):
                     adaptive_runtime, "observe_process_pressure", None
                 )
                 if callable(observe_pressure):
-                    queue_lag_seconds = None
                     queue_lag_provider = getattr(
                         self._event_bus, "queue_lag_seconds", None
                     )
@@ -2274,6 +2274,21 @@ class OpportunityScanner(AITOSModule):
                     "symbols_scanned": len(selected_symbols),
                     "deep_analysis_budget": self._tuning.analysis.expensive_analysis_limit,
                     "candidates_found": len(candidates),
+                    "compute_pressure_level": (
+                        int(adaptive_runtime.pressure_controller.level)
+                        if adaptive_runtime is not None
+                        else None
+                    ),
+                    "queue_pending_idle_seconds": queue_lag_seconds,
+                    "adaptive_concurrency_limit": (
+                        getattr(
+                            getattr(self, "_aitos_adaptive_concurrency_gate", None),
+                            "limit",
+                            None,
+                        )
+                        if adaptive_runtime is not None
+                        else None
+                    ),
                 },
                 source_module=self.module_id,
             )
