@@ -342,3 +342,38 @@ def test_stale_portfolio_risk_snapshot_fails_closed():
             shadow_gateway_factory=ShadowGateway,
             live_gateway=ShadowGateway(),
         )
+
+
+def test_typed_portfolio_exposures_are_forwarded_to_capital_gateway():
+    cycle, context, plans, _ = inputs()
+    portfolio_risk = StrategyPortfolioRiskContext(
+        snapshot_id="portfolio-snapshot-with-exposure",
+        observed_at_ns=context.now_ns,
+        equity_usd=1_000.0,
+        equity_peak_usd=1_050.0,
+        position_risk_pct={"ETHUSDT": 0.5},
+        position_sides={"ETHUSDT": "LONG"},
+        position_instruments={"ETHUSDT": "ETHUSDT"},
+        pending_order_risk_pct={"pending-sol": 0.2},
+        pending_order_symbols={"pending-sol": "SOLUSDT"},
+        pending_order_sides={"pending-sol": "SHORT"},
+        correlations={"BTCUSDT:ETHUSDT": 0.92},
+        daily_pnl_pct=-0.5,
+        consecutive_losses=2,
+        liquidation_buffer_pct=12.0,
+    )
+    gateway = ShadowGateway()
+    report = build_risk_governed_opportunities(
+        cycle,
+        context,
+        portfolio_risk,
+        plans,
+        shadow_gateway_factory=lambda: gateway,
+        live_gateway=ShadowGateway(),
+    )
+    assert len(report.opportunities) == 1
+    metadata = gateway.seen[0][0].agent_consensus
+    assert metadata["position_risk_pct"] == {"ETHUSDT": 0.5}
+    assert metadata["pending_order_symbols"] == {"pending-sol": "SOLUSDT"}
+    assert metadata["correlations"] == {"BTCUSDT:ETHUSDT": 0.92}
+    assert metadata["portfolio_risk_snapshot_id"] == "portfolio-snapshot-with-exposure"
