@@ -478,9 +478,11 @@ async def recover_accepted_initial_stop_submissions(
     A crash between those writes is idempotently recoverable on the next start.
     """
     scope = getattr(intent_store, "scope", None)
-    if not isinstance(scope, str) or not scope or getattr(
-        executor, "execution_scope", None
-    ) != scope:
+    if (
+        not isinstance(scope, str)
+        or not scope
+        or getattr(executor, "execution_scope", None) != scope
+    ):
         raise ValueError("executor and protective journal account scope mismatch")
     if not callable(persist_trade):
         raise TypeError("durable trade-state writer is required")
@@ -549,18 +551,26 @@ async def recover_accepted_initial_stop_submissions(
             or symbol != str(request.get("symbol", "")).upper()
             or trade_side not in {"LONG", "SHORT"}
             or request_side != trade_side
-            or not _decimal_matches(getattr(trade, "quantity", None), request.get("quantity"))
+            or not _decimal_matches(
+                getattr(trade, "quantity", None), request.get("quantity")
+            )
             or request.get("reduce_only") is not True
         ):
             blocked.append(
-                {"client_id": client_id, "reason": "owner trade does not match protective preclaim"}
+                {
+                    "client_id": client_id,
+                    "reason": "owner trade does not match protective preclaim",
+                }
             )
             continue
 
         algo = await lookup(symbol, client_id)
         if algo is None or algo.get("algoStatus") != "NEW":
             blocked.append(
-                {"client_id": client_id, "reason": "venue has no confirmed NEW resting stop"}
+                {
+                    "client_id": client_id,
+                    "reason": "venue has no confirmed NEW resting stop",
+                }
             )
             continue
         algo_id = algo.get("algoId")
@@ -584,25 +594,27 @@ async def recover_accepted_initial_stop_submissions(
                 or prior_result.get("client_order_id") != client_id
             ):
                 blocked.append(
-                    {"client_id": client_id, "reason": "durable accepted-stop result identity mismatch"}
+                    {
+                        "client_id": client_id,
+                        "reason": "durable accepted-stop result identity mismatch",
+                    }
                 )
                 continue
         expected_side = "SELL" if trade_side == "LONG" else "BUY"
         expected_position_side = trade_side if bool(executor.hedge_mode) else "BOTH"
         try:
-            quantity_matches = _decimal_matches(algo.get("quantity"), request.get("quantity"))
+            quantity_matches = _decimal_matches(
+                algo.get("quantity"), request.get("quantity")
+            )
             trigger_matches = _decimal_matches(
                 algo.get("triggerPrice"), request.get("reference_price")
             )
         except (TypeError, ValueError):
             quantity_matches = trigger_matches = False
         reduce_only = algo.get("reduceOnly")
-        reduction_matches = (
-            algo.get("positionSide") == expected_position_side
-            and (
-                (bool(executor.hedge_mode) and reduce_only in (False, "false"))
-                or (not bool(executor.hedge_mode) and reduce_only in (True, "true"))
-            )
+        reduction_matches = algo.get("positionSide") == expected_position_side and (
+            (bool(executor.hedge_mode) and reduce_only in (False, "false"))
+            or (not bool(executor.hedge_mode) and reduce_only in (True, "true"))
         )
         if not (
             algo.get("clientAlgoId") == client_id
@@ -615,7 +627,10 @@ async def recover_accepted_initial_stop_submissions(
             and reduction_matches
         ):
             blocked.append(
-                {"client_id": client_id, "reason": "authenticated venue stop identity mismatch"}
+                {
+                    "client_id": client_id,
+                    "reason": "authenticated venue stop identity mismatch",
+                }
             )
             continue
 
