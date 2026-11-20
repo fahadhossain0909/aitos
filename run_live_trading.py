@@ -241,7 +241,8 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     except Exception as exc:  # noqa: BLE001
         account_reconciliation_ready = False
         logger.critical(
-            "live startup entering manage-only mode: account exposure is not reconciled",
+            "live startup entering manage-only mode: "
+            "account exposure is not reconciled",
             extra={
                 "aitos_extra": {
                     "error": f"{type(exc).__name__}: {exc}",
@@ -284,7 +285,8 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         )
     else:
         logger.critical(
-            "capital reservations were not reconciled because venue exposure is unverified; "
+            "capital reservations were not reconciled because "
+            "venue exposure is unverified; "
             "runtime remains manage-only",
             extra={"aitos_extra": {"new_entries_allowed": False}},
         )
