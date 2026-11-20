@@ -58,6 +58,12 @@ The installation guide previously described the session manager as the desktop a
 
 **Remediation in this branch:** clarify the two products, their release status and security boundaries; add a complete host-native sidecar build sequence and exact CI artifact names.
 
+### P1 — Unauthenticated Vite preview was exposed on all interfaces
+
+The main-branch Vite configuration bound the development server to `0.0.0.0` and set `allowedHosts: true`. The proxy strips browser authorization/cookies and refuses the backend bearer, and the documented preview is supposed to remain unattached; nevertheless, the default exposed the development server to every reachable interface and disabled Vite's Host-header/DNS-rebinding protection.
+
+**Remediation in this branch:** default the dev server to `127.0.0.1`, bind preview to loopback, and require both an explicit bind host and exact DNS-host allowlist for remote Codespaces previews. Wildcards, URLs, paths, ports and malformed hostnames are rejected. Add unit coverage for the policy. Never attach real financial data to the unauthenticated Vite preview.
+
 ### P1 — Desktop validation did not re-run on main
 
 The console-quality, Windows-console and Linux-console workflows had push triggers pinned to the arena branch. The Tauri workflow was PR/manual only. Relevant PR checks existed, but post-merge mainline validation was not configured for these workflows.
