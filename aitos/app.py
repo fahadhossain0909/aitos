@@ -309,6 +309,15 @@ async def build_system(
                 adaptive_compute.budget.cpu_workers,
             ),
         )
+        # Optional background work is independently admitted; it never shares
+        # the scanner gate or blocks market-data, risk, or execution services.
+        scanner._aitos_adaptive_background_gate = AdaptiveConcurrencyGate(
+            max(1, int(tuning.hardware.max_background_tasks)),
+            initial_limit=min(
+                max(1, int(tuning.hardware.max_background_tasks)),
+                adaptive_compute.budget.background_task_limit,
+            ),
+        )
         scanner._aitos_protected_symbols = {scanner._reference_symbol}
         logger.info(
             "paper adaptive compute enabled",
