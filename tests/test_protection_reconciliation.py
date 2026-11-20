@@ -64,6 +64,7 @@ def inventory_row():
         "triggerPrice": "90.0",
         "algoStatus": "NEW",
         "reduceOnly": True,
+        "closePosition": False,
     }
 
 
