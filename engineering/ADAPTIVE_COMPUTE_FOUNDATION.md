@@ -66,13 +66,22 @@ rejected in live mode. Environment overrides use the
 `AITOS_TUNING_RUNTIME_ADAPTIVE_COMPUTE_ENABLED` and
 `AITOS_TUNING_RUNTIME_PRESSURE_*_SECONDS` names.
 
-The controller is still advisory and is not wired to production scanner,
-market-data, order-book, position-monitoring, risk, or execution services.
-When later integrated, only optional/background work may be deferred. Market
-data sequence integrity, order updates, open-position monitoring, risk checks,
-and execution recovery must remain protected regardless of pressure. Runtime
-admission requires telemetry-calibrated workload costs, observability, and
-service-level ownership before enabling the switch in paper environments.
+The controller is exposed through the paper-only adaptive runtime. The runtime
+factory is called during application construction, but returns no controller
+unless the explicit opt-in is enabled; it fails closed if a caller attempts to
+enable it in live mode. The runtime exposes one pressure update and optional
+admission interface, so service owners can apply the same pressure state to
+bounded CPU/memory budgets.
+
+The scanner integration is deliberately narrow: the lightweight candidate
+screen may reduce the optional expensive-analysis cohort using the resource
+budget and observed per-symbol workload. It protects the configured reference
+symbol and receives current open-position and pending-order symbols from the
+portfolio/lifecycle snapshot before each scan cycle. If the adaptive planner
+fails, the scanner falls back to its existing fixed candidate cap. Market-data
+ingestion, order updates, position monitoring, risk checks, execution recovery,
+and trading strategy decisions are not scheduled by this optional-work planner
+and are never deferred by it.
 
 ## Telemetry-based workload estimation
 
@@ -93,3 +102,26 @@ capacity under WARNING/HIGH pressure. CRITICAL pressure defers all optional
 work. It explicitly does not own protected services; market-data integrity,
 order updates, open-position monitoring, risk checks, and execution recovery
 must be scheduled by their own protected service budgets.
+
+
+## Scanner telemetry and opt-in operation
+
+When adaptive compute is enabled in paper mode, the application creates a
+bounded 60-second, process-local telemetry collector. The scanner records
+accepted trade events, observed book depth, and analysis starts. Per-symbol
+sample storage is capped and stale samples expire; symbols are LRU-bounded to
+avoid unbounded cardinality. An estimate is considered calibrated only when
+the event, depth, and analysis streams all meet the estimator's minimum sample
+count. Until then, the estimator uses its conservative unknown-workload cost.
+
+Enable only in paper environments after validating resource limits and
+telemetry coverage:
+
+```bash
+AITOS_TUNING_RUNTIME_ADAPTIVE_COMPUTE_ENABLED=true
+```
+
+The default remains disabled. No live trading configuration should enable this
+feature. The scanner's adaptive capacity is a compute admission decision only;
+it does not change signal thresholds, candidate scores, risk ceilings, order
+quantity, leverage, or execution authority.
