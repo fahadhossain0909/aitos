@@ -44,7 +44,12 @@ class SymbolTelemetryCollector:
         max_samples_per_metric: int = 4096,
         clock=monotonic,
     ) -> None:
-        if window_seconds < 1 or max_symbols < 1 or max_samples_per_metric < 1:
+        if (
+            not isfinite(window_seconds)
+            or window_seconds < 1
+            or max_symbols < 1
+            or max_samples_per_metric < 1
+        ):
             raise ValueError("telemetry collector bounds must be positive")
         self.window_seconds = float(window_seconds)
         self.max_symbols = int(max_symbols)
