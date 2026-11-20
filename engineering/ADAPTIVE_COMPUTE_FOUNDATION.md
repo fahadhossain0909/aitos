@@ -236,3 +236,15 @@ partially advanced book behind. The Rust batch method also detaches the
 CPU-bound replay from Python's GIL while it works on the private clone; the
 authoritative state is swapped back only after successful completion. The
 Python fallback remains behaviorally equivalent but does not release the GIL.
+
+
+## Adaptive background worker admission
+
+The paper application now provisions a background-work gate separately from
+scanner candidate concurrency. Its initial limit is derived from the detected
+background-task budget and is updated by the same pressure controller after
+each scanner batch. Statistical drift evaluation acquires this gate per
+provider batch rather than for the lifetime of its scheduler task. A pressure
+increase can therefore defer the next drift batch without cancelling an
+in-progress evaluation or starving protected trading services. A zero
+background budget leaves optional drift batches waiting until capacity recovers.
