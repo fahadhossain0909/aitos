@@ -2527,9 +2527,13 @@ class TradeLifecycle(AITOSModule):
         if not self._order_executor.requires_exchange_execution:
             raise RuntimeError("durable take-profit handover requires live execution")
         if self._position_manager is not None:
-            raise RuntimeError("EIE-managed take-profit checkpoints are not exchange orders")
+            raise RuntimeError(
+                "EIE-managed take-profit checkpoints are not exchange orders"
+            )
         if not _valid_market_price(new_price):
-            raise ValueError("replacement take-profit price must be finite and positive")
+            raise ValueError(
+                "replacement take-profit price must be finite and positive"
+            )
         self._require_execution_writer()
         self._assert_execution_unlatched(trade.trade_id)
         if self._open_trades.get(trade.trade_id) is not trade:
@@ -2547,7 +2551,9 @@ class TradeLifecycle(AITOSModule):
         intent_store = getattr(self._order_executor, "intent_store", None)
         if intent_store is None:
             raise ExecutionRecoveryRequired(
-                trade.symbol, trade.trade_id, "durable protective handover journal unavailable"
+                trade.symbol,
+                trade.trade_id,
+                "durable protective handover journal unavailable",
             )
         matches = []
         for row in await asyncio.to_thread(intent_store.protection_intents):
@@ -2561,7 +2567,9 @@ class TradeLifecycle(AITOSModule):
                 matches.append((row, request))
         if len(matches) != 1:
             raise ExecutionRecoveryRequired(
-                trade.symbol, str(old_id), "old take-profit ownership is missing or ambiguous"
+                trade.symbol,
+                str(old_id),
+                "old take-profit ownership is missing or ambiguous",
             )
         _, old_request = matches[0]
         if (
@@ -2586,7 +2594,9 @@ class TradeLifecycle(AITOSModule):
         status_reader = getattr(self._order_executor, "get_resting_order_status", None)
         if not callable(status_reader):
             raise ExecutionRecoveryRequired(
-                trade.symbol, str(old_id), "authenticated TP status lookup is unavailable"
+                trade.symbol,
+                str(old_id),
+                "authenticated TP status lookup is unavailable",
             )
         old_status = await status_reader(trade.symbol, old_id)
         if old_status != "NEW":
@@ -2618,7 +2628,9 @@ class TradeLifecycle(AITOSModule):
             )
             if not result.success or result.client_order_id != new_client_id:
                 raise ExecutionUncertainError(
-                    trade.symbol, new_client_id, "replacement take-profit acceptance is uncertain"
+                    trade.symbol,
+                    new_client_id,
+                    "replacement take-profit acceptance is uncertain",
                 )
             intent_store.record_handover_new_order(handover_id, result.order_id)
             trade.tp_order_ids[tp_index] = result.order_id
@@ -2628,7 +2640,9 @@ class TradeLifecycle(AITOSModule):
             )
             if not isinstance(pending, list):
                 raise ExecutionRecoveryRequired(
-                    trade.symbol, new_client_id, "pending protection cancellation state is malformed"
+                    trade.symbol,
+                    new_client_id,
+                    "pending protection cancellation state is malformed",
                 )
             if old_id not in pending:
                 pending.append(old_id)
@@ -2644,10 +2658,15 @@ class TradeLifecycle(AITOSModule):
                 )
             await self._order_executor.cancel_resting_order(trade.symbol, old_id)
             old_status = await status_reader(trade.symbol, old_id)
-            if old_status not in {"CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}:
+            if old_status not in {
+                "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"
+            }:
                 raise ExecutionRecoveryRequired(
                     trade.symbol, str(old_id),
-                    f"old take-profit cancellation is unconfirmed (status={old_status!r})",
+                    (
+                        "old take-profit cancellation is unconfirmed "
+                        f"(status={old_status!r})"
+                    ),
                 )
             intent_store.mark_handover_old_cancelled(handover_id)
             while old_id in pending:
@@ -2682,7 +2701,9 @@ class TradeLifecycle(AITOSModule):
         completed idempotently; SQLite-ahead-of-snapshot is quarantined.
         """
         if not self._order_executor.requires_exchange_execution:
-            raise RuntimeError("protective child reconciliation requires live execution")
+            raise RuntimeError(
+                "protective child reconciliation requires live execution"
+            )
         self._require_execution_writer()
         if not isinstance(algo, Mapping) or not isinstance(child, Mapping):
             raise ValueError("authenticated algo and child snapshots are required")
@@ -2705,21 +2726,23 @@ class TradeLifecycle(AITOSModule):
             if order_type == "STOP_MARKET":
                 if trade.sl_order_id != algo_order_id:
                     raise ExecutionRecoveryRequired(
-                        trade.symbol, algo_order_id, "triggered stop is not owned by restored trade"
+                        trade.symbol,
+                        algo_order_id,
+                        "triggered stop is not owned by restored trade",
                     )
             elif order_type == "TAKE_PROFIT_MARKET":
                 if algo_order_id not in trade.tp_order_ids:
                     raise ExecutionRecoveryRequired(
-                        trade.symbol, algo_order_id, "triggered TP is not owned by restored trade"
+                        trade.symbol,
+                        algo_order_id,
+                        "triggered TP is not owned by restored trade",
                     )
             else:
                 raise ValueError("unsupported protective algo type")
 
             expected_side = "SELL" if trade.side == TradeSide.LONG else "BUY"
-            expected_position_side = (
-                trade.side.value if bool(getattr(self._order_executor, "hedge_mode", False))
-                else "BOTH"
-            )
+            hedge_mode = bool(getattr(self._order_executor, "hedge_mode", False))
+            expected_position_side = trade.side.value if hedge_mode else "BOTH"
             marker_map = trade.agent_consensus.setdefault(
                 "_applied_protection_child_fills", {}
             )
@@ -2731,14 +2754,17 @@ class TradeLifecycle(AITOSModule):
             marker = marker_map.get(marker_key, {})
             if not isinstance(marker, dict):
                 raise ExecutionRecoveryRequired(
-                    trade.symbol, algo_order_id, "trade child-fill marker identity is malformed"
+                    trade.symbol,
+                    algo_order_id,
+                    "trade child-fill marker identity is malformed",
                 )
             watermark = await asyncio.to_thread(
                 intent_store.protection_child_watermark, algo_id, child_id
             )
             if watermark is not None and not marker:
                 raise ExecutionRecoveryRequired(
-                    trade.symbol, algo_order_id,
+                    trade.symbol,
+                    algo_order_id,
                     "SQLite child-fill watermark is ahead of the durable trade snapshot",
                 )
             previous_quantity = marker.get("cumulative_quantity", "0")
@@ -2789,7 +2815,10 @@ class TradeLifecycle(AITOSModule):
                 raise ExecutionRecoveryRequired(
                     trade.symbol, algo_order_id, "pending protection state is malformed"
                 )
-            if delta.status in {"NEW", "PARTIALLY_FILLED"} and algo_order_id not in pending:
+            if (
+                delta.status in {"NEW", "PARTIALLY_FILLED"}
+                and algo_order_id not in pending
+            ):
                 pending.append(algo_order_id)
 
             try:
