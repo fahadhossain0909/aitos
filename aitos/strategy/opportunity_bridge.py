@@ -119,18 +119,24 @@ def _validate_protection(
         return "fee and slippage assumptions cannot be negative"
     if not 0.0 <= loss_probability <= 1.0:
         return "explicit loss probability must be within [0, 1]"
+    if any(price <= 0 for price in targets):
+        return "take-profit levels must be positive"
+    if len(set(targets)) != len(targets):
+        return "take-profit levels must be unique"
     if side is TradeSide.LONG:
         if not stop < entry:
             return "LONG stop must be below entry"
         if any(price <= entry for price in targets):
             return "LONG take-profit levels must be above entry"
+        if targets != sorted(targets):
+            return "LONG take-profit levels must be ordered ascending"
     else:
         if not stop > entry:
             return "SHORT stop must be above entry"
         if any(price >= entry for price in targets):
             return "SHORT take-profit levels must be below entry"
-    if any(price <= 0 for price in targets):
-        return "take-profit levels must be positive"
+        if targets != sorted(targets, reverse=True):
+            return "SHORT take-profit levels must be ordered descending"
     return None
 
 
