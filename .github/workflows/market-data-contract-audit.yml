@@ -101,15 +101,30 @@ jobs:
           import os
           import redis
 
+          import time
+          from redis.exceptions import RedisError
+
           client = redis.Redis(
               host=os.environ["REDIS_HOST"],
               port=int(os.environ["REDIS_PORT"]),
-              password=os.environ["REDIS_PASSWORD"],
+              password=os.environ.get("REDIS_PASSWORD") or None,
               decode_responses=True,
+              socket_connect_timeout=2,
+              socket_timeout=2,
           )
-          if not client.ping():
-              raise SystemExit("Redis health check failed")
-          print("Redis: PONG")
+          last_error = None
+          for attempt in range(30):
+              try:
+                  response = client.ping()
+                  if response is True:
+                      print("Redis: PONG")
+                      break
+                  last_error = f"unexpected PING response: {response!r}"
+              except RedisError as exc:
+                  last_error = f"{type(exc).__name__}: {exc}"
+              if attempt == 29:
+                  raise SystemExit(f"Redis health check failed after retries: {last_error}")
+              time.sleep(1)
           PY
           curl -fsS http://127.0.0.1:7474 >/dev/null
           curl -fsS http://127.0.0.1:8123/ping >/dev/null
