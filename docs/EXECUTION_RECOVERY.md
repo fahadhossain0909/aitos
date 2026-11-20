@@ -331,3 +331,37 @@ but they do not substitute for the full Venue + SQLite + ClickHouse coordinated
 fault-injection drill. Authenticated Binance demo testnet acceptance remains
 blocked when the hosted runner receives HTTP 451; no mainnet fallback is
 permitted.
+
+
+## Triggered protective child fill application (2026-11-20)
+
+Startup now inspects only protective algo IDs already owned by restored open
+trades. A triggered/finished algo is fetched again through the authenticated
+client-algo lookup, then its actual child order is read from the signed order
+endpoint. The child is accepted only when algo/child ID, symbol, side, order
+type, position side, reduce-only semantics, original quantity and cumulative
+quantity/quote are consistent.
+
+The lifecycle computes the unapplied quantity and quote deltas using Decimal.
+It applies partial reductions through the existing PnL/quantity/risk ledger, or
+routes a terminal full-size fill through the confirmed-close path. The
+`_applied_protection_child_fills` marker is written in the same durable trade
+snapshot as the updated position. Only after that write does SQLite advance its
+per-`(scope, algo_id, child_order_id)` mirror watermark. If a crash occurs
+between those writes, the restored trade marker prevents a duplicate reduction
+and the SQLite mirror can be replayed forward. If SQLite is ahead of the
+restored trade marker, recovery fails closed.
+
+For a terminal partial stop fill, a fresh stop is installed against the
+remaining quantity using the existing make-before-break stop handover before
+the old triggered algo is retired. For a still-active partial child, the
+position is updated but remains quarantined with fresh entries disabled until
+the child reaches a terminal state. Terminal TP children are removed from the
+trade's TP ID/level pair after the fill has been durably applied.
+
+The startup account-reconciliation guard now degrades to manage-only instead
+of terminating the process when venue exposure cannot be proven. In that
+state, existing-position price/EIE management and reconciliation remain
+running; reservation release/promotion is skipped and new entries remain
+disabled. This is a safety fallback, not a substitute for an operator resolving
+the venue/local discrepancy.
