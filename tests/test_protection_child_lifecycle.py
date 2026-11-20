@@ -424,7 +424,9 @@ async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
 async def test_child_fill_finishes_protected_intent_owner_ack_after_trade_snapshot(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "child-protected-intent.sqlite", scope="child-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "child-protected-intent.sqlite", scope="child-account"
+    )
     journal.begin(
         OrderRequest(
             symbol="BTCUSDT",
