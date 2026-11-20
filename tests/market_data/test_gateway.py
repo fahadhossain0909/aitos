@@ -8,7 +8,9 @@ from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGat
 
 
 def _event(
-    source: MarketSource, age_seconds: float = 0, sequence: int = 0,
+    source: MarketSource,
+    age_seconds: float = 0,
+    sequence: int = 0,
     event_type: MarketEventType = MarketEventType.TRADE,
 ) -> MarketEvent:
     now = datetime.now(timezone.utc)
