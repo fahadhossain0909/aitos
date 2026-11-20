@@ -193,7 +193,7 @@ class TuningSettings(BaseModel):
             or self.runtime.adaptive_compute_enabled
         ):
             raise ValueError(
-                "adaptive tuning/compute is not permitted in live mode; change "
+                "adaptive tuning is not permitted in live mode; adaptive compute is also disabled; change "
                 "settings only through the approved risk/configuration workflow"
             )
         return self
