@@ -139,7 +139,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 api_key if api_key is not None else os.getenv("BINANCE_API_KEY")
             )
             self._api_secret = (
-                api_secret if api_secret is not None else os.getenv("BINANCE_API_SECRET")
+                api_secret
+                if api_secret is not None
+                else os.getenv("BINANCE_API_SECRET")
             )
         self._session: aiohttp.ClientSession | None = None
         self._ws_transport: dict[str, Any] = {
