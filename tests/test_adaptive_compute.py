@@ -758,7 +758,6 @@ def test_adaptive_runtime_connects_pressure_state_to_optional_admission():
     assert runtime.admit_optional_work(requests).admitted == ()
 
 
-
 def test_optional_scheduler_rejects_invalid_request_class_and_types():
     from aitos.compute.work_scheduler import (
         WorkloadClass,
@@ -780,7 +779,6 @@ def test_optional_scheduler_rejects_invalid_request_class_and_types():
         )
 
 
-
 def test_resource_budget_rejects_non_integer_worker_limits():
     resources = ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False)
     with pytest.raises(ValueError):
@@ -797,7 +795,6 @@ def test_capacity_planner_rejects_non_integer_symbol_cap():
     )
     with pytest.raises(ValueError):
         plan_symbol_capacity([], budget, max_symbols=1.5)
-
 
 
 def test_detect_resources_honors_cgroup_v1_cpu_and_memory_limits(tmp_path):
