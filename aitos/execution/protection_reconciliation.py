@@ -501,7 +501,9 @@ async def recover_accepted_initial_stop_submissions(
             by_trade_id.setdefault(trade_id, []).append(trade)
 
     handover_reader = getattr(intent_store, "protection_handovers", None)
-    handover_rows = await asyncio.to_thread(handover_reader) if callable(handover_reader) else []
+    handover_rows = (
+        await asyncio.to_thread(handover_reader) if callable(handover_reader) else []
+    )
     handover_client_ids = {
         item.get("new_client_id")
         for item in handover_rows
@@ -722,7 +724,9 @@ async def recover_protection_handovers(
     cancel = getattr(executor, "cancel_resting_order", None)
     status_reader = getattr(executor, "get_resting_order_status", None)
     if not all(callable(item) for item in (lookup, cancel, status_reader)):
-        raise TypeError("authenticated algo lookup and resting-order reconciliation are required")
+        raise TypeError(
+            "authenticated algo lookup and resting-order reconciliation are required"
+        )
     handovers = await asyncio.to_thread(intent_store.protection_handovers)
     intents = await asyncio.to_thread(intent_store.protection_intents)
     if (
@@ -835,10 +839,12 @@ async def recover_protection_handovers(
             continue
         new_id = f"algo:{int(algo_id)}"
         if handover.get("new_order_id") not in (None, "", new_id):
-            blocked.append({
+            blocked.append(
+                {
                     "client_id": client_id,
                     "reason": "replacement algo ID conflicts with durable handover",
-                })
+                }
+            )
             continue
         trade_side = str(
             getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", ""))
@@ -870,10 +876,12 @@ async def recover_protection_handovers(
             and exact_trigger
             and exact_reduction
         ):
-            blocked.append({
+            blocked.append(
+                {
                     "client_id": client_id,
                     "reason": "replacement venue identity mismatch",
-                })
+                }
+            )
             continue
 
         if state == "PREPARED":
@@ -882,10 +890,12 @@ async def recover_protection_handovers(
             )
             state = "NEW_ACCEPTED"
         elif handover.get("new_order_id") != new_id:
-            blocked.append({
+            blocked.append(
+                {
                     "client_id": client_id,
                     "reason": "durable replacement order ID is missing",
-                })
+                }
+            )
             continue
 
         intent_state = intent.get("state")
@@ -893,7 +903,10 @@ async def recover_protection_handovers(
             result_json = intent.get("result_json")
             if isinstance(result_json, str):
                 result_json = json.loads(result_json)
-            if not isinstance(result_json, dict) or result_json.get("order_id") != new_id:
+            if (
+                not isinstance(result_json, dict)
+                or result_json.get("order_id") != new_id
+            ):
                 blocked.append(
                     {
                         "client_id": client_id,
@@ -912,10 +925,12 @@ async def recover_protection_handovers(
 
         current_stop = getattr(trade, "sl_order_id", None)
         if current_stop not in (old_id, new_id):
-            blocked.append({
+            blocked.append(
+                {
                     "client_id": client_id,
                     "reason": "restored trade stop is neither old nor replacement stop",
-                })
+                }
+            )
             continue
         trade.sl_order_id = new_id
         pending = trade.agent_consensus.setdefault("_pending_stop_cancellations", [])
