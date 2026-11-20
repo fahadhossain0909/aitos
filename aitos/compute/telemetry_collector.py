@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from collections import OrderedDict, deque
-from dataclasses import dataclass, field
-from math import ceil
+from dataclasses import dataclass
+from math import ceil, isfinite
 from threading import RLock
 from time import monotonic
 
@@ -83,6 +83,8 @@ class SymbolTelemetryCollector:
 
     def record_event(self, symbol: str, *, timestamp: float | None = None) -> None:
         now = self._clock() if timestamp is None else float(timestamp)
+        if not isfinite(now) or now < 0:
+            raise ValueError("timestamp must be finite and non-negative")
         with self._lock:
             window = self._window(symbol, now)
             self._prune(window, now - self.window_seconds)
@@ -125,7 +127,7 @@ class SymbolTelemetryCollector:
                 return None
             self._prune(window, current - self.window_seconds)
             self._windows.move_to_end(key)
-            bucket_count = max(1, int(self.window_seconds))
+            bucket_count = max(1, ceil(self.window_seconds))
             buckets = [0] * bucket_count
             cutoff = current - self.window_seconds
             for event_time in window.events:
