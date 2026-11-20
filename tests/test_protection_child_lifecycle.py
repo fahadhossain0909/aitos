@@ -1,8 +1,9 @@
+import copy
 from unittest.mock import AsyncMock
 
 import pytest
 
-from aitos.execution.intent_store import ExecutionIntentStore
+from aitos.execution.intent_store import ExecutionIntentStore, ExecutionRecoveryRequired
 from aitos.execution.order_executor import OrderRequest, OrderResult
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.lifecycle import TradeLifecycle
@@ -227,3 +228,91 @@ async def test_terminal_partial_stop_fill_reprotects_remaining_position_make_bef
     assert trade.agent_consensus.get("_pending_stop_cancellations", []) == []
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
     assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
+
+@pytest.mark.asyncio
+async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduction(
+    event_bus, risk_engine, tmp_path, monkeypatch
+):
+    journal = ExecutionIntentStore(tmp_path / "child-crash.sqlite", scope="child-account")
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    lifecycle._open_trades[trade.trade_id] = trade
+    persisted = []
+
+    async def persist(value):
+        persisted.append(value.to_dict())
+
+    lifecycle._execution_state_writer = persist
+    lifecycle._execution_position_verifier = AsyncMock()
+    monkeypatch.setattr(
+        journal,
+        "mark_protection_child_applied",
+        lambda **kwargs: (_ for _ in ()).throw(OSError("simulated SQLite ACK failure")),
+    )
+    with pytest.raises(OSError, match="SQLite ACK failure"):
+        await lifecycle.apply_triggered_protection_child_fill(
+            trade.trade_id, algo_snapshot(), child_snapshot()
+        )
+    assert trade.quantity == pytest.approx(0.75)
+    assert persisted[-1]["agent_consensus"]["_applied_protection_child_fills"][
+        "123:456"
+    ]["cumulative_quantity"] == "0.25"
+
+    # Restore from the durable ClickHouse-like snapshot, with SQLite still behind.
+    restored = copy.deepcopy(trade)
+    restarted = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    restarted._open_trades[restored.trade_id] = restored
+    restarted._execution_state_writer = persist
+    restarted._execution_position_verifier = AsyncMock()
+    replay = await restarted.apply_triggered_protection_child_fill(
+        restored.trade_id, algo_snapshot(), child_snapshot()
+    )
+    assert replay["delta_quantity"] == "0"
+    assert restored.quantity == pytest.approx(0.75)
+    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
+
+
+@pytest.mark.asyncio
+async def test_sqlite_watermark_ahead_of_trade_snapshot_is_quarantined(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "child-ahead.sqlite", scope="child-account")
+    seed_stop(journal)
+    journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-child-1",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.25",
+        cumulative_quote="22.5",
+        status="PARTIALLY_FILLED",
+    )
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=TriggeredChildExecutor(journal),
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    lifecycle._open_trades[trade.trade_id] = trade
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    with pytest.raises(ExecutionRecoveryRequired, match="ahead"):
+        await lifecycle.apply_triggered_protection_child_fill(
+            trade.trade_id, algo_snapshot(), child_snapshot()
+        )
+    assert trade.quantity == pytest.approx(1.0)
+    lifecycle._execution_state_writer.assert_not_awaited()
