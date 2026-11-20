@@ -156,7 +156,7 @@ async def test_gateway_never_evicts_queued_orderbook_delta_for_trade_burst() -> 
     assert gateway.accept(delta) is True
     assert gateway.accept(trade) is False
     assert gateway.queue.qsize() == 1
-    assert gateway.queue._queue[0] is delta
+    assert gateway.queue._queue._queue[0] is delta
 
 
 @pytest.mark.asyncio
@@ -178,7 +178,7 @@ async def test_gateway_admits_book_delta_by_evicting_replaceable_trade() -> None
 
     assert gateway.accept(trade) is True
     assert gateway.accept(delta) is True
-    assert gateway.queue._queue[0] is delta
+    assert gateway.queue._queue._queue[0] is delta
     assert gateway.queue.stats.replaced_oldest == 1
 
 
@@ -205,6 +205,6 @@ async def test_gateway_degrades_when_all_queue_slots_are_sequence_critical() -> 
 
     assert gateway.accept(first) is True
     assert gateway.accept(second) is False
-    assert gateway.queue._queue[0] is first
+    assert gateway.queue._queue._queue[0] is first
     assert gateway.state is GatewayState.DEGRADED
     assert gateway.health.degraded is True
