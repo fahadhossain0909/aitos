@@ -65,6 +65,7 @@ class AdaptiveComputeRuntime:
         """Return a pressure-scaled budget for optional scanner/analysis work."""
         level = int(self.pressure_controller.level)
         scale = {0: 1.0, 1: 0.5, 2: 0.25, 3: 0.0}[level]
+
         def scaled_count(value: int) -> int:
             if scale <= 0 or value <= 0:
                 return 0
