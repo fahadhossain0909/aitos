@@ -326,9 +326,7 @@ async def test_algo_client_id_lookup_rejects_cross_symbol_or_client_identity():
 
 async def test_protective_preclaim_persists_owner_trade_identity(tmp_path):
     store = ExecutionIntentStore(tmp_path / "protective.sqlite", scope="test-account")
-    value = BinanceFuturesOrderExecutor(
-        "dummy", "dummy", intent_store=store
-    )
+    value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
     value._signed_request = AsyncMock(return_value=dict(algoId=321, algoStatus="NEW"))
 
     result = await value.place_stop_loss_order(
