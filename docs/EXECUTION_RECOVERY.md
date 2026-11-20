@@ -215,8 +215,11 @@ write but before cursor advancement, the stable Binance transaction ID makes the
 retry idempotent. A trade-write, event-publication or transport/API failure, or any
 income row that cannot be uniquely attributed to one internal trade, keeps startup
 blocked; the durable cursor remains held before unresolved rows for later
-operator-led reconciliation. The background reconciler continues only after the
-startup gate has been evaluated.
+operator-led reconciliation. The background reconciler continues only after the startup gate has been evaluated.
+If either financial or restored-position readiness is false, the runtime stays in
+manage-only mode: market ingestion, lifecycle price/EIE management, exchange
+protection reconciliation and existing-position supervision remain active, while
+the fresh-exposure scan is disabled until an operator restarts after remediation.
 
 ## Closed-ledger integrity and SQL verification (2026-11-07)
 
