@@ -12,7 +12,9 @@ class PendingRedis:
         self.calls = []
 
     async def xinfo_groups(self, stream):
-        names = ["scanner", "book-cache", *(f"group-{index}" for index in range(10))]
+        names = [
+            "scanner", "book-cache", *(f"group-{index}" for index in range(10))
+        ]
         return [
             {"name": name, "lag": 0, "last-delivered-id": "0-0"}
             for name in names
