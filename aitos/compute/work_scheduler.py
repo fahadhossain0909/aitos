@@ -1,4 +1,5 @@
 """Pressure-aware admission for optional analysis and background work."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
