@@ -419,3 +419,53 @@ async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
         journal.protection_child_watermark("123", "456")["cumulative_quantity"]
         == "1.0"
     )
+
+@pytest.mark.asyncio
+async def test_child_fill_finishes_protected_intent_owner_ack_after_trade_snapshot(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "child-protected-intent.sqlite", scope="child-account")
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="stop-child-client",
+            reduce_only=True,
+            owner_trade_id="trade-child-1",
+        )
+    )
+    journal.record_protection(
+        "stop-child-client",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="stop-child-client",
+        ),
+    )
+    executor = TriggeredChildExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    trade.sl_order_id = "algo:123"
+    lifecycle._open_trades[trade.trade_id] = trade
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    await lifecycle.apply_triggered_protection_child_fill(
+        trade.trade_id, algo_snapshot(), child_snapshot()
+    )
+
+    row = journal.protection_intents()[0]
+    assert row["state"] == "APPLIED"
+    assert row["trade_id"] == trade.trade_id
+    assert trade.quantity == pytest.approx(0.75)
