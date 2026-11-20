@@ -225,6 +225,27 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         state_store,
     )
     cleanup.push_async_callback(income_reconciler.shutdown)
+    income_reconciliation_ready = False
+    try:
+        income_result = await income_reconciler.reconcile_startup()
+        income_reconciliation_ready = True
+        logger.info(
+            "startup Binance fee/funding reconciliation completed",
+            extra={"aitos_extra": income_result},
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Do not allow fresh exposure when fees/funding cannot be attributed
+        # or the venue history is unavailable. Existing positions remain
+        # managed by the shutdown/recovery path; no journal/cursor is cleared.
+        logger.critical(
+            "live startup blocked: Binance fee/funding reconciliation incomplete",
+            extra={
+                "aitos_extra": {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "new_entries_allowed": False,
+                }
+            },
+        )
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
@@ -271,9 +292,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await tracker.restore()
     await income_reconciler.initialize({})
     stop_event = asyncio.Event()
-    if not position_recovery_ready:
+    if not position_recovery_ready or not income_reconciliation_ready:
         # Fail closed through the managed shutdown path; never scan or submit
-        # orders while a restored position is outside verified feed coverage.
+        # orders while restored positions or financial costs remain unverified.
         stop_event.set()
     install_signal_handlers(stop_event)
     # One teardown owner on both startup failure and normal exit. Draining is
