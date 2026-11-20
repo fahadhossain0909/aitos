@@ -108,6 +108,7 @@ def inputs(mode=StrategyMode.SHADOW):
     portfolio_risk = StrategyPortfolioRiskContext(
         snapshot_id="portfolio-snapshot-001",
         observed_at_ns=context.now_ns,
+        equity_usd=1_000.0,
         equity_peak_usd=1_000.0,
     )
     return cycle, context, plans, portfolio_risk
@@ -122,7 +123,6 @@ def test_shadow_strategy_candidate_becomes_typed_canonical_opportunity():
         portfolio_risk,
         plans,
         shadow_gateway_factory=lambda: gateway,
-        equity_usd=1_000.0,
         live_gateway=ShadowGateway(),
     )
 
@@ -165,7 +165,6 @@ def test_capital_veto_produces_no_canonical_opportunity():
         portfolio_risk,
         plans,
         shadow_gateway_factory=lambda: ShadowGateway(eligible=False),
-        equity_usd=1_000.0,
         live_gateway=ShadowGateway(),
     )
     assert report.opportunities == ()
@@ -193,7 +192,6 @@ def test_missing_or_directionally_invalid_protection_is_rejected(plan):
         portfolio_risk,
         plans,
         shadow_gateway_factory=ShadowGateway,
-        equity_usd=1_000.0,
         live_gateway=ShadowGateway(),
     )
     assert report.opportunities == ()
@@ -225,7 +223,6 @@ def test_shadow_opportunity_cannot_exceed_strategy_projected_loss_cap():
         portfolio_risk,
         plans,
         shadow_gateway_factory=ShadowGateway,
-        equity_usd=1_000.0,
         live_gateway=ShadowGateway(),
     )
     governed = report.opportunities[0]
@@ -281,7 +278,6 @@ def test_multiple_intents_do_not_reuse_one_strategy_allocation():
         portfolio_risk,
         plans,
         shadow_gateway_factory=ShadowGateway,
-        equity_usd=1_000.0,
         live_gateway=ShadowGateway(),
     )
     assert len(report.opportunities) == 1
@@ -321,7 +317,6 @@ def test_real_capital_gateway_reviews_candidate_without_live_authorization():
         portfolio_risk,
         plans,
         shadow_gateway_factory=CapitalGateway,
-        equity_usd=1_000.0,
         live_gateway=CapitalGateway(),
     )
     assert len(report.opportunities) == 1
@@ -338,6 +333,7 @@ def test_stale_portfolio_risk_snapshot_fails_closed():
     stale = StrategyPortfolioRiskContext(
         snapshot_id=portfolio_risk.snapshot_id,
         observed_at_ns=context.now_ns - 6_000_000_000,
+        equity_usd=portfolio_risk.equity_usd,
         equity_peak_usd=portfolio_risk.equity_peak_usd,
     )
     with pytest.raises(ValueError, match="missing, invalid, or stale"):
