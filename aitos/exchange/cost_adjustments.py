@@ -138,6 +138,8 @@ class BinanceIncomeReconciliationService(AITOSModule):
         self._unattributed = 0
         self._last_run_at: str | None = None
         self._last_error: str | None = None
+        self._startup_reconciled = False
+        self._startup_error: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -181,6 +183,8 @@ class BinanceIncomeReconciliationService(AITOSModule):
                 "errors": self._errors,
                 "last_error": self._last_error,
                 "account": self._account,
+                "startup_reconciled": self._startup_reconciled,
+                "startup_error": self._startup_error,
             },
         )
 
@@ -250,6 +254,27 @@ class BinanceIncomeReconciliationService(AITOSModule):
 
         unique_matches = list(dict.fromkeys(matches))
         return unique_matches[0] if len(unique_matches) == 1 else None
+
+    async def reconcile_startup(self) -> dict[str, int]:
+        """Run one complete fee/funding pass before live entries are enabled.
+
+        Ambiguous income attribution or an unavailable venue leaves startup
+        unready. The caller must keep new exposure disabled and retry only
+        through an explicit subsequent startup/reconciliation cycle.
+        """
+        self._startup_reconciled = False
+        self._startup_error = None
+        try:
+            result = await self.run_once()
+            if result["unattributed"]:
+                raise UnattributedCostAdjustment(
+                    f"{result['unattributed']} Binance income rows remain unattributed"
+                )
+        except Exception as exc:
+            self._startup_error = f"{type(exc).__name__}: {exc}"
+            raise
+        self._startup_reconciled = True
+        return result
 
     async def run_once(self) -> dict[str, int]:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
