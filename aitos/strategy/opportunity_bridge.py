@@ -66,8 +66,11 @@ class StrategyOpportunityBridgeReport:
 def _validate_protection(
     side: TradeSide, entry: float, plan: StrategyProtectionPlan
 ) -> str | None:
-    if not plan.take_profit_levels:
-        return "explicit take-profit levels are required"
+    if (
+        not isinstance(plan.take_profit_levels, tuple)
+        or not plan.take_profit_levels
+    ):
+        return "explicit non-empty tuple of take-profit levels is required"
     raw_values = (
         plan.stop_loss_price,
         plan.leverage,
@@ -135,10 +138,16 @@ def build_risk_governed_opportunities(
     """
     if context.mode is not StrategyMode.SHADOW:
         raise ValueError("canonical strategy bridge only accepts SHADOW context")
-    if context.now_ns <= 0:
+    if (
+        isinstance(context.now_ns, bool)
+        or not isinstance(context.now_ns, int)
+        or context.now_ns <= 0
+    ):
         raise ValueError("point-in-time strategy timestamp is required")
     if not isfinite(equity_usd) or equity_usd <= 0:
         raise ValueError("shadow portfolio equity must be finite and positive")
+    if isinstance(max_positions, bool) or not isinstance(max_positions, int) or max_positions < 1:
+        raise ValueError("max_positions must be a positive integer")
     if not callable(shadow_gateway_factory):
         raise TypeError("isolated shadow CapitalGateway factory is required")
     if not isinstance(live_gateway, CapitalGateway):
@@ -197,6 +206,7 @@ def build_risk_governed_opportunities(
         symbol = proposal.instrument_id.rsplit(":", 1)[-1].upper()
         if (
             not symbol
+            or not symbol.isascii()
             or not symbol.isalnum()
             or len(symbol) > 30
             or symbol in seen_symbols
@@ -250,8 +260,8 @@ def build_risk_governed_opportunities(
         except (TypeError, ValueError, OverflowError):
             rejected.append((key, "market liquidity score is invalid"))
             continue
-        if not isfinite(liquidity_score):
-            rejected.append((key, "market liquidity score is non-finite"))
+        if not isfinite(liquidity_score) or not 0.0 <= liquidity_score <= 10.0:
+            rejected.append((key, "market liquidity score must be finite within [0, 10]"))
             continue
         consensus = {
             "loss_probability": normalized_plan.loss_probability,
