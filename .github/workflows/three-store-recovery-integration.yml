@@ -4,10 +4,12 @@ on:
   pull_request:
     paths:
       - "aitos/execution/**"
+      - "aitos/strategy/**"
       - "aitos/trading/lifecycle.py"
       - "aitos/trading/persistent_state.py"
       - "tests/integration/test_execution_recovery_three_store.py"
       - "tests/test_protection_child_*.py"
+      - "tests/test_strategy_opportunity_bridge.py"
       - ".github/workflows/three-store-recovery-integration.yml"
   workflow_dispatch:
 
