@@ -106,7 +106,7 @@ async def test_queue_lag_seconds_uses_max_idle_not_first_stream_id():
 
 @pytest.mark.asyncio
 async def test_queue_lag_seconds_includes_oldest_unread_stream_entry(monkeypatch):
-    import aitos.eventbus.redis_bus as redis_bus
+    from aitos.eventbus import redis_bus
 
     now_ms = 1_800_000_000_000
     monkeypatch.setattr(redis_bus.time, "time", lambda: now_ms / 1000)

@@ -7,12 +7,12 @@ optional/background work; it does not resize trading risk or mutate strategy.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
-import os
 from pathlib import Path
 from time import monotonic
-from typing import Callable
 
 from aitos.compute.resource_governor import (
     PressureLevel,

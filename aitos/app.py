@@ -906,7 +906,7 @@ async def run_scan_and_trade_cycle(
         trade.symbol for trade in components.trade_lifecycle.get_open_trades()
     }
     protected_symbols.update(
-        str(getattr(order, "symbol"))
+        str(order.symbol)
         for order in (portfolio.pending_orders or ())
         if getattr(order, "symbol", None)
     )

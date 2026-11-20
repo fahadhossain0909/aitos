@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import glob
 import os
-from math import isfinite
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import IntEnum
+from math import isfinite
 from pathlib import Path
-from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -358,11 +358,7 @@ def plan_symbol_capacity(
     for item in workloads:
         key = item.symbol.strip().upper()
         previous = unique.get(key)
-        if previous is None:
-            unique[key] = item
-        elif item.protected and not previous.protected:
-            unique[key] = item
-        elif item.protected == previous.protected and (
+        if previous is None or item.protected and not previous.protected or item.protected == previous.protected and (
             item.opportunity_score,
             item.liquidity_score,
         ) > (previous.opportunity_score, previous.liquidity_score):

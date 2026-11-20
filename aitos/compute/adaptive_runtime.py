@@ -10,16 +10,16 @@ from aitos.compute.pressure_controller import (
     ProcessPressureSampler,
     ResourcePressureController,
 )
-from aitos.compute.work_scheduler import (
-    WorkloadAdmission,
-    WorkloadRequest,
-    admit_optional_work,
-)
 from aitos.compute.resource_governor import (
     ResourceBudget,
     ResourceSnapshot,
     build_resource_budget,
     detect_resources,
+)
+from aitos.compute.work_scheduler import (
+    WorkloadAdmission,
+    WorkloadRequest,
+    admit_optional_work,
 )
 
 if TYPE_CHECKING:

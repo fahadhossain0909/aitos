@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections import OrderedDict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import ceil, isfinite
 from threading import RLock
 from time import monotonic
-from typing import Callable
 
 from aitos.compute.workload_estimator import SymbolTelemetry
 

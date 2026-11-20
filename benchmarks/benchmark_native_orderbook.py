@@ -15,7 +15,7 @@ import argparse
 import json
 import statistics
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from aitos.native_core import create_order_book, native_available
 

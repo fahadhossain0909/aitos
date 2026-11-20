@@ -1127,7 +1127,7 @@ async def test_adaptive_concurrency_gate_zero_limit_pauses_and_cancellation_rele
 
 async def _acquire_gate_slot(gate):
     async with gate.slot():
-        return None
+        return
 
 
 def test_pressure_scaled_budget_also_scales_optional_worker_slots():
