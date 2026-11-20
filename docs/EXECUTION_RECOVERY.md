@@ -455,5 +455,5 @@ StrategyEngine allocation and CapitalGateway allocation, then caps projected
 risk by the upstream allocation's own projected-loss amount. A strategy with
 multiple simultaneous instrument intents is rejected until it supplies
 per-instrument allocations; one strategy-level budget is never reused for each
-intent. Shadow and live reservation stores are checked by object, connection
+intent. Shadow and live CapitalGateway reservation stores are checked by object, connection
 and SQLite database path identity before review.
