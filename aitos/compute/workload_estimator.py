@@ -87,6 +87,7 @@ class WorkloadEstimate:
 def estimate_symbol_workload(
     telemetry: SymbolTelemetry | None,
     *,
+    symbol: str | None = None,
     opportunity_score: float = 0.0,
     liquidity_score: float = 0.0,
     mandatory: bool = False,
@@ -97,10 +98,14 @@ def estimate_symbol_workload(
     """Convert p95 workload telemetry into a conservative planner input."""
     cost_model = model or WorkloadCostModel()
     if telemetry is None or telemetry.sample_count < cost_model.minimum_samples:
-        symbol = telemetry.symbol if telemetry is not None else "UNKNOWN"
+        fallback_symbol = (
+            telemetry.symbol if telemetry is not None else str(symbol or "UNKNOWN")
+        ).strip().upper()
+        if not fallback_symbol:
+            raise ValueError("symbol cannot be empty for an uncalibrated workload")
         return WorkloadEstimate(
             workload=SymbolWorkload(
-                symbol=symbol,
+                symbol=fallback_symbol,
                 cpu_cost_units=cost_model.unknown_cpu_cost_units,
                 memory_cost_mb=cost_model.unknown_memory_cost_mb,
                 opportunity_score=opportunity_score,
