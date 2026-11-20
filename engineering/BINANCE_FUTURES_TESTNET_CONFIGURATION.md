@@ -4,7 +4,7 @@
 
 ## Environment selection
 
-The adapter defaults to **mainnet** for backward compatibility. Select testnet explicitly:
+The adapter defaults to **mainnet** when neither mode variable is set. The explicit `AITOS_BINANCE_FUTURES_ENVIRONMENT` variable takes precedence. For backward compatibility, if it is unset, the existing `BINANCE_TESTNET=true/false` flag selects `testnet`/`mainnet`. The repository's `.env.example` retains `BINANCE_TESTNET=true`, so a normal local paper configuration resolves to demo/testnet endpoints. Select testnet explicitly:
 
 ```dotenv
 AITOS_BINANCE_FUTURES_ENVIRONMENT=testnet
@@ -27,6 +27,7 @@ These are the USDⓈ-M Futures demo/testnet endpoints documented by Binance. The
 - Testnet mode reads only `BINANCE_FUTURES_TESTNET_API_KEY` and `BINANCE_FUTURES_TESTNET_API_SECRET`.
 - It never falls back to `BINANCE_API_KEY` or `BINANCE_API_SECRET`.
 - Mainnet mode retains the existing `BINANCE_API_KEY` and `BINANCE_API_SECRET` variables.
+- `AITOS_BINANCE_FUTURES_ENVIRONMENT=mainnet` explicitly overrides `BINANCE_TESTNET=true`.
 - Constructor-injected credentials remain supported for controlled tests and dependency injection.
 - Do not reuse mainnet credentials in a testnet environment. Keep credentials out of source control, logs, issue reports and CI artifacts.
 
