@@ -145,10 +145,10 @@ cp .env.example .env
 ### 2. Start local infrastructure
 
 ```bash
-docker compose up -d redis clickhouse neo4j
+docker compose up -d redis clickhouse clickhouse-init neo4j
 ```
 
-The default paper-trading Docker service expects all three infrastructure services to become healthy. Redis is required for the Event Bus; ClickHouse and Neo4j are optional only for code paths that explicitly support running without persistence/graph storage.
+The paper runtime's documented local service set includes Redis, ClickHouse initialization and Neo4j. Wait for the selected services to become healthy before starting the runner; do not omit a declared dependency without a separately tested configuration. This service-backed setup is resource-intensive: review the [local resource profiles](docs/LOCAL_DEVELOPMENT.md#21-choose-a-local-resource-profile) first. A 4 GiB workstation should use the frontend/sample workspace and focused unit tests rather than the full paper stack.
 
 ### 3. Run paper trading locally
 
