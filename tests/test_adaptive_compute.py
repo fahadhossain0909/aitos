@@ -1064,3 +1064,101 @@ def test_detect_resources_resolves_nested_cgroup_v2_process_membership(tmp_path)
     assert result.cpu_quota_limited is True
     assert result.memory_limit_mb == 2048
     assert result.memory_available_mb == 1536
+
+
+@pytest.mark.asyncio
+async def test_adaptive_concurrency_gate_shrinks_without_cancelling_active_work():
+    import asyncio
+
+    from aitos.compute.concurrency import AdaptiveConcurrencyGate
+
+    gate = AdaptiveConcurrencyGate(2)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def first():
+        async with gate.slot():
+            entered.set()
+            await release.wait()
+
+    async def second():
+        async with gate.slot():
+            return "admitted"
+
+    first_task = asyncio.create_task(first())
+    await entered.wait()
+    await gate.set_limit(1)
+    second_task = asyncio.create_task(second())
+    await asyncio.sleep(0)
+    assert not second_task.done()
+    snapshot = await gate.snapshot()
+    assert snapshot.limit == 1
+    assert snapshot.active == 1
+    assert snapshot.waiting == 1
+
+    release.set()
+    await first_task
+    assert await second_task == "admitted"
+    assert (await gate.snapshot()).active == 0
+
+
+@pytest.mark.asyncio
+async def test_adaptive_concurrency_gate_zero_limit_pauses_and_cancellation_releases():
+    import asyncio
+
+    from aitos.compute.concurrency import AdaptiveConcurrencyGate
+
+    gate = AdaptiveConcurrencyGate(1, initial_limit=0)
+    task = asyncio.create_task(_acquire_gate_slot(gate))
+    await asyncio.sleep(0)
+    assert (await gate.snapshot()).waiting == 1
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await gate.snapshot()).waiting == 0
+
+    await gate.set_limit(1)
+    async with gate.slot():
+        assert (await gate.snapshot()).active == 1
+
+
+async def _acquire_gate_slot(gate):
+    async with gate.slot():
+        return None
+
+
+def test_pressure_scaled_budget_also_scales_optional_worker_slots():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.compute.resource_governor import ResourceSnapshot
+    from aitos.config.tuning import TuningSettings
+
+    runtime = create_adaptive_compute_runtime(
+        TuningSettings(
+            runtime={
+                "adaptive_compute_enabled": True,
+                "pressure_warning_hold_seconds": 0,
+                "pressure_high_hold_seconds": 0,
+                "pressure_minimum_transition_interval_seconds": 0,
+            }
+        ),
+        resources=ResourceSnapshot(4, 4.0, 8192, 4096, 2048, False, True),
+    )
+    assert runtime is not None
+    normal = runtime.budget_for_optional_work()
+    assert normal.cpu_workers == runtime.budget.cpu_workers
+    assert normal.background_task_limit == runtime.budget.background_task_limit
+
+    runtime.update_pressure(
+        now_seconds=1, cpu_utilization_pct=82, memory_utilization_pct=10
+    )
+    warning = runtime.budget_for_optional_work()
+    assert warning.cpu_workers == max(1, runtime.budget.cpu_workers // 2)
+    assert warning.deep_analysis_slots <= normal.deep_analysis_slots
+
+    runtime.update_pressure(
+        now_seconds=2, cpu_utilization_pct=99, memory_utilization_pct=10
+    )
+    critical = runtime.budget_for_optional_work()
+    assert critical.cpu_workers == 0
+    assert critical.background_task_limit == 0
+    assert critical.deep_analysis_slots == 0
