@@ -29,7 +29,10 @@ class ResourceSnapshot:
 
     def __post_init__(self) -> None:
         if (
-            self.logical_cpus < 1
+            isinstance(self.logical_cpus, bool)
+            or not isinstance(self.logical_cpus, int)
+            or self.logical_cpus < 1
+            or isinstance(self.effective_cpus, bool)
             or not isfinite(self.effective_cpus)
             or self.effective_cpus <= 0
         ):
@@ -255,11 +258,26 @@ def build_resource_budget(
     max_background_tasks: int = 4,
 ) -> ResourceBudget:
     """Build conservative compute budgets without modifying trading-risk limits."""
-    if not 5 <= memory_reserve_pct <= 80:
+    if (
+        isinstance(memory_reserve_pct, bool)
+        or not isinstance(memory_reserve_pct, int)
+        or not 5 <= memory_reserve_pct <= 80
+    ):
         raise ValueError("memory_reserve_pct must be between 5 and 80")
-    if not 0.1 <= cpu_utilization_target <= 0.95:
+    if (
+        isinstance(cpu_utilization_target, bool)
+        or not isfinite(cpu_utilization_target)
+        or not 0.1 <= cpu_utilization_target <= 0.95
+    ):
         raise ValueError("cpu_utilization_target must be between 0.1 and 0.95")
-    if max_workers < 1 or max_background_tasks < 0:
+    if (
+        isinstance(max_workers, bool)
+        or not isinstance(max_workers, int)
+        or max_workers < 1
+        or isinstance(max_background_tasks, bool)
+        or not isinstance(max_background_tasks, int)
+        or max_background_tasks < 0
+    ):
         raise ValueError("worker limits are invalid")
 
     workers = min(max_workers, max(1, int(resources.effective_cpus)))
@@ -290,8 +308,8 @@ def plan_symbol_capacity(
     combined cost exceeds the budget the plan reports overcommit; the caller
     must preserve risk/market-data duties and suppress optional admissions.
     """
-    if max_symbols < 1:
-        raise ValueError("max_symbols must be positive")
+    if isinstance(max_symbols, bool) or not isinstance(max_symbols, int) or max_symbols < 1:
+        raise ValueError("max_symbols must be a positive integer")
     unique: dict[str, SymbolWorkload] = {}
     for item in workloads:
         key = item.symbol.strip().upper()
