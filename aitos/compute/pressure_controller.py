@@ -60,8 +60,10 @@ class ProcessPressureSampler:
         cpu_time_reader: Callable[[], float] = _process_cpu_seconds,
         memory_reader: Callable[[], float | None] = _process_rss_mb,
     ) -> None:
-        if not callable(clock) or not callable(cpu_time_reader) or not callable(
-            memory_reader
+        if (
+            not callable(clock)
+            or not callable(cpu_time_reader)
+            or not callable(memory_reader)
         ):
             raise TypeError("pressure sampler readers must be callable")
         self.resources = resources
