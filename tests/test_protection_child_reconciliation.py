@@ -190,3 +190,21 @@ def test_child_reduce_only_semantics_are_enforced_when_requested():
             expected_position_side="BOTH",
             expected_reduce_only=False,
         )
+
+
+def test_child_original_quantity_must_match_durable_protection_request():
+    algo, child = snapshots()
+    child["origQty"] = "2.0"
+    with pytest.raises(
+        ProtectionChildReconciliationError,
+        match="does not match durable protective intent",
+    ):
+        calculate_protection_child_fill_delta(
+            algo,
+            child,
+            expected_symbol="BTCUSDT",
+            expected_side="SELL",
+            expected_algo_id="123",
+            previously_applied_quantity="0",
+            expected_original_quantity="1.0",
+        )
