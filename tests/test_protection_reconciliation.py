@@ -845,6 +845,9 @@ async def test_restart_recovers_replacement_stop_before_cancelling_old_stop(tmp_
     executor = HandoverExecutor(
         "paper-account", replacement_algo(), ["NEW", "CANCELED"]
     )
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
     trade = SimpleNamespace(
         trade_id="trade-1",
         symbol="BTCUSDT",
@@ -884,6 +887,9 @@ async def test_restart_recovers_crash_after_old_stop_was_already_cancelled(tmp_p
     journal.record_handover_new_order("rpl-0001", "algo:456")
     journal.mark_handover_old_cancel_requested("rpl-0001")
     executor = HandoverExecutor("paper-account", replacement_algo(), ["CANCELED"])
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
     trade = SimpleNamespace(
         trade_id="trade-1",
         symbol="BTCUSDT",
