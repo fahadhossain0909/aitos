@@ -2092,6 +2092,7 @@ class OpportunityScanner(AITOSModule):
                     telemetry = telemetry_collector.snapshot(symbol)
                     estimated = estimate_symbol_workload(
                         telemetry,
+                        symbol=symbol,
                         opportunity_score=10.0 * (count - rank_index) / count,
                         liquidity_score=10.0 * (count - rank_index) / count,
                         mandatory=(
