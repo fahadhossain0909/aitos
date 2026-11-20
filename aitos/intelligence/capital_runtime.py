@@ -184,7 +184,9 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
             raise ValueError(f"open position risk is unknown: {symbol}")
         risk_amount = float(risk_amount_raw)
         if not isfinite(risk_amount) or risk_amount <= 0:
-            raise ValueError(f"open position risk must be finite and positive: {symbol}")
+            raise ValueError(
+                f"open position risk must be finite and positive: {symbol}"
+            )
         side_raw = getattr(position, "side", None)
         side = str(side_raw).upper() if side_raw is not None else None
         if side not in {None, "LONG", "SHORT"}:
