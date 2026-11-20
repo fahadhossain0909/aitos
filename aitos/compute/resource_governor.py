@@ -393,7 +393,7 @@ def classify_pressure(
     *,
     cpu_utilization_pct: float,
     memory_utilization_pct: float,
-    queue_lag_seconds: float,
+    queue_lag_seconds: float | None,
 ) -> PressureLevel:
     """Classify operational pressure; this is advisory and never changes risk."""
     values = (cpu_utilization_pct, memory_utilization_pct)
