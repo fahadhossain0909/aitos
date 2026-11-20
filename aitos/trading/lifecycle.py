@@ -1613,7 +1613,11 @@ class TradeLifecycle(AITOSModule):
             trade.side,
             trade.quantity,
             exchange_stop_price,
-            owner_trade_id=trade.trade_id,
+            **(
+                {"owner_trade_id": trade.trade_id}
+                if self._order_executor.requires_exchange_execution
+                else {}
+            ),
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
@@ -1652,7 +1656,11 @@ class TradeLifecycle(AITOSModule):
                 trade.side,
                 leg_qty,
                 level_price,
-                owner_trade_id=trade.trade_id,
+                **(
+                    {"owner_trade_id": trade.trade_id}
+                    if self._order_executor.requires_exchange_execution
+                    else {}
+                ),
             )
             if tp_result.success:
                 trade.tp_order_ids.append(tp_result.order_id)
