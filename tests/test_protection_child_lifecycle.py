@@ -79,6 +79,7 @@ def make_trade():
         explanation="test protective child fill",
         sl_price=90.0,
         tp_price=110.0,
+        sl_order_id="algo:123",
         state=TradeLifecycleState.POSITION_OPENED,
         entry_time="2026-11-20T00:00:00+00:00",
     )
