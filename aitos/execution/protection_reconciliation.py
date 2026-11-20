@@ -1237,6 +1237,8 @@ async def recover_triggered_protection_child_fills(
                         }
                     )
                     continue
+                if algo.get("clientAlgoId") != client_id:
+                    raise ValueError("authenticated algo client identity mismatch")
                 if algo.get("algoStatus") not in {"TRIGGERED", "FINISHED"}:
                     continue
                 child = await child_reader(trade.symbol, order_id)
