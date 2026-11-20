@@ -140,7 +140,7 @@ def build_risk_governed_opportunities(
     shadow = build_strategy_shadow_report(cycle, context)
     allocations = {item.strategy_id: item for item in cycle.allocations}
     results = {item.strategy_id: item for item in cycle.results}
-    candidates: list[tuple[str, Opportunity, object]] = []
+    candidates: list[tuple[str, Opportunity, object, float]] = []
     rejected = [(key, reason) for key, reason in shadow.rejected]
     seen_symbols: set[str] = set()
     seen_strategies: set[str] = set()
@@ -191,13 +191,28 @@ def build_risk_governed_opportunities(
         if allocated_notional <= 0 or allocation.projected_loss <= 0:
             rejected.append((key, "strategy allocation and projected loss must be positive"))
             continue
-        detected_at = datetime.fromtimestamp(
-            context.now_ns / 1_000_000_000, tz=timezone.utc
-        ).isoformat()
+        try:
+            detected_at = datetime.fromtimestamp(
+                context.now_ns / 1_000_000_000, tz=timezone.utc
+            ).isoformat()
+        except (OverflowError, OSError, ValueError):
+            rejected.append((key, "strategy timestamp is outside supported range"))
+            continue
+        normalized_plan = StrategyProtectionPlan(
+            stop_loss_price=float(plan.stop_loss_price),
+            take_profit_levels=tuple(float(value) for value in plan.take_profit_levels),
+            leverage=float(plan.leverage),
+            fee_bps=float(plan.fee_bps),
+            slippage_bps=float(plan.slippage_bps),
+            funding_bps=float(plan.funding_bps),
+        )
+        if not isfinite(float(snapshot.liquidity_score)):
+            rejected.append((key, "market liquidity score is non-finite"))
+            continue
         consensus = {
             "loss_probability": max(0.0, min(1.0, 1.0 - confidence)),
             "liquidity_score": float(snapshot.liquidity_score),
-            "leverage": float(plan.leverage),
+            "leverage": normalized_plan.leverage,
             "side": side.value,
             "runtime_regime": context.global_regime,
             "position_risk_pct": dict(context.metadata.get("position_risk_pct", {})),
@@ -222,8 +237,8 @@ def build_risk_governed_opportunities(
             symbol=symbol,
             side=side,
             entry_price=proposal.reference_price,
-            stop_loss_price=plan.stop_loss_price,
-            take_profit_levels=list(plan.take_profit_levels),
+            stop_loss_price=normalized_plan.stop_loss_price,
+            take_profit_levels=list(normalized_plan.take_profit_levels),
             confidence=confidence,
             strategy_id=proposal.strategy_id,
             rationale=proposal.rationale,
@@ -237,9 +252,9 @@ def build_risk_governed_opportunities(
             estimates.append(
                 gateway.estimate_opportunity(
                     opportunity,
-                    fee_bps=plan.fee_bps,
-                    slippage_bps=plan.slippage_bps,
-                    funding_bps=plan.funding_bps,
+                    fee_bps=normalized_plan.fee_bps,
+                    slippage_bps=normalized_plan.slippage_bps,
+                    funding_bps=normalized_plan.funding_bps,
                 )
             )
             candidates.append((key, opportunity, allocation, allocated_notional))
