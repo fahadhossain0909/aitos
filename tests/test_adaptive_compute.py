@@ -656,9 +656,7 @@ def test_telemetry_collector_rejects_out_of_order_samples_per_metric():
 def test_telemetry_collector_rejects_invalid_depth_and_bounds_samples():
     from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 
-    collector = SymbolTelemetryCollector(
-        window_seconds=10, max_samples_per_metric=2
-    )
+    collector = SymbolTelemetryCollector(window_seconds=10, max_samples_per_metric=2)
     with pytest.raises(ValueError):
         collector.record_book_depth("BTCUSDT", -1, timestamp=1)
     for timestamp in (1, 2, 3):
