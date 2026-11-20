@@ -5,6 +5,7 @@ on:
     paths:
       - "aitos/execution/**"
       - "aitos/strategy/**"
+      - "aitos/intelligence/capital_protection.py"
       - "aitos/trading/lifecycle.py"
       - "aitos/trading/persistent_state.py"
       - "tests/integration/test_execution_recovery_three_store.py"
