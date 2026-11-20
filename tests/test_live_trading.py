@@ -44,11 +44,19 @@ def test_confirm_live_trading_case_sensitive_exact_match_required():
 class FakeSettings:
     class _Binance:
         def __init__(self):
-            self.api_key = "test-key"
-            self.api_secret = "test-secret"
+            self.api_key = "mainnet-key"
+            self.api_secret = "mainnet-secret"
+            self.futures_testnet_api_key = "test-key"
+            self.futures_testnet_api_secret = "test-secret"
             self.testnet = True
             self.recv_window_ms = 5000
             self.hedge_mode = False
+
+        @property
+        def execution_credentials(self):
+            if self.testnet:
+                return self.futures_testnet_api_key, self.futures_testnet_api_secret
+            return self.api_key, self.api_secret
 
     def __init__(self):
         self.binance = FakeSettings._Binance()
@@ -57,7 +65,7 @@ class FakeSettings:
 @pytest.mark.asyncio
 async def test_prepare_live_executor_exits_without_credentials():
     settings = FakeSettings()
-    settings.binance.api_key = ""
+    settings.binance.futures_testnet_api_key = ""
     with pytest.raises(SystemExit) as exc_info:
         await prepare_live_executor(settings, ["BTCUSDT"])
     assert exc_info.value.code == 1
@@ -80,7 +88,7 @@ async def test_prepare_live_executor_exits_on_hedge_mode_mismatch():
 
 @pytest.mark.asyncio
 async def test_prepare_live_executor_succeeds_and_loads_symbol_filters():
-    from aitos.exchange.binance import REST_BASE_URL
+    
 
     settings = FakeSettings()
     exchange_info = {
@@ -104,7 +112,7 @@ async def test_prepare_live_executor_succeeds_and_loads_symbol_filters():
             ),
             payload={"dualSidePosition": False},
         )
-        m.get(f"{REST_BASE_URL}/fapi/v1/exchangeInfo", payload=exchange_info)
+        m.get("https://demo-fapi.binance.com/fapi/v1/exchangeInfo", payload=exchange_info)
 
         executor = await prepare_live_executor(settings, ["BTCUSDT"])
 
