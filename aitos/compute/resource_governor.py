@@ -69,8 +69,6 @@ class ResourceBudget:
             any(
                 isinstance(value, bool) or not isinstance(value, int) or value < 0
                 for value in integer_limits
-            )
-            or self.cpu_workers < 1
         ):
             raise ValueError("resource budget limits must be non-negative integers")
         if (
