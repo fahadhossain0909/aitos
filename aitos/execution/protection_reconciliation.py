@@ -1195,7 +1195,10 @@ async def recover_triggered_protection_child_fills(
             if (
                 not isinstance(result, dict)
                 or not isinstance(request, dict)
-                or row.get("trade_id") != str(trade.trade_id)
+                or (
+                    row.get("trade_id") is not None
+                    and row.get("trade_id") != str(trade.trade_id)
+                )
                 or request.get("owner_trade_id") != str(trade.trade_id)
                 or request.get("symbol") != trade.symbol
                 or request.get("order_type")
