@@ -63,6 +63,7 @@ Click any topic below to jump directly to that section.
 - [Project structure](#project-structure)
 - [Safety boundaries](#safety-boundaries)
 - [Credential security & remote signing](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md)
+- [Desktop Operator User Manual](docs/USER_MANUAL.md)
 - [Binance Spot integration and rollout limits](docs/SPOT_MARKET_INTEGRATION.md)
 - [Architecture Evolution Program](engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md)
 - [System audit and open acceptance gates](engineering/SYSTEM_AUDIT_2026-11-20.md)
