@@ -823,7 +823,9 @@ async def recover_protection_handovers(
             _decimal_matches(request.get("quantity"), getattr(trade, "quantity", None))
             if order_type == "STOP_MARKET" and isinstance(request, dict)
             else (
-                _decimal_at_most(request.get("quantity"), getattr(trade, "quantity", None))
+                _decimal_at_most(
+                    request.get("quantity"), getattr(trade, "quantity", None)
+                )
                 if order_type == "TAKE_PROFIT_MARKET" and isinstance(request, dict)
                 else False
             )
@@ -1133,7 +1135,11 @@ async def recover_triggered_protection_child_fills(
     child_reader = getattr(executor, "get_order_status", None)
     if not callable(lookup) or not callable(child_reader):
         raise TypeError("authenticated algo and child-order readers are required")
-    if not isinstance(max_orders, int) or isinstance(max_orders, bool) or not 1 <= max_orders <= 5000:
+    if (
+        not isinstance(max_orders, int)
+        or isinstance(max_orders, bool)
+        or not 1 <= max_orders <= 5000
+    ):
         raise ValueError("child-fill recovery query budget must be between 1 and 5000")
 
     rows = await asyncio.to_thread(intent_store.protection_intents)
@@ -1163,7 +1169,8 @@ async def recover_triggered_protection_child_fills(
         tp_ids = getattr(trade, "tp_order_ids", [])
         if isinstance(tp_ids, list):
             owned_ids.extend(
-                value for value in tp_ids
+                value
+                for value in tp_ids
                 if isinstance(value, str) and value.startswith("algo:")
             )
         for order_id in dict.fromkeys(owned_ids):
@@ -1202,8 +1209,11 @@ async def recover_triggered_protection_child_fills(
                 or request.get("owner_trade_id") != str(trade.trade_id)
                 or request.get("symbol") != trade.symbol
                 or request.get("order_type")
-                != ("STOP_MARKET" if order_id == getattr(trade, "sl_order_id", None)
-                    else "TAKE_PROFIT_MARKET")
+                != (
+                    "STOP_MARKET"
+                    if order_id == getattr(trade, "sl_order_id", None)
+                    else "TAKE_PROFIT_MARKET"
+                )
             ):
                 blocked.append(
                     {
@@ -1213,7 +1223,9 @@ async def recover_triggered_protection_child_fills(
                     }
                 )
                 continue
-            client_id = str(result.get("client_order_id") or row.get("client_id") or "")
+            client_id = str(
+                result.get("client_order_id") or row.get("client_id") or ""
+            )
             if not client_id:
                 blocked.append(
                     {
@@ -1243,7 +1255,9 @@ async def recover_triggered_protection_child_fills(
                     continue
                 child = await child_reader(trade.symbol, order_id)
                 if not isinstance(child, dict):
-                    raise ValueError("authenticated child-order lookup returned malformed evidence")
+                    raise ValueError(
+                        "authenticated child-order lookup returned malformed evidence"
+                    )
                 outcome = await lifecycle.apply_triggered_protection_child_fill(
                     trade.trade_id, algo, child
                 )
