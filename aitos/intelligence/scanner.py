@@ -2018,14 +2018,92 @@ class OpportunityScanner(AITOSModule):
         ranked = sorted(scores, key=lambda item: (-item[1], item[2]))
         selected = []
         cooldown_skipped = 0
-        for symbol, _, _ in ranked:
+        eligible = []
+        for symbol, score, _ in ranked:
             fingerprint = self._lightweight_fingerprints.get(symbol, "unavailable")
-            if self._candidate_rotation.should_skip(symbol, fingerprint):
+            protected = symbol in getattr(self, "_aitos_protected_symbols", set())
+            if (
+                not protected
+                and symbol != self._reference_symbol
+                and self._candidate_rotation.should_skip(symbol, fingerprint)
+            ):
                 cooldown_skipped += 1
                 continue
-            selected.append(symbol)
-            if len(selected) >= limit:
-                break
+            eligible.append((symbol, score))
+        selected = [symbol for symbol, _score in eligible[:limit]]
+
+        adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
+        telemetry_collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+        if adaptive_runtime is not None and telemetry_collector is not None:
+            try:
+                from aitos.compute.resource_governor import (
+                    SymbolWorkload,
+                    plan_symbol_capacity,
+                )
+                from aitos.compute.workload_estimator import estimate_symbol_workload
+
+                protected_symbols = set(
+                    getattr(self, "_aitos_protected_symbols", set())
+                )
+                if self._reference_symbol in self._symbols:
+                    protected_symbols.add(self._reference_symbol)
+                ranked_scores = {
+                    symbol: score for symbol, score in eligible
+                }
+                for symbol in protected_symbols:
+                    if symbol in self._symbols and symbol not in ranked_scores:
+                        ranked_scores[symbol] = 0.0
+                count = max(1, len(ranked_scores))
+                workloads = []
+                for rank_index, (symbol, score) in enumerate(
+                    sorted(
+                        ranked_scores.items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )
+                ):
+                    telemetry = telemetry_collector.snapshot(symbol)
+                    estimated = estimate_symbol_workload(
+                        telemetry,
+                        opportunity_score=10.0 * (count - rank_index) / count,
+                        liquidity_score=10.0 * (count - rank_index) / count,
+                        mandatory=(
+                            symbol == self._reference_symbol
+                            or symbol in protected_symbols
+                        ),
+                    )
+                    workloads.append(estimated.workload)
+                capacity_plan = plan_symbol_capacity(
+                    workloads,
+                    adaptive_runtime.budget,
+                    max_symbols=limit,
+                )
+                selected = list(capacity_plan.selected_symbols)
+                logger.info(
+                    "adaptive scanner capacity applied",
+                    extra={
+                        "aitos_extra": {
+                            "selected": len(selected),
+                            "deferred": len(capacity_plan.deferred_symbols),
+                            "protected": len(capacity_plan.protected_symbols),
+                            "deep_analysis_limit": capacity_plan.deep_analysis_limit,
+                            "protected_overcommit": (
+                                capacity_plan.overcommitted_by_protected_work
+                            ),
+                            "cpu_capacity_units": (
+                                adaptive_runtime.budget.cpu_capacity_units
+                            ),
+                            "memory_budget_mb": (
+                                adaptive_runtime.budget.memory_budget_mb
+                            ),
+                        }
+                    },
+                )
+            except Exception as exc:
+                logger.exception(
+                    "adaptive scanner admission failed; retaining fixed safe cap",
+                    extra={"aitos_extra": {"error": type(exc).__name__}},
+                )
+                selected = [symbol for symbol, _score in eligible[:limit]]
         logger.info(
             "lightweight scanner screening complete",
             extra={
