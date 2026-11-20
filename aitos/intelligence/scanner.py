@@ -2192,7 +2192,7 @@ class OpportunityScanner(AITOSModule):
                     await concurrency_gate.set_limit(
                         min(
                             concurrency_gate.max_concurrency,
-                            max(1, optional_budget.cpu_workers),
+                            optional_budget.cpu_workers,
                         )
                     )
             except Exception:
@@ -2209,6 +2209,13 @@ class OpportunityScanner(AITOSModule):
                 logger.error("failed to fetch reference symbol klines: %s", exc)
 
         selected_symbols = await self._lightweight_rank_symbols()
+        if (
+            adaptive_runtime is not None
+            and int(adaptive_runtime.pressure_controller.level) == 3
+        ):
+            # At CRITICAL, the reference market is still fetched above, but no
+            # optional per-symbol scan is admitted.
+            selected_symbols = []
 
         async def _scan_one(symbol: str) -> ScanCandidate | None:
             async def run_scan() -> ScanCandidate | None:
@@ -2473,7 +2480,7 @@ class OpportunityScanner(AITOSModule):
                     await concurrency_gate.set_limit(
                         min(
                             concurrency_gate.max_concurrency,
-                            max(1, optional_budget.cpu_workers),
+                            optional_budget.cpu_workers,
                         )
                     )
             except Exception:
@@ -2492,6 +2499,12 @@ class OpportunityScanner(AITOSModule):
         selected = await self._lightweight_rank_symbols(limit=cfg.candidate_pool_limit)
         budget = min(cfg.max_candidate_analyses_per_cycle, cfg.candidate_pool_limit)
         selected = selected[:budget]
+        if (
+            adaptive_runtime is not None
+            and int(adaptive_runtime.pressure_controller.level) == 3
+        ):
+            # Preserve anchor-data fetches while deferring all optional analyses.
+            selected = []
         scanned = found = 0
         candidate_symbols_seen: set[str] = set()
         batch_size = max(1, cfg.candidate_batch_size)
