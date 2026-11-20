@@ -51,9 +51,7 @@ class AdaptiveComputeRuntime:
             queue_lag_seconds=queue_lag_seconds,
         )
 
-    def observe_process_pressure(
-        self, *, queue_lag_seconds: float | None = None
-    ):
+    def observe_process_pressure(self, *, queue_lag_seconds: float | None = None):
         """Sample host process pressure and update the shared hysteresis state."""
         sample = self.pressure_sampler.sample(queue_lag_seconds=queue_lag_seconds)
         return self.update_pressure(
