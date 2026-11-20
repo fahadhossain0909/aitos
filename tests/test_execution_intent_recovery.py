@@ -545,3 +545,76 @@ async def test_confirmed_binance_algo_cancel_updates_protection_journal(tmp_path
     assert result["status"] == "CANCELED"
     assert journal.unresolved() == []
     assert journal.protection_intents()[0]["state"] == "TERMINAL"
+
+
+def test_protection_handover_requires_new_order_before_old_cancel(tmp_path):
+    journal = store(tmp_path)
+    prepared = journal.begin_protection_handover(
+        handover_id="replace-stop-1",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0001",
+    )
+    assert prepared["state"] == "PREPARED"
+    with pytest.raises(ValueError, match="accepted replacement"):
+        journal.mark_handover_old_cancel_requested("replace-stop-1")
+
+    journal.record_handover_new_order("replace-stop-1", "algo:200")
+    journal.mark_handover_old_cancel_requested("replace-stop-1")
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCEL_REQUESTED"
+    journal.mark_handover_old_cancelled("replace-stop-1")
+    journal.complete_protection_handover("replace-stop-1")
+    assert store(tmp_path).protection_handovers()[0]["state"] == "APPLIED"
+
+
+def test_protection_handover_restart_is_idempotent_and_identity_bound(tmp_path):
+    journal = store(tmp_path)
+    journal.begin_protection_handover(
+        handover_id="replace-stop-2",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0002",
+    )
+    journal.record_handover_new_order("replace-stop-2", "algo:201")
+    reopened = store(tmp_path)
+    row = reopened.protection_handovers()[0]
+    assert row["state"] == "NEW_ACCEPTED"
+    assert row["new_order_id"] == "algo:201"
+
+    replay = reopened.begin_protection_handover(
+        handover_id="replace-stop-2",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0002",
+    )
+    assert replay["state"] == "NEW_ACCEPTED"
+    with pytest.raises(ValueError, match="different identity"):
+        reopened.begin_protection_handover(
+            handover_id="replace-stop-2",
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:999",
+            new_client_id="aitos-rpl-0002",
+        )
+
+
+def test_second_active_handover_for_trade_is_blocked(tmp_path):
+    journal = store(tmp_path)
+    journal.begin_protection_handover(
+        handover_id="replace-stop-3",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0003",
+    )
+    with pytest.raises(ExecutionRecoveryRequired, match="another protective handover"):
+        journal.begin_protection_handover(
+            handover_id="replace-stop-4",
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:100",
+            new_client_id="aitos-rpl-0004",
+        )
