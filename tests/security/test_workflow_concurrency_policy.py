@@ -50,7 +50,9 @@ def test_desktop_validation_repeats_after_matching_mainline_changes(workflow):
         ".github/workflows/staging-cd.yml",
     ),
 )
-def test_container_publication_emits_sbom_and_provenance_without_enabling_deploy(workflow):
+def test_container_publication_emits_sbom_and_provenance_without_enabling_deploy(
+    workflow,
+):
     content = (ROOT / workflow).read_text(encoding="utf-8")
     assert "provenance: mode=max" in content
     assert "sbom: true" in content
