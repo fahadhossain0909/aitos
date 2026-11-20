@@ -2534,9 +2534,7 @@ class OpportunityScanner(AITOSModule):
                 return None
             queue_lag_seconds = None
             try:
-                queue_lag_provider = getattr(
-                    self._event_bus, "queue_lag_seconds", None
-                )
+                queue_lag_provider = getattr(self._event_bus, "queue_lag_seconds", None)
                 if callable(queue_lag_provider):
                     try:
                         queue_lag_seconds = await queue_lag_provider()
