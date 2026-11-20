@@ -554,8 +554,12 @@ def test_portfolio_consensus_fails_closed_for_zero_risk_pending_order():
 def test_portfolio_consensus_aggregates_same_symbol_hedge_sides_without_overwrite():
     portfolio = make_portfolio(
         positions=(
-            PositionExposure("BTCUSDT", 2_000.0, 2.0, side="LONG", risk_amount_usd=100.0),
-            PositionExposure("BTCUSDT", 1_000.0, 2.0, side="SHORT", risk_amount_usd=50.0),
+            PositionExposure(
+                "BTCUSDT", 2_000.0, 2.0, side="LONG", risk_amount_usd=100.0
+            ),
+            PositionExposure(
+                "BTCUSDT", 1_000.0, 2.0, side="SHORT", risk_amount_usd=50.0
+            ),
             PositionExposure("BTCUSDT", 500.0, 1.0, side="LONG", risk_amount_usd=25.0),
         )
     )
