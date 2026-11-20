@@ -5,6 +5,7 @@ validates authenticated venue algo/child snapshots and calculates the unapplied
 quantity and quote deltas. A caller must persist both deltas with its trade
 snapshot before acknowledging the corresponding durable journal evidence.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,9 +36,7 @@ class ProtectionChildFillDelta:
         return self.delta_quantity > 0
 
 
-def _decimal_value(
-    value: Any, field: str, *, allow_zero: bool = False
-) -> Decimal:
+def _decimal_value(value: Any, field: str, *, allow_zero: bool = False) -> Decimal:
     if isinstance(value, bool):
         raise ProtectionChildReconciliationError(f"{field} must be numeric")
     try:
@@ -78,7 +77,9 @@ def calculate_protection_child_fill_delta(
     if not expected_algo_id or algo_id != expected_algo_id:
         raise ProtectionChildReconciliationError("protective algo identity mismatch")
     if not child_id or child_id in {"0", "None"}:
-        raise ProtectionChildReconciliationError("triggered child order identity missing")
+        raise ProtectionChildReconciliationError(
+            "triggered child order identity missing"
+        )
     if str(algo.get("actualOrderId", "")) != child_id:
         raise ProtectionChildReconciliationError("algo-to-child linkage mismatch")
     if algo.get("symbol") != expected_symbol or child.get("symbol") != expected_symbol:
@@ -112,9 +113,7 @@ def calculate_protection_child_fill_delta(
         "REJECTED",
     }
     if status not in allowed_statuses:
-        raise ProtectionChildReconciliationError(
-            "unsupported or missing child status"
-        )
+        raise ProtectionChildReconciliationError("unsupported or missing child status")
 
     cumulative = _decimal_value(
         child.get("executedQty", "0"), "executedQty", allow_zero=True
@@ -160,7 +159,7 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "new fill has no positive incremental quote value"
         )
-    average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal("0")
+    average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal(0)
     return ProtectionChildFillDelta(
         algo_id=algo_id,
         child_order_id=child_id,
