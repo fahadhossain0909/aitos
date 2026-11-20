@@ -1012,5 +1012,5 @@ def test_adaptive_runtime_automatically_samples_process_pressure():
     )
     assert runtime is not None
     decision = runtime.observe_process_pressure()
-    assert decision.level in PressureLevel
+    assert isinstance(decision.level, PressureLevel)
     assert runtime.pressure_sampler.resources == runtime.resources
