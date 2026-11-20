@@ -2076,6 +2076,9 @@ class OpportunityScanner(AITOSModule):
                 protected_symbols = set(
                     getattr(self, "_aitos_protected_symbols", set())
                 )
+                position_protected_symbols = protected_symbols - {
+                    self._reference_symbol
+                }
                 if self._reference_symbol in self._symbols:
                     protected_symbols.add(self._reference_symbol)
                 ranked_scores = {
@@ -2108,7 +2111,18 @@ class OpportunityScanner(AITOSModule):
                     adaptive_runtime.budget,
                     max_symbols=limit,
                 )
-                selected = list(capacity_plan.selected_symbols)
+                self._aitos_last_capacity_plan = capacity_plan
+                # Open/pending symbols reserve their protected budget but are
+                # not redundantly re-scanned as fresh trade candidates. Their
+                # market-data and position services remain independently active.
+                selected = [
+                    symbol
+                    for symbol in capacity_plan.selected_symbols
+                    if (
+                        symbol == self._reference_symbol
+                        or symbol not in position_protected_symbols
+                    )
+                ]
                 logger.info(
                     "adaptive scanner capacity applied",
                     extra={
