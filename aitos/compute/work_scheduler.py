@@ -27,7 +27,11 @@ class WorkloadRequest:
         if not isinstance(self.workload_class, WorkloadClass):
             raise ValueError("workload_class must be a WorkloadClass")
         if (
-            not isfinite(self.cpu_cost_units)
+            isinstance(self.cpu_cost_units, bool)
+            or not isinstance(self.cpu_cost_units, (int, float))
+            or isinstance(self.priority, bool)
+            or not isinstance(self.priority, (int, float))
+            or not isfinite(self.cpu_cost_units)
             or not isfinite(self.priority)
             or self.cpu_cost_units < 0
             or self.priority < 0
