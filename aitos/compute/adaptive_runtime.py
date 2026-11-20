@@ -41,7 +41,7 @@ class AdaptiveComputeRuntime:
         now_seconds: float,
         cpu_utilization_pct: float,
         memory_utilization_pct: float,
-        queue_lag_seconds: float,
+        queue_lag_seconds: float | None = None,
     ):
         """Update hysteretic pressure state from host/service telemetry."""
         return self.pressure_controller.update(
