@@ -88,10 +88,10 @@ Source inspection found a risk-projection edge case that needs an explicit polic
 
 **Implemented in this branch (not yet merged):**
 
-- Open positions now require finite, positive stop-risk at the final CapitalGateway boundary. Missing/zero/invalid risk produces a normal rejected-trade result and an auditable capital-gate rejection instead of an arbitrary 1% fallback or an uncaught exception.
+- Open positions now require finite, positive stop-risk at the final CapitalGateway boundary. Missing/zero/invalid risk and non-finite/non-positive equity or peak-equity inputs produce a normal rejected-trade result and an auditable capital-gate rejection instead of an arbitrary 1% fallback or an uncaught exception.
 - Risk-increasing pending orders with positive remaining notional require finite, positive risk. The CapitalGateway rejects zero/negative pending risk instead of omitting it from the portfolio sum.
 - Multiple positions in the same instrument are grouped by instrument and side; same-side risk is summed, opposing hedge sides remain distinct, and instrument identity is retained separately for correlation calculations.
-- Regression tests cover unknown open-position risk, zero-risk pending exposure, duplicate-symbol hedge positions, zero-risk gateway projections and fail-closed lifecycle rejection.
+- Regression tests cover unknown open-position risk, zero-risk pending exposure, duplicate-symbol hedge positions, zero-risk gateway projections, invalid equity/peak values and fail-closed lifecycle rejection.
 
 **Safety boundary:** this deliberately tightens admission (it may reject exposures whose risk cannot be proven). It does not change strategy signals, sizing formulae, leverage, stop placement or exit behavior. It must pass the full CI matrix and a paper-only integration test before merge.
 
