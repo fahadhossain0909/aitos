@@ -76,10 +76,56 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         rate_limiter: TokenBucketRateLimiter | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
+        environment: str | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._api_key = api_key or os.getenv("BINANCE_API_KEY")
-        self._api_secret = api_secret or os.getenv("BINANCE_API_SECRET")
+        selected_environment = (
+            environment or os.getenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", "mainnet")
+        ).strip().lower()
+        if selected_environment not in {"mainnet", "testnet"}:
+            raise ValueError(
+                "AITOS_BINANCE_FUTURES_ENVIRONMENT must be 'mainnet' or 'testnet'"
+            )
+        self.environment = selected_environment
+        if self.environment == "testnet":
+            self._rest_base_url = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_REST_BASE_URL",
+                "https://demo-fapi.binance.com",
+            ).rstrip("/")
+            testnet_ws_base = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_WS_BASE_URL",
+                "wss://demo-fstream.binance.com",
+            ).rstrip("/")
+            self._ws_market_base_url = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_WS_COMBINED_URL",
+                f"{testnet_ws_base}/market/stream",
+            ).rstrip("/")
+            self._ws_market_raw_base_url = os.getenv(
+                "AITOS_BINANCE_FUTURES_TESTNET_WS_RAW_URL",
+                f"{testnet_ws_base}/market/ws",
+            ).rstrip("/")
+            # Testnet credentials are intentionally isolated: never fall back
+            # to mainnet environment variables when testnet is selected.
+            self._api_key = (
+                api_key
+                if api_key is not None
+                else os.getenv("BINANCE_FUTURES_TESTNET_API_KEY")
+            )
+            self._api_secret = (
+                api_secret
+                if api_secret is not None
+                else os.getenv("BINANCE_FUTURES_TESTNET_API_SECRET")
+            )
+        else:
+            self._rest_base_url = REST_BASE_URL
+            self._ws_market_base_url = WS_MARKET_BASE_URL
+            self._ws_market_raw_base_url = WS_MARKET_RAW_BASE_URL
+            self._api_key = (
+                api_key if api_key is not None else os.getenv("BINANCE_API_KEY")
+            )
+            self._api_secret = (
+                api_secret if api_secret is not None else os.getenv("BINANCE_API_SECRET")
+            )
         self._session: aiohttp.ClientSession | None = None
         self._ws_transport: dict[str, Any] = {
             "state": "idle",
@@ -231,7 +277,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 await self.connect()
                 assert self._session is not None
                 async with self._session.get(
-                    f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
+                    f"{self._rest_base_url}/fapi/v1/income?{query}&signature={signature}",
                     headers={"X-MBX-APIKEY": self._api_key},
                 ) as response:
                     response.raise_for_status()
@@ -385,17 +431,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             for i in range(0, len(unique), max_per_connection)
         ]
 
-    @staticmethod
-    def _get_ws_base_url(streams: list[str]) -> tuple[str, str]:
-        """Route all Binance USDⓈ-M public streams through the market path."""
-        return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
+    def _get_ws_base_url(self, streams: list[str]) -> tuple[str, str]:
+        """Return the market/raw stream routes for the selected environment."""
+        return self._ws_market_base_url, self._ws_market_raw_base_url
 
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
         async with self._session.get(
-            f"{REST_BASE_URL}{path}", params=params
+            f"{self._rest_base_url}{path}", params=params
         ) as response:
             response.raise_for_status()
             return await response.json()
