@@ -2859,17 +2859,10 @@ class TradeLifecycle(AITOSModule):
                             # make-before-break against the remaining position.
                             await self._refresh_live_protection(trade)
                         elif order_type == "TAKE_PROFIT_MARKET":
-                            while algo_order_id in trade.tp_order_ids:
-                                trade.tp_order_ids.remove(algo_order_id)
-                            index = next(
-                                (
-                                    i for i, value in enumerate(trade.take_profit_levels)
-                                    if i < len(trade.tp_order_ids)
-                                ),
-                                None,
-                            )
-                            if index is not None and trade.take_profit_levels:
-                                trade.take_profit_levels.pop(index)
+                            tp_index = trade.tp_order_ids.index(algo_order_id)
+                            trade.tp_order_ids.pop(tp_index)
+                            if tp_index < len(trade.take_profit_levels):
+                                trade.take_profit_levels.pop(tp_index)
                             while algo_order_id in pending:
                                 pending.remove(algo_order_id)
                             trade.updated_at = utc_now_iso()
@@ -2897,7 +2890,6 @@ class TradeLifecycle(AITOSModule):
         close_fraction: float,
         *,
         consume_tp: bool = False,
-        refresh_protection: bool = True,
     ) -> None:
         if not self._order_executor.requires_exchange_execution:
             return await self._partial_close_unlocked(trade, price, close_fraction)
