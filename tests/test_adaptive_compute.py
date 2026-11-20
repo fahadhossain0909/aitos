@@ -1,3 +1,5 @@
+import pytest
+
 from aitos.compute.resource_governor import (
     PressureLevel,
     ResourceSnapshot,
