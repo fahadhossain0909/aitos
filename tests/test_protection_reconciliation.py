@@ -862,12 +862,13 @@ async def test_restart_recovers_replacement_stop_before_cancelling_old_stop(tmp_
 
     async def persist(value):
         persisted.append(
-            (value.sl_order_id, list(value.agent_consensus.get("_pending_stop_cancellations", [])))
+            (
+                value.sl_order_id,
+                list(value.agent_consensus.get("_pending_stop_cancellations", [])),
+            )
         )
 
-    report = await recover_protection_handovers(
-        executor, journal, [trade], persist
-    )
+    report = await recover_protection_handovers(executor, journal, [trade], persist)
 
     assert report["recovered"] == 1
     assert report["blocked"] == []
@@ -934,9 +935,7 @@ async def test_replacement_recovery_quarantines_old_stop_partial_fill(tmp_path):
         updated_at="",
     )
 
-    report = await recover_protection_handovers(
-        executor, journal, [trade], AsyncMock()
-    )
+    report = await recover_protection_handovers(executor, journal, [trade], AsyncMock())
 
     assert report["recovered"] == 0
     assert "partial" in report["blocked"][0]["reason"]
