@@ -19,6 +19,7 @@ from aitos.risk.models import (
     PendingOrderExposure,
     PortfolioState,
     PositionExposure,
+    PendingOrderExposure,
 )
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -524,3 +525,93 @@ def test_pending_order_exposure_rejects_invalid_risk_and_side():
         PendingOrderExposure("entry", "BTCUSDT", "BOTH", 100.0, 10.0)
     with pytest.raises(ValueError, match="risk_amount_usd"):
         PendingOrderExposure("entry", "BTCUSDT", "LONG", 100.0, float("nan"))
+
+
+def test_portfolio_consensus_fails_closed_for_unknown_open_position_risk():
+    portfolio = make_portfolio(
+        positions=(PositionExposure("BTCUSDT", 5_000.0, 5.0, side="LONG"),)
+    )
+    with pytest.raises(ValueError, match="risk is unknown"):
+        _portfolio_consensus(portfolio, make_opportunity())
+
+
+def test_portfolio_consensus_fails_closed_for_zero_risk_pending_order():
+    portfolio = make_portfolio(
+        pending_orders=(
+            PendingOrderExposure(
+                order_id="pending-1",
+                symbol="BTCUSDT",
+                side="LONG",
+                remaining_notional_usd=500.0,
+                risk_amount_usd=0.0,
+            ),
+        )
+    )
+    with pytest.raises(ValueError, match="unpriced"):
+        _portfolio_consensus(portfolio, make_opportunity())
+
+
+def test_portfolio_consensus_aggregates_same_symbol_hedge_sides_without_overwrite():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure("BTCUSDT", 2_000.0, 2.0, side="LONG", risk_amount_usd=100.0),
+            PositionExposure("BTCUSDT", 1_000.0, 2.0, side="SHORT", risk_amount_usd=50.0),
+            PositionExposure("BTCUSDT", 500.0, 1.0, side="LONG", risk_amount_usd=25.0),
+        )
+    )
+    result = _portfolio_consensus(portfolio, make_opportunity(symbol="ETHUSDT"))
+    assert result["position_risk_pct"] == {
+        "BTCUSDT:LONG": pytest.approx(1.25),
+        "BTCUSDT:SHORT": pytest.approx(0.5),
+    }
+    assert result["position_sides"] == {
+        "BTCUSDT:LONG": "LONG",
+        "BTCUSDT:SHORT": "SHORT",
+    }
+    assert result["position_instruments"] == {
+        "BTCUSDT:LONG": "BTCUSDT",
+        "BTCUSDT:SHORT": "BTCUSDT",
+    }
+    snapshot = CapitalGateway()._snapshot(
+        10_000.0,
+        CapitalGateway().estimate_opportunity(
+            make_opportunity(
+                symbol="ETHUSDT",
+                agent_consensus=result,
+            )
+        ),
+    )
+    assert snapshot.total_risk_pct == pytest.approx(1.75)
+    assert snapshot.position_instruments["BTCUSDT:LONG"] == "BTCUSDT"
+
+
+def test_gateway_rejects_zero_risk_pending_projection():
+    gateway = CapitalGateway()
+    estimate = gateway.estimate_opportunity(
+        make_opportunity(
+            agent_consensus={
+                "pending_order_risk_pct": {"pending:zero": 0.0},
+                "pending_order_symbols": {"pending:zero": "BTCUSDT"},
+                "pending_order_sides": {"pending:zero": "LONG"},
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="finite and positive"):
+        gateway._snapshot(10_000.0, estimate)
+
+
+@pytest.mark.asyncio
+async def test_runtime_guard_returns_rejection_for_unknown_open_position_risk(
+    event_bus, risk_engine
+):
+    install_capital_guard()
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    portfolio = make_portfolio(
+        positions=(PositionExposure("BTCUSDT", 5_000.0, 5.0, side="LONG"),)
+    )
+    trade = await lifecycle.submit_opportunity(make_opportunity(), portfolio)
+    assert trade.state == TradeLifecycleState.REJECTED
+    assert "portfolio exposure unavailable" in trade.rejection_reason
+    assert lifecycle.get_open_trades() == []
+    await lifecycle.shutdown()
