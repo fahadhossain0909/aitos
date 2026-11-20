@@ -194,12 +194,14 @@ class EventBus(AITOSModule):
         )
 
     async def queue_lag_seconds(self, *, max_groups: int = 8) -> float | None:
-        """Return a bounded-sample pending-delivery idle-age pressure signal.
+        """Return the oldest observable unread/pending age across active groups.
 
-        XPENDING range ordering is by stream ID, not idle age. Inspect a bounded
-        prefix per group and take the maximum observed idle age instead of
-        incorrectly treating the first (lowest-ID) entry as the stalest one.
-        This is not total unread-stream lag; unknown remains None.
+        Redis 7 XINFO GROUPS exposes lag and last-delivered-id. For a group with
+        unread entries, the first entry after last-delivered-id gives the oldest
+        unread event's enqueue timestamp. XPENDING supplements this with
+        delivery-idle age for already delivered but unacked entries.
+        Work is bounded to max_groups, 100 pending entries/group, and one unread
+        XRANGE entry/group. Unsupported server/client capabilities return None.
         """
         if (
             isinstance(max_groups, bool)
@@ -216,13 +218,68 @@ class EventBus(AITOSModule):
                         break
             if len(pairs) >= max_groups:
                 break
-        max_observed_idle_ms = 0
+        if not pairs:
+            return None
+
+        now_ms = int(time.time() * 1000)
+        max_age_ms = 0
         for stream_key, group in pairs:
             try:
+                groups = await self._redis.xinfo_groups(stream_key)
+                group_info = next(
+                    (
+                        item
+                        for item in groups
+                        if item.get("name", item.get(b"name")) in (group, group.encode())
+                    ),
+                    None,
+                )
+                if group_info is None:
+                    continue
+                lag = group_info.get("lag", group_info.get(b"lag"))
+                last_id = group_info.get(
+                    "last-delivered-id", group_info.get(b"last-delivered-id")
+                )
+                if lag is not None and int(lag) > 0 and last_id is not None:
+                    last_id_text = (
+                        last_id.decode() if isinstance(last_id, bytes) else str(last_id)
+                    )
+                    unread = await self._redis.xrange(
+                        stream_key, min=f"({last_id_text}", max="+", count=1
+                    )
+                    if unread:
+                        entry_id = unread[0][0]
+                        entry_id_text = (
+                            entry_id.decode()
+                            if isinstance(entry_id, bytes)
+                            else str(entry_id)
+                        )
+                        event_time_ms = int(entry_id_text.split("-", 1)[0])
+                        max_age_ms = max(max_age_ms, now_ms - event_time_ms)
+
                 pending = await self._redis.xpending_range(
                     stream_key, group, min="-", max="+", count=100
                 )
+                for entry in pending or ():
+                    idle_ms = entry.get(
+                        "time_since_delivered", entry.get(b"time_since_delivered")
+                    )
+                    if idle_ms is not None:
+                        max_age_ms = max(max_age_ms, int(idle_ms))
             except (AttributeError, NotImplementedError):
+                return None
+            except (TypeError, ValueError, OverflowError, KeyError, IndexError) as exc:
+                self._last_error = str(exc)[:500]
+                logger.debug(
+                    "queue pressure sample unavailable",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream_key,
+                            "group": group,
+                            "error": str(exc),
+                        }
+                    },
+                )
                 return None
             except Exception as exc:
                 self._last_error = str(exc)[:500]
@@ -237,17 +294,7 @@ class EventBus(AITOSModule):
                     },
                 )
                 return None
-            for entry in pending or ():
-                idle_ms = entry.get(
-                    "time_since_delivered", entry.get(b"time_since_delivered")
-                )
-                if idle_ms is None:
-                    continue
-                try:
-                    max_observed_idle_ms = max(max_observed_idle_ms, int(idle_ms))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-        return max_observed_idle_ms / 1000.0 if pairs else None
+        return max(0, max_age_ms) / 1000.0
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for sub in self._subscriptions:
