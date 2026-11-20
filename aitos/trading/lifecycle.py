@@ -2834,6 +2834,21 @@ class TradeLifecycle(AITOSModule):
 
                 # The durable trade snapshot (including its marker) must exist
                 # before either SQLite acknowledgement or terminal transition.
+                client_id = str(algo.get("clientAlgoId", ""))
+                intent_rows = await asyncio.to_thread(intent_store.protection_intents)
+                owned_rows = [
+                    row for row in intent_rows if row.get("client_id") == client_id
+                ]
+                if len(owned_rows) != 1:
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        algo_order_id,
+                        "triggered child has no unique durable client-algo intent",
+                    )
+                if owned_rows[0].get("state") == "PROTECTED":
+                    await asyncio.to_thread(
+                        intent_store.mark_applied, client_id, trade_id
+                    )
                 await asyncio.to_thread(
                     intent_store.mark_protection_child_applied,
                     algo_id=algo_id,
