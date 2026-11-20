@@ -83,7 +83,6 @@ def test_queue_lag_seconds_rejects_invalid_query_bound():
         asyncio.run(bus.queue_lag_seconds(max_groups=0))
 
 
-
 @pytest.mark.asyncio
 async def test_queue_lag_seconds_uses_max_idle_not_first_stream_id():
     # XPENDING is ordered by stream ID, which is not the same as idle age.
