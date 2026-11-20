@@ -888,6 +888,28 @@ async def recover_protection_handovers(
                 })
             continue
 
+        intent_state = intent.get("state")
+        if intent_state == "PROTECTED":
+            result_json = intent.get("result_json")
+            if isinstance(result_json, str):
+                result_json = json.loads(result_json)
+            if not isinstance(result_json, dict) or result_json.get("order_id") != new_id:
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "replacement intent result identity mismatch",
+                    }
+                )
+                continue
+        elif intent_state not in {"SUBMITTING", "APPLIED"}:
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "replacement intent is in an unsupported state",
+                }
+            )
+            continue
+
         current_stop = getattr(trade, "sl_order_id", None)
         if current_stop not in (old_id, new_id):
             blocked.append({
@@ -910,7 +932,6 @@ async def recover_protection_handovers(
         trade.updated_at = datetime.now(timezone.utc).isoformat()
         await persist_trade(trade)
 
-        intent_state = intent.get("state")
         if intent_state == "SUBMITTING":
             result = OrderResult(
                 order_id=new_id,
@@ -921,29 +942,6 @@ async def recover_protection_handovers(
                 client_order_id=client_id,
             )
             await asyncio.to_thread(intent_store.record_protection, client_id, result)
-        elif intent_state == "PROTECTED":
-            result_json = intent.get("result_json")
-            if isinstance(result_json, str):
-                result_json = json.loads(result_json)
-            if (
-                not isinstance(result_json, dict)
-                or result_json.get("order_id") != new_id
-            ):
-                blocked.append(
-                    {
-                        "client_id": client_id,
-                        "reason": "replacement intent result identity mismatch",
-                    }
-                )
-                continue
-        elif intent_state not in {"APPLIED"}:
-            blocked.append(
-                {
-                    "client_id": client_id,
-                    "reason": "replacement intent is in an unsupported state",
-                }
-            )
-            continue
 
         if state == "NEW_ACCEPTED":
             await asyncio.to_thread(
