@@ -120,6 +120,7 @@ class CapitalGateway:
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
                 "position_sides": consensus.get("position_sides", {}),
+                "position_instruments": consensus.get("position_instruments", {}),
                 "pending_order_risk_pct": consensus.get("pending_order_risk_pct", {}),
                 "pending_order_symbols": consensus.get("pending_order_symbols", {}),
                 "pending_order_sides": consensus.get("pending_order_sides", {}),
@@ -155,7 +156,12 @@ class CapitalGateway:
             str(k): str(v).upper()
             for k, v in dict(metadata.get("position_sides") or {}).items()
         }
-        position_instruments = {key: key for key in positions}
+        position_instruments = {
+            str(key): str(value)
+            for key, value in dict(metadata.get("position_instruments") or {}).items()
+        }
+        for key in positions:
+            position_instruments.setdefault(key, key)
         pending_risk = dict(metadata.get("pending_order_risk_pct") or {})
         pending_symbols = dict(metadata.get("pending_order_symbols") or {})
         pending_sides = dict(metadata.get("pending_order_sides") or {})
@@ -169,13 +175,12 @@ class CapitalGateway:
                 not instrument
                 or side not in {"LONG", "SHORT"}
                 or not isfinite(risk_pct)
-                or risk_pct < 0
+                or risk_pct <= 0
             ):
-                raise ValueError("invalid pending order risk projection")
-            if risk_pct > 0:
-                positions[str(order_key)] = risk_pct
-                position_sides[str(order_key)] = side
-                position_instruments[str(order_key)] = instrument
+                raise ValueError("pending order risk projection must be finite and positive")
+            positions[str(order_key)] = risk_pct
+            position_sides[str(order_key)] = side
+            position_instruments[str(order_key)] = instrument
         if not correlations and metadata.get("return_observations"):
             decision_at = metadata.get("decision_at")
             if decision_at is not None:
