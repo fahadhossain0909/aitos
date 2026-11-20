@@ -797,3 +797,33 @@ def test_capacity_planner_rejects_non_integer_symbol_cap():
     )
     with pytest.raises(ValueError):
         plan_symbol_capacity([], budget, max_symbols=1.5)
+
+
+
+def test_detect_resources_honors_cgroup_v1_cpu_and_memory_limits(tmp_path):
+    proc = tmp_path / "proc"
+    cgroup = tmp_path / "cgroup"
+    devices = tmp_path / "dev"
+    proc.mkdir()
+    cgroup.mkdir()
+    devices.mkdir()
+    (proc / "meminfo").write_text(
+        "MemTotal:       8388608 kB\nMemAvailable:    4194304 kB\n",
+        encoding="ascii",
+    )
+    (cgroup / "cpu.cfs_quota_us").write_text("150000", encoding="ascii")
+    (cgroup / "cpu.cfs_period_us").write_text("100000", encoding="ascii")
+    (cgroup / "memory.limit_in_bytes").write_text(
+        str(4 * 1024 * 1024 * 1024), encoding="ascii"
+    )
+    (cgroup / "memory.usage_in_bytes").write_text(
+        str(1 * 1024 * 1024 * 1024), encoding="ascii"
+    )
+
+    result = detect_resources(proc_root=proc, cgroup_root=cgroup, device_root=devices)
+
+    assert result.effective_cpus == pytest.approx(1.5)
+    assert result.cpu_quota_limited is True
+    assert result.memory_limit_mb == 4096
+    assert result.memory_available_mb == 3072
+    assert result.memory_limit_limited is True
