@@ -2101,15 +2101,16 @@ class OpportunityScanner(AITOSModule):
                         ),
                     )
                     workloads.append(estimated.workload)
+                optional_budget = (
+                    adaptive_runtime.budget_for_optional_work()
+                    if callable(
+                        getattr(adaptive_runtime, "budget_for_optional_work", None)
+                    )
+                    else adaptive_runtime.budget
+                )
                 capacity_plan = plan_symbol_capacity(
                     workloads,
-                    (
-                        adaptive_runtime.budget_for_optional_work()
-                        if callable(
-                            getattr(adaptive_runtime, "budget_for_optional_work", None)
-                        )
-                        else adaptive_runtime.budget
-                    ),
+                    optional_budget,
                     max_symbols=limit,
                 )
                 self._aitos_last_capacity_plan = capacity_plan
@@ -2136,10 +2137,10 @@ class OpportunityScanner(AITOSModule):
                                 capacity_plan.overcommitted_by_protected_work
                             ),
                             "cpu_capacity_units": (
-                                adaptive_runtime.budget.cpu_capacity_units
+                                optional_budget.cpu_capacity_units
                             ),
                             "memory_budget_mb": (
-                                adaptive_runtime.budget_for_optional_work().memory_budget_mb
+                                optional_budget.memory_budget_mb
                             ),
                             "pressure_level": int(
                                 getattr(
