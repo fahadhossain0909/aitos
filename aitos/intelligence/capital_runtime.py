@@ -345,9 +345,21 @@ def install_capital_guard() -> None:
             )
             return _rejected_trade(opportunity, reason)
 
+        try:
+            portfolio_consensus = _portfolio_consensus(portfolio, opportunity)
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            reason = f"capital_objective: portfolio exposure unavailable: {exc}"
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
+            )
+            return _rejected_trade(opportunity, reason)
         protected_opportunity = replace(
             opportunity,
-            agent_consensus=_portfolio_consensus(portfolio, opportunity),
+            agent_consensus=portfolio_consensus,
         )
         gateway = getattr(self, _GATEWAY_ATTR, None)
         if gateway is None:
