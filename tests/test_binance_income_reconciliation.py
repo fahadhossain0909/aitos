@@ -391,3 +391,18 @@ async def test_trade_write_failure_prevents_income_cursor_advancement():
     assert store.cursor is None
     assert bus.events == []
     assert len(lifecycle.adjustments) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_requires_durable_trade_writer():
+    exchange = FakeExchange()
+    service = BinanceIncomeReconciliationService(
+        exchange, FakeLifecycle(), FakeEventBus(), FakeStateStore()
+    )
+
+    with pytest.raises(RuntimeError, match="durable lifecycle cost-adjustment writer"):
+        await service.reconcile_startup()
+
+    assert exchange.calls == []
+    assert service._startup_reconciled is False
+    assert service._startup_error is not None
