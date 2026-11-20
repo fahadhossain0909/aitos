@@ -1035,3 +1035,15 @@ def test_compute_models_reject_non_numeric_and_boolean_values():
             memory_utilization_pct=20,
             queue_lag_seconds=None,
         )
+
+
+
+def test_resource_budget_disables_deep_analysis_without_memory_headroom():
+    from aitos.compute.resource_governor import build_resource_budget
+
+    budget = build_resource_budget(
+        ResourceSnapshot(2, 2.0, 1024, 128, 0, False, True)
+    )
+    assert budget.memory_budget_mb == 0
+    assert budget.deep_analysis_slots == 0
+    assert budget.cpu_workers == 2
