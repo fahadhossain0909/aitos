@@ -1,11 +1,9 @@
 """Fail-closed cumulative-fill reconciliation for triggered protective algos.
 
-This module deliberately does not mutate trades or submit/cancel orders. It
-validates the venue child-order snapshot and calculates the unapplied delta.
-A caller must persist the resulting trade mutation before advancing its
-durable applied-cumulative watermark.
+This module validates authenticated venue algo/child snapshots and calculates
+unapplied quantity and quote deltas. The lifecycle persists those deltas with
+the trade snapshot before the SQLite mirror watermark is advanced.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +19,7 @@ class ProtectionChildReconciliationError(ValueError):
 class ProtectionChildFillDelta:
     algo_id: str
     child_order_id: str
+    order_type: str
     status: str
     cumulative_quantity: Decimal
     previously_applied_quantity: Decimal
@@ -35,7 +34,9 @@ class ProtectionChildFillDelta:
         return self.delta_quantity > 0
 
 
-def _positive_decimal(value: Any, field: str, *, allow_zero: bool = False) -> Decimal:
+def _decimal_value(
+    value: Any, field: str, *, allow_zero: bool = False
+) -> Decimal:
     if isinstance(value, bool):
         raise ProtectionChildReconciliationError(f"{field} must be numeric")
     try:
@@ -43,7 +44,10 @@ def _positive_decimal(value: Any, field: str, *, allow_zero: bool = False) -> De
     except (InvalidOperation, TypeError, ValueError):
         raise ProtectionChildReconciliationError(f"{field} must be numeric") from None
     if not parsed.is_finite() or parsed < 0 or (not allow_zero and parsed == 0):
-        raise ProtectionChildReconciliationError(f"{field} must be finite and positive")
+        qualifier = "non-negative" if allow_zero else "positive"
+        raise ProtectionChildReconciliationError(
+            f"{field} must be finite and {qualifier}"
+        )
     return parsed
 
 
@@ -56,11 +60,13 @@ def calculate_protection_child_fill_delta(
     expected_algo_id: str,
     previously_applied_quantity: Any,
     previously_applied_quote: Any = "0",
+    expected_position_side: str | None = None,
+    expected_reduce_only: bool | None = None,
 ) -> ProtectionChildFillDelta:
-    """Validate one authenticated child snapshot and calculate its new fill.
+    """Validate one authenticated triggered-algo child and calculate new fills.
 
-    Binance child order quantities are cumulative. This function never treats
-    an order's status alone as proof of a fill and rejects quantity regression.
+    Venue executedQty/cumQuote are cumulative. Incremental average fill price is
+    delta cumQuote / delta executedQty, not the venue's lifetime avgPrice.
     """
     if not isinstance(algo, dict) or not isinstance(child, dict):
         raise ProtectionChildReconciliationError(
@@ -74,15 +80,33 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "triggered child order identity missing"
         )
+    if str(algo.get("actualOrderId", "")) != child_id:
+        raise ProtectionChildReconciliationError("algo-to-child linkage mismatch")
     if algo.get("symbol") != expected_symbol or child.get("symbol") != expected_symbol:
         raise ProtectionChildReconciliationError("child symbol mismatch")
-    if child.get("side") != expected_side:
+    if algo.get("side") != expected_side or child.get("side") != expected_side:
         raise ProtectionChildReconciliationError("child side mismatch")
-    if (
-        algo.get("actualOrderId") is not None
-        and str(algo.get("actualOrderId")) != child_id
-    ):
-        raise ProtectionChildReconciliationError("algo-to-child linkage mismatch")
+
+    order_type = str(algo.get("orderType", ""))
+    if order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+        raise ProtectionChildReconciliationError("unsupported protective algo type")
+    if algo.get("algoType") != "CONDITIONAL":
+        raise ProtectionChildReconciliationError("algo is not a conditional order")
+    if algo.get("algoStatus") not in {"TRIGGERED", "FINISHED"}:
+        raise ProtectionChildReconciliationError("algo is not confirmed triggered")
+    if algo.get("closePosition") not in (False, "false"):
+        raise ProtectionChildReconciliationError("close-position algo is unsupported")
+    if expected_position_side is not None:
+        if algo.get("positionSide") != expected_position_side:
+            raise ProtectionChildReconciliationError("algo position-side mismatch")
+        if child.get("positionSide") != expected_position_side:
+            raise ProtectionChildReconciliationError("child position-side mismatch")
+    if expected_reduce_only is not None:
+        allowed_flags = (expected_reduce_only, str(expected_reduce_only).lower())
+        if algo.get("reduceOnly") not in allowed_flags:
+            raise ProtectionChildReconciliationError("algo reduce-only mismatch")
+        if child.get("reduceOnly") is not None and child.get("reduceOnly") not in allowed_flags:
+            raise ProtectionChildReconciliationError("child reduce-only mismatch")
 
     status = str(child.get("status", "")).upper()
     allowed_statuses = {
@@ -95,28 +119,34 @@ def calculate_protection_child_fill_delta(
         "REJECTED",
     }
     if status not in allowed_statuses:
-        raise ProtectionChildReconciliationError("unsupported or missing child status")
+        raise ProtectionChildReconciliationError(
+            "unsupported or missing child status"
+        )
 
-    cumulative = _positive_decimal(
+    cumulative = _decimal_value(
         child.get("executedQty", "0"), "executedQty", allow_zero=True
     )
-    applied = _positive_decimal(
+    original = _decimal_value(child.get("origQty"), "origQty")
+    if cumulative > original:
+        raise ProtectionChildReconciliationError(
+            "executed child quantity exceeds original quantity"
+        )
+    applied = _decimal_value(
         previously_applied_quantity,
         "previously_applied_quantity",
         allow_zero=True,
     )
     if cumulative < applied:
         raise ProtectionChildReconciliationError("cumulative child fill regressed")
-    if status == "FILLED":
-        original = _positive_decimal(child.get("origQty"), "origQty")
-        if cumulative != original:
-            raise ProtectionChildReconciliationError(
-                "FILLED child quantity does not equal original quantity"
-            )
-    cumulative_quote = _positive_decimal(
+    if status == "FILLED" and cumulative != original:
+        raise ProtectionChildReconciliationError(
+            "FILLED child quantity does not equal original quantity"
+        )
+
+    cumulative_quote = _decimal_value(
         child.get("cumQuote", "0"), "cumQuote", allow_zero=True
     )
-    applied_quote = _positive_decimal(
+    applied_quote = _decimal_value(
         previously_applied_quote,
         "previously_applied_quote",
         allow_zero=True,
@@ -133,12 +163,15 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "quote changed without new executed quantity"
         )
+    if delta_quantity > 0 and delta_quote <= 0:
+        raise ProtectionChildReconciliationError(
+            "new fill has no positive incremental quote value"
+        )
     average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal("0")
-    if delta_quantity > 0 and average <= 0:
-        raise ProtectionChildReconciliationError("new fill has no positive quote value")
     return ProtectionChildFillDelta(
         algo_id=algo_id,
         child_order_id=child_id,
+        order_type=order_type,
         status=status,
         cumulative_quantity=cumulative,
         previously_applied_quantity=applied,
