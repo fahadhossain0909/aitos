@@ -1,5 +1,13 @@
 name: Cross-platform embedded desktop (unsigned, no trading)
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'native/shared/**'
+      - 'aitos/native/**'
+      - 'aitos/console*.py'
+      - '.github/workflows/tauri-desktop.yml'
   pull_request:
     paths:
       - 'desktop/**'
