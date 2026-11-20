@@ -1,4 +1,5 @@
 """Bounded in-process telemetry windows for per-symbol compute estimation."""
+
 from __future__ import annotations
 
 from collections import OrderedDict, deque
