@@ -308,7 +308,11 @@ def plan_symbol_capacity(
     combined cost exceeds the budget the plan reports overcommit; the caller
     must preserve risk/market-data duties and suppress optional admissions.
     """
-    if isinstance(max_symbols, bool) or not isinstance(max_symbols, int) or max_symbols < 1:
+    if (
+        isinstance(max_symbols, bool)
+        or not isinstance(max_symbols, int)
+        or max_symbols < 1
+    ):
         raise ValueError("max_symbols must be a positive integer")
     unique: dict[str, SymbolWorkload] = {}
     for item in workloads:
