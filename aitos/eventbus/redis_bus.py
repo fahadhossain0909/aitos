@@ -200,7 +200,11 @@ class EventBus(AITOSModule):
         of every unread stream entry. Query at most max_groups and one oldest
         pending entry per group. Unknown remains None, never a fabricated zero.
         """
-        if isinstance(max_groups, bool) or not isinstance(max_groups, int) or max_groups < 1:
+        if (
+            isinstance(max_groups, bool)
+            or not isinstance(max_groups, int)
+            or max_groups < 1
+        ):
             raise ValueError("max_groups must be a positive integer")
         pairs: set[tuple[str, str]] = set()
         for subscription in self._subscriptions:
@@ -221,9 +225,16 @@ class EventBus(AITOSModule):
                 return None
             except Exception as exc:
                 self._last_error = str(exc)[:500]
-                logger.debug("queue pressure sample unavailable", extra={"aitos_extra": {
-                    "stream": stream_key, "group": group, "error": str(exc)
-                }})
+                logger.debug(
+                    "queue pressure sample unavailable",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream_key,
+                            "group": group,
+                            "error": str(exc),
+                        }
+                    },
+                )
                 return None
             if not pending:
                 continue
