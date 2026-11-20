@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import time
 import uuid
@@ -2548,16 +2549,16 @@ class TradeLifecycle(AITOSModule):
             result = row.get("result_json")
             request = row.get("request_json")
             if isinstance(result, str):
-                result = __import__("json").loads(result)
+                result = json.loads(result)
             if isinstance(request, str):
-                request = __import__("json").loads(request)
+                request = json.loads(request)
             if isinstance(result, dict) and result.get("order_id") == old_id:
                 matches.append((row, request))
         if len(matches) != 1:
             raise ExecutionRecoveryRequired(
                 trade.symbol, str(old_id), "old take-profit ownership is missing or ambiguous"
             )
-        old_row, old_request = matches[0]
+        _, old_request = matches[0]
         if (
             not isinstance(old_request, dict)
             or old_request.get("owner_trade_id") != trade.trade_id
