@@ -12,11 +12,11 @@ BINANCE_FUTURES_TESTNET_API_KEY=<testnet-api-key>
 BINANCE_FUTURES_TESTNET_API_SECRET=<testnet-api-secret>
 ```
 
-The adapter uses the following testnet endpoints unless explicitly overridden:
+Both the market-data adapter and live-order executor now use the documented USDⓈ-M Futures demo REST host when testnet is selected. The market-data adapter uses the following testnet endpoints unless explicitly overridden:
 
 | Purpose | Default |
 |---|---|
-| REST | `https://demo-fapi.binance.com` |
+| REST (market data and order executor) | `https://demo-fapi.binance.com` |
 | Market WebSocket combined stream | `wss://demo-fstream.binance.com/market/stream` |
 | Market WebSocket raw stream | `wss://demo-fstream.binance.com/market/ws` |
 
@@ -28,6 +28,7 @@ These are the USDⓈ-M Futures demo/testnet endpoints documented by Binance. The
 - It never falls back to `BINANCE_API_KEY` or `BINANCE_API_SECRET`.
 - Mainnet mode retains the existing `BINANCE_API_KEY` and `BINANCE_API_SECRET` variables.
 - `AITOS_BINANCE_FUTURES_ENVIRONMENT=mainnet` explicitly overrides `BINANCE_TESTNET=true`.
+- The live-order preparation path selects credentials through `BinanceSettings.execution_credentials`, so it cannot silently use mainnet credentials for a testnet session.
 - Constructor-injected credentials remain supported for controlled tests and dependency injection.
 - Do not reuse mainnet credentials in a testnet environment. Keep credentials out of source control, logs, issue reports and CI artifacts.
 
@@ -48,6 +49,8 @@ Current automated coverage verifies:
 - default testnet endpoint selection;
 - separate testnet credential lookup and no fallback to mainnet environment credentials;
 - rejection of unknown environment names;
+- settings-level selection of the correct mainnet/testnet credential pair;
+- live-order preparation uses the same environment for signed order execution and exchange metadata lookup;
 - REST market-data routing to the demo endpoint;
 - market WebSocket routing to the demo market stream.
 
