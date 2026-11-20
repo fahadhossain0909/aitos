@@ -5,6 +5,7 @@ validates the venue child-order snapshot and calculates the unapplied delta.
 A caller must persist the resulting trade mutation before advancing its
 durable applied-cumulative watermark.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -39,9 +40,7 @@ def _positive_decimal(value: Any, field: str, *, allow_zero: bool = False) -> De
     except (InvalidOperation, TypeError, ValueError):
         raise ProtectionChildReconciliationError(f"{field} must be numeric") from None
     if not parsed.is_finite() or parsed < 0 or (not allow_zero and parsed == 0):
-        raise ProtectionChildReconciliationError(
-            f"{field} must be finite and positive"
-        )
+        raise ProtectionChildReconciliationError(f"{field} must be finite and positive")
     return parsed
 
 
@@ -92,9 +91,7 @@ def calculate_protection_child_fill_delta(
         "REJECTED",
     }
     if status not in allowed_statuses:
-        raise ProtectionChildReconciliationError(
-            "unsupported or missing child status"
-        )
+        raise ProtectionChildReconciliationError("unsupported or missing child status")
 
     cumulative = _positive_decimal(
         child.get("executedQty", "0"), "executedQty", allow_zero=True
