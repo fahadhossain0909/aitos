@@ -186,12 +186,11 @@ class AttributedOrderExecutor(OrderExecutor):
             owner_trade_id=owner_trade_id,
         )
         context = self.context_resolver(request)
+        owner_kwargs = (
+            {"owner_trade_id": owner_trade_id} if owner_trade_id is not None else {}
+        )
         result = await self.delegate.place_stop_loss_order(
-            symbol,
-            side,
-            quantity,
-            stop_price,
-            owner_trade_id=owner_trade_id,
+            symbol, side, quantity, stop_price, **owner_kwargs
         )
         try:
             self._record_result(request, context, result, decision_type="MANAGE")
@@ -221,12 +220,11 @@ class AttributedOrderExecutor(OrderExecutor):
             owner_trade_id=owner_trade_id,
         )
         context = self.context_resolver(request)
+        owner_kwargs = (
+            {"owner_trade_id": owner_trade_id} if owner_trade_id is not None else {}
+        )
         result = await self.delegate.place_take_profit_order(
-            symbol,
-            side,
-            quantity,
-            take_profit_price,
-            owner_trade_id=owner_trade_id,
+            symbol, side, quantity, take_profit_price, **owner_kwargs
         )
         try:
             self._record_result(request, context, result, decision_type="MANAGE")
