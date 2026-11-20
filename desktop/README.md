@@ -57,9 +57,11 @@ Use the separately authenticated built-console gateway instead, with the backend
 token only in that gateway's server environment. See
 [`docs/OPERATOR_GATEWAY.md`](../docs/OPERATOR_GATEWAY.md).
 
-Do not use a `VITE_`-prefixed secret, commit credentials, paste passwords/API keys
-into chat, or put exchange API keys in this UI. Do not start live trading to test
-the console. The public development preview remains an unattached/sample sandbox,
+Do not use a `VITE_`-prefixed secret, commit credentials, or paste passwords/API
+keys into chat. The operator workspace and Vite preview never accept exchange
+keys; the separate Trusted Signer Settings window is a different trust boundary
+and currently provisions testnet credentials only. Use it only on a trusted,
+user-controlled device. Do not start live trading to test the console. The public development preview remains an unattached/sample sandbox,
 not a route to real financial data.
 
 **Security boundary:** the new gateway implements single-process read-only
