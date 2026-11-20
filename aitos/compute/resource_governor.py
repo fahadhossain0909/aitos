@@ -33,6 +33,7 @@ class ResourceSnapshot:
             or not isinstance(self.logical_cpus, int)
             or self.logical_cpus < 1
             or isinstance(self.effective_cpus, bool)
+            or not isinstance(self.effective_cpus, (int, float))
             or not isfinite(self.effective_cpus)
             or self.effective_cpus <= 0
         ):
@@ -72,7 +73,12 @@ class ResourceBudget:
             or self.cpu_workers < 1
         ):
             raise ValueError("resource budget limits must be non-negative integers")
-        if not isfinite(self.cpu_capacity_units) or self.cpu_capacity_units < 0:
+        if (
+            isinstance(self.cpu_capacity_units, bool)
+            or not isinstance(self.cpu_capacity_units, (int, float))
+            or not isfinite(self.cpu_capacity_units)
+            or self.cpu_capacity_units < 0
+        ):
             raise ValueError("CPU capacity units must be finite and non-negative")
 
 
@@ -92,10 +98,16 @@ class SymbolWorkload:
         return self.mandatory or self.open_position or self.pending_order
 
     def __post_init__(self) -> None:
-        if not self.symbol.strip():
+        if not isinstance(self.symbol, str) or not self.symbol.strip():
             raise ValueError("symbol cannot be empty")
         if (
-            not isfinite(self.cpu_cost_units)
+            isinstance(self.cpu_cost_units, bool)
+            or not isinstance(self.cpu_cost_units, (int, float))
+            or isinstance(self.opportunity_score, bool)
+            or not isinstance(self.opportunity_score, (int, float))
+            or isinstance(self.liquidity_score, bool)
+            or not isinstance(self.liquidity_score, (int, float))
+            or not isfinite(self.cpu_cost_units)
             or not isfinite(self.opportunity_score)
             or not isfinite(self.liquidity_score)
             or self.cpu_cost_units < 0
@@ -278,6 +290,7 @@ def build_resource_budget(
         raise ValueError("memory_reserve_pct must be between 5 and 80")
     if (
         isinstance(cpu_utilization_target, bool)
+        or not isinstance(cpu_utilization_target, (int, float))
         or not isfinite(cpu_utilization_target)
         or not 0.1 <= cpu_utilization_target <= 0.95
     ):
@@ -397,10 +410,19 @@ def classify_pressure(
 ) -> PressureLevel:
     """Classify operational pressure; this is advisory and never changes risk."""
     values = (cpu_utilization_pct, memory_utilization_pct)
-    if any(not isfinite(value) or value < 0 for value in values):
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(value)
+        or value < 0
+        for value in values
+    ):
         raise ValueError("pressure metrics must be finite and non-negative")
     if queue_lag_seconds is not None and (
-        not isfinite(queue_lag_seconds) or queue_lag_seconds < 0
+        isinstance(queue_lag_seconds, bool)
+        or not isinstance(queue_lag_seconds, (int, float))
+        or not isfinite(queue_lag_seconds)
+        or queue_lag_seconds < 0
     ):
         raise ValueError("queue lag must be finite and non-negative when provided")
     if (
