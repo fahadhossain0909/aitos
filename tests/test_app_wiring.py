@@ -557,19 +557,20 @@ async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize()
 @pytest.mark.asyncio
 async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
     exchange = FakeScannerExchange()
+    instrument_master = InstrumentMaster(
+        [
+            Instrument(
+                symbol="BTCUSDT",
+                asset_class=AssetClass.CRYPTO,
+                venue="binance",
+                market_type="usd_m_futures",
+            )
+        ],
+        version="test-instruments-v1",
+    )
     consumer = MarketDataShadowConsumer(
         engine=CrossMarketIntelligenceEngine(),
-        instrument_resolver=InstrumentMaster(
-            [
-                Instrument(
-                    symbol="BTCUSDT",
-                    asset_class=AssetClass.CRYPTO,
-                    venue="binance",
-                    market_type="usd_m_futures",
-                )
-            ],
-            version="test-instruments-v1",
-        ),
+        instrument_resolver=instrument_master,
         market_types=("usd_m_futures",),
     )
     components = await build_system(
@@ -587,6 +588,30 @@ async def test_opt_in_market_shadow_consumer_follows_app_lifecycle(event_bus):
 
     await initialize_all(components)
     assert consumer.snapshot().started is True
+
+    from aitos.market_data.contracts import (
+        MarketEvent,
+        MarketEventType,
+        MarketSource,
+    )
+
+    now = datetime.now(timezone.utc)
+    await components.data_ingestion.market_data_bus.publish(
+        MarketEvent(
+            event_type=MarketEventType.TICKER,
+            exchange="binance",
+            venue="binance",
+            market="usd_m_futures",
+            market_type="usd_m_futures",
+            symbol="BTCUSDT",
+            event_time=now,
+            source=MarketSource.WEBSOCKET,
+            payload={"last_price": "100.0"},
+            event_id="shadow-app-wiring-btc-1",
+        )
+    )
+    assert await _wait_for(lambda: consumer.snapshot().processed == 1)
+    assert consumer.snapshot().accepted == 1
 
     await shutdown_all(components)
     assert consumer.snapshot().started is False
