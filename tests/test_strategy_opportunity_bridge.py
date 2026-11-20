@@ -18,6 +18,7 @@ from aitos.strategy.contracts import (
 )
 from aitos.strategy.engine import StrategyCycle
 from aitos.strategy.opportunity_bridge import (
+    StrategyPortfolioRiskContext,
     StrategyProtectionPlan,
     build_risk_governed_opportunities,
 )
@@ -104,15 +105,21 @@ def inputs(mode=StrategyMode.SHADOW):
             leverage=1.0,
         )
     }
-    return cycle, context, plans
+    portfolio_risk = StrategyPortfolioRiskContext(
+        snapshot_id="portfolio-snapshot-001",
+        observed_at_ns=context.now_ns,
+        equity_peak_usd=1_000.0,
+    )
+    return cycle, context, plans, portfolio_risk
 
 
 def test_shadow_strategy_candidate_becomes_typed_canonical_opportunity():
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     gateway = ShadowGateway()
     report = build_risk_governed_opportunities(
         cycle,
         context,
+        portfolio_risk,
         plans,
         shadow_gateway_factory=lambda: gateway,
         equity_usd=1_000.0,
@@ -137,7 +144,7 @@ def test_shadow_strategy_candidate_becomes_typed_canonical_opportunity():
 
 
 def test_shadow_gateway_must_not_share_live_reservation_ledger():
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     live = ShadowGateway()
     with pytest.raises(ValueError, match="share the live reservation"):
         build_risk_governed_opportunities(
@@ -151,10 +158,11 @@ def test_shadow_gateway_must_not_share_live_reservation_ledger():
 
 
 def test_capital_veto_produces_no_canonical_opportunity():
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     report = build_risk_governed_opportunities(
         cycle,
         context,
+        portfolio_risk,
         plans,
         shadow_gateway_factory=lambda: ShadowGateway(eligible=False),
         equity_usd=1_000.0,
@@ -177,11 +185,12 @@ def test_capital_veto_produces_no_canonical_opportunity():
     ],
 )
 def test_missing_or_directionally_invalid_protection_is_rejected(plan):
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     plans["binance:futures:BTCUSDT"] = plan
     report = build_risk_governed_opportunities(
         cycle,
         context,
+        portfolio_risk,
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
@@ -191,7 +200,7 @@ def test_missing_or_directionally_invalid_protection_is_rejected(plan):
 
 
 def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
-    cycle, context, plans = inputs(mode=StrategyMode.LIVE)
+    cycle, context, plans, portfolio_risk = inputs(mode=StrategyMode.LIVE)
     with pytest.raises(ValueError, match="SHADOW"):
         build_risk_governed_opportunities(
             cycle,
@@ -204,7 +213,7 @@ def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
 
 
 def test_shadow_opportunity_cannot_exceed_strategy_projected_loss_cap():
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     cycle = StrategyCycle(
         regime=cycle.regime,
         results=cycle.results,
@@ -213,6 +222,7 @@ def test_shadow_opportunity_cannot_exceed_strategy_projected_loss_cap():
     report = build_risk_governed_opportunities(
         cycle,
         context,
+        portfolio_risk,
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
@@ -224,7 +234,7 @@ def test_shadow_opportunity_cannot_exceed_strategy_projected_loss_cap():
 
 
 def test_multiple_intents_do_not_reuse_one_strategy_allocation():
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     result = cycle.results[0]
     second = ExecutionIntent(
         instrument_id="binance:futures:ETHUSDT",
@@ -268,6 +278,7 @@ def test_multiple_intents_do_not_reuse_one_strategy_allocation():
     report = build_risk_governed_opportunities(
         cycle,
         context,
+        portfolio_risk,
         plans,
         shadow_gateway_factory=ShadowGateway,
         equity_usd=1_000.0,
@@ -280,7 +291,7 @@ def test_multiple_intents_do_not_reuse_one_strategy_allocation():
 def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
     from aitos.intelligence.capital_protection import CapitalReservation
 
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     live_gateway = ShadowGateway()
     live_gateway.reservation = CapitalReservation(
         path=tmp_path / "live-capital.sqlite"
@@ -303,10 +314,11 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
 
 
 def test_real_capital_gateway_reviews_candidate_without_live_authorization():
-    cycle, context, plans = inputs()
+    cycle, context, plans, portfolio_risk = inputs()
     report = build_risk_governed_opportunities(
         cycle,
         context,
+        portfolio_risk,
         plans,
         shadow_gateway_factory=CapitalGateway,
         equity_usd=1_000.0,
