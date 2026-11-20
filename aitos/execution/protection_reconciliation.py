@@ -500,9 +500,18 @@ async def recover_accepted_initial_stop_submissions(
         if trade_id:
             by_trade_id.setdefault(trade_id, []).append(trade)
 
+    handover_reader = getattr(intent_store, "protection_handovers", None)
+    handover_rows = await asyncio.to_thread(handover_reader) if callable(handover_reader) else []
+    handover_client_ids = {
+        item.get("new_client_id")
+        for item in handover_rows
+        if isinstance(item, dict) and item.get("state") != "APPLIED"
+    }
     recovered: list[str] = []
     blocked: list[dict[str, str]] = []
     for row in rows:
+        if isinstance(row, dict) and row.get("client_id") in handover_client_ids:
+            continue
         if not isinstance(row, dict) or row.get("state") not in {
             "SUBMITTING",
             "PROTECTED",
@@ -682,6 +691,238 @@ async def recover_accepted_initial_stop_submissions(
     return {
         "recovered": len(recovered),
         "recovered_client_ids": recovered,
+        "blocked": blocked,
+        "safe_to_resume": False,
+    }
+
+
+async def recover_protection_handovers(
+    executor: Any,
+    intent_store: Any,
+    trades: Iterable[Any],
+    persist_trade: Any,
+) -> dict[str, Any]:
+    """Resume replacement-stop handovers without ever dropping the old stop early.
+
+    PREPARED recovery uses the deterministic clientAlgoId to discover a POST
+    whose response was lost. The new stop must still be NEW and match the exact
+    durable request before the old stop can be cancelled. Old-stop cancellation
+    is queried before and after DELETE so a triggered/partial fill is quarantined.
+    """
+    scope = getattr(intent_store, "scope", None)
+    if (
+        not isinstance(scope, str)
+        or not scope
+        or getattr(executor, "execution_scope", None) != scope
+    ):
+        raise ValueError("executor and handover journal account scope mismatch")
+    if not callable(persist_trade):
+        raise TypeError("durable trade-state writer is required")
+    lookup = getattr(executor, "get_algo_order_by_client_id", None)
+    cancel = getattr(executor, "cancel_resting_order", None)
+    status_reader = getattr(executor, "get_resting_order_status", None)
+    if not all(callable(item) for item in (lookup, cancel, status_reader)):
+        raise TypeError("authenticated algo lookup and resting-order reconciliation are required")
+    handovers = await asyncio.to_thread(intent_store.protection_handovers)
+    intents = await asyncio.to_thread(intent_store.protection_intents)
+    if (
+        not isinstance(handovers, list)
+        or len(handovers) > 10000
+        or not isinstance(intents, list)
+        or len(intents) > 10000
+    ):
+        raise ValueError("bounded protective recovery history is required")
+    intent_by_client = {
+        row.get("client_id"): row for row in intents if isinstance(row, dict)
+    }
+    by_trade_id: dict[str, list[Any]] = {}
+    for trade in tuple(trades):
+        trade_id = str(getattr(trade, "trade_id", "") or "")
+        if trade_id:
+            by_trade_id.setdefault(trade_id, []).append(trade)
+
+    recovered: list[str] = []
+    blocked: list[dict[str, str]] = []
+    for handover in handovers:
+        if not isinstance(handover, dict):
+            raise ValueError("malformed protective handover row")
+        state = handover.get("state")
+        handover_id = handover.get("handover_id")
+        if state == "APPLIED":
+            continue
+        client_id = str(handover.get("new_client_id", ""))
+        if state == "BLOCKED":
+            blocked.append(
+                {"client_id": client_id, "reason": str(handover.get("blocked_reason") or "handover is quarantined")}
+            )
+            continue
+        trade_id = str(handover.get("trade_id", ""))
+        owners = by_trade_id.get(trade_id, [])
+        if len(owners) != 1:
+            blocked.append(
+                {"client_id": client_id, "reason": "handover does not map to exactly one restored open trade"}
+            )
+            continue
+        trade = owners[0]
+        symbol = str(getattr(trade, "symbol", "")).upper()
+        old_id = handover.get("old_order_id")
+        intent = intent_by_client.get(client_id)
+        if (
+            not isinstance(handover_id, str)
+            or not isinstance(old_id, str)
+            or not old_id
+            or symbol != str(handover.get("symbol", "")).upper()
+            or not isinstance(intent, dict)
+        ):
+            blocked.append(
+                {"client_id": client_id, "reason": "handover or linked protective intent identity is incomplete"}
+            )
+            continue
+        request = intent.get("request_json")
+        if isinstance(request, str):
+            request = json.loads(request)
+        if (
+            not isinstance(request, dict)
+            or request.get("owner_trade_id") != trade_id
+            or request.get("symbol") != symbol
+            or request.get("order_type") != "STOP_MARKET"
+            or request.get("reduce_only") is not True
+            or str(request.get("side", "")).upper()
+            != str(getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", ""))).upper()
+            or not _decimal_matches(request.get("quantity"), getattr(trade, "quantity", None))
+        ):
+            blocked.append(
+                {"client_id": client_id, "reason": "linked replacement intent does not match restored trade"}
+            )
+            continue
+
+        algo = await lookup(symbol, client_id)
+        if not isinstance(algo, dict) or algo.get("algoStatus") != "NEW":
+            blocked.append(
+                {"client_id": client_id, "reason": "replacement algo is not confirmed NEW; old stop remains untouched"}
+            )
+            continue
+        algo_id = algo.get("algoId")
+        if isinstance(algo_id, bool) or not str(algo_id or "").isdigit() or int(algo_id) <= 0:
+            blocked.append({"client_id": client_id, "reason": "replacement algo ID is invalid"})
+            continue
+        new_id = f"algo:{int(algo_id)}"
+        if handover.get("new_order_id") not in (None, "", new_id):
+            blocked.append({"client_id": client_id, "reason": "replacement algo ID conflicts with durable handover"})
+            continue
+        trade_side = str(getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", ""))).upper()
+        expected_side = "SELL" if trade_side == "LONG" else "BUY"
+        expected_position_side = trade_side if bool(executor.hedge_mode) else "BOTH"
+        try:
+            exact_quantity = _decimal_matches(algo.get("quantity"), request.get("quantity"))
+            exact_trigger = _decimal_matches(algo.get("triggerPrice"), request.get("reference_price"))
+        except (TypeError, ValueError):
+            exact_quantity = exact_trigger = False
+        reduce_only = algo.get("reduceOnly")
+        exact_reduction = algo.get("positionSide") == expected_position_side and (
+            (bool(executor.hedge_mode) and reduce_only in (False, "false"))
+            or (not bool(executor.hedge_mode) and reduce_only in (True, "true"))
+        )
+        if not (
+            algo.get("clientAlgoId") == client_id
+            and algo.get("symbol") == symbol
+            and algo.get("algoType") == "CONDITIONAL"
+            and algo.get("orderType") == "STOP_MARKET"
+            and algo.get("side") == expected_side
+            and algo.get("closePosition") in (False, "false")
+            and exact_quantity
+            and exact_trigger
+            and exact_reduction
+        ):
+            blocked.append({"client_id": client_id, "reason": "replacement venue identity mismatch"})
+            continue
+
+        if state == "PREPARED":
+            await asyncio.to_thread(intent_store.record_handover_new_order, handover_id, new_id)
+            state = "NEW_ACCEPTED"
+        elif handover.get("new_order_id") != new_id:
+            blocked.append({"client_id": client_id, "reason": "durable replacement order ID is missing"})
+            continue
+
+        current_stop = getattr(trade, "sl_order_id", None)
+        if current_stop not in (old_id, new_id):
+            blocked.append({"client_id": client_id, "reason": "restored trade stop is neither old nor replacement stop"})
+            continue
+        trade.sl_order_id = new_id
+        pending = trade.agent_consensus.setdefault("_pending_stop_cancellations", [])
+        if old_id not in pending:
+            pending.append(old_id)
+        trade.updated_at = datetime.now(timezone.utc).isoformat()
+        await persist_trade(trade)
+
+        intent_state = intent.get("state")
+        if intent_state == "SUBMITTING":
+            result = OrderResult(
+                order_id=new_id,
+                symbol=symbol,
+                side=TradeSide(trade_side),
+                filled_quantity=0.0,
+                fill_price=float(request["reference_price"]),
+                client_order_id=client_id,
+            )
+            await asyncio.to_thread(intent_store.record_protection, client_id, result)
+        elif intent_state == "PROTECTED":
+            result_json = intent.get("result_json")
+            if isinstance(result_json, str):
+                result_json = json.loads(result_json)
+            if not isinstance(result_json, dict) or result_json.get("order_id") != new_id:
+                blocked.append({"client_id": client_id, "reason": "replacement intent result identity mismatch"})
+                continue
+        elif intent_state not in {"APPLIED"}:
+            blocked.append({"client_id": client_id, "reason": "replacement intent is in an unsupported state"})
+            continue
+
+        if state == "NEW_ACCEPTED":
+            await asyncio.to_thread(intent_store.mark_handover_old_cancel_requested, handover_id)
+            state = "OLD_CANCEL_REQUESTED"
+        if state == "OLD_CANCEL_REQUESTED":
+            old_status = await status_reader(symbol, old_id)
+            if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
+                blocked.append({"client_id": client_id, "reason": "old stop has triggered or partially filled; child-fill reconciliation required"})
+                continue
+            if old_status not in {"CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}:
+                if old_status != "NEW":
+                    blocked.append({"client_id": client_id, "reason": f"old stop status is ambiguous: {old_status!r}"})
+                    continue
+                await cancel(symbol, old_id)
+                old_status = await status_reader(symbol, old_id)
+                if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
+                    blocked.append({"client_id": client_id, "reason": "old stop triggered during cancellation; child-fill reconciliation required"})
+                    continue
+                if old_status not in {"CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}:
+                    blocked.append({"client_id": client_id, "reason": f"old stop cancellation is unconfirmed: {old_status!r}"})
+                    continue
+            await asyncio.to_thread(intent_store.mark_handover_old_cancelled, handover_id)
+            state = "OLD_CANCELLED"
+
+        if state == "OLD_CANCELLED":
+            while old_id in pending:
+                pending.remove(old_id)
+            trade.updated_at = datetime.now(timezone.utc).isoformat()
+            await persist_trade(trade)
+            await asyncio.to_thread(intent_store.complete_protection_handover, handover_id)
+            if intent_state == "PROTECTED":
+                executor.acknowledge_protection(
+                    OrderResult(
+                        order_id=new_id,
+                        symbol=symbol,
+                        side=TradeSide(trade_side),
+                        filled_quantity=0.0,
+                        fill_price=float(request["reference_price"]),
+                        client_order_id=client_id,
+                    ),
+                    trade_id,
+                )
+            recovered.append(handover_id)
+
+    return {
+        "recovered": len(recovered),
+        "recovered_handover_ids": recovered,
         "blocked": blocked,
         "safe_to_resume": False,
     }
