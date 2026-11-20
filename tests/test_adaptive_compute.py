@@ -692,7 +692,7 @@ def test_pressure_controller_recovery_honors_zero_timestamp_and_cooldown():
     )
     assert elevated.level == PressureLevel.WARNING
     blocked_recovery = controller.update(
-        now_seconds=2,
+        now_seconds=0,
         cpu_utilization_pct=0,
         memory_utilization_pct=0,
         queue_lag_seconds=0,
