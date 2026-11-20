@@ -88,6 +88,7 @@ def make_trade(
 def make_service(exchange, lifecycle, bus=None, store=None):
     bus = bus or FakeEventBus()
     store = store or FakeStateStore()
+
     async def persist_trade(trade):
         store.persisted.append(trade.trade_id)
 
