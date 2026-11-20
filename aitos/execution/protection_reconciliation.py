@@ -622,6 +622,7 @@ async def recover_accepted_initial_stop_submissions(
             and algo.get("algoType") == "CONDITIONAL"
             and algo.get("orderType") == "STOP_MARKET"
             and algo.get("side") == expected_side
+            and algo.get("closePosition") in (False, "false")
             and quantity_matches
             and trigger_matches
             and reduction_matches
