@@ -105,6 +105,7 @@ async def venue_http():
     requests = []
 
     async def handle(request):
+        assert request.method == "GET"
         assert request.headers.get("X-MBX-APIKEY") == "integration-key"
         raw = request.query_string
         assert "&signature=" in raw
