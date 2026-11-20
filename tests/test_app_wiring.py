@@ -715,6 +715,7 @@ async def test_build_system_wires_adaptive_concurrency_gate(event_bus, monkeypat
         budget=SimpleNamespace(
             cpu_workers=2,
             memory_budget_mb=1024,
+            background_task_limit=1,
             cpu_capacity_units=2.0,
         ),
         pressure_controller=SimpleNamespace(level=0),
@@ -738,4 +739,11 @@ async def test_build_system_wires_adaptive_concurrency_gate(event_bus, monkeypat
         1, int(components.scanner._tuning.analysis.lightweight_concurrency)
     )
     assert (await gate.snapshot()).limit == min(gate.max_concurrency, 2)
+    background_gate = components.scanner._aitos_adaptive_background_gate
+    assert background_gate.max_concurrency == max(
+        1, int(components.scanner._tuning.hardware.max_background_tasks)
+    )
+    assert (await background_gate.snapshot()).limit == min(
+        background_gate.max_concurrency, 1
+    )
     assert components.scanner._aitos_adaptive_compute_runtime is adaptive_runtime
