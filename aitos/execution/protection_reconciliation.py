@@ -16,6 +16,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from aitos.execution.intent_store import ExecutionUncertainError
+from aitos.execution.order_executor import OrderResult
+from aitos.models.trade import TradeSide
 from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.protection_audit import audit_protection_inventory
 
@@ -455,6 +457,189 @@ async def audit_exchange_protection_inventory(
     )
     report["safe_to_resume"] = False
     return report
+
+
+async def recover_accepted_initial_stop_submissions(
+    executor: Any,
+    intent_store: Any,
+    trades: Iterable[Any],
+    persist_trade: Any,
+) -> dict[str, Any]:
+    """Recover a confirmed initial stop whose venue ACK/local write was interrupted.
+
+    Recovery is deliberately narrow: only STOP_MARKET preclaims with an
+    explicit owner_trade_id, a unique matching open trade, exact quantity/side,
+    a fresh authenticated client-algo lookup, and an exact NEW reduce-only algo
+    identity are eligible. Replacement stops, take-profits, triggered orders,
+    missing identities and mismatches remain quarantined for manual review.
+
+    The trade snapshot is persisted before the journal transitions to APPLIED.
+    A crash between those writes is idempotently recoverable on the next start.
+    """
+    scope = getattr(intent_store, "scope", None)
+    if not isinstance(scope, str) or not scope or getattr(
+        executor, "execution_scope", None
+    ) != scope:
+        raise ValueError("executor and protective journal account scope mismatch")
+    if not callable(persist_trade):
+        raise TypeError("durable trade-state writer is required")
+    lookup = getattr(executor, "get_algo_order_by_client_id", None)
+    if not callable(lookup):
+        raise TypeError("authenticated algo client-id lookup is required")
+    rows = await asyncio.to_thread(intent_store.protection_intents)
+    if not isinstance(rows, list) or len(rows) > 10000:
+        raise ValueError("bounded protective intent history is required")
+    open_trades = tuple(trades)
+    by_trade_id: dict[str, list[Any]] = {}
+    for trade in open_trades:
+        trade_id = str(getattr(trade, "trade_id", "") or "")
+        if trade_id:
+            by_trade_id.setdefault(trade_id, []).append(trade)
+
+    recovered: list[str] = []
+    blocked: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("state") not in {
+            "SUBMITTING",
+            "PROTECTED",
+        }:
+            continue
+        request = row.get("request_json")
+        if isinstance(request, str):
+            request = json.loads(request)
+        if not isinstance(request, dict):
+            raise ValueError("malformed protective preclaim request")
+        if request.get("order_type") != "STOP_MARKET":
+            blocked.append(
+                {
+                    "client_id": str(row.get("client_id", "")),
+                    "reason": "automatic recovery is limited to initial STOP_MARKET intents",
+                }
+            )
+            continue
+        client_id = row.get("client_id")
+        owner_trade_id = request.get("owner_trade_id")
+        if not isinstance(client_id, str) or not client_id:
+            raise ValueError("protective client identity is missing")
+        if not isinstance(owner_trade_id, str) or not owner_trade_id:
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "legacy protective preclaim has no owner_trade_id",
+                }
+            )
+            continue
+        owners = by_trade_id.get(owner_trade_id, [])
+        if len(owners) != 1:
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "protective preclaim does not map to exactly one open trade",
+                }
+            )
+            continue
+        trade = owners[0]
+        raw_side = getattr(trade, "side", "")
+        trade_side = str(getattr(raw_side, "value", raw_side)).upper()
+        request_side = str(request.get("side", "")).upper()
+        symbol = str(getattr(trade, "symbol", "")).upper()
+        if (
+            not symbol
+            or symbol != str(request.get("symbol", "")).upper()
+            or trade_side not in {"LONG", "SHORT"}
+            or request_side != trade_side
+            or not _decimal_matches(getattr(trade, "quantity", None), request.get("quantity"))
+            or request.get("reduce_only") is not True
+        ):
+            blocked.append(
+                {"client_id": client_id, "reason": "owner trade does not match protective preclaim"}
+            )
+            continue
+
+        algo = await lookup(symbol, client_id)
+        if algo is None or algo.get("algoStatus") != "NEW":
+            blocked.append(
+                {"client_id": client_id, "reason": "venue has no confirmed NEW resting stop"}
+            )
+            continue
+        algo_id = algo.get("algoId")
+        if (
+            isinstance(algo_id, bool)
+            or not str(algo_id or "").isdigit()
+            or int(algo_id) <= 0
+        ):
+            blocked.append(
+                {"client_id": client_id, "reason": "venue algo identity is invalid"}
+            )
+            continue
+        order_id = f"algo:{int(algo_id)}"
+        expected_side = "SELL" if trade_side == "LONG" else "BUY"
+        expected_position_side = trade_side if bool(executor.hedge_mode) else "BOTH"
+        try:
+            quantity_matches = _decimal_matches(algo.get("quantity"), request.get("quantity"))
+            trigger_matches = _decimal_matches(
+                algo.get("triggerPrice"), request.get("reference_price")
+            )
+        except (TypeError, ValueError):
+            quantity_matches = trigger_matches = False
+        reduce_only = algo.get("reduceOnly")
+        reduction_matches = (
+            algo.get("positionSide") == expected_position_side
+            and (
+                (bool(executor.hedge_mode) and reduce_only in (False, "false"))
+                or (not bool(executor.hedge_mode) and reduce_only in (True, "true"))
+            )
+        )
+        if not (
+            algo.get("clientAlgoId") == client_id
+            and algo.get("symbol") == symbol
+            and algo.get("algoType") == "CONDITIONAL"
+            and algo.get("orderType") == "STOP_MARKET"
+            and algo.get("side") == expected_side
+            and quantity_matches
+            and trigger_matches
+            and reduction_matches
+        ):
+            blocked.append(
+                {"client_id": client_id, "reason": "authenticated venue stop identity mismatch"}
+            )
+            continue
+
+        existing_stop_id = getattr(trade, "sl_order_id", None)
+        if existing_stop_id not in (None, "", order_id):
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "trade already owns a different stop; replacement recovery is manual",
+                }
+            )
+            continue
+
+        # Write the venue identity to the durable trade snapshot first. If
+        # the process dies before journal acknowledgement, the next pass sees
+        # the same ID and safely completes the journal transition.
+        trade.sl_order_id = order_id
+        trade.updated_at = datetime.now(timezone.utc).isoformat()
+        await persist_trade(trade)
+        if row.get("state") == "SUBMITTING":
+            result = OrderResult(
+                order_id=order_id,
+                symbol=symbol,
+                side=TradeSide(trade_side),
+                filled_quantity=0.0,
+                fill_price=float(request["reference_price"]),
+                client_order_id=client_id,
+            )
+            await asyncio.to_thread(intent_store.record_protection, client_id, result)
+        await asyncio.to_thread(intent_store.mark_applied, client_id, owner_trade_id)
+        recovered.append(client_id)
+
+    return {
+        "recovered": len(recovered),
+        "recovered_client_ids": recovered,
+        "blocked": blocked,
+        "safe_to_resume": False,
+    }
 
 
 async def require_live_account_exposure_reconciled(
