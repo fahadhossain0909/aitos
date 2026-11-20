@@ -660,3 +660,56 @@ def test_existing_protection_handover_database_migrates_order_type(tmp_path):
     assert journal.protection_handovers(trade_id="trade-2")[0]["order_type"] == (
         "TAKE_PROFIT_MARKET"
     )
+
+def test_protection_child_watermark_is_monotonic_and_identity_scoped(tmp_path):
+    journal = store(tmp_path)
+    first = journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-one",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.25",
+        cumulative_quote="22.5",
+        status="PARTIALLY_FILLED",
+    )
+    assert first["cumulative_quantity"] == "0.25"
+    replay = journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-one",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.25",
+        cumulative_quote="22.5",
+        status="CANCELED",
+    )
+    assert replay["status"] == "CANCELED"
+    advanced = journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-one",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.5",
+        cumulative_quote="45",
+        status="FILLED",
+    )
+    assert advanced["cumulative_quantity"] == "0.5"
+    with pytest.raises(ValueError, match="regressed"):
+        journal.mark_protection_child_applied(
+            algo_id="123",
+            child_order_id="456",
+            trade_id="trade-one",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.4",
+            cumulative_quote="36",
+            status="FILLED",
+        )
+    with pytest.raises(ValueError, match="reused across trade scope"):
+        journal.mark_protection_child_applied(
+            algo_id="123",
+            child_order_id="456",
+            trade_id="trade-two",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.5",
+            cumulative_quote="45",
+            status="FILLED",
+        )
