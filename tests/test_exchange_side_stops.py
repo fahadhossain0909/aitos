@@ -613,6 +613,9 @@ class LiveTakeProfitHandoverExecutor(FakeExchangeCapableExecutor):
     async def get_resting_order_status(self, symbol, order_id):
         return self.statuses.get(order_id)
 
+    async def get_resting_order_status(self, symbol, order_id):
+        return self.statuses.get(order_id)
+
     async def cancel_resting_order(self, symbol, order_id):
         self.cancel_calls.append(order_id)
         self.statuses[order_id] = "CANCELED"
