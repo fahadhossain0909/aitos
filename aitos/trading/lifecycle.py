@@ -2502,6 +2502,7 @@ class TradeLifecycle(AITOSModule):
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
             intent_store.complete_protection_handover(handover_id)
+            await self._execution_position_verifier()
             self._order_executor.acknowledge_protection(result, trade.trade_id)
         except BaseException:
             # Preserve the last durable handover stage. Startup recovery must
