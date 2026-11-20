@@ -471,3 +471,156 @@ async def test_child_fill_finishes_protected_intent_owner_ack_after_trade_snapsh
     assert row["state"] == "APPLIED"
     assert row["trade_id"] == trade.trade_id
     assert trade.quantity == pytest.approx(0.75)
+
+
+
+@pytest.mark.asyncio
+async def test_triggered_child_recovery_is_idempotent_across_repeated_restarts(
+    event_bus, risk_engine, tmp_path
+):
+    from aitos.trading.persistent_state import _trade_from_dict
+
+    journal = ExecutionIntentStore(
+        tmp_path / "repeated-restart.sqlite", scope="child-account"
+    )
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    algo = {**algo_snapshot(), "algoStatus": "TRIGGERED"}
+    child = child_snapshot(status="PARTIALLY_FILLED")
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=algo)
+    executor.get_order_status = AsyncMock(return_value=child)
+
+    durable_snapshot = make_trade().to_dict()
+    for restart_number in range(4):
+        restored = _trade_from_dict(copy.deepcopy(durable_snapshot))
+        lifecycle = TradeLifecycle(
+            event_bus=event_bus,
+            risk_engine=risk_engine,
+            order_executor=executor,
+            use_exchange_side_stops=True,
+        )
+        lifecycle._open_trades[restored.trade_id] = restored
+        lifecycle._execution_position_verifier = AsyncMock()
+
+        async def persist(value):
+            nonlocal durable_snapshot
+            durable_snapshot = value.to_dict()
+
+        lifecycle._execution_state_writer = persist
+        report = await recover_triggered_protection_child_fills(
+            executor, journal, lifecycle
+        )
+        assert report["blocked"] == []
+        assert len(report["applied"]) == 1
+        assert restored.quantity == pytest.approx(0.75)
+        assert restored.gross_realized_pnl_usd == pytest.approx(-2.5)
+        assert (
+            journal.protection_child_watermark("123", "456")[
+                "cumulative_quantity"
+            ]
+            == "0.25"
+        )
+        assert durable_snapshot["agent_consensus"][
+            "_applied_protection_child_fills"
+        ]["123:456"]["cumulative_quantity"] == "0.25"
+        if restart_number:
+            assert restored.quantity == pytest.approx(0.75)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutate_algo,mutate_child",
+    [
+        (lambda algo: algo.update(clientAlgoId="foreign-client"), lambda child: None),
+        (lambda algo: algo.update(actualOrderId=999), lambda child: None),
+        (lambda algo: None, lambda child: child.update(orderId=999)),
+        (lambda algo: None, lambda child: child.update(symbol="ETHUSDT")),
+        (lambda algo: None, lambda child: child.update(side="BUY")),
+        (lambda algo: None, lambda child: child.update(origQty="2.0")),
+        (lambda algo: None, lambda child: child.update(positionSide="LONG")),
+    ],
+)
+async def test_ambiguous_algo_or_child_identity_is_quarantined(
+    event_bus, risk_engine, tmp_path, mutate_algo, mutate_child
+):
+    journal = ExecutionIntentStore(
+        tmp_path / "ambiguous-child.sqlite", scope="child-account"
+    )
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    algo = algo_snapshot()
+    child = child_snapshot()
+    mutate_algo(algo)
+    mutate_child(child)
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=algo)
+    executor.get_order_status = AsyncMock(return_value=child)
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    trade.sl_order_id = "algo:123"
+    lifecycle._open_trades[trade.trade_id] = trade
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    report = await recover_triggered_protection_child_fills(
+        executor, journal, lifecycle
+    )
+
+    assert report["applied"] == []
+    assert len(report["blocked"]) == 1
+    assert trade.quantity == pytest.approx(1.0)
+    lifecycle._execution_state_writer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_durable_algo_identity_blocks_all_child_recovery(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(
+        tmp_path / "duplicate-child.sqlite", scope="child-account"
+    )
+    seed_stop(journal)
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=89.0,
+            order_type="STOP_MARKET",
+            client_order_id="second-stop-client",
+            reduce_only=True,
+            owner_trade_id="trade-child-2",
+        )
+    )
+    journal.record_protection(
+        "second-stop-client",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            89.0,
+            client_order_id="second-stop-client",
+        ),
+    )
+    executor = TriggeredChildExecutor(journal)
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=algo_snapshot())
+    executor.get_order_status = AsyncMock(return_value=child_snapshot())
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    trade.sl_order_id = "algo:123"
+    lifecycle._open_trades[trade.trade_id] = trade
+
+    with pytest.raises(ValueError, match="duplicate durable protective order"):
+        await recover_triggered_protection_child_fills(executor, journal, lifecycle)
+    assert trade.quantity == pytest.approx(1.0)
