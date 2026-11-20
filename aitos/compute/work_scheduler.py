@@ -4,6 +4,7 @@ Protected workloads (market-data integrity, order updates, open-position
 monitoring, risk checks, and execution recovery) must not be submitted to this
 optional-work scheduler. They have independent service ownership and capacity.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,7 +35,9 @@ class WorkloadRequest:
             or self.cpu_cost_units < 0
             or self.memory_cost_mb < 0
         ):
-            raise ValueError("workload request costs and priority must be finite/non-negative")
+            raise ValueError(
+                "workload request costs and priority must be finite/non-negative"
+            )
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,10 @@ def admit_optional_work(
         )
         pressure_allows = not (
             pressure_level == 3
-            or (pressure_level >= 2 and request.workload_class != WorkloadClass.INTERACTIVE)
+            or (
+                pressure_level >= 2
+                and request.workload_class != WorkloadClass.INTERACTIVE
+            )
         )
         if within_count and within_budget and pressure_allows:
             admitted.append(request.request_id)
