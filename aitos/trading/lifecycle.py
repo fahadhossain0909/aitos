@@ -2442,12 +2442,16 @@ class TradeLifecycle(AITOSModule):
         old_id = trade.sl_order_id
         if not isinstance(old_id, str) or not old_id:
             raise ExecutionRecoveryRequired(
-                trade.symbol, trade.trade_id, "replacement requires an existing durable stop"
+                trade.symbol,
+                trade.trade_id,
+                "replacement requires an existing durable stop",
             )
         intent_store = getattr(self._order_executor, "intent_store", None)
         if intent_store is None:
             raise ExecutionRecoveryRequired(
-                trade.symbol, trade.trade_id, "durable protective handover journal unavailable"
+                trade.symbol,
+                trade.trade_id,
+                "durable protective handover journal unavailable",
             )
         handover_token = uuid.uuid4().hex[:16]
         handover_id = f"rpl-{handover_token}"
@@ -2475,7 +2479,9 @@ class TradeLifecycle(AITOSModule):
             )
             if not result.success or result.client_order_id != new_client_id:
                 raise ExecutionUncertainError(
-                    trade.symbol, new_client_id, "replacement stop acceptance is uncertain"
+                    trade.symbol,
+                    new_client_id,
+                    "replacement stop acceptance is uncertain",
                 )
             intent_store.record_handover_new_order(handover_id, result.order_id)
             trade.sl_order_id = result.order_id
