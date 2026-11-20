@@ -936,3 +936,81 @@ def test_detect_resources_honors_nested_cgroup_v1_controller_paths(tmp_path):
     assert result.effective_cpus == pytest.approx(2.0)
     assert result.memory_limit_mb == 3072
     assert result.memory_available_mb == 2048
+
+
+
+def test_pressure_classification_supports_unavailable_queue_lag():
+    from aitos.compute.resource_governor import PressureLevel, classify_pressure
+
+    assert (
+        classify_pressure(
+            cpu_utilization_pct=85,
+            memory_utilization_pct=20,
+            queue_lag_seconds=None,
+        )
+        == PressureLevel.WARNING
+    )
+    with pytest.raises(ValueError):
+        classify_pressure(
+            cpu_utilization_pct=20,
+            memory_utilization_pct=20,
+            queue_lag_seconds=float("nan"),
+        )
+
+
+def test_adaptive_runtime_pressure_scales_optional_capacity_only():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.compute.resource_governor import ResourceSnapshot
+    from aitos.config.tuning import TuningSettings
+
+    settings = TuningSettings(
+        runtime={
+            "adaptive_compute_enabled": True,
+            "pressure_warning_hold_seconds": 0,
+            "pressure_high_hold_seconds": 0,
+            "pressure_recovery_hold_seconds": 30,
+            "pressure_minimum_transition_interval_seconds": 0,
+        },
+        hardware={"memory_budget_mb": 1024, "memory_reserve_pct": 20},
+    )
+    runtime = create_adaptive_compute_runtime(
+        settings,
+        resources=ResourceSnapshot(4, 4.0, 8192, 4096, 2048, False, True),
+    )
+    assert runtime is not None
+    normal = runtime.budget_for_optional_work()
+    assert normal.cpu_capacity_units == runtime.budget.cpu_capacity_units
+    assert normal.memory_budget_mb == runtime.budget.memory_budget_mb
+
+    runtime.update_pressure(
+        now_seconds=1,
+        cpu_utilization_pct=82,
+        memory_utilization_pct=10,
+    )
+    warning = runtime.budget_for_optional_work()
+    assert warning.cpu_capacity_units == pytest.approx(normal.cpu_capacity_units * 0.5)
+    assert warning.memory_budget_mb == normal.memory_budget_mb // 2
+
+    runtime.update_pressure(
+        now_seconds=2,
+        cpu_utilization_pct=99,
+        memory_utilization_pct=10,
+    )
+    critical = runtime.budget_for_optional_work()
+    assert critical.cpu_capacity_units == 0
+    assert critical.memory_budget_mb == 0
+
+
+def test_adaptive_runtime_automatically_samples_process_pressure():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.compute.resource_governor import ResourceSnapshot
+    from aitos.config.tuning import TuningSettings
+
+    runtime = create_adaptive_compute_runtime(
+        TuningSettings(runtime={"adaptive_compute_enabled": True}),
+        resources=ResourceSnapshot(2, 2.0, 2048, 1024, 512, False, True),
+    )
+    assert runtime is not None
+    decision = runtime.observe_process_pressure()
+    assert decision.level in PressureLevel
+    assert runtime.pressure_sampler.resources == runtime.resources
