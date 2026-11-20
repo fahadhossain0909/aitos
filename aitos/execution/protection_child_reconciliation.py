@@ -124,11 +124,15 @@ def calculate_protection_child_fill_delta(
     if cumulative_quote < applied_quote:
         raise ProtectionChildReconciliationError("cumulative child quote regressed")
     if cumulative == 0 and cumulative_quote != 0:
-        raise ProtectionChildReconciliationError("quote exists without executed quantity")
+        raise ProtectionChildReconciliationError(
+            "quote exists without executed quantity"
+        )
     delta_quantity = cumulative - applied
     delta_quote = cumulative_quote - applied_quote
     if delta_quantity == 0 and delta_quote != 0:
-        raise ProtectionChildReconciliationError("quote changed without new executed quantity")
+        raise ProtectionChildReconciliationError(
+            "quote changed without new executed quantity"
+        )
     average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal("0")
     if delta_quantity > 0 and average <= 0:
         raise ProtectionChildReconciliationError("new fill has no positive quote value")
