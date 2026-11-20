@@ -440,7 +440,9 @@ class ExecutionIntentStore:
                     current["trade_id"] != trade_id
                     or current["symbol"] != symbol
                 ):
-                    raise ValueError("child-fill identity was reused across trade scope")
+                    raise ValueError(
+                        "child-fill identity was reused across trade scope"
+                    )
                 previous_quantity = Decimal(current["cumulative_quantity"])
                 previous_quote = Decimal(current["cumulative_quote"])
                 if quantity < previous_quantity or quote < previous_quote:
