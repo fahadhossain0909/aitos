@@ -778,3 +778,22 @@ def test_optional_scheduler_rejects_invalid_request_class_and_types():
             cpu_capacity_units=1,
             memory_capacity_mb=True,
         )
+
+
+
+def test_resource_budget_rejects_non_integer_worker_limits():
+    resources = ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False)
+    with pytest.raises(ValueError):
+        build_resource_budget(resources, max_workers=1.5)
+    with pytest.raises(ValueError):
+        build_resource_budget(resources, max_background_tasks=True)
+    with pytest.raises(ValueError):
+        build_resource_budget(resources, cpu_utilization_target=float("inf"))
+
+
+def test_capacity_planner_rejects_non_integer_symbol_cap():
+    budget = build_resource_budget(
+        ResourceSnapshot(2, 2.0, 4096, 4096, 3000, False, False)
+    )
+    with pytest.raises(ValueError):
+        plan_symbol_capacity([], budget, max_symbols=1.5)
