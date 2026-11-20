@@ -166,8 +166,10 @@ services by itself.
 The paper scanner samples process CPU time and RSS once at the start of each
 candidate-analysis cycle. CPU utilization is normalized against the effective
 cgroup/affinity CPU count; memory utilization uses process RSS where available,
-with a conservative snapshot fallback. Queue lag is optional: when no queue
-telemetry provider is wired, it remains explicitly unknown rather than being
+with a conservative snapshot fallback. Queue lag is sampled from the Redis EventBus pending-delivery idle age for a
+bounded number of active subscription groups. This is a conservative stuck-work
+signal, not a measurement of every unread stream entry; unsupported Redis
+clients and missing subscriptions remain explicitly unknown rather than being
 reported as zero. The pressure controller still evaluates CPU and memory.
 
 The resulting hysteretic pressure state scales only the optional scanner
@@ -186,3 +188,36 @@ new optional scans until active work falls below the new limit. Cancellation
 always releases a slot. Background and deep-analysis admission counts are also
 scaled in the optional budget. The gate is not attached to ingestion, order
 updates, position monitoring, risk checks, or execution recovery.
+
+
+## Adaptive concurrency and Redis pressure wiring
+
+The paper application now constructs the adaptive scanner concurrency gate
+alongside the resource runtime. Its maximum is the existing lightweight
+scanner concurrency ceiling; its initial limit is capped by the detected CPU
+worker budget. Each scan cycle updates that limit from the hysteretic pressure
+state. Reducing the limit never cancels in-flight scans; CRITICAL pressure
+prevents new optional scans after the reference-market fetch.
+
+The EventBus exposes a bounded queue-pressure sample using one oldest pending
+delivery per active subscription group. The scanner passes that sample into
+the process pressure controller. The metric is intentionally named and
+documented as pending-delivery idle age: it must not be mistaken for complete
+Redis Stream consumer lag, which requires stream/group-specific unread-entry
+lag support and service-level ownership.
+
+## Sequence-safe market-data queue overflow
+
+Latest-wins overflow is suitable for replaceable state such as tickers and
+trade observations, but it is unsafe to evict an already queued order-book
+snapshot or incremental depth delta. The bounded market queue therefore
+supports a caller-supplied replacement predicate. The canonical gateway only
+evicts replaceable events; queued BOOK_SNAPSHOT and BOOK_DELTA events are
+protected. If the queue contains only sequence-critical book events, a new
+event is rejected explicitly and the gateway enters DEGRADED state with an
+order-book saturation error. The downstream sequence-gap/recovery contract
+must obtain a fresh snapshot before trusting incremental depth again.
+
+This policy favors explicit degraded recovery over silently publishing a
+plausible but sequence-corrupted L3/L2 book. Queue capacity still needs
+production-like sizing and sustained burst tests; no claim of zero loss is made.
