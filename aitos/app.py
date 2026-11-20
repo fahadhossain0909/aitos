@@ -593,8 +593,9 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
         if drift_task is None or drift_task.done():
             stop_event = asyncio.Event()
             components._governance_drift_stop_event = stop_event
+            scanner = getattr(components, "scanner", None)
             background_gate = getattr(
-                components.scanner, "_aitos_adaptive_background_gate", None
+                scanner, "_aitos_adaptive_background_gate", None
             )
 
             async def governed_drift_provider():
