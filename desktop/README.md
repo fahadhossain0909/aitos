@@ -1,7 +1,13 @@
 # AITOS Operator Console — local-first preview
 
-Seven-page React/TypeScript workspace: overview, portfolio, trade journal,
-research lab, observability, connections and configuration. Self-hosted fonts,
+This guide describes the **Tauri Embedded Desktop** track. The separate native
+Windows/Linux browser session-manager packages are documented in
+[`native/windows/README.md`](../native/windows/README.md) and
+[`native/linux/README.md`](../native/linux/README.md); they are not the Tauri shell.
+
+Ten-page React/TypeScript workspace: overview, portfolio, trade journal,
+research lab, observability, connections, configuration, quality/readiness,
+performance and persistence/recovery. Self-hosted fonts,
 custom SVG charts and responsive olive/ivory/lime styling; no external CDN.
 
 ## Run safely
@@ -109,15 +115,26 @@ per-platform packaging smoke. CI packages are **unsigned test software**, not
 signed/trusted releases. No automatic updater, backend bootstrap, live trading
 activation, or production release signing is included.
 
-Build locally from `desktop/` with Node.js 22 and the platform Tauri
-prerequisites:
+Build locally on the target platform with Python 3.12, Node.js 22.12+, Rust
+stable and the platform Tauri prerequisites. The frozen sidecar embeds the built
+React assets, so build the frontend first and then freeze the sidecar from the
+repository root:
 
 ```sh
-npm ci
-npm test
-npm run build
-npm run tauri -- build
+python -m pip install -r native/shared/requirements.txt
+npm --prefix desktop ci
+npm --prefix desktop test
+npm --prefix desktop run build
+TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+python native/shared/build_sidecar.py --target "$TARGET"
+npm --prefix desktop run tauri -- build
 ```
+
+The target triple must match the host (`x86_64-pc-windows-msvc`,
+`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, or
+`aarch64-apple-darwin`). Cross-compiling the PyInstaller sidecar is not supported
+by this helper. See [Installation & Deployment](../INSTALLATION.md#18-tauri-embedded-desktop--unsigned-evaluation-candidate)
+for platform prerequisites and CI artifact retrieval.
 
 See the canonical [Installation & Deployment Guide](../INSTALLATION.md) for
 runtime setup, backend connection and SSH-tunnel access. The browser/PWA
@@ -145,9 +162,11 @@ The declared backend mode is now supplied explicitly by canonical runners;
 unknown mode stays unknown rather than defaulting a live process to paper.
 Workspace mode controls still do not activate or change that runtime.
 
-The new `.github/workflows/console-quality.yml` runs frontend unit contracts,
-build and audit on relevant PRs or manual dispatch. It never deploys or launches
-trading. Its remote CI execution has not yet been observed.
+The `.github/workflows/console-quality.yml` workflow runs frontend unit contracts,
+production build and dependency audit for relevant PRs, matching `main` updates,
+and manual dispatch. It never deploys or launches trading. Check the Actions run
+for the exact commit being evaluated; historic workflow results do not certify a
+newer `main` SHA.
 
 ## Research + ledger performance update (2026-11-07)
 
