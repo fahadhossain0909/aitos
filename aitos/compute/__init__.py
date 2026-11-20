@@ -15,6 +15,10 @@ from aitos.compute.work_scheduler import (
     WorkloadRequest,
     admit_optional_work,
 )
+from aitos.compute.telemetry_collector import (
+    SymbolTelemetryCollector,
+    TelemetryCollectorStats,
+)
 from aitos.compute.workload_estimator import (
     SymbolTelemetry,
     WorkloadCostModel,
@@ -43,10 +47,12 @@ __all__ = [
     "ResourcePressureController",
     "ResourceSnapshot",
     "SymbolTelemetry",
+    "SymbolTelemetryCollector",
     "SymbolWorkload",
     "WorkloadAdmission",
     "WorkloadClass",
     "WorkloadCostModel",
+    "TelemetryCollectorStats",
     "WorkloadRequest",
     "WorkloadEstimate",
     "admit_optional_work",
