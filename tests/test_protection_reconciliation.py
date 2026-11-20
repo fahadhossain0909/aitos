@@ -666,3 +666,73 @@ async def test_restart_does_not_recover_stop_for_different_existing_protection(
     assert report["recovered"] == 0
     assert "different stop" in report["blocked"][0]["reason"]
     assert store.unresolved()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovery_quarantines_legacy_preclaim_without_trade_owner(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "legacy.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+        )
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id=None,
+        updated_at="",
+    )
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "no owner_trade_id" in report["blocked"][0]["reason"]
+    assert store.unresolved()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovery_rejects_venue_stop_quantity_mismatch(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "mismatch.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    mismatched = inventory_row()
+    mismatched["quantity"] = "0.5"
+    executor = ReadOnlyExecutor("paper-account", [mismatched])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id=None,
+        updated_at="",
+    )
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "identity mismatch" in report["blocked"][0]["reason"]
+    assert trade.sl_order_id is None
+    assert store.unresolved()[0]["state"] == "SUBMITTING"
