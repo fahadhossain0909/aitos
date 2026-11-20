@@ -704,12 +704,13 @@ async def recover_protection_handovers(
     trades: Iterable[Any],
     persist_trade: Any,
 ) -> dict[str, Any]:
-    """Resume replacement-stop handovers without ever dropping the old stop early.
+    """Resume replacement protective handovers without dropping old protection early.
 
     PREPARED recovery uses the deterministic clientAlgoId to discover a POST
-    whose response was lost. The new stop must still be NEW and match the exact
-    durable request before the old stop can be cancelled. Old-stop cancellation
-    is queried before and after DELETE so a triggered/partial fill is quarantined.
+    whose response was lost. The new STOP_MARKET or TAKE_PROFIT_MARKET must be
+    NEW and match the exact durable request before the old order is cancelled.
+    Cancellation is queried before and after DELETE so triggered/partial fills
+    are quarantined rather than treated as a successful cancellation.
     """
     scope = getattr(intent_store, "scope", None)
     if (
@@ -800,7 +801,8 @@ async def recover_protection_handovers(
             not isinstance(request, dict)
             or request.get("owner_trade_id") != trade_id
             or request.get("symbol") != symbol
-            or request.get("order_type") != "STOP_MARKET"
+            or request.get("order_type") != handover.get("order_type", "STOP_MARKET")
+            or request.get("order_type") not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}
             or request.get("reduce_only") is not True
             or str(request.get("side", "")).upper()
             != str(
@@ -923,16 +925,42 @@ async def recover_protection_handovers(
             )
             continue
 
-        current_stop = getattr(trade, "sl_order_id", None)
-        if current_stop not in (old_id, new_id):
-            blocked.append(
-                {
-                    "client_id": client_id,
-                    "reason": "restored trade stop is neither old nor replacement stop",
-                }
-            )
-            continue
-        trade.sl_order_id = new_id
+        order_type = request["order_type"]
+        if order_type == "STOP_MARKET":
+            current_stop = getattr(trade, "sl_order_id", None)
+            if current_stop not in (old_id, new_id):
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "restored trade stop is neither old nor replacement stop",
+                    }
+                )
+                continue
+            trade.sl_order_id = new_id
+        else:
+            tp_ids = getattr(trade, "tp_order_ids", None)
+            if not isinstance(tp_ids, list):
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "restored trade has no durable take-profit order collection",
+                    }
+                )
+                continue
+            old_matches = [index for index, value in enumerate(tp_ids) if value == old_id]
+            new_matches = [index for index, value in enumerate(tp_ids) if value == new_id]
+            if len(old_matches) > 1 or len(new_matches) > 1 or (
+                not old_matches and not new_matches
+            ):
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "restored take-profit ownership is ambiguous",
+                    }
+                )
+                continue
+            if old_matches:
+                tp_ids[old_matches[0]] = new_id
         pending = trade.agent_consensus.setdefault("_pending_stop_cancellations", [])
         if not isinstance(pending, list):
             blocked.append(
