@@ -221,3 +221,14 @@ must obtain a fresh snapshot before trusting incremental depth again.
 This policy favors explicit degraded recovery over silently publishing a
 plausible but sequence-corrupted L3/L2 book. Queue capacity still needs
 production-like sizing and sustained burst tests; no claim of zero loss is made.
+
+
+## Atomic native order-book batch replay
+
+Both the Python reference and optional Rust fixed-point book now apply batches
+against a private candidate state and publish the new state only after every
+sequence check succeeds. A malformed later delta therefore cannot leave a
+partially advanced book behind. The Rust batch method also detaches the
+CPU-bound replay from Python's GIL while it works on the private clone; the
+authoritative state is swapped back only after successful completion. The
+Python fallback remains behaviorally equivalent but does not release the GIL.
