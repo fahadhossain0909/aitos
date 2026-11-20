@@ -11,6 +11,7 @@ import json
 import math
 import re
 import sqlite3
+from decimal import Decimal, InvalidOperation
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -77,6 +78,20 @@ class ExecutionIntentStore:
                     "ALTER TABLE protection_handovers ADD COLUMN order_type TEXT "
                     "NOT NULL DEFAULT 'STOP_MARKET'"
                 )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS protection_child_fills (
+                    scope TEXT NOT NULL,
+                    algo_id TEXT NOT NULL,
+                    child_order_id TEXT NOT NULL,
+                    trade_id TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    cumulative_quantity TEXT NOT NULL,
+                    cumulative_quote TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(scope, algo_id, child_order_id)
+                )"""
+            )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -368,6 +383,107 @@ class ExecutionIntentStore:
         return [
             dict(row) for row in rows if trade_id is None or row["trade_id"] == trade_id
         ]
+
+    def protection_child_watermark(
+        self, algo_id: str, child_order_id: str
+    ) -> dict | None:
+        """Return the last applied child cumulative watermark for this account."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM protection_child_fills WHERE scope=? AND algo_id=? "
+                "AND child_order_id=?",
+                (self.scope, str(algo_id), str(child_order_id)),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def mark_protection_child_applied(
+        self,
+        *,
+        algo_id: str,
+        child_order_id: str,
+        trade_id: str,
+        symbol: str,
+        cumulative_quantity: str,
+        cumulative_quote: str,
+        status: str,
+    ) -> dict:
+        """Advance the SQLite mirror only after the durable trade snapshot write.
+
+        The trade snapshot's per-child marker remains the replay authority across
+        a crash between the ClickHouse write and this journal acknowledgement.
+        """
+        identities = (algo_id, child_order_id, trade_id, symbol, status)
+        if any(not isinstance(value, str) or not value.strip() for value in identities):
+            raise ValueError("complete child-fill application identity is required")
+        try:
+            quantity = Decimal(str(cumulative_quantity))
+            quote = Decimal(str(cumulative_quote))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("child cumulative values must be decimals") from None
+        if (
+            not quantity.is_finite()
+            or not quote.is_finite()
+            or quantity < 0
+            or quote < 0
+        ):
+            raise ValueError("child cumulative values must be finite and non-negative")
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM protection_child_fills WHERE scope=? AND algo_id=? "
+                "AND child_order_id=?",
+                (self.scope, algo_id, child_order_id),
+            ).fetchone()
+            if row is not None:
+                current = dict(row)
+                if (
+                    current["trade_id"] != trade_id
+                    or current["symbol"] != symbol
+                ):
+                    raise ValueError("child-fill identity was reused across trade scope")
+                previous_quantity = Decimal(current["cumulative_quantity"])
+                previous_quote = Decimal(current["cumulative_quote"])
+                if quantity < previous_quantity or quote < previous_quote:
+                    raise ValueError("child-fill cumulative watermark regressed")
+                if (quantity == previous_quantity) != (quote == previous_quote):
+                    raise ValueError("child-fill quantity/quote watermark diverged")
+                if quantity == previous_quantity:
+                    return current
+                conn.execute(
+                    "UPDATE protection_child_fills SET cumulative_quantity=?,"
+                    "cumulative_quote=?,status=?,updated_at=CURRENT_TIMESTAMP "
+                    "WHERE scope=? AND algo_id=? AND child_order_id=?",
+                    (
+                        str(quantity),
+                        str(quote),
+                        status,
+                        self.scope,
+                        algo_id,
+                        child_order_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO protection_child_fills(scope,algo_id,child_order_id,"
+                    "trade_id,symbol,cumulative_quantity,cumulative_quote,status) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        self.scope,
+                        algo_id,
+                        child_order_id,
+                        trade_id,
+                        symbol,
+                        str(quantity),
+                        str(quote),
+                        status,
+                    ),
+                )
+            result = conn.execute(
+                "SELECT * FROM protection_child_fills WHERE scope=? AND algo_id=? "
+                "AND child_order_id=?",
+                (self.scope, algo_id, child_order_id),
+            ).fetchone()
+            return dict(result)
 
     def mark_protection_terminal(
         self,
