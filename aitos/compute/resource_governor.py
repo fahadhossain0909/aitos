@@ -65,10 +65,9 @@ class ResourceBudget:
             self.background_task_limit,
             self.deep_analysis_slots,
         )
-        if (
-            any(
-                isinstance(value, bool) or not isinstance(value, int) or value < 0
-                for value in integer_limits
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in integer_limits
         ):
             raise ValueError("resource budget limits must be non-negative integers")
         if (
