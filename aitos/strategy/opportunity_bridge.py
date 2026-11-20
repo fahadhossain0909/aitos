@@ -85,7 +85,10 @@ def _validate_protection(
         )
     except (TypeError, ValueError, OverflowError):
         return "protection plan contains non-numeric values"
-    if not all(isfinite(value) for value in (stop, leverage, fees, slippage, funding, *targets)):
+    if not all(
+        isfinite(value)
+        for value in (stop, leverage, fees, slippage, funding, *targets)
+    ):
         return "protection plan contains non-finite values"
     if stop <= 0 or leverage < 1:
         return "stop and leverage must be positive (leverage >= 1)"
@@ -176,7 +179,10 @@ def build_risk_governed_opportunities(
         allocation = allocations.get(proposal.strategy_id)
         if proposal.strategy_id in seen_strategies:
             rejected.append(
-                (key, "multiple intents require explicit per-instrument capital allocation")
+                (
+                    key,
+                    "multiple intents require explicit per-instrument capital allocation",
+                ),
             )
             continue
         seen_strategies.add(proposal.strategy_id)
@@ -213,7 +219,9 @@ def build_risk_governed_opportunities(
             continue
         allocated_notional = min(proposal.allocated_notional, allocation.notional)
         if allocated_notional <= 0 or allocation.projected_loss <= 0:
-            rejected.append((key, "strategy allocation and projected loss must be positive"))
+            rejected.append(
+                (key, "strategy allocation and projected loss must be positive")
+            )
             continue
         try:
             detected_at = datetime.fromtimestamp(
@@ -224,7 +232,9 @@ def build_risk_governed_opportunities(
             continue
         normalized_plan = StrategyProtectionPlan(
             stop_loss_price=float(plan.stop_loss_price),
-            take_profit_levels=tuple(float(value) for value in plan.take_profit_levels),
+            take_profit_levels=tuple(
+                float(value) for value in plan.take_profit_levels
+            ),
             leverage=float(plan.leverage),
             fee_bps=float(plan.fee_bps),
             slippage_bps=float(plan.slippage_bps),
@@ -247,10 +257,18 @@ def build_risk_governed_opportunities(
             "runtime_regime": context.global_regime,
             "position_risk_pct": dict(context.metadata.get("position_risk_pct", {})),
             "position_sides": dict(context.metadata.get("position_sides", {})),
-            "position_instruments": dict(context.metadata.get("position_instruments", {})),
-            "pending_order_risk_pct": dict(context.metadata.get("pending_order_risk_pct", {})),
-            "pending_order_symbols": dict(context.metadata.get("pending_order_symbols", {})),
-            "pending_order_sides": dict(context.metadata.get("pending_order_sides", {})),
+            "position_instruments": dict(
+                context.metadata.get("position_instruments", {})
+            ),
+            "pending_order_risk_pct": dict(
+                context.metadata.get("pending_order_risk_pct", {})
+            ),
+            "pending_order_symbols": dict(
+                context.metadata.get("pending_order_symbols", {})
+            ),
+            "pending_order_sides": dict(
+                context.metadata.get("pending_order_sides", {})
+            ),
             "correlations": dict(context.metadata.get("correlations", {})),
             "equity_peak_usd": context.metadata.get("equity_peak_usd", equity_usd),
             "daily_pnl_pct": context.metadata.get("daily_pnl_pct", 0.0),
@@ -298,7 +316,9 @@ def build_risk_governed_opportunities(
         )
 
     try:
-        reviewed = gateway.evaluate(equity_usd, estimates, max_positions=max_positions)
+        reviewed = gateway.evaluate(
+            equity_usd, estimates, max_positions=max_positions
+        )
     except Exception as exc:
         rejected.extend(
             (key, f"capital risk review failed closed: {type(exc).__name__}")
@@ -316,7 +336,11 @@ def build_risk_governed_opportunities(
         decision = decisions.get(opportunity.symbol)
         approved = capital.get(opportunity.symbol)
         if decision is None or not decision.eligible or approved is None:
-            reasons = decision.rejection_reasons if decision else ("risk_review_missing",)
+            reasons = (
+                decision.rejection_reasons
+                if decision
+                else ("risk_review_missing",)
+            )
             rejected.append((key, ";".join(reasons)))
             continue
         try:
@@ -354,7 +378,7 @@ def build_risk_governed_opportunities(
             scale = strategy_risk_cap / risk_budget
             amount *= scale
             risk_budget = strategy_risk_cap
-        if amount <= 0: 
+        if amount <= 0:
             rejected.append((key, "strategy risk cap reduced capital to zero"))
             continue
         receipt = OpportunityRiskReceipt(
