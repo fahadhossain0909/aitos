@@ -99,6 +99,7 @@ def inputs(mode=StrategyMode.SHADOW):
         "binance:futures:BTCUSDT": StrategyProtectionPlan(
             stop_loss_price=95.0,
             take_profit_levels=(110.0, 115.0),
+            loss_probability=0.15,
             leverage=1.0,
         )
     }
@@ -165,10 +166,10 @@ def test_capital_veto_produces_no_canonical_opportunity():
 @pytest.mark.parametrize(
     "plan",
     [
-        StrategyProtectionPlan(101.0, (110.0,)),
-        StrategyProtectionPlan(95.0, (99.0,)),
-        StrategyProtectionPlan(95.0, ()),
-        StrategyProtectionPlan(95.0, (110.0,), leverage=0.0),
+        StrategyProtectionPlan(101.0, (110.0,), loss_probability=0.15),
+        StrategyProtectionPlan(95.0, (99.0,), loss_probability=0.15),
+        StrategyProtectionPlan(95.0, (), loss_probability=0.15),
+        StrategyProtectionPlan(95.0, (110.0,), loss_probability=0.15, leverage=0.0),
     ],
 )
 def test_missing_or_directionally_invalid_protection_is_rejected(plan):
@@ -258,6 +259,7 @@ def test_multiple_intents_do_not_reuse_one_strategy_allocation():
     plans["binance:futures:ETHUSDT"] = StrategyProtectionPlan(
         stop_loss_price=95.0,
         take_profit_levels=(110.0,),
+        loss_probability=0.15,
     )
     report = build_risk_governed_opportunities(
         cycle,
