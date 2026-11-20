@@ -824,3 +824,57 @@ def test_detect_resources_honors_cgroup_v1_cpu_and_memory_limits(tmp_path):
     assert result.memory_limit_mb == 4096
     assert result.memory_available_mb == 3072
     assert result.memory_limit_limited is True
+
+
+
+def test_process_pressure_sampler_measures_cpu_rss_and_queue_lag():
+    from aitos.compute.pressure_controller import ProcessPressureSampler
+
+    wall = [0.0]
+    cpu = [0.0]
+    sampler = ProcessPressureSampler(
+        ResourceSnapshot(4, 2.0, 4096, 1000, 500, False, True),
+        clock=lambda: wall[0],
+        cpu_time_reader=lambda: cpu[0],
+        memory_reader=lambda: 250.0,
+    )
+    first = sampler.sample(queue_lag_seconds=0.1)
+    assert first.cpu_utilization_pct == 0
+    assert first.memory_utilization_pct == 25
+    assert first.queue_lag_seconds == 0.1
+
+    wall[0] = 1.0
+    cpu[0] = 1.0
+    second = sampler.sample(queue_lag_seconds=2.5)
+    assert second.cpu_utilization_pct == 50
+    assert second.memory_utilization_pct == 25
+    assert second.queue_lag_seconds == 2.5
+
+
+def test_process_pressure_sampler_uses_conservative_memory_fallback():
+    from aitos.compute.pressure_controller import ProcessPressureSampler
+
+    sampler = ProcessPressureSampler(
+        ResourceSnapshot(2, 2.0, 4096, 1000, 250, False, True),
+        clock=lambda: 1.0,
+        cpu_time_reader=lambda: 0.0,
+        memory_reader=lambda: None,
+    )
+    sample = sampler.sample(queue_lag_seconds=0)
+    assert sample.memory_utilization_pct == 75
+
+
+def test_process_pressure_sampler_rejects_clock_regression():
+    from aitos.compute.pressure_controller import ProcessPressureSampler
+
+    wall = [2.0]
+    sampler = ProcessPressureSampler(
+        ResourceSnapshot(2, 2.0, 4096, 1000, 500, False, True),
+        clock=lambda: wall[0],
+        cpu_time_reader=lambda: 0.0,
+        memory_reader=lambda: 100.0,
+    )
+    sampler.sample(queue_lag_seconds=0)
+    wall[0] = 1.0
+    with pytest.raises(ValueError, match="monotonic"):
+        sampler.sample(queue_lag_seconds=0)
