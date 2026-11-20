@@ -164,7 +164,14 @@ def build_risk_governed_opportunities(
         or context.now_ns <= 0
     ):
         raise ValueError("point-in-time strategy timestamp is required")
-    equity_usd = float(portfolio_risk.equity_usd)
+    if not isinstance(portfolio_risk, StrategyPortfolioRiskContext):
+        raise TypeError("typed point-in-time portfolio risk context is required")
+    try:
+        equity_usd = float(portfolio_risk.equity_usd)
+        equity_peak_usd = float(portfolio_risk.equity_peak_usd)
+        daily_pnl_pct = float(portfolio_risk.daily_pnl_pct)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("portfolio snapshot numeric evidence is invalid") from None
     if not isfinite(equity_usd) or equity_usd <= 0:
         raise ValueError("portfolio snapshot equity must be finite and positive")
     if (
@@ -175,10 +182,9 @@ def build_risk_governed_opportunities(
         raise ValueError("max_positions must be a positive integer")
     if not callable(shadow_gateway_factory):
         raise TypeError("isolated shadow CapitalGateway factory is required")
-    if not isinstance(portfolio_risk, StrategyPortfolioRiskContext):
-        raise TypeError("typed point-in-time portfolio risk context is required")
     if (
-        not portfolio_risk.snapshot_id.strip()
+        not isinstance(portfolio_risk.snapshot_id, str)
+        or not portfolio_risk.snapshot_id.strip()
         or isinstance(portfolio_risk.observed_at_ns, bool)
         or not isinstance(portfolio_risk.observed_at_ns, int)
         or portfolio_risk.observed_at_ns <= 0
@@ -186,19 +192,23 @@ def build_risk_governed_opportunities(
     ):
         raise ValueError("portfolio risk snapshot is missing, invalid, or stale")
     if (
-        not isfinite(portfolio_risk.equity_peak_usd)
-        or portfolio_risk.equity_peak_usd < equity_usd
+        not isfinite(equity_peak_usd)
+        or equity_peak_usd < equity_usd
     ):
         raise ValueError("portfolio peak equity must be finite and cover current equity")
     if (
         isinstance(portfolio_risk.consecutive_losses, bool)
         or not isinstance(portfolio_risk.consecutive_losses, int)
         or portfolio_risk.consecutive_losses < 0
-        or not isfinite(portfolio_risk.daily_pnl_pct)
+        or not isfinite(daily_pnl_pct)
     ):
         raise ValueError("portfolio loss-streak or daily PnL evidence is invalid")
     for symbol, risk_pct in portfolio_risk.position_risk_pct.items():
-        if not str(symbol).strip() or not isfinite(float(risk_pct)) or risk_pct <= 0:
+        try:
+            risk_value = float(risk_pct)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("open-position risk snapshot is invalid") from None
+        if not str(symbol).strip() or not isfinite(risk_value) or risk_value <= 0:
             raise ValueError("open-position risk snapshot is invalid")
     pending_keys = (
         set(portfolio_risk.pending_order_risk_pct),
@@ -208,28 +218,38 @@ def build_risk_governed_opportunities(
     if not (pending_keys[0] == pending_keys[1] == pending_keys[2]):
         raise ValueError("pending-order risk snapshot identities do not match")
     for order_id, risk_pct in portfolio_risk.pending_order_risk_pct.items():
+        try:
+            risk_value = float(risk_pct)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("pending-order risk snapshot is invalid") from None
         if (
             not str(order_id).strip()
-            or not isfinite(float(risk_pct))
-            or risk_pct <= 0
+            or not isfinite(risk_value)
+            or risk_value <= 0
             or not str(portfolio_risk.pending_order_symbols[order_id]).strip()
             or str(portfolio_risk.pending_order_sides[order_id]).upper()
             not in {"LONG", "SHORT"}
         ):
             raise ValueError("pending-order risk snapshot is invalid")
     for pair, correlation in portfolio_risk.correlations.items():
+        try:
+            correlation_value = float(correlation)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("portfolio correlation snapshot is invalid") from None
         if (
             not isinstance(pair, str)
             or ":" not in pair
-            or not isfinite(float(correlation))
-            or not -1.0 <= float(correlation) <= 1.0
+            or not isfinite(correlation_value)
+            or not -1.0 <= correlation_value <= 1.0
         ):
             raise ValueError("portfolio correlation snapshot is invalid")
-    if portfolio_risk.liquidation_buffer_pct is not None and (
-        not isfinite(portfolio_risk.liquidation_buffer_pct)
-        or portfolio_risk.liquidation_buffer_pct <= 0
-    ):
-        raise ValueError("liquidation buffer snapshot is invalid")
+    if portfolio_risk.liquidation_buffer_pct is not None:
+        try:
+            liquidation_buffer = float(portfolio_risk.liquidation_buffer_pct)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("liquidation buffer snapshot is invalid") from None
+        if not isfinite(liquidation_buffer) or liquidation_buffer <= 0:
+            raise ValueError("liquidation buffer snapshot is invalid")
     if not isinstance(live_gateway, CapitalGateway):
         raise TypeError("live CapitalGateway identity is required for isolation")
 
