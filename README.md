@@ -17,7 +17,7 @@ AITOS is a Python-first, event-driven quantitative trading platform. Binance USD
 
 ## Credential security and remote signing
 
-Read [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md) before entering exchange credentials on a remote host. OS vaults protect local storage, not against a provider administrator with root/administrator access to that same machine. The remote signer and live order-dispatch path are not implemented or authorized by this RFC.
+Read [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md) before entering exchange credentials on a remote host. OS vaults protect local storage, not against a provider administrator with root/administrator access to that same machine. Paper-only signer and testnet adapter components exist, but production remote signing and live order dispatch are not enabled or certified.
 
 ## Desktop application delivery
 
