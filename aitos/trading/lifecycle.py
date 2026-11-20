@@ -2764,6 +2764,9 @@ class TradeLifecycle(AITOSModule):
                 previously_applied_quantity=previous_quantity,
                 previously_applied_quote=previous_quote,
                 expected_position_side=expected_position_side,
+                expected_reduce_only=not bool(
+                    getattr(self._order_executor, "hedge_mode", False)
+                ),
             )
             if delta.delta_quantity > trade.quantity + max(1e-12, trade.quantity * 1e-9):
                 raise ExecutionRecoveryRequired(
