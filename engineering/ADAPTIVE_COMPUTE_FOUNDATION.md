@@ -83,3 +83,13 @@ receive conservative fallback costs instead of optimistic zero-cost admission.
 The cost coefficients remain explicit calibration parameters and must be
 benchmarked against production-like telemetry before scanner admission uses
 them.
+
+
+## Optional workload admission
+
+The optional-work scheduler ranks interactive analysis ahead of background and
+bulk work, applies CPU/memory hard budgets, and progressively shrinks optional
+capacity under WARNING/HIGH pressure. CRITICAL pressure defers all optional
+work. It explicitly does not own protected services; market-data integrity,
+order updates, open-position monitoring, risk checks, and execution recovery
+must be scheduled by their own protected service budgets.
