@@ -881,7 +881,6 @@ def test_process_pressure_sampler_rejects_clock_regression():
         sampler.sample(queue_lag_seconds=0)
 
 
-
 def test_uncalibrated_workload_estimator_preserves_requested_symbol():
     from aitos.compute.workload_estimator import estimate_symbol_workload
 
