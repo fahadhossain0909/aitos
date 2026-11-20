@@ -361,3 +361,36 @@ async def test_startup_child_recovery_routes_owned_triggered_algo_to_lifecycle(
     lifecycle.apply_triggered_protection_child_fill.assert_awaited_once_with(
         trade.trade_id, algo_snapshot(), child_snapshot()
     )
+
+@pytest.mark.asyncio
+async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "child-full-close.sqlite", scope="child-account")
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    await lifecycle.initialize({})
+    trade = make_trade()
+    trade.sl_order_id = "algo:123"
+    lifecycle._open_trades[trade.trade_id] = trade
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    result = await lifecycle.apply_triggered_protection_child_fill(
+        trade.trade_id,
+        algo_snapshot(),
+        child_snapshot(status="FILLED", quantity="1.0", quote="90.0"),
+    )
+
+    assert result["terminal"] is True
+    assert trade.trade_id not in lifecycle._open_trades
+    assert lifecycle._closed_trades[-1].exit_reason == "exchange_protective_child_filled"
+    assert lifecycle._closed_trades[-1].gross_realized_pnl_usd == pytest.approx(-10.0)
+    assert executor.cancelled == ["algo:123"]
+    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "1.0"
