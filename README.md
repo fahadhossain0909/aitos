@@ -417,14 +417,16 @@ recorded Binance-shaped paper/testnet responses. No account requests/credentials
 or financial mutations. See [contract and verification](engineering/BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md)
 for schema, supported subset, pagination limitations and pending real-provider gates.
 
-## Hosted Windows and service validation
+## Historical hosted Windows and service validation (2026-11-07)
 
-Actual hosted Windows vault/build/install/network/uninstall and disposable service
-restart/soak checks have now passed. An **unsigned Windows test candidate** is
-available; it is not a signed production release. Current artifact links, tested
-commit, seven workflow results, 300-second soak, review request and remaining gates:
-[remote validation evidence](engineering/REMOTE_VALIDATION_EVIDENCE.md). No main
-merge, production cutover, trusted signing or live capability was activated.
+The [remote validation evidence](engineering/REMOTE_VALIDATION_EVIDENCE.md)
+records Windows vault/build/install/network/uninstall and disposable service
+restart/soak checks for the exact older source SHAs listed in that report. Those
+runs produced unsigned test candidates, not signed production releases. The
+report's statement that no main merge had occurred describes the state at that
+time only; it must not be read as the current repository status or as validation
+of today's `main` head. Re-run the relevant workflows on the exact release
+candidate SHA before relying on the evidence.
 
 ## Historical integration evidence
 
