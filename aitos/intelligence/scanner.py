@@ -2103,7 +2103,7 @@ class OpportunityScanner(AITOSModule):
                     workloads.append(estimated.workload)
                 capacity_plan = plan_symbol_capacity(
                     workloads,
-                    adaptive_runtime.budget,
+                    adaptive_runtime.budget_for_optional_work(),
                     max_symbols=limit,
                 )
                 self._aitos_last_capacity_plan = capacity_plan
@@ -2133,8 +2133,9 @@ class OpportunityScanner(AITOSModule):
                                 adaptive_runtime.budget.cpu_capacity_units
                             ),
                             "memory_budget_mb": (
-                                adaptive_runtime.budget.memory_budget_mb
+                                adaptive_runtime.budget_for_optional_work().memory_budget_mb
                             ),
+                            "pressure_level": int(adaptive_runtime.pressure_controller.level),
                         }
                     },
                 )
@@ -2161,6 +2162,14 @@ class OpportunityScanner(AITOSModule):
 
     async def scan_all(self) -> list[ScanCandidate]:
         self._require_initialized()
+        adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
+        if adaptive_runtime is not None:
+            try:
+                adaptive_runtime.observe_process_pressure()
+            except Exception:
+                logger.exception(
+                    "adaptive process pressure sampling failed; retaining last pressure state"
+                )
         reference_klines = None
         if self._reference_symbol:
             try:
