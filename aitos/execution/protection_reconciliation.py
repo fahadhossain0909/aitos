@@ -906,7 +906,7 @@ async def recover_protection_handovers(
             trade.updated_at = datetime.now(timezone.utc).isoformat()
             await persist_trade(trade)
             await asyncio.to_thread(intent_store.complete_protection_handover, handover_id)
-            if intent_state == "PROTECTED":
+            if intent_state in {"SUBMITTING", "PROTECTED"}:
                 executor.acknowledge_protection(
                     OrderResult(
                         order_id=new_id,
