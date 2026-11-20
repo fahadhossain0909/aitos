@@ -164,7 +164,13 @@ class AttributedOrderExecutor(OrderExecutor):
         return await self.delegate.get_order_status(symbol, order_id)
 
     async def place_stop_loss_order(
-        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        stop_price: float,
+        *,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         request = OrderRequest(
             symbol=symbol,
@@ -173,10 +179,15 @@ class AttributedOrderExecutor(OrderExecutor):
             reference_price=stop_price,
             order_type="STOP_MARKET",
             reduce_only=True,
+            owner_trade_id=owner_trade_id,
         )
         context = self.context_resolver(request)
         result = await self.delegate.place_stop_loss_order(
-            symbol, side, quantity, stop_price
+            symbol,
+            side,
+            quantity,
+            stop_price,
+            owner_trade_id=owner_trade_id,
         )
         try:
             self._record_result(request, context, result, decision_type="MANAGE")
@@ -188,7 +199,13 @@ class AttributedOrderExecutor(OrderExecutor):
         return result
 
     async def place_take_profit_order(
-        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        take_profit_price: float,
+        *,
+        owner_trade_id: str | None = None,
     ) -> OrderResult:
         request = OrderRequest(
             symbol=symbol,
@@ -197,10 +214,15 @@ class AttributedOrderExecutor(OrderExecutor):
             reference_price=take_profit_price,
             order_type="TAKE_PROFIT_MARKET",
             reduce_only=True,
+            owner_trade_id=owner_trade_id,
         )
         context = self.context_resolver(request)
         result = await self.delegate.place_take_profit_order(
-            symbol, side, quantity, take_profit_price
+            symbol,
+            side,
+            quantity,
+            take_profit_price,
+            owner_trade_id=owner_trade_id,
         )
         try:
             self._record_result(request, context, result, decision_type="MANAGE")
