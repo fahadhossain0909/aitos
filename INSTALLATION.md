@@ -361,8 +361,10 @@ Create or use an environment named `papertrade`. Add these secrets:
 | `AITOS_CONSOLE_TOKEN` | For desktop remote console | Strong backend bearer token, minimum 32 characters |
 | `CLICKHOUSE_USER` | Optional | Defaults to `default` |
 | `NEO4J_USER` | Optional | Defaults to `neo4j` |
-| `BINANCE_API_KEY` / `BINANCE_API_SECRET` | Optional | Not needed for public-market-data paper trading |
-| `BINANCE_TESTNET` | Optional | Defaults to `true` |
+| `BINANCE_API_KEY` / `BINANCE_API_SECRET` | Optional | Mainnet credentials only; not needed for public-market-data paper trading |
+| `BINANCE_FUTURES_TESTNET_API_KEY` / `BINANCE_FUTURES_TESTNET_API_SECRET` | Optional | Dedicated Futures demo/testnet credentials; never fall back to mainnet keys |
+| `BINANCE_TESTNET` | Optional | Defaults to `true`; retained as the compatibility environment selector |
+| `AITOS_BINANCE_FUTURES_ENVIRONMENT` | Optional | Explicit `mainnet` or `testnet` override; takes precedence over `BINANCE_TESTNET` |
 | `DATABASE_URL`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL` | Optional | External integrations |
 
 Use unique strong passwords. Do not reuse staging credentials or production secrets without an explicit isolation/security decision. Never grant withdrawal permission to exchange keys.
