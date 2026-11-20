@@ -963,3 +963,94 @@ async def test_replacement_recovery_keeps_old_stop_when_new_algo_is_missing(tmp_
     assert trade.sl_order_id == "algo:123"
     executor.cancel_resting_order.assert_not_awaited()
     assert journal.protection_handovers()[0]["state"] == "PREPARED"
+
+@pytest.mark.asyncio
+async def test_handover_crash_before_cancel_is_recovered_without_duplicate_post(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["NEW", "CANCELED"]
+    )
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    calls = 0
+
+    async def fail_first_persist(_trade):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("simulated ClickHouse unavailable")
+
+    first = await recover_protection_handovers(
+        executor, journal, [trade], fail_first_persist
+    )
+    assert first["recovered"] == 0
+    assert journal.protection_handovers()[0]["state"] == "NEW_ACCEPTED"
+    executor.cancel_resting_order.assert_not_awaited()
+
+    persisted = []
+
+    async def persist(_trade):
+        persisted.append(True)
+
+    second = await recover_protection_handovers(
+        executor, journal, [trade], persist
+    )
+    assert second["recovered"] == 1
+    assert executor.get_algo_order_by_client_id.await_count == 2
+    assert executor.cancel_resting_order.await_count == 1
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_handover_crash_after_cancel_ack_replays_without_second_cancel(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["NEW", "CANCELED"]
+    )
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    calls = 0
+
+    async def fail_second_persist(_trade):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated ClickHouse write failure after cancel")
+
+    first = await recover_protection_handovers(
+        executor, journal, [trade], fail_second_persist
+    )
+    assert first["recovered"] == 0
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCELLED"
+    assert executor.cancel_resting_order.await_count == 1
+
+    second = await recover_protection_handovers(
+        executor, journal, [trade], AsyncMock()
+    )
+    assert second["recovered"] == 1
+    assert executor.cancel_resting_order.await_count == 1
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
