@@ -177,7 +177,9 @@ class CapitalGateway:
                 or not isfinite(risk_pct)
                 or risk_pct <= 0
             ):
-                raise ValueError("pending order risk projection must be finite and positive")
+                raise ValueError(
+                    "pending order risk projection must be finite and positive"
+                )
             positions[str(order_key)] = risk_pct
             position_sides[str(order_key)] = side
             position_instruments[str(order_key)] = instrument
