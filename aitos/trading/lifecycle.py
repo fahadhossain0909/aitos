@@ -1609,7 +1609,11 @@ class TradeLifecycle(AITOSModule):
             else trade.sl_price
         )
         sl_result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, exchange_stop_price
+            trade.symbol,
+            trade.side,
+            trade.quantity,
+            exchange_stop_price,
+            owner_trade_id=trade.trade_id,
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
@@ -1644,7 +1648,11 @@ class TradeLifecycle(AITOSModule):
             )
             remaining_qty -= leg_qty
             tp_result = await self._order_executor.place_take_profit_order(
-                trade.symbol, trade.side, leg_qty, level_price
+                trade.symbol,
+                trade.side,
+                leg_qty,
+                level_price,
+                owner_trade_id=trade.trade_id,
             )
             if tp_result.success:
                 trade.tp_order_ids.append(tp_result.order_id)
@@ -2429,7 +2437,11 @@ class TradeLifecycle(AITOSModule):
             else trade.sl_price
         )
         result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, stop_price
+            trade.symbol,
+            trade.side,
+            trade.quantity,
+            stop_price,
+            owner_trade_id=trade.trade_id,
         )
         if not result.success:
             raise ExecutionUncertainError(
