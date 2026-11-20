@@ -171,7 +171,10 @@ async def test_child_fill_applies_only_new_cumulative_delta_and_replays_idempote
     assert trade.quantity == pytest.approx(0.75)
     assert trade.position_size_usd == pytest.approx(75.0)
     assert trade.gross_realized_pnl_usd == pytest.approx(-2.5)
-    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
+    assert (
+        journal.protection_child_watermark("123", "456")["cumulative_quantity"]
+        == "0.25"
+    )
 
     second = await lifecycle.apply_triggered_protection_child_fill(
         trade.trade_id,
@@ -196,10 +199,12 @@ async def test_child_fill_applies_only_new_cumulative_delta_and_replays_idempote
 
 
 @pytest.mark.asyncio
-async def test_terminal_partial_stop_fill_reprotects_remaining_position_make_before_break(
+async def test_terminal_partial_stop_fill_reprotects_remaining_position(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "child-terminal.sqlite", scope="child-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "child-terminal.sqlite", scope="child-account"
+    )
     seed_stop(journal)
     executor = TriggeredChildExecutor(journal)
     lifecycle = TradeLifecycle(
@@ -236,7 +241,9 @@ async def test_terminal_partial_stop_fill_reprotects_remaining_position_make_bef
 async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduction(
     event_bus, risk_engine, tmp_path, monkeypatch
 ):
-    journal = ExecutionIntentStore(tmp_path / "child-crash.sqlite", scope="child-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "child-crash.sqlite", scope="child-account"
+    )
     seed_stop(journal)
     executor = TriggeredChildExecutor(journal)
     lifecycle = TradeLifecycle(
@@ -293,7 +300,9 @@ async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduct
 async def test_sqlite_watermark_ahead_of_trade_snapshot_is_quarantined(
     event_bus, risk_engine, tmp_path
 ):
-    journal = ExecutionIntentStore(tmp_path / "child-ahead.sqlite", scope="child-account")
+    journal = ExecutionIntentStore(
+        tmp_path / "child-ahead.sqlite", scope="child-account"
+    )
     seed_stop(journal)
     journal.mark_protection_child_applied(
         algo_id="123",
