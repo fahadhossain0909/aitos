@@ -13,7 +13,7 @@ from aitos.compute.workload_estimator import SymbolTelemetry
 @dataclass
 class _SymbolWindow:
     events: deque[float]
-    depths: deque[int]
+    depths: deque[tuple[float, int]]
     analyses: deque[float]
     last_seen: float
 
@@ -74,6 +74,8 @@ class SymbolTelemetryCollector:
                 last_seen=now,
             )
             self._windows[key] = window
+        if now < window.last_seen:
+            raise ValueError("per-symbol telemetry timestamps must be monotonic")
         window.last_seen = now
         self._windows.move_to_end(key)
         while len(self._windows) > self.max_symbols:
@@ -84,6 +86,8 @@ class SymbolTelemetryCollector:
         for samples in (window.events, window.analyses):
             while samples and samples[0] < cutoff:
                 samples.popleft()
+        while window.depths and window.depths[0][0] < cutoff:
+            window.depths.popleft()
 
     def record_event(self, symbol: str, *, timestamp: float | None = None) -> None:
         now = self._clock() if timestamp is None else float(timestamp)
@@ -103,7 +107,7 @@ class SymbolTelemetryCollector:
         with self._lock:
             window = self._window(symbol, now)
             self._prune(window, now - self.window_seconds)
-            window.depths.append(int(depth_levels))
+            window.depths.append((now, int(depth_levels)))
 
     def record_analysis(self, symbol: str, *, timestamp: float | None = None) -> None:
         now = self._clock() if timestamp is None else float(timestamp)
@@ -147,7 +151,12 @@ class SymbolTelemetryCollector:
                 for value in window.analyses
                 if cutoff <= value <= current
             )
-            depth = int(self._percentile([float(v) for v in window.depths], 0.95))
+            depth_values = [
+                float(value)
+                for timestamp, value in window.depths
+                if cutoff <= timestamp <= current
+            ]
+            depth = int(self._percentile(depth_values, 0.95))
             sample_count = (
                 len(window.events) + len(window.depths) + len(window.analyses)
             )
