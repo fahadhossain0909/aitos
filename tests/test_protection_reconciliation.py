@@ -1063,6 +1063,30 @@ async def test_restart_recovers_replacement_take_profit_without_cancelling_early
             symbol="BTCUSDT",
             side=TradeSide.LONG,
             quantity=0.5,
+            reference_price=108.0,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id="aitos-tp-old",
+            reduce_only=True,
+            owner_trade_id="trade-tp",
+        )
+    )
+    journal.record_protection(
+        "aitos-tp-old",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            108.0,
+            client_order_id="aitos-tp-old",
+        ),
+    )
+    journal.mark_applied("aitos-tp-old", "trade-tp")
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=0.5,
             reference_price=112.0,
             order_type="TAKE_PROFIT_MARKET",
             client_order_id="aitos-tpr-0001",
@@ -1082,6 +1106,7 @@ async def test_restart_recovers_replacement_take_profit_without_cancelling_early
     new_algo.update(
         orderType="TAKE_PROFIT_MARKET",
         triggerPrice="112.0",
+        quantity="0.5",
     )
     executor = HandoverExecutor("paper-account", new_algo, ["NEW", "CANCELED"])
     executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
