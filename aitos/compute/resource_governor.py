@@ -334,9 +334,7 @@ def build_resource_budget(
         cpu_workers=workers,
         memory_budget_mb=usable_memory,
         background_task_limit=min(max_background_tasks, max(0, workers - 1)),
-        deep_analysis_slots=(
-            min(workers, workers * 2) if usable_memory > 0 else 0
-        ),
+        deep_analysis_slots=(min(workers, workers * 2) if usable_memory > 0 else 0),
         cpu_capacity_units=resources.effective_cpus * 100.0 * cpu_utilization_target,
     )
 
