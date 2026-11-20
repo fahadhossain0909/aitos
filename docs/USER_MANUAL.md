@@ -54,7 +54,7 @@ Enter `http://127.0.0.1:18090` as the runtime endpoint. The tunnel must remain o
 | Overview | High-level runtime status, position summary and pipeline/module observations | A healthy API response is not a production-readiness or trading-profitability certificate |
 | Portfolio | Current position and exposure context | Does not independently calculate full market-price mark-to-market equity unless the backend supplies it |
 | Trade Journal | Closed/open lifecycle records, search, direction filtering and CSV export | Journal pagination is offset-based; new rows can shift pages. Totals cover loaded rows, not all-time account P&L |
-| Research Lab | Research workspace and evaluation-planning context | The Evaluation Planner does not itself execute a backtest |
+| Research Lab | Research workspace and evaluation-planning context | The Evaluation Planner does not itself execute a backtest; the separate StrategyEngine is proposal/allocation-only until a typed bridge through TradeLifecycle is implemented |
 | Observability | Pipeline stage latency and operational signals | Unmeasured p50/p95/p99 values remain unavailable; they are not zero |
 | Connections | Runtime and adapter connection context | Connection display does not store exchange keys or activate an account |
 | Configuration | Local configuration drafts and export | Drafts are not applied to the backend or trading runtime |
