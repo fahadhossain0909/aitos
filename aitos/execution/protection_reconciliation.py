@@ -1,9 +1,10 @@
 """Authenticated read-only protection inventory reconciliation.
 
-This module joins the scoped local intent journal to Binance's authenticated
-open-algo-order inventory. It is deliberately observational: a match is not
-account-position proof, and this module never clears, retries, cancels or replaces
-an order or journal intent.
+This module audits the scoped local intent journal against Binance's authenticated
+open-algo-order inventory. Audit functions are observational. The separate,
+explicit startup recovery function can only bind an exactly matched accepted
+initial stop to its uniquely identified durable trade; it never retries, cancels
+or replaces venue orders.
 """
 
 from __future__ import annotations
@@ -573,6 +574,19 @@ async def recover_accepted_initial_stop_submissions(
             )
             continue
         order_id = f"algo:{int(algo_id)}"
+        if row.get("state") == "PROTECTED":
+            prior_result = row.get("result_json")
+            if isinstance(prior_result, str):
+                prior_result = json.loads(prior_result)
+            if (
+                not isinstance(prior_result, dict)
+                or prior_result.get("order_id") != order_id
+                or prior_result.get("client_order_id") != client_id
+            ):
+                blocked.append(
+                    {"client_id": client_id, "reason": "durable accepted-stop result identity mismatch"}
+                )
+                continue
         expected_side = "SELL" if trade_side == "LONG" else "BUY"
         expected_position_side = trade_side if bool(executor.hedge_mode) else "BOTH"
         try:
