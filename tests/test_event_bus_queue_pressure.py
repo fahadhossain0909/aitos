@@ -12,13 +12,8 @@ class PendingRedis:
         self.calls = []
 
     async def xinfo_groups(self, stream):
-        names = [
-            "scanner", "book-cache", *(f"group-{index}" for index in range(10))
-        ]
-        return [
-            {"name": name, "lag": 0, "last-delivered-id": "0-0"}
-            for name in names
-        ]
+        names = ["scanner", "book-cache", *(f"group-{index}" for index in range(10))]
+        return [{"name": name, "lag": 0, "last-delivered-id": "0-0"} for name in names]
 
     async def xrange(self, stream, *, min, max, count):
         return []
@@ -109,7 +104,6 @@ async def test_queue_lag_seconds_uses_max_idle_not_first_stream_id():
     assert redis.calls[0][4] == 100
 
 
-
 @pytest.mark.asyncio
 async def test_queue_lag_seconds_includes_oldest_unread_stream_entry(monkeypatch):
     import aitos.eventbus.redis_bus as redis_bus
@@ -133,3 +127,19 @@ async def test_queue_lag_seconds_includes_oldest_unread_stream_entry(monkeypatch
     ]
 
     assert await bus.queue_lag_seconds() == 3.5
+
+
+
+@pytest.mark.asyncio
+async def test_queue_lag_seconds_returns_unknown_for_missing_consumer_group():
+    class MissingGroupRedis:
+        async def xinfo_groups(self, stream):
+            return []
+
+    bus = EventBus(MissingGroupRedis())
+    bus._known_topics.add("market.trade.BTCUSDT")
+    bus._subscriptions = [
+        SimpleNamespace(topic_pattern="market.trade.*", group="scanner")
+    ]
+
+    assert await bus.queue_lag_seconds() is None
