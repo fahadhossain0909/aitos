@@ -150,7 +150,9 @@ class CapitalGateway:
             identity = str(key).strip()
             risk_pct = float(value)
             if not identity or not isfinite(risk_pct) or risk_pct <= 0:
-                raise ValueError("open position risk projection must be finite and positive")
+                raise ValueError(
+                    "open position risk projection must be finite and positive"
+                )
             positions[identity] = risk_pct
         correlations: dict[tuple[str, str], float] = {}
         for key, value in dict(metadata.get("correlations") or {}).items():
