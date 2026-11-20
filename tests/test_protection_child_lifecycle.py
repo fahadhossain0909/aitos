@@ -296,7 +296,10 @@ async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduct
     )
     assert replay["delta_quantity"] == "0"
     assert restored.quantity == pytest.approx(0.75)
-    assert journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "0.25"
+    assert (
+        journal.protection_child_watermark("123", "456")["cumulative_quantity"]
+        == "0.25"
+    )
 
 
 @pytest.mark.asyncio
