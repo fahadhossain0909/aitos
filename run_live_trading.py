@@ -22,6 +22,7 @@ from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,
     recover_protection_handovers,
+    recover_triggered_protection_child_fills,
     require_live_account_exposure_reconciled,
 )
 from aitos.health_server import HealthServer
@@ -212,19 +213,48 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
             "protective-order handovers remain quarantined after startup recovery",
             extra={"aitos_extra": {"blocked": handover_recovery["blocked"]}},
         )
-    await require_live_account_exposure_reconciled(
+    child_fill_recovery = await recover_triggered_protection_child_fills(
         raw_order_executor,
         raw_order_executor.execution_intent_store,
-        components.trade_lifecycle.get_open_trades(),
+        components.trade_lifecycle,
     )
+    if child_fill_recovery["applied"]:
+        logger.warning(
+            "applied authenticated triggered protective child fills",
+            extra={"aitos_extra": child_fill_recovery},
+        )
+    if child_fill_recovery["blocked"]:
+        logger.critical(
+            "triggered protective child fills remain quarantined",
+            extra={"aitos_extra": {"blocked": child_fill_recovery["blocked"]}},
+        )
+    account_reconciliation_ready = True
+    try:
+        await require_live_account_exposure_reconciled(
+            raw_order_executor,
+            raw_order_executor.execution_intent_store,
+            components.trade_lifecycle.get_open_trades(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        account_reconciliation_ready = False
+        logger.critical(
+            "live startup entering manage-only mode: account exposure is not reconciled",
+            extra={
+                "aitos_extra": {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "new_entries_allowed": False,
+                }
+            },
+        )
     gateway = components.trade_lifecycle._aitos_capital_gateway
     restored_trades = components.trade_lifecycle.get_open_trades()
     active_symbols = {trade.symbol for trade in restored_trades}
     # A crash after durable close but before release may leave a flat lease.
     # Only the matched full-account snapshot and this stable owner permit release.
-    for reservation in gateway.reservation.snapshot():
-        if reservation.symbol not in active_symbols:
-            gateway.release(reservation.symbol)
+    if account_reconciliation_ready:
+        for reservation in gateway.reservation.snapshot():
+            if reservation.symbol not in active_symbols:
+                gateway.release(reservation.symbol)
     for trade in restored_trades:
         if trade.leverage <= 0:
             raise ValueError("restored exposure has invalid leverage")
@@ -337,7 +367,11 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await tracker.restore()
     await income_reconciler.initialize({})
     stop_event = asyncio.Event()
-    new_entries_allowed = position_recovery_ready and income_reconciliation_ready
+    new_entries_allowed = (
+        position_recovery_ready
+        and income_reconciliation_ready
+        and account_reconciliation_ready
+    )
     if not new_entries_allowed:
         # Keep market ingestion, lifecycle price management, exchange protection
         # reconciliation and existing-position supervision alive, but do not
@@ -348,6 +382,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 "aitos_extra": {
                     "position_recovery_ready": position_recovery_ready,
                     "income_reconciliation_ready": income_reconciliation_ready,
+                    "account_reconciliation_ready": account_reconciliation_ready,
                     "new_entries_allowed": False,
                 }
             },
