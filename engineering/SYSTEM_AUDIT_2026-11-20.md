@@ -127,7 +127,7 @@ The main CI workflow currently:
 
 The default Compose limits permit Redis 2.5 GiB, ClickHouse 2.5 GiB, Neo4j 2.5 GiB and the paper runner 2 GiB, before Docker Desktop and host overhead. These are caps rather than reserved memory, but a full local stack is not appropriate for a 4 GiB workstation. The paper Compose service also declares all three data services as dependencies, so simply omitting Neo4j is not a supported paper-run configuration.
 
-**Remediation in this branch:** add resource-profile guidance for frontend-only, low-memory development, selective service work and full paper-stack validation. The guide explicitly directs low-memory machines to frontend/sample mode and focused unit tests rather than unsafe memory-limit reductions.
+**Remediation in this branch:** add resource-profile guidance for frontend-only, low-memory development, selective service work and full paper-stack validation; align the README quick-start service command with the local guide by including `clickhouse-init`. The guide explicitly directs low-memory machines to frontend/sample mode and focused unit tests rather than unsafe memory-limit reductions.
 
 ### P2 — Overlapping open testnet PRs require explicit triage
 
