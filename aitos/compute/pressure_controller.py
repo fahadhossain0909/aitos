@@ -86,7 +86,10 @@ class ProcessPressureSampler:
             or (
                 queue_lag_seconds is not None
                 and (
-                    not isfinite(queue_lag_seconds) or queue_lag_seconds < 0
+                    isinstance(queue_lag_seconds, bool)
+                    or not isinstance(queue_lag_seconds, (int, float))
+                    or not isfinite(queue_lag_seconds)
+                    or queue_lag_seconds < 0
                 )
             )
         ):
@@ -144,7 +147,13 @@ class PressurePolicy:
             self.recovery_hold_seconds,
             self.minimum_transition_interval_seconds,
         )
-        if any(not isfinite(value) or value < 0 for value in values):
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+            or value < 0
+            for value in values
+        ):
             raise ValueError("pressure policy durations must be non-negative")
 
 
