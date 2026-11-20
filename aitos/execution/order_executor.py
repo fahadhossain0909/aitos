@@ -118,6 +118,7 @@ class OrderExecutor(ABC):
         take_profit_price: float,
         *,
         owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support exchange-side take-profit orders"
