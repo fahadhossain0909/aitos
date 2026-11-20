@@ -61,10 +61,13 @@ class ResourceBudget:
             self.background_task_limit,
             self.deep_analysis_slots,
         )
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in integer_limits
-        ) or self.cpu_workers < 1:
+        if (
+            any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in integer_limits
+            )
+            or self.cpu_workers < 1
+        ):
             raise ValueError("resource budget limits must be non-negative integers")
         if not isfinite(self.cpu_capacity_units) or self.cpu_capacity_units < 0:
             raise ValueError("CPU capacity units must be finite and non-negative")
