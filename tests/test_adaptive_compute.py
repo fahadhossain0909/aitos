@@ -413,6 +413,7 @@ def test_workload_estimator_rejects_invalid_telemetry():
     else:
         raise AssertionError("non-finite telemetry must be rejected")
 
+
 def test_optional_scheduler_applies_priority_and_hard_budgets():
     from aitos.compute.work_scheduler import (
         WorkloadClass,
@@ -433,6 +434,7 @@ def test_optional_scheduler_applies_priority_and_hard_budgets():
     assert result.admitted == ("scan-a", "scan-b")
     assert set(result.deferred) == {"metrics", "backfill"}
     assert result.cpu_reserved_units == 60
+
 
 def test_optional_scheduler_reduces_work_during_warning_and_high_pressure():
     from aitos.compute.work_scheduler import (
@@ -469,6 +471,7 @@ def test_optional_scheduler_reduces_work_during_warning_and_high_pressure():
     assert critical.admitted == ()
     assert set(critical.deferred) == {"interactive", "background"}
 
+
 def test_optional_scheduler_rejects_duplicate_ids_and_invalid_budgets():
     from aitos.compute.work_scheduler import (
         WorkloadClass,
@@ -492,7 +495,6 @@ def test_optional_scheduler_rejects_duplicate_ids_and_invalid_budgets():
         pass
     else:
         raise AssertionError("non-finite capacity must be rejected")
-
 
 
 def test_symbol_telemetry_collector_exports_bounded_p95_samples():
@@ -554,7 +556,6 @@ def test_symbol_telemetry_collector_rejects_invalid_samples():
         raise AssertionError("non-finite timestamp must be rejected")
 
 
-
 def test_symbol_telemetry_collector_expires_stale_book_depth_samples():
     from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 
@@ -577,7 +578,6 @@ def test_symbol_telemetry_collector_rejects_subsecond_window():
         raise AssertionError("subsecond windows must not mislabel rates as per-second")
 
 
-
 def test_symbol_telemetry_collector_rejects_non_finite_window():
     from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 
@@ -587,7 +587,6 @@ def test_symbol_telemetry_collector_rejects_non_finite_window():
         pass
     else:
         raise AssertionError("non-finite telemetry window must be rejected")
-
 
 
 def test_resource_budget_rejects_invalid_direct_construction():
