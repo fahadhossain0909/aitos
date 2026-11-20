@@ -74,7 +74,7 @@ The console-quality, Windows-console and Linux-console workflows had push trigge
 
 The separate `aitos.strategy.StrategyEngine` deliberately stops before the risk gate and venue adapter. The source audit did not establish a production consumer of its `StrategyResult.intents` or a production call to the universal `ExecutionAdapter.submit`. The active Futures opportunity path is separately wired through `TradeLifecycle.submit_opportunity`, whose runtime wrapper applies hard-limit, CapitalGateway and reservation checks. This is an architectural boundary, not proof that the active Futures scanner is bypassing risk; however, the StrategyEngine must not be presented as an end-to-end live strategy pipeline until a governed adapter path is explicitly wired and tested.
 
-**Required action:** either keep this engine explicitly research/shadow-only in product documentation, or implement an additive, typed adapter that translates strategy proposals through the existing final capital/risk authority. Do not add a second independent risk gate or dispatch around `TradeLifecycle`.
+**Remediation in this branch:** the Desktop User Manual and Financial State Authority & Reconciliation Contract now explicitly classify StrategyEngine output as research/proposal/allocation evidence until a typed bridge is implemented. The documented target bridge must create the canonical Opportunity and call `TradeLifecycle.submit_opportunity`; no strategy can call a venue adapter directly. The bridge itself remains a separate integration project because StrategyResult/Allocation contracts do not yet provide a verified one-to-one mapping to Opportunity sizing, stop, venue and lifecycle semantics.
 
 ### P1 — Zero/unknown position risk can be understated in the capital projection
 
@@ -124,7 +124,7 @@ The main CI workflow currently:
 - installs Pylint but does not run it;
 - runs Bandit and Safety checks and validates/builds the Docker image.
 
-Both production and staging image-build workflows explicitly set Docker Buildx `provenance: false` and `sbom: false`; the current release pipeline therefore does not publish those supply-chain attestations/SBOMs.
+Both production and staging image-build workflows previously disabled Docker Buildx provenance and SBOM generation. **Remediation in this branch:** image publication now requests BuildKit `provenance: mode=max` and `sbom: true` attestations. The production deploy remains gated by `AITOS_VPS_ENABLED == 'true'`; this branch did not deploy or enable that variable. Registry-side verification of the published attestations remains a release acceptance task.
 
 **Observed in this PR:** the first full CI run failed at the repository-wide Black check because the newly merged compute workload preference condition in `aitos/compute/resource_governor.py` was not Black-formatted. The condition has been reformatted without changing its logic; a fresh full run is required on the updated head.
 
@@ -138,9 +138,14 @@ The default Compose limits permit Redis 2.5 GiB, ClickHouse 2.5 GiB, Neo4j 2.5 G
 
 ### P2 — Overlapping open testnet PRs require explicit triage
 
-The current open-PR search returned both #215 and #244, with nearly identical stated scope: enabling Binance Futures Testnet routing for paper trading. Their descriptions overlap; this audit did not compare every branch diff or certify either PR as still needed.
+Diff comparison is complete. Both branches are stale relative to current `main` and are not safe to merge as-is (GitHub reports mergeable=false for both). They are not duplicates:
 
-**Required action:** compare both diffs against current `main`, identify any unique changes, and close/supersede only after review. Do not merge both blindly or infer that either is already represented in main from its title alone.
+- #215 changes 100 files (8,513 additions / 480 deletions), including EventBus contracts/factory, MarketDataBus, capital runtime, strategy contracts/allocator/engine, HTF cache, RL feedback, forensic data-flow and broader paper-runtime lifecycle changes.
+- #244 changes 99 files (12,039 additions / 131 deletions), including a substantial advanced-statistics/continuous-intelligence stack (HSMM/Hawkes, dependence, depth replay, validation, model governance and rollout), plus position-switching and outcome attribution.
+- They share 31 files, including `aitos/exchange/binance.py`, `run_paper_trading.py`, `aitos/app.py`, scanner/lifecycle/persistence, and shared tests. Those overlaps have materially different patches. For example, #215 adds signed income-history pagination and a much larger paper-runner cleanup/recovery refactor; #244 adds testnet URL selection to the existing adapter and changes dead-candle exit behavior. Blindly merging both would risk conflicting financial semantics and duplicate integrations.
+- Current `main` still does not expose an explicit Futures testnet selector in `BinanceFuturesAdapter` / `run_paper_trading.py`; neither PR's feature is proven integrated merely by its title.
+
+**Decision:** retain both as historical work packages for selective extraction, but do not merge or close them automatically. The testnet endpoint/credential work requires an isolated adapter contract and no-live-order test plan; the advanced-statistics work requires individual module dependency, point-in-time and OOS review before cherry-picking. This audit branch implements neither broad stale diff wholesale.
 
 ### P2 — Documentation freshness and product truth
 
