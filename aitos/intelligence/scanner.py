@@ -2180,7 +2180,24 @@ class OpportunityScanner(AITOSModule):
                     adaptive_runtime, "observe_process_pressure", None
                 )
                 if callable(observe_pressure):
-                    observe_pressure()
+                    queue_lag_seconds = None
+                    queue_lag_provider = getattr(
+                        self._event_bus, "queue_lag_seconds", None
+                    )
+                    if callable(queue_lag_provider):
+                        try:
+                            queue_lag_seconds = await queue_lag_provider()
+                        except Exception:
+                            logger.debug(
+                                "event-bus queue pressure sample unavailable",
+                                exc_info=True,
+                            )
+                    try:
+                        observe_pressure(queue_lag_seconds=queue_lag_seconds)
+                    except TypeError:
+                        # Preserve compatibility with lightweight test doubles and
+                        # older injected runtimes that expose a no-argument sampler.
+                        observe_pressure()
                 concurrency_gate = getattr(
                     self, "_aitos_adaptive_concurrency_gate", None
                 )
