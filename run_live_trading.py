@@ -245,6 +245,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         components.trade_lifecycle,
         event_bus,
         state_store,
+        persist_trade=trade_state_persistence.persist_execution_state,
     )
     cleanup.push_async_callback(income_reconciler.shutdown)
     income_reconciliation_ready = False
