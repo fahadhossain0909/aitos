@@ -495,3 +495,63 @@ def test_optional_scheduler_rejects_duplicate_ids_and_invalid_budgets():
         pass
     else:
         raise AssertionError("non-finite capacity must be rejected")
+
+
+
+def test_symbol_telemetry_collector_exports_bounded_p95_samples():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    now = [100.0]
+    collector = SymbolTelemetryCollector(
+        window_seconds=10,
+        max_symbols=2,
+        max_samples_per_metric=5,
+        clock=lambda: now[0],
+    )
+    for offset in range(5):
+        collector.record_event("BTCUSDT", timestamp=95 + offset)
+    collector.record_book_depth("BTCUSDT", 20, timestamp=99)
+    collector.record_book_depth("BTCUSDT", 40, timestamp=100)
+    collector.record_analysis("BTCUSDT", timestamp=99)
+    collector.record_analysis("BTCUSDT", timestamp=100)
+
+    snapshot = collector.snapshot("btcusdt")
+    assert snapshot is not None
+    assert snapshot.symbol == "BTCUSDT"
+    assert snapshot.p95_event_rate_per_second >= 1
+    assert snapshot.p95_book_depth_levels == 40
+    assert snapshot.analysis_runs_per_minute == 12
+    assert snapshot.sample_count == 9
+
+
+def test_symbol_telemetry_collector_prunes_old_samples_and_bounds_cardinality():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    now = [10.0]
+    collector = SymbolTelemetryCollector(
+        window_seconds=5,
+        max_symbols=2,
+        max_samples_per_metric=2,
+        clock=lambda: now[0],
+    )
+    collector.record_event("BTCUSDT", timestamp=1)
+    collector.record_event("BTCUSDT", timestamp=9)
+    collector.record_event("ETHUSDT", timestamp=9)
+    collector.record_event("SOLUSDT", timestamp=9)
+
+    assert collector.snapshot("BTCUSDT") is None
+    assert collector.snapshot("ETHUSDT") is not None
+    assert collector.snapshot("SOLUSDT") is not None
+    assert collector.stats().tracked_symbols == 2
+
+
+def test_symbol_telemetry_collector_rejects_invalid_samples():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    collector = SymbolTelemetryCollector()
+    try:
+        collector.record_event("BTCUSDT", timestamp=float("nan"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite timestamp must be rejected")
