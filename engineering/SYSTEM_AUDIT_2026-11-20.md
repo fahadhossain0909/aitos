@@ -25,7 +25,7 @@
 | Futures market/runtime | Existing Binance USD-M Futures adapters and paper/live entrypoints | SOURCE-VERIFIED; venue behavior NOT VERIFIED |
 | Spot | Separate Binance Spot runtime and market-data adapter; USDT quote scope | SOURCE-VERIFIED |
 | Spot safety defaults | Spot disabled; testnet true; execution disabled; mainnet not allowed by default | SOURCE-VERIFIED in `docs/SPOT_MARKET_INTEGRATION.md` |
-| Market architecture | Canonical market-data envelope, separate asset-neutral domain contracts and provenance bridge | SOURCE-VERIFIED; production shadow-consumer wiring remains an explicit gate |
+| Market architecture | Canonical market-data envelope, separate asset-neutral domain contracts, provenance bridge and recursive payload/state freezing | SOURCE-VERIFIED; production shadow-consumer wiring remains an explicit gate |
 | Portfolio/risk | CapitalGateway, atomic reservation checks and pending-order exposure projection additions | SOURCE-VERIFIED; complete provider freshness and all-path runtime proof remains open |
 | Execution recovery | Durable intent/quarantine and protection reconciliation mechanisms | SOURCE-VERIFIED; protective POST-to-ACK recovery and full terminal history remain open |
 | Compute | Adaptive capacity detection, bounded optional-work admission and queue pressure telemetry | SOURCE-VERIFIED; disabled by default and rejected in live mode |
@@ -64,11 +64,19 @@ The console-quality, Windows-console and Linux-console workflows had push trigge
 
 **Remediation in this branch:** add path-filtered main push validation to all four desktop workflows while retaining the arena branch trigger where it existed. Add a regression test that protects the mainline trigger policy.
 
+### P1 — Strategy proposal engine is not the active execution path
+
+The separate `aitos.strategy.StrategyEngine` deliberately stops before the risk gate and venue adapter. The source audit did not establish a production consumer of its `StrategyResult.intents` or a production call to the universal `ExecutionAdapter.submit`. The active Futures opportunity path is separately wired through `TradeLifecycle.submit_opportunity`, whose runtime wrapper applies hard-limit, CapitalGateway and reservation checks. This is an architectural boundary, not proof that the active Futures scanner is bypassing risk; however, the StrategyEngine must not be presented as an end-to-end live strategy pipeline until a governed adapter path is explicitly wired and tested.
+
+**Required action:** either keep this engine explicitly research/shadow-only in product documentation, or implement an additive, typed adapter that translates strategy proposals through the existing final capital/risk authority. Do not add a second independent risk gate or dispatch around `TradeLifecycle`.
+
 ### P1 — Financial source-of-truth and reconciliation matrix
 
 The architecture program explicitly records that financial state is distributed across ClickHouse, Redis, SQLite/scoped journals and other stores, with no single cross-database transaction. The authority matrix for orders, fills, positions, cash, fees, funding, reservations and model artifacts is not yet complete.
 
 **Required action:** define one authoritative writer/reader and reconciliation source per aggregate; specify idempotency, transaction boundary, replay behavior and recovery procedure. Do not silently repair discrepancies or release pinned capital when evidence is ambiguous.
+
+**Positive source verification:** PR #260's recursive `FrozenDict`/`FrozenList` change is present on current main. Both market-event envelopes freeze `payload` and `stage_timestamps`, and `GlobalMarketState` freezes `features`. The earlier AEP Phase 1 note that these dictionaries remained mutable is historical and has been corrected on this branch.
 
 ### P1 — Spot rollout remains intentionally limited
 
