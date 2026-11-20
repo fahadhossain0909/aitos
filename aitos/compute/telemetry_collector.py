@@ -167,8 +167,8 @@ class SymbolTelemetryCollector:
                 if cutoff <= timestamp <= current
             ]
             depth = int(self._percentile(depth_values, 0.95))
-            sample_count = (
-                len(window.events) + len(window.depths) + len(window.analyses)
+            sample_count = min(
+                len(window.events), len(window.depths), len(window.analyses)
             )
             return SymbolTelemetry(
                 symbol=key,
