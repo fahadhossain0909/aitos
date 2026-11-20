@@ -88,7 +88,6 @@ async def test_prepare_live_executor_exits_on_hedge_mode_mismatch():
 
 @pytest.mark.asyncio
 async def test_prepare_live_executor_succeeds_and_loads_symbol_filters():
-    
 
     settings = FakeSettings()
     exchange_info = {
@@ -112,7 +111,9 @@ async def test_prepare_live_executor_succeeds_and_loads_symbol_filters():
             ),
             payload={"dualSidePosition": False},
         )
-        m.get("https://demo-fapi.binance.com/fapi/v1/exchangeInfo", payload=exchange_info)
+        m.get(
+            "https://demo-fapi.binance.com/fapi/v1/exchangeInfo", payload=exchange_info
+        )
 
         executor = await prepare_live_executor(settings, ["BTCUSDT"])
 
