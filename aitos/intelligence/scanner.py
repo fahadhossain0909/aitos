@@ -2103,7 +2103,13 @@ class OpportunityScanner(AITOSModule):
                     workloads.append(estimated.workload)
                 capacity_plan = plan_symbol_capacity(
                     workloads,
-                    adaptive_runtime.budget_for_optional_work(),
+                    (
+                        adaptive_runtime.budget_for_optional_work()
+                        if callable(
+                            getattr(adaptive_runtime, "budget_for_optional_work", None)
+                        )
+                        else adaptive_runtime.budget
+                    ),
                     max_symbols=limit,
                 )
                 self._aitos_last_capacity_plan = capacity_plan
@@ -2135,7 +2141,13 @@ class OpportunityScanner(AITOSModule):
                             "memory_budget_mb": (
                                 adaptive_runtime.budget_for_optional_work().memory_budget_mb
                             ),
-                            "pressure_level": int(adaptive_runtime.pressure_controller.level),
+                            "pressure_level": int(
+                                getattr(
+                                    getattr(adaptive_runtime, "pressure_controller", None),
+                                    "level",
+                                    0,
+                                )
+                            ),
                         }
                     },
                 )
@@ -2165,7 +2177,11 @@ class OpportunityScanner(AITOSModule):
         adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
         if adaptive_runtime is not None:
             try:
-                adaptive_runtime.observe_process_pressure()
+                observe_pressure = getattr(
+                    adaptive_runtime, "observe_process_pressure", None
+                )
+                if callable(observe_pressure):
+                    observe_pressure()
             except Exception:
                 logger.exception(
                     "adaptive process pressure sampling failed; retaining last pressure state"
