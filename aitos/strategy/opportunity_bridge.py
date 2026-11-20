@@ -386,6 +386,14 @@ def build_risk_governed_opportunities(
             funding_bps=float(plan.funding_bps),
             loss_probability=float(plan.loss_probability),
         )
+        if (
+            normalized_plan.leverage > 1.0
+            and portfolio_risk.liquidation_buffer_pct is None
+        ):
+            rejected.append(
+                (key, "leveraged proposal requires a current liquidation-buffer snapshot")
+            )
+            continue
         try:
             liquidity_score = float(snapshot.liquidity_score)
         except (TypeError, ValueError, OverflowError):
