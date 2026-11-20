@@ -195,7 +195,9 @@ def build_risk_governed_opportunities(
         not isfinite(equity_peak_usd)
         or equity_peak_usd < equity_usd
     ):
-        raise ValueError("portfolio peak equity must be finite and cover current equity")
+        raise ValueError(
+            "portfolio peak equity must be finite and cover current equity"
+        )
     if (
         isinstance(portfolio_risk.consecutive_losses, bool)
         or not isinstance(portfolio_risk.consecutive_losses, int)
