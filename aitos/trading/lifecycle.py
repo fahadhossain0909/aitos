@@ -2534,6 +2534,12 @@ class TradeLifecycle(AITOSModule):
             raise ValueError(
                 "replacement take-profit price must be finite and positive"
             )
+        if (
+            trade.side == TradeSide.LONG and new_price <= trade.entry_price
+        ) or (
+            trade.side == TradeSide.SHORT and new_price >= trade.entry_price
+        ):
+            raise ValueError("replacement take-profit must remain on the profitable side")
         self._require_execution_writer()
         self._assert_execution_unlatched(trade.trade_id)
         if self._open_trades.get(trade.trade_id) is not trade:
@@ -2587,9 +2593,22 @@ class TradeLifecycle(AITOSModule):
             old_quantity = float(old_request["quantity"])
         except (KeyError, TypeError, ValueError, OverflowError):
             old_quantity = float("nan")
-        if not math.isfinite(old_quantity) or old_quantity <= 0:
+        if (
+            not math.isfinite(old_quantity)
+            or old_quantity <= 0
+            or old_quantity > trade.quantity
+            or not _valid_market_price(old_request.get("reference_price"))
+            or not math.isclose(
+                float(old_request["reference_price"]),
+                float(trade.take_profit_levels[tp_index]),
+                rel_tol=1e-12,
+                abs_tol=0.0,
+            )
+        ):
             raise ExecutionRecoveryRequired(
-                trade.symbol, str(old_id), "old take-profit quantity is invalid"
+                trade.symbol,
+                str(old_id),
+                "old take-profit quantity or trigger is inconsistent with trade snapshot",
             )
         status_reader = getattr(self._order_executor, "get_resting_order_status", None)
         if not callable(status_reader):
