@@ -81,9 +81,7 @@ async def prepare_live_executor(
         )
         sys.exit(1)
 
-    scope = hashlib.sha256(
-        f"{settings.binance.testnet}:{api_key}".encode()
-    ).hexdigest()
+    scope = hashlib.sha256(f"{settings.binance.testnet}:{api_key}".encode()).hexdigest()
     intent_store = ExecutionIntentStore(
         get_model_data_dir() / "execution_intents.sqlite3", scope=scope
     )
