@@ -1047,3 +1047,31 @@ def test_resource_budget_disables_deep_analysis_without_memory_headroom():
     assert budget.memory_budget_mb == 0
     assert budget.deep_analysis_slots == 0
     assert budget.cpu_workers == 2
+
+
+
+def test_detect_resources_resolves_nested_cgroup_v2_process_membership(tmp_path):
+    proc = tmp_path / "proc"
+    cgroup = tmp_path / "cgroup"
+    devices = tmp_path / "dev"
+    (proc / "self").mkdir(parents=True)
+    (cgroup / "docker" / "container-id").mkdir(parents=True)
+    devices.mkdir()
+    (proc / "meminfo").write_text(
+        "MemTotal: 8388608 kB\nMemAvailable: 4194304 kB\n", encoding="ascii"
+    )
+    (proc / "self" / "cgroup").write_text(
+        "0::/docker/container-id\n", encoding="ascii"
+    )
+    nested = cgroup / "docker" / "container-id"
+    (nested / "cpu.max").write_text("150000 100000", encoding="ascii")
+    (nested / "memory.max").write_text(str(2 * 1024 * 1024 * 1024), encoding="ascii")
+    (nested / "memory.current").write_text(
+        str(512 * 1024 * 1024), encoding="ascii"
+    )
+
+    result = detect_resources(proc_root=proc, cgroup_root=cgroup, device_root=devices)
+    assert result.effective_cpus == pytest.approx(1.5)
+    assert result.cpu_quota_limited is True
+    assert result.memory_limit_mb == 2048
+    assert result.memory_available_mb == 1536
