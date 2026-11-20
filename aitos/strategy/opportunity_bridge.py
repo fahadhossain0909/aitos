@@ -181,7 +181,10 @@ def build_risk_governed_opportunities(
             rejected.append(
                 (
                     key,
-                    "multiple intents require explicit per-instrument capital allocation",
+                    (
+                        "multiple intents require explicit per-instrument "
+                        "capital allocation"
+                    ),
                 ),
             )
             continue
