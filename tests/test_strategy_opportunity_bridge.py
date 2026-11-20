@@ -196,3 +196,76 @@ def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
             equity_usd=1_000.0,
             live_reservation=object(),
         )
+
+
+def test_shadow_opportunity_cannot_exceed_strategy_projected_loss_cap():
+    cycle, context, plans = inputs()
+    cycle = StrategyCycle(
+        regime=cycle.regime,
+        results=cycle.results,
+        allocations=(Allocation("amt-flow", 100.0, 2.0, 1.0),),
+    )
+    report = build_risk_governed_opportunities(
+        cycle,
+        context,
+        plans,
+        shadow_gateway_factory=ShadowGateway,
+        equity_usd=1_000.0,
+        live_reservation=object(),
+    )
+    governed = report.opportunities[0]
+    assert governed.risk_receipt.risk_budget_usd == 2.0
+    assert governed.risk_receipt.capital_usd == 40.0
+
+
+def test_multiple_intents_do_not_reuse_one_strategy_allocation():
+    cycle, context, plans = inputs()
+    result = cycle.results[0]
+    second = ExecutionIntent(
+        instrument_id="binance:futures:ETHUSDT",
+        side="buy",
+        quantity=1.0,
+        strategy_id="amt-flow",
+        rationale="second instrument",
+    )
+    context = StrategyContext(
+        now_ns=context.now_ns,
+        mode=context.mode,
+        snapshots={
+            **context.snapshots,
+            "binance:futures:ETHUSDT": MarketSnapshot(
+                instrument_id="binance:futures:ETHUSDT",
+                mid=100.0,
+                liquidity_score=8.0,
+            ),
+        },
+        available_capital=context.available_capital,
+        risk_budget=context.risk_budget,
+        global_regime=context.global_regime,
+    )
+    cycle = StrategyCycle(
+        regime=cycle.regime,
+        results=(
+            StrategyResult(
+                strategy_id=result.strategy_id,
+                family=result.family,
+                intents=(*result.intents, second),
+                capital_request=result.capital_request,
+            ),
+        ),
+        allocations=cycle.allocations,
+    )
+    plans["binance:futures:ETHUSDT"] = StrategyProtectionPlan(
+        stop_loss_price=95.0,
+        take_profit_levels=(110.0,),
+    )
+    report = build_risk_governed_opportunities(
+        cycle,
+        context,
+        plans,
+        shadow_gateway_factory=ShadowGateway,
+        equity_usd=1_000.0,
+        live_reservation=object(),
+    )
+    assert len(report.opportunities) == 1
+    assert any("multiple intents" in reason for _, reason in report.rejected)
