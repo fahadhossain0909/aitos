@@ -579,6 +579,34 @@ class ExecutionIntentStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def protection_intent_for_order(
+        self, order_id: str, trade_id: str
+    ) -> dict:
+        """Resolve one exact owner-bound protective intent by venue order ID."""
+        matches = []
+        for row in self.protection_intents():
+            result = json.loads(row.get("result_json") or "{}")
+            request = json.loads(row.get("request_json") or "{}")
+            if str(result.get("order_id") or "") == str(order_id):
+                if (
+                    request.get("owner_trade_id") != str(trade_id)
+                    or row.get("symbol") != request.get("symbol")
+                ):
+                    raise ExecutionRecoveryRequired(
+                        str(row.get("symbol") or ""),
+                        str(order_id),
+                        "protective order ID is bound to a different owner",
+                    )
+                matches.append((row, request))
+        if len(matches) != 1:
+            raise ExecutionRecoveryRequired(
+                "",
+                str(order_id),
+                "protective order ID has missing or ambiguous durable intent",
+            )
+        row, request = matches[0]
+        return {**row, "request": request}
+
     def assert_ready(self) -> None:
         rows = self.unresolved()
         if rows:
