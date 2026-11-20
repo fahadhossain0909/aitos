@@ -1043,7 +1043,6 @@ def test_resource_budget_disables_deep_analysis_without_memory_headroom():
     assert budget.cpu_workers == 2
 
 
-
 def test_detect_resources_resolves_nested_cgroup_v2_process_membership(tmp_path):
     proc = tmp_path / "proc"
     cgroup = tmp_path / "cgroup"
