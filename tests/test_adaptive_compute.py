@@ -705,3 +705,58 @@ def test_pressure_controller_recovery_honors_zero_timestamp_and_cooldown():
         queue_lag_seconds=0,
     )
     assert recovered.level == PressureLevel.NORMAL
+
+
+
+def test_adaptive_runtime_connects_pressure_state_to_optional_admission():
+    from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+    from aitos.compute.resource_governor import ResourceSnapshot
+    from aitos.compute.work_scheduler import WorkloadClass, WorkloadRequest
+    from aitos.config.tuning import TuningSettings
+
+    settings = TuningSettings.model_validate(
+        {
+            "mode": "paper",
+            "runtime": {
+                "adaptive_compute_enabled": True,
+                "pressure_warning_hold_seconds": 0,
+                "pressure_high_hold_seconds": 0,
+                "pressure_recovery_hold_seconds": 2,
+                "pressure_minimum_transition_interval_seconds": 0,
+            },
+            "hardware": {
+                "cpu_worker_budget": 2,
+                "memory_budget_mb": 1024,
+                "memory_reserve_pct": 20,
+            },
+        }
+    )
+    runtime = create_adaptive_compute_runtime(
+        settings,
+        resources=ResourceSnapshot(2, 2.0, 2048, 2048, 1024, False, False),
+    )
+    assert runtime is not None
+    requests = [
+        WorkloadRequest("scan", WorkloadClass.INTERACTIVE, 50, 50),
+        WorkloadRequest("backfill", WorkloadClass.BULK, 50, 50),
+    ]
+
+    warning = runtime.update_pressure(
+        now_seconds=0,
+        cpu_utilization_pct=82,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert warning.level == PressureLevel.WARNING
+    admitted = runtime.admit_optional_work(requests)
+    assert admitted.admitted == ("scan",)
+    assert admitted.deferred == ("backfill",)
+
+    critical = runtime.update_pressure(
+        now_seconds=1,
+        cpu_utilization_pct=99,
+        memory_utilization_pct=20,
+        queue_lag_seconds=0,
+    )
+    assert critical.level == PressureLevel.CRITICAL
+    assert runtime.admit_optional_work(requests).admitted == ()
