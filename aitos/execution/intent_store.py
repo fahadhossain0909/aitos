@@ -248,7 +248,9 @@ class ExecutionIntentStore:
                     "new_client_id": new_client_id,
                 }
                 if any(row[key] != value for key, value in expected.items()):
-                    raise ValueError("protective handover ID reused for different identity")
+                    raise ValueError(
+                        "protective handover ID reused for different identity"
+                    )
                 return row
             active = conn.execute(
                 "SELECT handover_id FROM protection_handovers WHERE scope=? "
@@ -264,7 +266,14 @@ class ExecutionIntentStore:
             conn.execute(
                 "INSERT INTO protection_handovers(scope,handover_id,trade_id,symbol,"
                 "old_order_id,new_client_id,state) VALUES (?,?,?,?,?,?,'PREPARED')",
-                (self.scope, handover_id, trade_id, symbol, old_order_id, new_client_id),
+                (
+                    self.scope,
+                    handover_id,
+                    trade_id,
+                    symbol,
+                    old_order_id,
+                    new_client_id,
+                ),
             )
             row = conn.execute(
                 "SELECT * FROM protection_handovers WHERE scope=? AND handover_id=?",
@@ -272,9 +281,7 @@ class ExecutionIntentStore:
             ).fetchone()
             return dict(row)
 
-    def record_handover_new_order(
-        self, handover_id: str, new_order_id: str
-    ) -> None:
+    def record_handover_new_order(self, handover_id: str, new_order_id: str) -> None:
         if not re.fullmatch(r"algo:[1-9][0-9]{0,29}", str(new_order_id or "")):
             raise ValueError("valid replacement algo order ID required")
         with self._connection() as conn:
@@ -320,7 +327,9 @@ class ExecutionIntentStore:
                 (self.scope, handover_id),
             )
             if cursor.rowcount != 1:
-                raise ValueError("handover cannot complete before old stop cancellation")
+                raise ValueError(
+                    "handover cannot complete before old stop cancellation"
+                )
 
     def block_protection_handover(self, handover_id: str, reason: str) -> None:
         if not isinstance(reason, str) or not reason.strip():
@@ -335,9 +344,7 @@ class ExecutionIntentStore:
             if cursor.rowcount != 1:
                 raise ValueError("handover cannot be quarantined")
 
-    def protection_handovers(
-        self, *, trade_id: str | None = None
-    ) -> list[dict]:
+    def protection_handovers(self, *, trade_id: str | None = None) -> list[dict]:
         with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM protection_handovers WHERE scope=? "
@@ -345,9 +352,7 @@ class ExecutionIntentStore:
                 (self.scope,),
             ).fetchall()
         return [
-            dict(row)
-            for row in rows
-            if trade_id is None or row["trade_id"] == trade_id
+            dict(row) for row in rows if trade_id is None or row["trade_id"] == trade_id
         ]
 
     def mark_protection_terminal(
