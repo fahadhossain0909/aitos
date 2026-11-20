@@ -7,6 +7,8 @@ from aitos.compute.adaptive_runtime import (
 from aitos.compute.pressure_controller import (
     PressureDecision,
     PressurePolicy,
+    ProcessPressureSample,
+    ProcessPressureSampler,
     ResourcePressureController,
 )
 from aitos.compute.work_scheduler import (
@@ -43,6 +45,8 @@ __all__ = [
     "PressureDecision",
     "PressureLevel",
     "PressurePolicy",
+    "ProcessPressureSample",
+    "ProcessPressureSampler",
     "ResourceBudget",
     "ResourcePressureController",
     "ResourceSnapshot",
