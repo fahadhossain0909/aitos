@@ -447,3 +447,13 @@ orders, reserve live capital, or change StrategyEngine's existing run-cycle
 behavior. A later live integration requires a separately reviewed execution
 authorization and account/venue-specific contract; this bridge is not that
 authorization.
+
+The typed protection plan also requires an explicit loss-probability estimate;
+strategy confidence is not silently reinterpreted as a loss probability. The
+bridge limits accepted capital to the smaller of the strategy request,
+StrategyEngine allocation and CapitalGateway allocation, then caps projected
+risk by the upstream allocation's own projected-loss amount. A strategy with
+multiple simultaneous instrument intents is rejected until it supplies
+per-instrument allocations; one strategy-level budget is never reused for each
+intent. Shadow and live reservation stores are checked by object, connection
+and SQLite database path identity before review.
