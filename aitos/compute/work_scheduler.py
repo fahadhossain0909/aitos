@@ -22,12 +22,17 @@ class WorkloadRequest:
     priority: float = 0.0
 
     def __post_init__(self) -> None:
-        if not self.request_id.strip():
+        if not isinstance(self.request_id, str) or not self.request_id.strip():
             raise ValueError("request_id cannot be empty")
+        if not isinstance(self.workload_class, WorkloadClass):
+            raise ValueError("workload_class must be a WorkloadClass")
         if (
             not isfinite(self.cpu_cost_units)
             or not isfinite(self.priority)
             or self.cpu_cost_units < 0
+            or self.priority < 0
+            or isinstance(self.memory_cost_mb, bool)
+            or not isinstance(self.memory_cost_mb, int)
             or self.memory_cost_mb < 0
         ):
             raise ValueError(
