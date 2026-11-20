@@ -54,7 +54,7 @@ from aitos.models.trade import TradeSide
 logger = get_logger("aitos.execution.binance")
 
 MAINNET_URL = "https://fapi.binance.com"
-TESTNET_URL = "https://testnet.binancefuture.com"
+TESTNET_URL = "https://demo-fapi.binance.com"
 
 
 def round_step(value: float, precision: int) -> float:
