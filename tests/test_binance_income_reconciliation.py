@@ -46,9 +46,7 @@ class FakeLifecycle:
         self.closed_trades = list(closed_trades or [])
         self.adjustments = []
 
-    async def apply_cost_adjustment(
-        self, trade_id, *, adjustment_id, kind, amount_usd
-    ):
+    async def apply_cost_adjustment(self, trade_id, *, adjustment_id, kind, amount_usd):
         trade = next(
             (
                 item
@@ -191,9 +189,7 @@ async def test_run_once_publishes_fee_and_advances_durable_cursor():
     assert bus.events[0].payload["adjustment_id"] == "binance:income:9001"
     assert bus.events[0].payload["kind"] == "fee"
     assert bus.events[0].payload["amount_usd"] == 0.12
-    assert lifecycle.adjustments == [
-        ("position-1", "binance:income:9001", "fee", 0.12)
-    ]
+    assert lifecycle.adjustments == [("position-1", "binance:income:9001", "fee", 0.12)]
     assert store.persisted == ["position-1"]
     assert store.saved and store.cursor >= int(now.timestamp() * 1000)
     assert exchange.calls[0]["start_time_ms"] <= int(entry.timestamp() * 1000)
