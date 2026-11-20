@@ -39,7 +39,9 @@ def _positive_decimal(value: Any, field: str, *, allow_zero: bool = False) -> De
     except (InvalidOperation, TypeError, ValueError):
         raise ProtectionChildReconciliationError(f"{field} must be numeric") from None
     if not parsed.is_finite() or parsed < 0 or (not allow_zero and parsed == 0):
-        raise ProtectionChildReconciliationError(f"{field} must be finite and positive")
+        raise ProtectionChildReconciliationError(
+            f"{field} must be finite and positive"
+        )
     return parsed
 
 
@@ -58,36 +60,62 @@ def calculate_protection_child_fill_delta(
     an order's status alone as proof of a fill and rejects quantity regression.
     """
     if not isinstance(algo, dict) or not isinstance(child, dict):
-        raise ProtectionChildReconciliationError("algo and child snapshots are required")
+        raise ProtectionChildReconciliationError(
+            "algo and child snapshots are required"
+        )
     algo_id = str(algo.get("algoId", ""))
     child_id = str(child.get("orderId", ""))
     if not expected_algo_id or algo_id != expected_algo_id:
         raise ProtectionChildReconciliationError("protective algo identity mismatch")
     if not child_id or child_id in {"0", "None"}:
-        raise ProtectionChildReconciliationError("triggered child order identity missing")
+        raise ProtectionChildReconciliationError(
+            "triggered child order identity missing"
+        )
     if algo.get("symbol") != expected_symbol or child.get("symbol") != expected_symbol:
         raise ProtectionChildReconciliationError("child symbol mismatch")
     if child.get("side") != expected_side:
         raise ProtectionChildReconciliationError("child side mismatch")
-    if algo.get("actualOrderId") is not None and str(algo.get("actualOrderId")) != child_id:
+    if algo.get("actualOrderId") is not None and str(
+        algo.get("actualOrderId")
+    ) != child_id:
         raise ProtectionChildReconciliationError("algo-to-child linkage mismatch")
 
     status = str(child.get("status", "")).upper()
-    if status not in {"NEW", "PARTIALLY_FILLED", "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}:
-        raise ProtectionChildReconciliationError("unsupported or missing child status")
+    allowed_statuses = {
+        "NEW",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "CANCELED",
+        "EXPIRED",
+        "EXPIRED_IN_MATCH",
+        "REJECTED",
+    }
+    if status not in allowed_statuses:
+        raise ProtectionChildReconciliationError(
+            "unsupported or missing child status"
+        )
 
-    cumulative = _positive_decimal(child.get("executedQty", "0"), "executedQty", allow_zero=True)
-    applied = _positive_decimal(previously_applied_quantity, "previously_applied_quantity", allow_zero=True)
+    cumulative = _positive_decimal(
+        child.get("executedQty", "0"), "executedQty", allow_zero=True
+    )
+    applied = _positive_decimal(
+        previously_applied_quantity,
+        "previously_applied_quantity",
+        allow_zero=True,
+    )
     if cumulative < applied:
         raise ProtectionChildReconciliationError("cumulative child fill regressed")
     if status == "FILLED":
         original = _positive_decimal(child.get("origQty"), "origQty")
         if cumulative != original:
-            raise ProtectionChildReconciliationError("FILLED child quantity does not equal original quantity")
-    if cumulative > 0:
-        average = _positive_decimal(child.get("avgPrice"), "avgPrice")
-    else:
-        average = Decimal("0")
+            raise ProtectionChildReconciliationError(
+                "FILLED child quantity does not equal original quantity"
+            )
+    average = (
+        _positive_decimal(child.get("avgPrice"), "avgPrice")
+        if cumulative > 0
+        else Decimal("0")
+    )
     return ProtectionChildFillDelta(
         algo_id=algo_id,
         child_order_id=child_id,
