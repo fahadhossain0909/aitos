@@ -29,6 +29,10 @@ class SymbolTelemetry:
             or not isfinite(self.analysis_runs_per_minute)
             or self.p95_event_rate_per_second < 0
             or self.analysis_runs_per_minute < 0
+            or isinstance(self.p95_book_depth_levels, bool)
+            or not isinstance(self.p95_book_depth_levels, int)
+            or isinstance(self.sample_count, bool)
+            or not isinstance(self.sample_count, int)
             or self.p95_book_depth_levels < 0
             or self.sample_count < 0
         ):
