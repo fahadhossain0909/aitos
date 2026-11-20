@@ -304,7 +304,9 @@ class BinanceIncomeReconciliationService(AITOSModule):
         if self._persist_trade is None or not callable(
             getattr(self._lifecycle, "apply_cost_adjustment", None)
         ):
-            self._startup_error = "durable lifecycle cost-adjustment writer is unavailable"
+            self._startup_error = (
+                "durable lifecycle cost-adjustment writer is unavailable"
+            )
             raise RuntimeError(self._startup_error)
         try:
             result = await self.run_once()
