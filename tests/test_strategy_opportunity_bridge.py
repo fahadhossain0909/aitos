@@ -160,7 +160,9 @@ def test_capital_veto_produces_no_canonical_opportunity():
         live_reservation=object(),
     )
     assert report.opportunities == ()
-    assert report.rejected == (("amt-flow:binance:futures:BTCUSDT", "portfolio_risk_limit"),)
+    assert report.rejected == (
+        ("amt-flow:binance:futures:BTCUSDT", "portfolio_risk_limit"),
+    )
 
 
 @pytest.mark.parametrize(
