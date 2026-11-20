@@ -2509,6 +2509,151 @@ class TradeLifecycle(AITOSModule):
             self._execution_recovery_required = True
             raise
 
+    async def _replace_exchange_side_take_profit(
+        self, trade: Trade, tp_index: int, new_price: float
+    ) -> None:
+        """Replace one resting TP with a durable make-before-break handover.
+
+        This operation is intentionally unavailable to EIE-managed positions:
+        their TP levels are decision checkpoints, not exchange-side orders.
+        The old TP must be a uniquely owned, untouched resting order.
+        """
+        if not self._order_executor.requires_exchange_execution:
+            raise RuntimeError("durable take-profit handover requires live execution")
+        if self._position_manager is not None:
+            raise RuntimeError("EIE-managed take-profit checkpoints are not exchange orders")
+        if not _valid_market_price(new_price):
+            raise ValueError("replacement take-profit price must be finite and positive")
+        self._require_execution_writer()
+        self._assert_execution_unlatched(trade.trade_id)
+        if self._open_trades.get(trade.trade_id) is not trade:
+            raise TradeNotFoundError(trade.trade_id)
+        if (
+            not isinstance(trade.tp_order_ids, list)
+            or not isinstance(trade.take_profit_levels, list)
+            or tp_index < 0
+            or tp_index >= len(trade.tp_order_ids)
+            or tp_index >= len(trade.take_profit_levels)
+        ):
+            raise ValueError("take-profit index is not durably owned by the trade")
+
+        old_id = trade.tp_order_ids[tp_index]
+        intent_store = getattr(self._order_executor, "intent_store", None)
+        if intent_store is None:
+            raise ExecutionRecoveryRequired(
+                trade.symbol, trade.trade_id, "durable protective handover journal unavailable"
+            )
+        matches = []
+        for row in await asyncio.to_thread(intent_store.protection_intents):
+            result = row.get("result_json")
+            request = row.get("request_json")
+            if isinstance(result, str):
+                result = __import__("json").loads(result)
+            if isinstance(request, str):
+                request = __import__("json").loads(request)
+            if isinstance(result, dict) and result.get("order_id") == old_id:
+                matches.append((row, request))
+        if len(matches) != 1:
+            raise ExecutionRecoveryRequired(
+                trade.symbol, str(old_id), "old take-profit ownership is missing or ambiguous"
+            )
+        old_row, old_request = matches[0]
+        if (
+            not isinstance(old_request, dict)
+            or old_request.get("owner_trade_id") != trade.trade_id
+            or old_request.get("order_type") != "TAKE_PROFIT_MARKET"
+            or old_request.get("reduce_only") is not True
+            or old_request.get("symbol") != trade.symbol
+            or str(old_request.get("side", "")).upper() != trade.side.value
+        ):
+            raise ExecutionRecoveryRequired(
+                trade.symbol, str(old_id), "old take-profit journal identity mismatch"
+            )
+        try:
+            old_quantity = float(old_request["quantity"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            old_quantity = float("nan")
+        if not math.isfinite(old_quantity) or old_quantity <= 0:
+            raise ExecutionRecoveryRequired(
+                trade.symbol, str(old_id), "old take-profit quantity is invalid"
+            )
+        status_reader = getattr(self._order_executor, "get_resting_order_status", None)
+        if not callable(status_reader):
+            raise ExecutionRecoveryRequired(
+                trade.symbol, str(old_id), "authenticated TP status lookup is unavailable"
+            )
+        old_status = await status_reader(trade.symbol, old_id)
+        if old_status != "NEW":
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                str(old_id),
+                f"old take-profit is not untouched NEW (status={old_status!r})",
+            )
+
+        token = uuid.uuid4().hex[:16]
+        handover_id = f"tpr-{token}"
+        new_client_id = f"aitos-tpr-{token}"
+        intent_store.begin_protection_handover(
+            handover_id=handover_id,
+            trade_id=trade.trade_id,
+            symbol=trade.symbol,
+            old_order_id=old_id,
+            new_client_id=new_client_id,
+            order_type="TAKE_PROFIT_MARKET",
+        )
+        try:
+            result = await self._order_executor.place_take_profit_order(
+                trade.symbol,
+                trade.side,
+                old_quantity,
+                new_price,
+                owner_trade_id=trade.trade_id,
+                client_order_id=new_client_id,
+            )
+            if not result.success or result.client_order_id != new_client_id:
+                raise ExecutionUncertainError(
+                    trade.symbol, new_client_id, "replacement take-profit acceptance is uncertain"
+                )
+            intent_store.record_handover_new_order(handover_id, result.order_id)
+            trade.tp_order_ids[tp_index] = result.order_id
+            trade.take_profit_levels[tp_index] = float(new_price)
+            pending = trade.agent_consensus.setdefault(
+                "_pending_stop_cancellations", []
+            )
+            if not isinstance(pending, list):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, new_client_id, "pending protection cancellation state is malformed"
+                )
+            if old_id not in pending:
+                pending.append(old_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+
+            intent_store.mark_handover_old_cancel_requested(handover_id)
+            old_status = await status_reader(trade.symbol, old_id)
+            if old_status != "NEW":
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, str(old_id),
+                    f"old take-profit changed before cancel (status={old_status!r})",
+                )
+            await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+            old_status = await status_reader(trade.symbol, old_id)
+            if old_status not in {"CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, str(old_id),
+                    f"old take-profit cancellation is unconfirmed (status={old_status!r})",
+                )
+            intent_store.mark_handover_old_cancelled(handover_id)
+            while old_id in pending:
+                pending.remove(old_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+            intent_store.complete_protection_handover(handover_id)
+            self._order_executor.acknowledge_protection(result, trade.trade_id)
+        except BaseException:
+            self._execution_recovery_required = True
+            raise
+
     async def _commit_live_execution(self, trade: Trade) -> None:
         self._require_execution_writer()
         await self._execution_position_verifier()
