@@ -250,7 +250,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
                     raise OSError("injected ClickHouse snapshot outage")
                 await original_save(trade)
 
-            monkeypatch.setattr(store, "save_trade", fail_snapshot)
+            first._execution_state_writer = fail_snapshot
         else:
             original_watermark = journal.mark_protection_child_applied
             failed = False
