@@ -244,6 +244,24 @@ def _cpu_values(proc_root: Path, cgroup_root: Path) -> tuple[int, float, bool]:
     return logical, max(0.1, effective), bool(quota_cpus and quota_cpus < logical)
 
 
+def _resolve_process_cgroup_root(proc_root: Path, cgroup_root: Path) -> Path:
+    """Resolve the current process cgroup directory for unified v2 mounts."""
+    membership = _read_text(proc_root / "self" / "cgroup")
+    if not membership:
+        return cgroup_root
+    for line in membership.splitlines():
+        hierarchy, separator, relative = line.partition("::")
+        if not separator or hierarchy != "0":
+            continue
+        relative_path = Path(relative.lstrip("/"))
+        if ".." in relative_path.parts:
+            return cgroup_root
+        candidate = cgroup_root / relative_path
+        if candidate.is_dir():
+            return candidate
+    return cgroup_root
+
+
 def detect_resources(
     *,
     proc_root: str | Path = "/proc",
@@ -252,7 +270,7 @@ def detect_resources(
 ) -> ResourceSnapshot:
     """Detect resources visible to this process; safely degrades on non-Linux."""
     proc = Path(proc_root)
-    cgroup = Path(cgroup_root)
+    cgroup = _resolve_process_cgroup_root(proc, Path(cgroup_root))
     logical, effective, cpu_limited = _cpu_values(proc, cgroup)
     total, limit, available, memory_limited = _memory_values(proc, cgroup)
     accelerators: list[str] = []
