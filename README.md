@@ -5,7 +5,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/docker-compose%20ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose ready">
-  <img src="https://img.shields.io/badge/exchange-Binance%20USDT--M%20Futures-F0B90B?style=flat-square" alt="Binance USDT-M Futures">
+  <img src="https://img.shields.io/badge/markets-Binance%20Futures%20%2B%20Spot-F0B90B?style=flat-square" alt="Binance Futures and Spot">
   <img src="https://img.shields.io/badge/status-active%20development-blue?style=flat-square" alt="Active development">
 </p>
 
@@ -362,22 +362,18 @@ Storage maintenance is profile/service based and should be run deliberately on p
 
 ```text
 aitos/
-├── aitos/
-│   ├── backtest/
-│   ├── core/
-│   ├── data/
-│   ├── execution/
-│   ├── learning/
-│   ├── monitoring/
-│   ├── risk/
-│   ├── strategy/
-│   └── xai/
+├── aitos/                 # Python trading, market-data, risk and learning platform
+├── desktop/               # React/TypeScript console and Tauri shell
+├── native/                # Windows/Linux packaging and shared desktop sidecar
+├── docs/                  # User, operator, security and integration guides
+├── engineering/           # Architecture decisions, audits and verification evidence
 ├── scripts/
 ├── tests/
+├── .github/workflows/     # CI, desktop validation and guarded deployment
 ├── docker-compose.yml
 ├── Dockerfile
-├── requirements.txt
-├── requirements-backtest.txt
+├── requirements*.txt
+├── pyproject.toml
 ├── .env.example
 └── README.md
 ```
