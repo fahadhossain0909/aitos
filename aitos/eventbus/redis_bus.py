@@ -223,6 +223,7 @@ class EventBus(AITOSModule):
 
         now_ms = int(time.time() * 1000)
         max_age_ms = 0
+        observed_groups = 0
         for stream_key, group in pairs:
             try:
                 groups = await self._redis.xinfo_groups(stream_key)
@@ -237,15 +238,14 @@ class EventBus(AITOSModule):
                 )
                 if group_info is None:
                     continue
+                observed_groups += 1
                 lag = group_info.get("lag", group_info.get(b"lag"))
                 last_id = group_info.get(
                     "last-delivered-id", group_info.get(b"last-delivered-id")
                 )
                 if (lag is None or int(lag) > 0) and last_id is not None:
                     last_id_text = (
-                        last_id.decode()
-                        if isinstance(last_id, bytes)
-                        else str(last_id)
+                        last_id.decode() if isinstance(last_id, bytes) else str(last_id)
                     )
                     unread = await self._redis.xrange(
                         stream_key, min=f"({last_id_text}", max="+", count=1
@@ -297,7 +297,7 @@ class EventBus(AITOSModule):
                     },
                 )
                 return None
-        return max(0, max_age_ms) / 1000.0
+        return max(0, max_age_ms) / 1000.0 if observed_groups else None
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for sub in self._subscriptions:
