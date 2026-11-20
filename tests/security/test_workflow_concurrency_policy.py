@@ -24,3 +24,20 @@ VALIDATION_WORKFLOWS = (
 def test_validation_workflows_do_not_cancel_in_progress_runs(workflow):
     content = (ROOT / workflow).read_text(encoding="utf-8")
     assert "cancel-in-progress: false" in content
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    (
+        ".github/workflows/console-quality.yml",
+        ".github/workflows/windows-console.yml",
+        ".github/workflows/linux-console.yml",
+        ".github/workflows/tauri-desktop.yml",
+    ),
+)
+def test_desktop_validation_repeats_after_matching_mainline_changes(workflow):
+    content = (ROOT / workflow).read_text(encoding="utf-8")
+    push_config = content.split("  pull_request:", 1)[0]
+    assert "  push:" in push_config
+    assert "branches: [main" in push_config
+    assert "  paths:" in push_config
