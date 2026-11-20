@@ -58,7 +58,9 @@ class BoundedMarketQueue(Generic[T]):
         except asyncio.QueueFull:
             replaceable = can_replace or (lambda _queued: True)
             queue_items = self._queue._queue
-            victim = next((queued for queued in queue_items if replaceable(queued)), None)
+            victim = next(
+                (queued for queued in queue_items if replaceable(queued)), None
+            )
             if victim is None:
                 self.stats.dropped += 1
                 self.stats.depth = self._queue.qsize()
