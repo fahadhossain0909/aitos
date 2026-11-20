@@ -27,13 +27,16 @@ describe("Vite development server security policy", () => {
       "https://preview.example.test",
       "preview.example.test/path",
       "preview.example.test:5173",
+      ".example.test",
+      "*.example.test",
+      "preview..example.test",
     ]) {
       expect(() =>
         getDevServerPolicy({
           AITOS_VITE_HOST: "0.0.0.0",
           AITOS_VITE_ALLOWED_HOSTS: value,
         }),
-      ).toThrow("exact hostnames");
+      ).toThrow("exact DNS hostnames");
     }
   });
 });
