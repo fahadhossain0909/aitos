@@ -634,3 +634,74 @@ def test_symbol_telemetry_rejects_invalid_integer_fields():
         pass
     else:
         raise AssertionError("fractional book depth must be rejected")
+
+
+
+def test_telemetry_collector_rejects_out_of_order_samples_per_metric():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    collector = SymbolTelemetryCollector(window_seconds=10)
+    collector.record_event("BTCUSDT", timestamp=5)
+    with pytest.raises(ValueError, match="event timestamps"):
+        collector.record_event("BTCUSDT", timestamp=4)
+    collector.record_book_depth("BTCUSDT", 10, timestamp=5)
+    with pytest.raises(ValueError, match="depth timestamps"):
+        collector.record_book_depth("BTCUSDT", 9, timestamp=4)
+    collector.record_analysis("BTCUSDT", timestamp=5)
+    with pytest.raises(ValueError, match="analysis timestamps"):
+        collector.record_analysis("BTCUSDT", timestamp=4)
+
+
+def test_telemetry_collector_rejects_invalid_depth_and_bounds_samples():
+    from aitos.compute.telemetry_collector import SymbolTelemetryCollector
+
+    collector = SymbolTelemetryCollector(
+        window_seconds=10, max_samples_per_metric=2
+    )
+    with pytest.raises(ValueError):
+        collector.record_book_depth("BTCUSDT", -1, timestamp=1)
+    for timestamp in (1, 2, 3):
+        collector.record_event("BTCUSDT", timestamp=timestamp)
+        collector.record_book_depth("BTCUSDT", timestamp, timestamp=timestamp)
+        collector.record_analysis("BTCUSDT", timestamp=timestamp)
+    stats = collector.stats()
+    assert stats.retained_event_samples == 2
+    assert stats.retained_depth_samples == 2
+    assert stats.retained_analysis_samples == 2
+
+
+def test_pressure_controller_recovery_honors_zero_timestamp_and_cooldown():
+    from aitos.compute.pressure_controller import (
+        PressurePolicy,
+        ResourcePressureController,
+    )
+
+    controller = ResourcePressureController(
+        PressurePolicy(
+            warning_hold_seconds=0,
+            high_hold_seconds=0,
+            recovery_hold_seconds=2,
+            minimum_transition_interval_seconds=5,
+        )
+    )
+    elevated = controller.update(
+        now_seconds=0,
+        cpu_utilization_pct=82,
+        memory_utilization_pct=0,
+        queue_lag_seconds=0,
+    )
+    assert elevated.level == PressureLevel.WARNING
+    blocked_recovery = controller.update(
+        now_seconds=2,
+        cpu_utilization_pct=0,
+        memory_utilization_pct=0,
+        queue_lag_seconds=0,
+    )
+    assert blocked_recovery.level == PressureLevel.WARNING
+    recovered = controller.update(
+        now_seconds=5,
+        cpu_utilization_pct=0,
+        memory_utilization_pct=0,
+        queue_lag_seconds=0,
+    )
+    assert recovered.level == PressureLevel.NORMAL
