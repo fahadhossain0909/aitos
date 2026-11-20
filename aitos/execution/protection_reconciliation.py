@@ -26,9 +26,17 @@ from aitos.execution.protection_audit import audit_protection_inventory
 def _decimal_matches(left: Any, right: Any) -> bool:
     try:
         first, second = Decimal(str(left)), Decimal(str(right))
-    except (InvalidOperation, ValueError):
+    except (InvalidOperation, TypeError, ValueError):
         return False
     return first.is_finite() and second.is_finite() and first == second
+
+
+def _decimal_at_most(left: Any, right: Any) -> bool:
+    try:
+        first, second = Decimal(str(left)), Decimal(str(right))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return first.is_finite() and second.is_finite() and 0 < first <= second
 
 
 async def query_ambiguous_protection_submissions(
@@ -740,6 +748,15 @@ async def recover_protection_handovers(
     intent_by_client = {
         row.get("client_id"): row for row in intents if isinstance(row, dict)
     }
+    intent_by_order_id: dict[str, dict[str, Any]] = {}
+    for row in intents:
+        if not isinstance(row, dict):
+            continue
+        result_payload = row.get("result_json")
+        if isinstance(result_payload, str):
+            result_payload = json.loads(result_payload)
+        if isinstance(result_payload, dict) and result_payload.get("order_id"):
+            intent_by_order_id[str(result_payload["order_id"])] = row
     by_trade_id: dict[str, list[Any]] = {}
     for trade in tuple(trades):
         trade_id = str(getattr(trade, "trade_id", "") or "")
@@ -797,19 +814,37 @@ async def recover_protection_handovers(
         request = intent.get("request_json")
         if isinstance(request, str):
             request = json.loads(request)
+        order_type = request.get("order_type") if isinstance(request, dict) else None
+        old_intent = intent_by_order_id.get(str(old_id))
+        old_request = old_intent.get("request_json") if old_intent else None
+        if isinstance(old_request, str):
+            old_request = json.loads(old_request)
+        quantity_matches_trade = (
+            _decimal_matches(request.get("quantity"), getattr(trade, "quantity", None))
+            if order_type == "STOP_MARKET" and isinstance(request, dict)
+            else (
+                _decimal_at_most(request.get("quantity"), getattr(trade, "quantity", None))
+                if order_type == "TAKE_PROFIT_MARKET" and isinstance(request, dict)
+                else False
+            )
+        )
         if (
             not isinstance(request, dict)
             or request.get("owner_trade_id") != trade_id
             or request.get("symbol") != symbol
-            or request.get("order_type") != handover.get("order_type", "STOP_MARKET")
-            or request.get("order_type") not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}
+            or order_type != handover.get("order_type", "STOP_MARKET")
+            or order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}
             or request.get("reduce_only") is not True
             or str(request.get("side", "")).upper()
             != str(
                 getattr(getattr(trade, "side", ""), "value", getattr(trade, "side", ""))
             ).upper()
+            or not quantity_matches_trade
+            or not isinstance(old_request, dict)
+            or old_request.get("owner_trade_id") != trade_id
+            or old_request.get("order_type") != order_type
             or not _decimal_matches(
-                request.get("quantity"), getattr(trade, "quantity", None)
+                old_request.get("quantity"), request.get("quantity")
             )
         ):
             blocked.append(
