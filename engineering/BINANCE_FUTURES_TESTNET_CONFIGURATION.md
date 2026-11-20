@@ -4,7 +4,7 @@
 
 ## Environment selection
 
-The adapter defaults to **mainnet** when neither mode variable is set. The explicit `AITOS_BINANCE_FUTURES_ENVIRONMENT` variable takes precedence. For backward compatibility, if it is unset, the existing `BINANCE_TESTNET=true/false` flag selects `testnet`/`mainnet`. The repository's `.env.example` retains `BINANCE_TESTNET=true`, so a normal local paper configuration resolves to demo/testnet endpoints. Select testnet explicitly:
+The standalone market-data adapter defaults to **mainnet** when neither mode variable is set. Settings-driven paper/live entrypoints default to testnet through `BinanceSettings.testnet=True`. The explicit `AITOS_BINANCE_FUTURES_ENVIRONMENT` variable takes precedence for all settings-driven and adapter-created Futures components. For backward compatibility, if it is unset, the existing `BINANCE_TESTNET=true/false` flag selects `testnet`/`mainnet`. The repository's `.env.example` retains `BINANCE_TESTNET=true`, so a normal local paper configuration resolves to demo/testnet endpoints. Select testnet explicitly:
 
 ```dotenv
 AITOS_BINANCE_FUTURES_ENVIRONMENT=testnet
