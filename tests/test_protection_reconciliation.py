@@ -8,6 +8,7 @@ from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.order_executor import OrderRequest, OrderResult
 from aitos.execution.protection_reconciliation import (
     audit_exchange_protection_inventory,
+    recover_accepted_initial_stop_submissions,
     require_live_account_exposure_reconciled,
 )
 from aitos.models.trade import TradeSide
@@ -533,3 +534,135 @@ async def test_live_account_audit_requires_local_stop_in_authenticated_inventory
         finding["status"] == "local_stop_missing_from_venue_inventory"
         for finding in report["findings"]
     )
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_accepted_initial_stop_and_applies_after_durable_trade_write(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id=None,
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append((value.trade_id, value.sl_order_id))
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert persisted == [("trade-1", "algo:123")]
+    assert trade.sl_order_id == "algo:123"
+    assert store.unresolved() == []
+    history = store.protection_intents()[0]
+    assert history["state"] == "APPLIED"
+    assert history["trade_id"] == "trade-1"
+
+
+@pytest.mark.asyncio
+async def test_restart_finishes_journal_ack_after_trade_snapshot_was_already_written(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    store.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append(value.sl_order_id)
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert persisted == ["algo:123"]
+    assert store.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_restart_does_not_recover_stop_for_different_existing_protection(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:old-stop",
+        updated_at="",
+    )
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "different stop" in report["blocked"][0]["reason"]
+    assert store.unresolved()[0]["state"] == "SUBMITTING"
