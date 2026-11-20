@@ -152,6 +152,13 @@ class TelemetryTuning(BaseModel):
 class RuntimeTuning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     adaptive_tuning_enabled: bool = False
+    adaptive_compute_enabled: bool = False
+    pressure_warning_hold_seconds: float = Field(default=5.0, ge=0, le=300)
+    pressure_high_hold_seconds: float = Field(default=3.0, ge=0, le=300)
+    pressure_recovery_hold_seconds: float = Field(default=30.0, ge=0, le=3600)
+    pressure_minimum_transition_interval_seconds: float = Field(
+        default=10.0, ge=0, le=3600
+    )
     config_reload_enabled: bool = False
 
 
@@ -181,10 +188,14 @@ class TuningSettings(BaseModel):
                 "scanner.symbol_allowlist must be non-empty when "
                 "universe_mode='allowlist'"
             )
-        if self.mode == "live" and self.runtime.adaptive_tuning_enabled:
+        if self.mode == "live" and (
+            self.runtime.adaptive_tuning_enabled
+            or self.runtime.adaptive_compute_enabled
+        ):
             raise ValueError(
-                "adaptive tuning is not permitted in live mode; change settings "
-                "only through the approved risk/configuration workflow"
+                "adaptive tuning is not permitted in live mode; adaptive compute "
+                "is also disabled; change settings only through the approved "
+                "risk/configuration workflow"
             )
         return self
 
@@ -537,6 +548,31 @@ def _env_overrides() -> dict[str, Any]:
             "runtime",
             "adaptive_tuning_enabled",
             _parse_bool,
+        ),
+        "AITOS_TUNING_RUNTIME_ADAPTIVE_COMPUTE_ENABLED": (
+            "runtime",
+            "adaptive_compute_enabled",
+            _parse_bool,
+        ),
+        "AITOS_TUNING_RUNTIME_PRESSURE_WARNING_HOLD_SECONDS": (
+            "runtime",
+            "pressure_warning_hold_seconds",
+            float,
+        ),
+        "AITOS_TUNING_RUNTIME_PRESSURE_HIGH_HOLD_SECONDS": (
+            "runtime",
+            "pressure_high_hold_seconds",
+            float,
+        ),
+        "AITOS_TUNING_RUNTIME_PRESSURE_RECOVERY_HOLD_SECONDS": (
+            "runtime",
+            "pressure_recovery_hold_seconds",
+            float,
+        ),
+        "AITOS_TUNING_RUNTIME_PRESSURE_MINIMUM_TRANSITION_INTERVAL_SECONDS": (
+            "runtime",
+            "pressure_minimum_transition_interval_seconds",
+            float,
         ),
         "AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED": (
             "runtime",
