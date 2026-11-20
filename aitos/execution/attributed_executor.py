@@ -233,6 +233,7 @@ class AttributedOrderExecutor(OrderExecutor):
         take_profit_price: float,
         *,
         owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         request = OrderRequest(
             symbol=symbol,
@@ -242,11 +243,14 @@ class AttributedOrderExecutor(OrderExecutor):
             order_type="TAKE_PROFIT_MARKET",
             reduce_only=True,
             owner_trade_id=owner_trade_id,
+            client_order_id=client_order_id,
         )
         context = self.context_resolver(request)
         owner_kwargs = (
             {"owner_trade_id": owner_trade_id} if owner_trade_id is not None else {}
         )
+        if client_order_id is not None:
+            owner_kwargs["client_order_id"] = client_order_id
         result = await self.delegate.place_take_profit_order(
             symbol, side, quantity, take_profit_price, **owner_kwargs
         )
