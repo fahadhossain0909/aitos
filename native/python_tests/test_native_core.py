@@ -232,3 +232,34 @@ def test_batch_keeps_prior_valid_events_when_later_delta_is_semantically_invalid
     with pytest.raises(ValueError, match="quantity units"):
         book.apply_deltas(updates)
     assert book.snapshot(5) == (11, [(101, 2), (100, 1)], [(102, 1)])
+
+
+def test_reference_batch_sequence_failure_is_atomic():
+    book = PythonFixedPointOrderBook(10, [(100, 5)], [(102, 4)])
+    before = book.snapshot(5)
+    updates = [
+        (11, 11, [(101, 2)], [], None),
+        (13, 13, [(103, 7)], [], 12),
+    ]
+
+    with pytest.raises(ValueError, match="sequence gap"):
+        book.apply_deltas(updates)
+
+    assert book.snapshot(5) == before
+
+
+@pytest.mark.skipif(
+    not native_available(), reason="optional Rust extension not installed"
+)
+def test_native_batch_sequence_failure_is_atomic():
+    book = create_order_book(10, [(100, 5)], [(102, 4)])
+    before = book.snapshot(5)
+    updates = [
+        (11, 11, [(101, 2)], [], None),
+        (13, 13, [(103, 7)], [], 12),
+    ]
+
+    with pytest.raises(ValueError, match="sequence gap"):
+        book.apply_deltas(updates)
+
+    assert book.snapshot(5) == before
