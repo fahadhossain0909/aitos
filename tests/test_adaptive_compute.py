@@ -756,3 +756,25 @@ def test_adaptive_runtime_connects_pressure_state_to_optional_admission():
     )
     assert critical.level == PressureLevel.CRITICAL
     assert runtime.admit_optional_work(requests).admitted == ()
+
+
+
+def test_optional_scheduler_rejects_invalid_request_class_and_types():
+    from aitos.compute.work_scheduler import (
+        WorkloadClass,
+        WorkloadRequest,
+        admit_optional_work,
+    )
+
+    with pytest.raises(ValueError):
+        WorkloadRequest("bad-class", 99, 1.0)
+    with pytest.raises(ValueError):
+        WorkloadRequest("bad-memory", WorkloadClass.BULK, 1.0, True)
+    with pytest.raises(ValueError):
+        WorkloadRequest("negative-priority", WorkloadClass.BULK, 1.0, priority=-1)
+    with pytest.raises(ValueError):
+        admit_optional_work(
+            [],
+            cpu_capacity_units=1,
+            memory_capacity_mb=True,
+        )
