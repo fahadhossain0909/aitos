@@ -2567,14 +2567,25 @@ class OpportunityScanner(AITOSModule):
                 budget_for_optional = getattr(
                     adaptive_runtime, "budget_for_optional_work", None
                 )
-                if concurrency_gate is not None and callable(budget_for_optional):
+                if callable(budget_for_optional):
                     optional_budget = budget_for_optional()
-                    await concurrency_gate.set_limit(
-                        min(
-                            concurrency_gate.max_concurrency,
-                            optional_budget.cpu_workers,
+                    if concurrency_gate is not None:
+                        await concurrency_gate.set_limit(
+                            min(
+                                concurrency_gate.max_concurrency,
+                                optional_budget.cpu_workers,
+                            )
                         )
+                    background_gate = getattr(
+                        self, "_aitos_adaptive_background_gate", None
                     )
+                    if background_gate is not None:
+                        await background_gate.set_limit(
+                            min(
+                                background_gate.max_concurrency,
+                                optional_budget.background_task_limit,
+                            )
+                        )
             except Exception:
                 logger.exception(
                     "adaptive process pressure sampling failed; retaining last pressure state"
@@ -2670,7 +2681,16 @@ class OpportunityScanner(AITOSModule):
                     if adaptive_runtime is not None
                     else None
                 ),
-                "queue_pending_idle_seconds": queue_lag_seconds,
+                "queue_lag_seconds": queue_lag_seconds,
+                "adaptive_concurrency_limit": (
+                    getattr(
+                        getattr(self, "_aitos_adaptive_concurrency_gate", None),
+                        "limit",
+                        None,
+                    )
+                    if adaptive_runtime is not None
+                    else None
+                ),
                 "adaptive_background_limit": (
                     getattr(
                         getattr(self, "_aitos_adaptive_background_gate", None),
