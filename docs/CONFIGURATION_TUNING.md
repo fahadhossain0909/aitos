@@ -142,13 +142,13 @@ concurrency and the hardware profile's `cpu_worker_budget`. Central risk ceiling
 are wired into `build_system()` and can tighten, but never relax, caller-supplied
 risk limits. Hardware memory
 budget/reserve, background-task limits, storage backfill/batch/retention values,
-and telemetry sampling intervals are currently validated configuration
-contracts and profile hints; they are **not yet universal runtime governors**.
-They must not be interpreted as proof that the running process is enforcing
-those limits in every storage, health, metrics, or background worker. Automatic
-CPU/RAM detection, adaptive resource control, a dashboard editor, and complete
-inventory/removal of all legacy strategy/execution constants are also not
-implemented by this PR.
+and telemetry sampling intervals are not universal runtime governors.
+They must not be interpreted as proof that the running process enforces those
+limits in every storage, health, metrics, or background worker. PR #261 adds
+opt-in adaptive compute discovery and scanner candidate admission, but it does
+not govern every background worker or automatically change all service pools.
+A dashboard editor and complete inventory/removal of all legacy strategy and
+execution constants remain separate work.
 
 The schema rejects adaptive tuning in live mode. It does not let hardware
 profiles increase the financial risk limits of a caller-supplied risk engine.
@@ -165,8 +165,12 @@ CPU/cgroup and memory/cgroup discovery, conservative resource-budget
 calculation, protected-symbol-aware capacity planning, and advisory pressure
 classification. See `engineering/ADAPTIVE_COMPUTE_FOUNDATION.md`.
 
-This is a tested library foundation only. It is not yet wired into
-`TuningSettings`, the staged scanner, service lifecycle, or automatic runtime
-degradation. Existing profile-based limits remain authoritative until those
-integration phases are separately reviewed and enabled. No automatic live
-strategy or risk mutation is introduced.
+The adaptive compute switch is wired into validated `TuningSettings` and the
+paper application runtime. When explicitly enabled, bounded telemetry is
+collected and the lightweight scanner ranks optional expensive-analysis
+candidates against the detected CPU/memory budget while protecting the
+reference symbol and open-position/pending-order symbols. It remains disabled
+by default and fails closed in live mode. The pressure controller and optional
+work scheduler expose a common API, but broad background-worker degradation,
+service-wide concurrency resizing, and automated resource sampling are not yet
+activated. No automatic live strategy or financial-risk mutation is introduced.
