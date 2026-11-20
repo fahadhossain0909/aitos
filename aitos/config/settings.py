@@ -71,9 +71,20 @@ class BinanceSettings(BaseSettings):
 
     api_key: str = ""
     api_secret: str = ""
+    # Dedicated demo-account credentials. These are never substituted with
+    # mainnet credentials when testnet=True.
+    futures_testnet_api_key: str = ""
+    futures_testnet_api_secret: str = ""
     testnet: bool = True
     recv_window_ms: int = 5000
     hedge_mode: bool = False
+
+    @property
+    def execution_credentials(self) -> tuple[str, str]:
+        """Return credentials for the selected venue environment only."""
+        if self.testnet:
+            return self.futures_testnet_api_key, self.futures_testnet_api_secret
+        return self.api_key, self.api_secret
 
 
 class SpotSettings(BaseSettings):
