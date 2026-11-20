@@ -213,6 +213,9 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
     )
     _seed_intent(journal)
     await store.save_trade(_trade())
+    # Runtime snapshots use DateTime64(3); separate versions by >1 ms so the
+    # test cannot accidentally manufacture a timestamp-tie ambiguity.
+    await asyncio.sleep(0.01)
 
     base_url, requests = venue_http
     executor = BinanceFuturesOrderExecutor(
