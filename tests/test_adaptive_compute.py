@@ -887,3 +887,52 @@ def test_uncalibrated_workload_estimator_preserves_requested_symbol():
     estimate = estimate_symbol_workload(None, symbol="ethusdt")
     assert estimate.calibrated is False
     assert estimate.workload.symbol == "ETHUSDT"
+
+
+
+def test_optional_scheduler_rejects_boolean_and_invalid_capacity_limits():
+    from aitos.compute.work_scheduler import admit_optional_work
+
+    for kwargs in (
+        {"cpu_capacity_units": True, "memory_capacity_mb": 10},
+        {"cpu_capacity_units": 1.0, "memory_capacity_mb": True},
+        {"cpu_capacity_units": 1.0, "memory_capacity_mb": 10, "pressure_level": True},
+        {"cpu_capacity_units": 1.0, "memory_capacity_mb": 10, "max_admitted": True},
+    ):
+        with pytest.raises(ValueError):
+            admit_optional_work([], **kwargs)
+
+
+def test_optional_scheduler_rejects_non_request_values_and_non_sequence():
+    from aitos.compute.work_scheduler import admit_optional_work
+
+    with pytest.raises(ValueError, match="list or tuple"):
+        admit_optional_work(iter(()), cpu_capacity_units=1, memory_capacity_mb=1)
+    with pytest.raises(ValueError, match="WorkloadRequest"):
+        admit_optional_work([object()], cpu_capacity_units=1, memory_capacity_mb=1)
+
+
+def test_detect_resources_honors_nested_cgroup_v1_controller_paths(tmp_path):
+    proc = tmp_path / "proc"
+    cgroup = tmp_path / "cgroup"
+    devices = tmp_path / "dev"
+    proc.mkdir()
+    (cgroup / "cpu").mkdir(parents=True)
+    (cgroup / "memory").mkdir()
+    devices.mkdir()
+    (proc / "meminfo").write_text(
+        "MemTotal: 8388608 kB\nMemAvailable: 4194304 kB\n", encoding="ascii"
+    )
+    (cgroup / "cpu" / "cpu.cfs_quota_us").write_text("200000", encoding="ascii")
+    (cgroup / "cpu" / "cpu.cfs_period_us").write_text("100000", encoding="ascii")
+    (cgroup / "memory" / "memory.limit_in_bytes").write_text(
+        str(3 * 1024 * 1024 * 1024), encoding="ascii"
+    )
+    (cgroup / "memory" / "memory.usage_in_bytes").write_text(
+        str(1 * 1024 * 1024 * 1024), encoding="ascii"
+    )
+
+    result = detect_resources(proc_root=proc, cgroup_root=cgroup, device_root=devices)
+    assert result.effective_cpus == pytest.approx(2.0)
+    assert result.memory_limit_mb == 3072
+    assert result.memory_available_mb == 2048
