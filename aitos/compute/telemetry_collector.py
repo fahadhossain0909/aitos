@@ -59,6 +59,10 @@ class SymbolTelemetryCollector:
             raise ValueError("symbol cannot be empty")
         return key
 
+    def _timestamp(self, timestamp: float | None) -> float:
+        now = self._timestamp(timestamp)
+        return now
+
     def _window(self, symbol: str, now: float) -> _SymbolWindow:
         key = self._symbol_key(symbol)
         window = self._windows.get(key)
@@ -95,7 +99,7 @@ class SymbolTelemetryCollector:
     ) -> None:
         if depth_levels < 0:
             raise ValueError("depth_levels must be non-negative")
-        now = self._clock() if timestamp is None else float(timestamp)
+        now = self._timestamp(timestamp)
         with self._lock:
             window = self._window(symbol, now)
             self._prune(window, now - self.window_seconds)
@@ -113,13 +117,15 @@ class SymbolTelemetryCollector:
         if not values:
             return 0.0
         ordered = sorted(values)
-        index = max(0, min(len(ordered) - 1, ceil(percentile * len(ordered)) - 1))
+        index = max(
+            0, min(len(ordered) - 1, ceil(percentile * len(ordered)) - 1)
+        )
         return float(ordered[index])
 
     def snapshot(
         self, symbol: str, *, now: float | None = None
     ) -> SymbolTelemetry | None:
-        current = self._clock() if now is None else float(now)
+        current = self._timestamp(now)
         key = self._symbol_key(symbol)
         with self._lock:
             window = self._windows.get(key)
@@ -142,7 +148,9 @@ class SymbolTelemetryCollector:
                 if cutoff <= value <= current
             )
             depth = int(self._percentile([float(v) for v in window.depths], 0.95))
-            sample_count = len(window.events) + len(window.depths) + len(window.analyses)
+            sample_count = (
+                len(window.events) + len(window.depths) + len(window.analyses)
+            )
             return SymbolTelemetry(
                 symbol=key,
                 p95_event_rate_per_second=event_rate,
@@ -157,7 +165,9 @@ class SymbolTelemetryCollector:
         with self._lock:
             return TelemetryCollectorStats(
                 tracked_symbols=len(self._windows),
-                retained_event_samples=sum(len(w.events) for w in self._windows.values()),
+                retained_event_samples=sum(
+                    len(w.events) for w in self._windows.values()
+                ),
                 retained_depth_samples=sum(len(w.depths) for w in self._windows.values()),
                 retained_analysis_samples=sum(
                     len(w.analyses) for w in self._windows.values()
