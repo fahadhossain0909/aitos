@@ -42,3 +42,17 @@ def test_mainnet_requires_mainnet_credentials_even_when_testnet_keys_exist(monke
     settings = get_settings()
 
     assert settings.binance.execution_credentials == ("mainnet-key", "mainnet-secret")
+
+
+def test_explicit_futures_environment_overrides_legacy_testnet_setting(monkeypatch):
+    monkeypatch.setenv("BINANCE_TESTNET", "true")
+    monkeypatch.setenv("AITOS_BINANCE_FUTURES_ENVIRONMENT", "mainnet")
+    monkeypatch.setenv("BINANCE_API_KEY", "mainnet-key")
+    monkeypatch.setenv("BINANCE_API_SECRET", "mainnet-secret")
+    monkeypatch.setenv("BINANCE_FUTURES_TESTNET_API_KEY", "testnet-key")
+    monkeypatch.setenv("BINANCE_FUTURES_TESTNET_API_SECRET", "testnet-secret")
+
+    settings = get_settings()
+
+    assert settings.binance.testnet is False
+    assert settings.binance.execution_credentials == ("mainnet-key", "mainnet-secret")
