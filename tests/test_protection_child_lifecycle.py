@@ -251,6 +251,7 @@ async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduct
 
     lifecycle._execution_state_writer = persist
     lifecycle._execution_position_verifier = AsyncMock()
+    original_mark = journal.mark_protection_child_applied
     monkeypatch.setattr(
         journal,
         "mark_protection_child_applied",
@@ -266,6 +267,7 @@ async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduct
     ]["cumulative_quantity"] == "0.25"
 
     # Restore from the durable ClickHouse-like snapshot, with SQLite still behind.
+    monkeypatch.setattr(journal, "mark_protection_child_applied", original_mark)
     restored = copy.deepcopy(trade)
     restarted = TradeLifecycle(
         event_bus=event_bus,
