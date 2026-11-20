@@ -199,12 +199,16 @@ worker budget. Each scan cycle updates that limit from the hysteretic pressure
 state. Reducing the limit never cancels in-flight scans; CRITICAL pressure
 prevents new optional scans after the reference-market fetch.
 
-The EventBus exposes a bounded queue-pressure sample using one oldest pending
-delivery per active subscription group. The scanner passes that sample into
-the process pressure controller. The metric is intentionally named and
-documented as pending-delivery idle age: it must not be mistaken for complete
-Redis Stream consumer lag, which requires stream/group-specific unread-entry
-lag support and service-level ownership.
+The EventBus exposes a bounded queue-age sample across at most eight active
+subscription groups. On Redis 7+, XINFO GROUPS reports unread-entry lag and the
+last delivered ID; one XRANGE lookup obtains the oldest unread entry timestamp.
+The sampler also inspects at most 100 pending deliveries per group and combines
+the oldest unread event age with maximum pending-delivery idle age. This is a
+bounded pressure signal, not an unbounded queue scan. Older Redis/client
+combinations that cannot expose group metadata return unknown rather than a
+fabricated zero. The scanner passes the sample into the process pressure
+controller and re-samples after expensive candidate batches so the next batch's
+admission reflects current pressure.
 
 ## Sequence-safe market-data queue overflow
 
