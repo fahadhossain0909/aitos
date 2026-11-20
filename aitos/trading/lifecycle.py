@@ -2767,6 +2767,26 @@ class TradeLifecycle(AITOSModule):
             expected_side = "SELL" if trade.side == TradeSide.LONG else "BUY"
             hedge_mode = bool(getattr(self._order_executor, "hedge_mode", False))
             expected_position_side = trade.side.value if hedge_mode else "BOTH"
+            intent_row = await asyncio.to_thread(
+                intent_store.protection_intent_for_order,
+                algo_order_id,
+                trade_id,
+            )
+            intent_request = intent_row.get("request")
+            if (
+                not isinstance(intent_request, dict)
+                or intent_row.get("client_id") != algo.get("clientAlgoId")
+                or intent_request.get("owner_trade_id") != trade_id
+                or intent_request.get("symbol") != trade.symbol
+                or intent_request.get("order_type") != order_type
+                or intent_request.get("quantity") is None
+                or bool(intent_request.get("reduce_only")) != (not hedge_mode)
+            ):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "triggered child does not match its owner-bound protective intent",
+                )
             marker_map = trade.agent_consensus.setdefault(
                 "_applied_protection_child_fills", {}
             )
@@ -2816,9 +2836,8 @@ class TradeLifecycle(AITOSModule):
                 previously_applied_quantity=previous_quantity,
                 previously_applied_quote=previous_quote,
                 expected_position_side=expected_position_side,
-                expected_reduce_only=not bool(
-                    getattr(self._order_executor, "hedge_mode", False)
-                ),
+                expected_reduce_only=not hedge_mode,
+                expected_original_quantity=intent_request["quantity"],
             )
             remaining_quantity = Decimal(str(trade.quantity))
             if delta.delta_quantity > remaining_quantity:
