@@ -86,9 +86,14 @@ Source inspection found a risk-projection edge case that needs an explicit polic
 - For an open position with missing/non-positive `risk_amount_usd`, `_portfolio_consensus` substitutes a fixed 1.0 percentage point. That fallback is not derived from the position's actual stop distance or notional and could understate a larger unknown exposure.
 - The projection maps open-position risk and side by symbol. If multiple same-symbol positions exist (for example, both sides in hedge mode), later entries can overwrite earlier ones. `BINANCE_HEDGE_MODE` defaults false, but hedge-mode/duplicate-symbol support must be explicitly proven before enabling it.
 
-**Required action:** trace every pending-order producer and prove that each risk-increasing order has a finite, positive, stop-derived risk amount before it reaches the CapitalGateway. Unknown/missing risk should fail closed or be represented as an explicit conservative unknown exposure, not silently dropped or replaced with an arbitrary 1%. Use a unique instrument+side/position identity if same-symbol multiple positions are supported. Add tests for zero-risk pending orders, missing/zero open-position risk and hedge-mode duplicate symbols.
+**Implemented in this branch (not yet merged):**
 
-**Safety decision:** this PR does not change these financial semantics. Fixing them changes order admission and portfolio risk behavior, so it requires a separate focused risk-design review and explicit approval.
+- Open positions now require finite, positive stop-risk at the final CapitalGateway boundary. Missing/zero/invalid risk produces a normal rejected-trade result and an auditable capital-gate rejection instead of an arbitrary 1% fallback or an uncaught exception.
+- Risk-increasing pending orders with positive remaining notional require finite, positive risk. The CapitalGateway rejects zero/negative pending risk instead of omitting it from the portfolio sum.
+- Multiple positions in the same instrument are grouped by instrument and side; same-side risk is summed, opposing hedge sides remain distinct, and instrument identity is retained separately for correlation calculations.
+- Regression tests cover unknown open-position risk, zero-risk pending exposure, duplicate-symbol hedge positions, zero-risk gateway projections and fail-closed lifecycle rejection.
+
+**Safety boundary:** this deliberately tightens admission (it may reject exposures whose risk cannot be proven). It does not change strategy signals, sizing formulae, leverage, stop placement or exit behavior. It must pass the full CI matrix and a paper-only integration test before merge.
 
 ### P1 — Financial source-of-truth and reconciliation matrix
 
