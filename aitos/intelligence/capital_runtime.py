@@ -169,6 +169,8 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
                 consensus[field_name] = value
     positions = getattr(portfolio, "positions", ()) or ()
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
+    if not isfinite(equity) or equity <= 0:
+        raise ValueError("portfolio equity must be finite and positive")
     # The live portfolio is authoritative; scanner-supplied exposure snapshots
     # may be stale by the time the final lifecycle gate is reached.
     # Preserve all same-symbol exposures. A single exposure keeps the
@@ -336,7 +338,7 @@ def install_capital_guard() -> None:
         )
 
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
-        if equity <= 0:
+        if not isfinite(equity) or equity <= 0:
             reason = "capital_objective: invalid or unavailable equity"
             await record_gate(
                 symbol=opportunity.symbol,
