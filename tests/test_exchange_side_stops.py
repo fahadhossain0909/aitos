@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from aitos.execution.intent_store import ExecutionIntentStore
+from aitos.execution.protection_reconciliation import recover_protection_handovers
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
@@ -613,6 +614,20 @@ class LiveTakeProfitHandoverExecutor(FakeExchangeCapableExecutor):
         self.cancel_calls.append(order_id)
         self.statuses[order_id] = "CANCELED"
 
+    async def get_algo_order_by_client_id(self, symbol, client_order_id):
+        return {
+            "algoId": 456,
+            "clientAlgoId": client_order_id,
+            "symbol": symbol,
+            "side": "SELL",
+            "orderType": "TAKE_PROFIT_MARKET",
+            "algoStatus": "NEW",
+            "quantity": "0.5",
+            "triggerPrice": "110.0",
+            "positionSide": "BOTH",
+            "reduceOnly": True,
+        }
+
     def acknowledge_protection(self, result, trade_id):
         self._journal.mark_applied(result.client_order_id, trade_id)
 
@@ -721,3 +736,80 @@ async def test_live_take_profit_replacement_keeps_old_order_if_snapshot_write_fa
     assert trade.tp_order_ids == ["algo:456"]
     assert executor.cancel_calls == []
     assert journal.protection_handovers()[0]["state"] == "NEW_ACCEPTED"
+
+@pytest.mark.asyncio
+async def test_tp_handover_restart_after_cancel_ack_does_not_cancel_twice(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(tmp_path / "tp-handover-after-cancel.sqlite", scope="account")
+    seed_owned_take_profit(journal)
+    executor = LiveTakeProfitHandoverExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        tp_order_ids=["algo:123"],
+        take_profit_levels=[104.0],
+        sl_order_id="algo:999",
+        agent_consensus={},
+        updated_at="",
+    )
+    lifecycle._open_trades[trade.trade_id] = trade
+    writes = 0
+    durable_snapshots = []
+
+    async def fail_after_cancel(_trade):
+        nonlocal writes
+        writes += 1
+        durable_snapshots.append(
+            {
+                "tp_order_ids": list(_trade.tp_order_ids),
+                "take_profit_levels": list(_trade.take_profit_levels),
+                "agent_consensus": dict(_trade.agent_consensus),
+            }
+        )
+        if writes == 2:
+            raise OSError("simulated post-cancel snapshot failure")
+
+    lifecycle._execution_state_writer = fail_after_cancel
+    lifecycle._execution_position_verifier = AsyncMock()
+    with pytest.raises(OSError, match="post-cancel"):
+        await lifecycle._replace_exchange_side_take_profit(trade, 0, 110.0)
+
+    assert executor.cancel_calls == ["algo:123"]
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCELLED"
+    assert durable_snapshots[0]["agent_consensus"]["_pending_stop_cancellations"] == [
+        "algo:123"
+    ]
+
+    restored = SimpleNamespace(
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        tp_order_ids=["algo:456"],
+        take_profit_levels=[110.0],
+        sl_order_id="algo:999",
+        agent_consensus=durable_snapshots[0]["agent_consensus"],
+        updated_at="",
+    )
+
+    async def persist(_trade):
+        return None
+
+    report = await recover_protection_handovers(
+        executor, journal, [restored], persist
+    )
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert restored.tp_order_ids == ["algo:456"]
+    assert restored.agent_consensus["_pending_stop_cancellations"] == []
+    assert executor.cancel_calls == ["algo:123"]
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
