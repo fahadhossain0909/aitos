@@ -6,6 +6,7 @@ workload knobs are provided by the validated tuning profile resolver.
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from dotenv import load_dotenv
@@ -85,6 +86,20 @@ class BinanceSettings(BaseSettings):
         if self.testnet:
             return self.futures_testnet_api_key, self.futures_testnet_api_secret
         return self.api_key, self.api_secret
+
+    @model_validator(mode="after")
+    def apply_explicit_futures_environment(self):
+        """Keep every Futures adapter on one explicitly selected environment."""
+        selected = os.getenv("AITOS_BINANCE_FUTURES_ENVIRONMENT")
+        if selected is None:
+            return self
+        normalized = selected.strip().lower()
+        if normalized not in {"mainnet", "testnet"}:
+            raise ValueError(
+                "AITOS_BINANCE_FUTURES_ENVIRONMENT must be 'mainnet' or 'testnet'"
+            )
+        self.testnet = normalized == "testnet"
+        return self
 
 
 class SpotSettings(BaseSettings):
