@@ -25,6 +25,9 @@ class ProtectionChildFillDelta:
     cumulative_quantity: Decimal
     previously_applied_quantity: Decimal
     delta_quantity: Decimal
+    cumulative_quote: Decimal
+    previously_applied_quote: Decimal
+    delta_quote: Decimal
     average_price: Decimal
 
     @property
@@ -52,6 +55,7 @@ def calculate_protection_child_fill_delta(
     expected_side: str,
     expected_algo_id: str,
     previously_applied_quantity: Any,
+    previously_applied_quote: Any = "0",
 ) -> ProtectionChildFillDelta:
     """Validate one authenticated child snapshot and calculate its new fill.
 
@@ -109,17 +113,34 @@ def calculate_protection_child_fill_delta(
             raise ProtectionChildReconciliationError(
                 "FILLED child quantity does not equal original quantity"
             )
-    average = (
-        _positive_decimal(child.get("avgPrice"), "avgPrice")
-        if cumulative > 0
-        else Decimal("0")
+    cumulative_quote = _positive_decimal(
+        child.get("cumQuote", "0"), "cumQuote", allow_zero=True
     )
+    applied_quote = _positive_decimal(
+        previously_applied_quote,
+        "previously_applied_quote",
+        allow_zero=True,
+    )
+    if cumulative_quote < applied_quote:
+        raise ProtectionChildReconciliationError("cumulative child quote regressed")
+    if cumulative == 0 and cumulative_quote != 0:
+        raise ProtectionChildReconciliationError("quote exists without executed quantity")
+    delta_quantity = cumulative - applied
+    delta_quote = cumulative_quote - applied_quote
+    if delta_quantity == 0 and delta_quote != 0:
+        raise ProtectionChildReconciliationError("quote changed without new executed quantity")
+    average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal("0")
+    if delta_quantity > 0 and average <= 0:
+        raise ProtectionChildReconciliationError("new fill has no positive quote value")
     return ProtectionChildFillDelta(
         algo_id=algo_id,
         child_order_id=child_id,
         status=status,
         cumulative_quantity=cumulative,
         previously_applied_quantity=applied,
-        delta_quantity=cumulative - applied,
+        delta_quantity=delta_quantity,
+        cumulative_quote=cumulative_quote,
+        previously_applied_quote=applied_quote,
+        delta_quote=delta_quote,
         average_price=average,
     )
