@@ -152,8 +152,7 @@ The target triple must match the host (`x86_64-pc-windows-msvc`,
 by this helper. See [Installation & Deployment](../INSTALLATION.md#18-tauri-embedded-desktop--unsigned-evaluation-candidate)
 for platform prerequisites and CI artifact retrieval.
 
-See the canonical [Installation & Deployment Guide](../INSTALLATION.md) for
-runtime setup, backend connection and SSH-tunnel access. The browser/PWA
+See the [Desktop Operator User Manual](../docs/USER_MANUAL.md) for page-by-page usage, sample/runtime behavior and troubleshooting. See the canonical [Installation & Deployment Guide](../INSTALLATION.md) for runtime setup, backend connection and SSH-tunnel access. The browser/PWA
 manifest remains a separate browser starting point; it does not grant native
 signer access and does not cache financial/API responses.
 
