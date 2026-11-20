@@ -1,6 +1,7 @@
 """Adaptive compute capability and capacity planning primitives."""
 
-from aitos.compute.concurrency import AdaptiveConcurrencyGate, ConcurrencySnapshot\nfrom aitos.compute.adaptive_runtime import (
+from aitos.compute.concurrency import AdaptiveConcurrencyGate, ConcurrencySnapshot
+from aitos.compute.adaptive_runtime import (
     AdaptiveComputeRuntime,
     create_adaptive_compute_runtime,
 )
@@ -40,7 +41,9 @@ from aitos.compute.resource_governor import (
 )
 
 __all__ = [
-    "AdaptiveComputeRuntime",\n    "AdaptiveConcurrencyGate",\n    "ConcurrencySnapshot",
+    "AdaptiveComputeRuntime",
+    "AdaptiveConcurrencyGate",
+    "ConcurrencySnapshot",
     "CapacityPlan",
     "PressureDecision",
     "PressureLevel",
