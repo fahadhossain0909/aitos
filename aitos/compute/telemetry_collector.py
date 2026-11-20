@@ -187,9 +187,7 @@ class SymbolTelemetryCollector:
                 symbol=key,
                 p95_event_rate_per_second=event_rate,
                 p95_book_depth_levels=depth,
-                analysis_runs_per_minute=(
-                    analysis_count * 60.0 / self.window_seconds
-                ),
+                analysis_runs_per_minute=(analysis_count * 60.0 / self.window_seconds),
                 sample_count=sample_count,
             )
 
