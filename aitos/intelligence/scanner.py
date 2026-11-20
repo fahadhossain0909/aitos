@@ -603,6 +603,15 @@ class OpportunityScanner(AITOSModule):
             and trade.trade_id != previous_trade_id
         )
         if accepted:
+            collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+            if collector is not None:
+                try:
+                    collector.record_event(trade.symbol)
+                except (TypeError, ValueError):
+                    logger.debug(
+                        "adaptive compute trade telemetry sample rejected",
+                        extra={"aitos_extra": {"symbol": trade.symbol}},
+                    )
             timestamp = getattr(trade, "timestamp", None)
             quantity = float(getattr(trade, "quantity", 0.0) or 0.0)
             trade_side = str(
@@ -641,6 +650,18 @@ class OpportunityScanner(AITOSModule):
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
+        collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+        if collector is not None:
+            try:
+                depth = len(getattr(book, "bids", ())) + len(getattr(book, "asks", ()))
+                collector.record_book_depth(book.symbol, depth)
+            except (AttributeError, TypeError, ValueError):
+                logger.debug(
+                    "adaptive compute book telemetry sample rejected",
+                    extra={
+                        "aitos_extra": {"symbol": getattr(book, "symbol", "unknown")}
+                    },
+                )
 
     async def _record_funnel(self, **event: Any) -> None:
         """Persist diagnostics off-loop; telemetry must not change trade decisions."""
@@ -743,6 +764,15 @@ class OpportunityScanner(AITOSModule):
         import time
 
         started = time.perf_counter()
+        collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+        if collector is not None:
+            try:
+                collector.record_analysis(symbol)
+            except (TypeError, ValueError):
+                logger.debug(
+                    "adaptive compute analysis telemetry sample rejected",
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
         trace_token = None
         try:
             from aitos.forensics.data_flow_hooks import (
@@ -2018,14 +2048,114 @@ class OpportunityScanner(AITOSModule):
         ranked = sorted(scores, key=lambda item: (-item[1], item[2]))
         selected = []
         cooldown_skipped = 0
-        for symbol, _, _ in ranked:
+        eligible = []
+        for symbol, score, _ in ranked:
             fingerprint = self._lightweight_fingerprints.get(symbol, "unavailable")
-            if self._candidate_rotation.should_skip(symbol, fingerprint):
+            protected = symbol in getattr(self, "_aitos_protected_symbols", set())
+            if (
+                not protected
+                and symbol != self._reference_symbol
+                and self._candidate_rotation.should_skip(symbol, fingerprint)
+            ):
                 cooldown_skipped += 1
                 continue
-            selected.append(symbol)
-            if len(selected) >= limit:
-                break
+            eligible.append((symbol, score))
+        selected = [symbol for symbol, _score in eligible[:limit]]
+
+        adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
+        telemetry_collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
+        if adaptive_runtime is not None and telemetry_collector is not None:
+            try:
+                from aitos.compute.resource_governor import plan_symbol_capacity
+                from aitos.compute.workload_estimator import estimate_symbol_workload
+
+                protected_symbols = set(
+                    getattr(self, "_aitos_protected_symbols", set())
+                )
+                position_protected_symbols = protected_symbols - {
+                    self._reference_symbol
+                }
+                if self._reference_symbol in self._symbols:
+                    protected_symbols.add(self._reference_symbol)
+                ranked_scores = {symbol: score for symbol, score in eligible}
+                for symbol in protected_symbols:
+                    if symbol in self._symbols and symbol not in ranked_scores:
+                        ranked_scores[symbol] = 0.0
+                count = max(1, len(ranked_scores))
+                workloads = []
+                for rank_index, (symbol, _score) in enumerate(
+                    sorted(
+                        ranked_scores.items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )
+                ):
+                    telemetry = telemetry_collector.snapshot(symbol)
+                    estimated = estimate_symbol_workload(
+                        telemetry,
+                        symbol=symbol,
+                        opportunity_score=10.0 * (count - rank_index) / count,
+                        liquidity_score=10.0 * (count - rank_index) / count,
+                        mandatory=(
+                            symbol == self._reference_symbol
+                            or symbol in protected_symbols
+                        ),
+                    )
+                    workloads.append(estimated.workload)
+                optional_budget = (
+                    adaptive_runtime.budget_for_optional_work()
+                    if callable(
+                        getattr(adaptive_runtime, "budget_for_optional_work", None)
+                    )
+                    else adaptive_runtime.budget
+                )
+                capacity_plan = plan_symbol_capacity(
+                    workloads,
+                    optional_budget,
+                    max_symbols=limit,
+                )
+                self._aitos_last_capacity_plan = capacity_plan
+                # Open/pending symbols reserve their protected budget but are
+                # not redundantly re-scanned as fresh trade candidates. Their
+                # market-data and position services remain independently active.
+                selected = [
+                    symbol
+                    for symbol in capacity_plan.selected_symbols
+                    if (
+                        symbol == self._reference_symbol
+                        or symbol not in position_protected_symbols
+                    )
+                ]
+                logger.info(
+                    "adaptive scanner capacity applied",
+                    extra={
+                        "aitos_extra": {
+                            "selected": len(selected),
+                            "deferred": len(capacity_plan.deferred_symbols),
+                            "protected": len(capacity_plan.protected_symbols),
+                            "deep_analysis_limit": capacity_plan.deep_analysis_limit,
+                            "protected_overcommit": (
+                                capacity_plan.overcommitted_by_protected_work
+                            ),
+                            "cpu_capacity_units": (optional_budget.cpu_capacity_units),
+                            "memory_budget_mb": (optional_budget.memory_budget_mb),
+                            "pressure_level": int(
+                                getattr(
+                                    getattr(
+                                        adaptive_runtime, "pressure_controller", None
+                                    ),
+                                    "level",
+                                    0,
+                                )
+                            ),
+                        }
+                    },
+                )
+            except Exception as exc:
+                logger.exception(
+                    "adaptive scanner admission failed; retaining fixed safe cap",
+                    extra={"aitos_extra": {"error": type(exc).__name__}},
+                )
+                selected = [symbol for symbol, _score in eligible[:limit]]
         logger.info(
             "lightweight scanner screening complete",
             extra={
@@ -2043,6 +2173,59 @@ class OpportunityScanner(AITOSModule):
 
     async def scan_all(self) -> list[ScanCandidate]:
         self._require_initialized()
+        queue_lag_seconds = None
+        adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
+        if adaptive_runtime is not None:
+            try:
+                observe_pressure = getattr(
+                    adaptive_runtime, "observe_process_pressure", None
+                )
+                if callable(observe_pressure):
+                    queue_lag_provider = getattr(
+                        self._event_bus, "queue_lag_seconds", None
+                    )
+                    if callable(queue_lag_provider):
+                        try:
+                            queue_lag_seconds = await queue_lag_provider()
+                        except Exception:
+                            logger.debug(
+                                "event-bus queue pressure sample unavailable",
+                                exc_info=True,
+                            )
+                    try:
+                        observe_pressure(queue_lag_seconds=queue_lag_seconds)
+                    except TypeError:
+                        # Preserve compatibility with lightweight test doubles and
+                        # older injected runtimes that expose a no-argument sampler.
+                        observe_pressure()
+                concurrency_gate = getattr(
+                    self, "_aitos_adaptive_concurrency_gate", None
+                )
+                budget_for_optional = getattr(
+                    adaptive_runtime, "budget_for_optional_work", None
+                )
+                if concurrency_gate is not None and callable(budget_for_optional):
+                    optional_budget = budget_for_optional()
+                    await concurrency_gate.set_limit(
+                        min(
+                            concurrency_gate.max_concurrency,
+                            optional_budget.cpu_workers,
+                        )
+                    )
+                    background_gate = getattr(
+                        self, "_aitos_adaptive_background_gate", None
+                    )
+                    if background_gate is not None:
+                        await background_gate.set_limit(
+                            min(
+                                background_gate.max_concurrency,
+                                optional_budget.background_task_limit,
+                            )
+                        )
+            except Exception:
+                logger.exception(
+                    "adaptive process pressure sampling failed; retaining last pressure state"
+                )
         reference_klines = None
         if self._reference_symbol:
             try:
@@ -2053,25 +2236,74 @@ class OpportunityScanner(AITOSModule):
                 logger.error("failed to fetch reference symbol klines: %s", exc)
 
         selected_symbols = await self._lightweight_rank_symbols()
+        if (
+            adaptive_runtime is not None
+            and int(adaptive_runtime.pressure_controller.level) == 3
+        ):
+            # At CRITICAL, the reference market is still fetched above, but no
+            # optional per-symbol scan is admitted.
+            selected_symbols = []
 
         async def _scan_one(symbol: str) -> ScanCandidate | None:
-            async with self._scan_semaphore:
-                try:
-                    return await asyncio.wait_for(
-                        self.scan_symbol(symbol, reference_klines),
-                        timeout=self._tuning.analysis.timeout_seconds,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "scan failed for symbol",
-                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
-                    )
-                    return None
+            async def run_scan() -> ScanCandidate | None:
+                async with self._scan_semaphore:
+                    try:
+                        return await asyncio.wait_for(
+                            self.scan_symbol(symbol, reference_klines),
+                            timeout=self._tuning.analysis.timeout_seconds,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "scan failed for symbol",
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
+                        )
+                        return None
+
+            gate = getattr(self, "_aitos_adaptive_concurrency_gate", None)
+            if gate is None:
+                return await run_scan()
+            async with gate.slot():
+                return await run_scan()
 
         results = await asyncio.gather(
             *(_scan_one(symbol) for symbol in selected_symbols)
         )
         candidates = [candidate for candidate in results if candidate is not None]
+        if adaptive_runtime is not None:
+            try:
+                # The start-of-cycle sample is a CPU-time baseline. Sampling
+                # again after the expensive scan measures this cycle's actual
+                # process CPU/RSS pressure rather than diluting it with idle time
+                # between scans.
+                observe_pressure = getattr(
+                    adaptive_runtime, "observe_process_pressure", None
+                )
+                if callable(observe_pressure):
+                    try:
+                        observe_pressure(queue_lag_seconds=queue_lag_seconds)
+                    except TypeError:
+                        observe_pressure()
+                concurrency_gate = getattr(
+                    self, "_aitos_adaptive_concurrency_gate", None
+                )
+                budget_for_optional = getattr(
+                    adaptive_runtime, "budget_for_optional_work", None
+                )
+                if concurrency_gate is not None and callable(budget_for_optional):
+                    optional_budget = budget_for_optional()
+                    await concurrency_gate.set_limit(
+                        min(
+                            concurrency_gate.max_concurrency,
+                            optional_budget.cpu_workers,
+                        )
+                    )
+            except Exception:
+                logger.exception(
+                    "adaptive end-of-cycle pressure sampling failed; "
+                    "retaining last admission limit"
+                )
         self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
         self._last_candidate_symbols = tuple(
             sorted({item.symbol for item in candidates})
@@ -2085,6 +2317,21 @@ class OpportunityScanner(AITOSModule):
                     "symbols_scanned": len(selected_symbols),
                     "deep_analysis_budget": self._tuning.analysis.expensive_analysis_limit,
                     "candidates_found": len(candidates),
+                    "compute_pressure_level": (
+                        int(adaptive_runtime.pressure_controller.level)
+                        if adaptive_runtime is not None
+                        else None
+                    ),
+                    "queue_pending_idle_seconds": queue_lag_seconds,
+                    "adaptive_concurrency_limit": (
+                        getattr(
+                            getattr(self, "_aitos_adaptive_concurrency_gate", None),
+                            "limit",
+                            None,
+                        )
+                        if adaptive_runtime is not None
+                        else None
+                    ),
                 },
                 source_module=self.module_id,
             )
@@ -2289,6 +2536,63 @@ class OpportunityScanner(AITOSModule):
     async def iter_candidate_batches(self):
         """Analyse bounded batches, yielding each to downstream gates before refill."""
         self._require_initialized()
+        adaptive_runtime = getattr(self, "_aitos_adaptive_compute_runtime", None)
+
+        async def sample_adaptive_pressure() -> float | None:
+            """Sample optional-work pressure without blocking protected services."""
+            if adaptive_runtime is None:
+                return None
+            queue_lag_seconds = None
+            try:
+                queue_lag_provider = getattr(self._event_bus, "queue_lag_seconds", None)
+                if callable(queue_lag_provider):
+                    try:
+                        queue_lag_seconds = await queue_lag_provider()
+                    except Exception:
+                        logger.debug(
+                            "event-bus queue pressure sample unavailable",
+                            exc_info=True,
+                        )
+                observe_pressure = getattr(
+                    adaptive_runtime, "observe_process_pressure", None
+                )
+                if callable(observe_pressure):
+                    try:
+                        observe_pressure(queue_lag_seconds=queue_lag_seconds)
+                    except TypeError:
+                        observe_pressure()
+                concurrency_gate = getattr(
+                    self, "_aitos_adaptive_concurrency_gate", None
+                )
+                budget_for_optional = getattr(
+                    adaptive_runtime, "budget_for_optional_work", None
+                )
+                if callable(budget_for_optional):
+                    optional_budget = budget_for_optional()
+                    if concurrency_gate is not None:
+                        await concurrency_gate.set_limit(
+                            min(
+                                concurrency_gate.max_concurrency,
+                                optional_budget.cpu_workers,
+                            )
+                        )
+                    background_gate = getattr(
+                        self, "_aitos_adaptive_background_gate", None
+                    )
+                    if background_gate is not None:
+                        await background_gate.set_limit(
+                            min(
+                                background_gate.max_concurrency,
+                                optional_budget.background_task_limit,
+                            )
+                        )
+            except Exception:
+                logger.exception(
+                    "adaptive process pressure sampling failed; retaining last pressure state"
+                )
+            return queue_lag_seconds
+
+        queue_lag_seconds = await sample_adaptive_pressure()
         reference_klines = None
         if self._reference_symbol:
             try:
@@ -2301,6 +2605,12 @@ class OpportunityScanner(AITOSModule):
         selected = await self._lightweight_rank_symbols(limit=cfg.candidate_pool_limit)
         budget = min(cfg.max_candidate_analyses_per_cycle, cfg.candidate_pool_limit)
         selected = selected[:budget]
+        if (
+            adaptive_runtime is not None
+            and int(adaptive_runtime.pressure_controller.level) == 3
+        ):
+            # Preserve anchor-data fetches while deferring all optional analyses.
+            selected = []
         scanned = found = 0
         candidate_symbols_seen: set[str] = set()
         batch_size = max(1, cfg.candidate_batch_size)
@@ -2308,37 +2618,51 @@ class OpportunityScanner(AITOSModule):
             batch = selected[offset : offset + batch_size]
 
             async def scan_one(symbol: str) -> ScanCandidate | None:
-                async with self._scan_semaphore:
-                    try:
-                        return await asyncio.wait_for(
-                            self.scan_symbol(symbol, reference_klines),
-                            timeout=cfg.timeout_seconds,
-                        )
-                    except Exception as exc:
-                        for rejected_side in ("LONG", "SHORT"):
-                            await self._record_funnel(
-                                symbol=symbol,
-                                side=rejected_side,
-                                stage="scanner_batch",
-                                accepted=False,
-                                reason=(
-                                    "scan_timeout"
-                                    if isinstance(exc, asyncio.TimeoutError)
-                                    else "scan_exception"
-                                ),
-                                details={"error": str(exc)[:500]},
+                async def run_scan() -> ScanCandidate | None:
+                    async with self._scan_semaphore:
+                        try:
+                            return await asyncio.wait_for(
+                                self.scan_symbol(symbol, reference_klines),
+                                timeout=cfg.timeout_seconds,
                             )
-                        logger.error(
-                            "candidate batch scan failed",
-                            extra={
-                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
-                            },
-                        )
-                        return None
+                        except Exception as exc:
+                            for rejected_side in ("LONG", "SHORT"):
+                                await self._record_funnel(
+                                    symbol=symbol,
+                                    side=rejected_side,
+                                    stage="scanner_batch",
+                                    accepted=False,
+                                    reason=(
+                                        "scan_timeout"
+                                        if isinstance(exc, asyncio.TimeoutError)
+                                        else "scan_exception"
+                                    ),
+                                    details={"error": str(exc)[:500]},
+                                )
+                            logger.error(
+                                "candidate batch scan failed",
+                                extra={
+                                    "aitos_extra": {
+                                        "symbol": symbol,
+                                        "error": str(exc),
+                                    }
+                                },
+                            )
+                            return None
+
+                gate = getattr(self, "_aitos_adaptive_concurrency_gate", None)
+                if gate is None:
+                    return await run_scan()
+                async with gate.slot():
+                    return await run_scan()
 
             results = await asyncio.gather(*(scan_one(symbol) for symbol in batch))
             scanned += len(batch)
             candidates = [item for item in results if item is not None]
+            # Re-sample after each expensive batch so the next batch's admission
+            # reflects actual work pressure, not only the previous idle interval.
+            if adaptive_runtime is not None:
+                queue_lag_seconds = await sample_adaptive_pressure()
             ranked = await self.rank(candidates, top_n=len(candidates))
             found += len(ranked)
             self._last_scan_at, self._last_candidate_count = _utc_now_iso(), found
@@ -2352,6 +2676,30 @@ class OpportunityScanner(AITOSModule):
                 "analysis_budget": budget,
                 "candidates_found": found,
                 "ranked_symbols": [item.symbol for item in ranked],
+                "compute_pressure_level": (
+                    int(adaptive_runtime.pressure_controller.level)
+                    if adaptive_runtime is not None
+                    else None
+                ),
+                "queue_lag_seconds": queue_lag_seconds,
+                "adaptive_concurrency_limit": (
+                    getattr(
+                        getattr(self, "_aitos_adaptive_concurrency_gate", None),
+                        "limit",
+                        None,
+                    )
+                    if adaptive_runtime is not None
+                    else None
+                ),
+                "adaptive_background_limit": (
+                    getattr(
+                        getattr(self, "_aitos_adaptive_background_gate", None),
+                        "limit",
+                        None,
+                    )
+                    if adaptive_runtime is not None
+                    else None
+                ),
                 "rotation": self._candidate_rotation.snapshot(),
             }
             logger.info(

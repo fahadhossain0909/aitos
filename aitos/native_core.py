@@ -212,10 +212,20 @@ class PythonFixedPointOrderBook:
             self._validate_abi_levels(ask_rows)
             prepared.append((first, final, bid_rows, ask_rows, previous))
 
+        # Apply to a private candidate first. A sequence gap in a later
+        # update must not leave the caller with a partially advanced book.
+        candidate = PythonFixedPointOrderBook(
+            self.last_update_id, self.bids.items(), self.asks.items()
+        )
+        candidate._first_delta = self._first_delta
         applied = 0
         for first, final, bids, asks, previous in prepared:
-            if self.apply_delta(first, final, bids, asks, previous):
+            if candidate.apply_delta(first, final, bids, asks, previous):
                 applied += 1
+        self.last_update_id = candidate.last_update_id
+        self.bids = candidate.bids
+        self.asks = candidate.asks
+        self._first_delta = candidate._first_delta
         return applied
 
     def snapshot(

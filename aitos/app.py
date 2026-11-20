@@ -10,6 +10,9 @@ from datetime import datetime, timedelta, timezone
 from math import isfinite
 from typing import Any, Protocol
 
+from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+from aitos.compute.concurrency import AdaptiveConcurrencyGate
+from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
 from aitos.config.tuning import effective_tuning_report, reload_tuning_settings
@@ -109,15 +112,35 @@ class SystemComponents:
             or current.event_bus != updated.event_bus
             or current.risk != updated.risk
             or current.hardware != updated.hardware
+            or (
+                current.runtime.adaptive_compute_enabled
+                != updated.runtime.adaptive_compute_enabled
+            )
+            or (
+                current.runtime.pressure_warning_hold_seconds
+                != updated.runtime.pressure_warning_hold_seconds
+            )
+            or (
+                current.runtime.pressure_high_hold_seconds
+                != updated.runtime.pressure_high_hold_seconds
+            )
+            or (
+                current.runtime.pressure_recovery_hold_seconds
+                != updated.runtime.pressure_recovery_hold_seconds
+            )
+            or (
+                current.runtime.pressure_minimum_transition_interval_seconds
+                != updated.runtime.pressure_minimum_transition_interval_seconds
+            )
             or current.storage != updated.storage
             or current.telemetry != updated.telemetry
             or current.positions != updated.positions
         )
         if restart_required:
             raise ValueError(
-                "Runtime reload changed mode, infrastructure, hardware, storage, "
-                "telemetry, risk ceilings or position-management tuning; restart AITOS "
-                "to apply this profile safely"
+                "Runtime reload changed mode, infrastructure, hardware, adaptive "
+                "compute policy, storage, telemetry, risk ceilings or position "
+                "management tuning; restart AITOS to apply this profile safely"
             )
         self.scanner.apply_tuning_settings(updated)
         self.trade_lifecycle.apply_tuning_settings(updated)
@@ -268,6 +291,47 @@ async def build_system(
         tuning=tuning,
         world_intelligence_provider=world_intelligence_provider,
     )
+    adaptive_compute = create_adaptive_compute_runtime(tuning)
+    if adaptive_compute is not None:
+        scanner._aitos_adaptive_compute_runtime = adaptive_compute
+        scanner._aitos_symbol_telemetry_collector = SymbolTelemetryCollector(
+            window_seconds=60.0,
+            max_symbols=min(5000, max(100, len(scanner._symbols) * 2)),
+            max_samples_per_metric=4096,
+        )
+        # The scanner already has a fixed semaphore for its absolute ceiling.
+        # This second gate is the adaptive admission limit; lowering it never
+        # cancels in-flight scans and CRITICAL pressure pauses new optional work.
+        scanner._aitos_adaptive_concurrency_gate = AdaptiveConcurrencyGate(
+            max(1, int(tuning.analysis.lightweight_concurrency)),
+            initial_limit=min(
+                max(1, int(tuning.analysis.lightweight_concurrency)),
+                adaptive_compute.budget.cpu_workers,
+            ),
+        )
+        # Optional background work is independently admitted; it never shares
+        # the scanner gate or blocks market-data, risk, or execution services.
+        scanner._aitos_adaptive_background_gate = AdaptiveConcurrencyGate(
+            max(1, int(tuning.hardware.max_background_tasks)),
+            initial_limit=min(
+                max(1, int(tuning.hardware.max_background_tasks)),
+                adaptive_compute.budget.background_task_limit,
+            ),
+        )
+        scanner._aitos_protected_symbols = {scanner._reference_symbol}
+        logger.info(
+            "paper adaptive compute enabled",
+            extra={
+                "aitos_extra": {
+                    "effective_cpus": adaptive_compute.resources.effective_cpus,
+                    "memory_limit_mb": adaptive_compute.resources.memory_limit_mb,
+                    "memory_budget_mb": adaptive_compute.budget.memory_budget_mb,
+                    "cpu_workers": adaptive_compute.budget.cpu_workers,
+                    "cpu_capacity_units": adaptive_compute.budget.cpu_capacity_units,
+                    "telemetry_window_seconds": 60,
+                }
+            },
+        )
     rl_feedback = RLFeedbackLoop(event_bus=event_bus, scorer=rl_scorer)
     outcome_classifier = outcome_classifier or TradeOutcomeClassifier()
     ml_feedback = MLExplainerFeedbackLoop(
@@ -529,8 +593,22 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
         if drift_task is None or drift_task.done():
             stop_event = asyncio.Event()
             components._governance_drift_stop_event = stop_event
+            scanner = getattr(components, "scanner", None)
+            background_gate = getattr(scanner, "_aitos_adaptive_background_gate", None)
+
+            if background_gate is None:
+                governed_drift_provider = drift_provider
+            else:
+
+                async def governed_drift_provider():
+                    # Drift evaluation is optional background work. Acquire a
+                    # slot per batch (not for the worker lifetime) so pressure
+                    # can defer the next batch without cancelling this one.
+                    async with background_gate.slot():
+                        return await drift_provider()
+
             components._governance_drift_task = asyncio.create_task(
-                drift_scheduler.run_forever(stop_event, drift_provider),
+                drift_scheduler.run_forever(stop_event, governed_drift_provider),
                 name="aitos-statistical-drift-monitor",
             )
     deadline = asyncio.get_running_loop().time() + timeout
@@ -823,6 +901,20 @@ async def run_scan_and_trade_cycle(
     accepted_opportunities = 0
     target_opportunities = components.scanner.target_opportunities
     stop_cycle = False
+
+    protected_symbols = {
+        trade.symbol for trade in components.trade_lifecycle.get_open_trades()
+    }
+    protected_symbols.update(
+        str(getattr(order, "symbol"))
+        for order in (portfolio.pending_orders or ())
+        if getattr(order, "symbol", None)
+    )
+    reference_symbol = getattr(components.scanner, "_reference_symbol", None)
+    if reference_symbol:
+        protected_symbols.add(reference_symbol)
+    if getattr(components.scanner, "_aitos_adaptive_compute_runtime", None) is not None:
+        components.scanner._aitos_protected_symbols = protected_symbols
 
     ranked_batches = [
         batch async for batch in components.scanner.iter_candidate_batches()

@@ -193,6 +193,112 @@ class EventBus(AITOSModule):
             },
         )
 
+    async def queue_lag_seconds(self, *, max_groups: int = 8) -> float | None:
+        """Return the oldest observable unread/pending age across active groups.
+
+        Redis 7 XINFO GROUPS exposes lag and last-delivered-id. For a group with
+        unread entries, the first entry after last-delivered-id gives the oldest
+        unread event's enqueue timestamp. XPENDING supplements this with
+        delivery-idle age for already delivered but unacked entries.
+        Work is bounded to max_groups, 100 pending entries/group, and one unread
+        XRANGE entry/group. Unsupported server/client capabilities return None.
+        """
+        if (
+            isinstance(max_groups, bool)
+            or not isinstance(max_groups, int)
+            or max_groups < 1
+        ):
+            raise ValueError("max_groups must be a positive integer")
+        pairs: set[tuple[str, str]] = set()
+        for subscription in self._subscriptions:
+            for topic in self._known_topics:
+                if fnmatch.fnmatch(topic, subscription.topic_pattern):
+                    pairs.add((_stream_key(topic), subscription.group))
+                    if len(pairs) >= max_groups:
+                        break
+            if len(pairs) >= max_groups:
+                break
+        if not pairs:
+            return None
+
+        now_ms = int(time.time() * 1000)
+        max_age_ms = 0
+        observed_groups = 0
+        for stream_key, group in pairs:
+            try:
+                groups = await self._redis.xinfo_groups(stream_key)
+                group_info = next(
+                    (
+                        item
+                        for item in groups
+                        if item.get("name", item.get(b"name"))
+                        in (group, group.encode())
+                    ),
+                    None,
+                )
+                if group_info is None:
+                    continue
+                observed_groups += 1
+                lag = group_info.get("lag", group_info.get(b"lag"))
+                last_id = group_info.get(
+                    "last-delivered-id", group_info.get(b"last-delivered-id")
+                )
+                if (lag is None or int(lag) > 0) and last_id is not None:
+                    last_id_text = (
+                        last_id.decode() if isinstance(last_id, bytes) else str(last_id)
+                    )
+                    unread = await self._redis.xrange(
+                        stream_key, min=f"({last_id_text}", max="+", count=1
+                    )
+                    if unread:
+                        entry_id = unread[0][0]
+                        entry_id_text = (
+                            entry_id.decode()
+                            if isinstance(entry_id, bytes)
+                            else str(entry_id)
+                        )
+                        event_time_ms = int(entry_id_text.split("-", 1)[0])
+                        max_age_ms = max(max_age_ms, now_ms - event_time_ms)
+
+                pending = await self._redis.xpending_range(
+                    stream_key, group, min="-", max="+", count=100
+                )
+                for entry in pending or ():
+                    idle_ms = entry.get(
+                        "time_since_delivered", entry.get(b"time_since_delivered")
+                    )
+                    if idle_ms is not None:
+                        max_age_ms = max(max_age_ms, int(idle_ms))
+            except (AttributeError, NotImplementedError):
+                return None
+            except (TypeError, ValueError, OverflowError, KeyError, IndexError) as exc:
+                self._last_error = str(exc)[:500]
+                logger.debug(
+                    "queue pressure sample unavailable",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream_key,
+                            "group": group,
+                            "error": str(exc),
+                        }
+                    },
+                )
+                return None
+            except Exception as exc:
+                self._last_error = str(exc)[:500]
+                logger.debug(
+                    "queue pressure sample unavailable",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream_key,
+                            "group": group,
+                            "error": str(exc),
+                        }
+                    },
+                )
+                return None
+        return max(0, max_age_ms) / 1000.0 if observed_groups else None
+
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for sub in self._subscriptions:
             sub.cancel()

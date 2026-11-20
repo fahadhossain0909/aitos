@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -39,25 +40,39 @@ class BoundedMarketQueue(Generic[T]):
         self.stats.depth = self._queue.qsize()
         return True
 
-    def put_latest_nowait(self, item: T) -> bool:
-        """Enqueue immediately, replacing the oldest item when full.
+    def put_latest_nowait(
+        self,
+        item: T,
+        *,
+        can_replace: Callable[[T], bool] | None = None,
+    ) -> bool:
+        """Enqueue immediately, replacing the oldest eligible item when full.
 
-        Live trading must prefer the newest market state over an old backlog.
+        A caller can protect sequence-critical state (for example order-book
+        snapshots/deltas) from being evicted by a latest-wins ticker/trade burst.
+        If every queued item is protected, reject the incoming item explicitly.
         This operation never waits for a slow downstream consumer.
         """
         try:
             self._queue.put_nowait(item)
         except asyncio.QueueFull:
-            try:
-                self._queue.get_nowait()
-                self._queue.task_done()
-            except asyncio.QueueEmpty:
+            replaceable = can_replace or (lambda _queued: True)
+            queue_items = self._queue._queue
+            victim = next(
+                (queued for queued in queue_items if replaceable(queued)), None
+            )
+            if victim is None:
+                self.stats.dropped += 1
+                self.stats.depth = self._queue.qsize()
                 return False
+            queue_items.remove(victim)
+            self._queue.task_done()
             self.stats.dropped += 1
             self.stats.replaced_oldest += 1
             try:
                 self._queue.put_nowait(item)
             except asyncio.QueueFull:
+                self.stats.depth = self._queue.qsize()
                 return False
         self.stats.accepted += 1
         self.stats.depth = self._queue.qsize()

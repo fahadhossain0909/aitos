@@ -8,11 +8,14 @@ from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGat
 
 
 def _event(
-    source: MarketSource, age_seconds: float = 0, sequence: int = 0
+    source: MarketSource,
+    age_seconds: float = 0,
+    sequence: int = 0,
+    event_type: MarketEventType = MarketEventType.TRADE,
 ) -> MarketEvent:
     now = datetime.now(timezone.utc)
     return MarketEvent(
-        event_type=MarketEventType.TRADE,
+        event_type=event_type,
         exchange="binance",
         market="usd_m_futures",
         symbol="BTCUSDT",
@@ -131,3 +134,77 @@ async def test_gateway_drain_once_returns_false_on_empty_queue() -> None:
     assert await gateway.drain_once() is False
     assert published == []
     assert gateway.queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_gateway_never_evicts_queued_orderbook_delta_for_trade_burst() -> None:
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        lambda _: None,
+        GatewayConfig(queue_capacity=1),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    delta = _event(
+        MarketSource.WEBSOCKET,
+        sequence=10,
+        event_type=MarketEventType.BOOK_DELTA,
+    )
+    trade = _event(MarketSource.WEBSOCKET, sequence=11)
+
+    assert gateway.accept(delta) is True
+    assert gateway.accept(trade) is False
+    assert gateway.queue.qsize() == 1
+    assert gateway.queue._queue._queue[0] is delta
+
+
+@pytest.mark.asyncio
+async def test_gateway_admits_book_delta_by_evicting_replaceable_trade() -> None:
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        lambda _: None,
+        GatewayConfig(queue_capacity=1),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    trade = _event(MarketSource.WEBSOCKET, sequence=10)
+    delta = _event(
+        MarketSource.WEBSOCKET,
+        sequence=11,
+        event_type=MarketEventType.BOOK_DELTA,
+    )
+
+    assert gateway.accept(trade) is True
+    assert gateway.accept(delta) is True
+    assert gateway.queue._queue._queue[0] is delta
+    assert gateway.queue.stats.replaced_oldest == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_degrades_when_all_queue_slots_are_sequence_critical() -> None:
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        lambda _: None,
+        GatewayConfig(queue_capacity=1),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    first = _event(
+        MarketSource.WEBSOCKET,
+        sequence=10,
+        event_type=MarketEventType.BOOK_DELTA,
+    )
+    second = _event(
+        MarketSource.WEBSOCKET,
+        sequence=11,
+        event_type=MarketEventType.BOOK_DELTA,
+    )
+
+    assert gateway.accept(first) is True
+    assert gateway.accept(second) is False
+    assert gateway.queue._queue._queue[0] is first
+    assert gateway.state is GatewayState.DEGRADED
+    assert gateway.health.degraded is True

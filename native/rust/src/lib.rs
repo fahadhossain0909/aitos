@@ -13,6 +13,7 @@ type DepthDelta = (
 );
 type BookSnapshot = (u64, Vec<PriceQuantity>, Vec<PriceQuantity>);
 
+#[derive(Clone)]
 struct Book {
     last: u64,
     bids: BTreeMap<i64, i64>,
@@ -175,13 +176,22 @@ impl FixedPointOrderBook {
         )
     }
 
-    fn apply_deltas(&mut self, updates: Vec<DepthDelta>) -> PyResult<usize> {
-        let mut applied = 0;
-        for (first, final_id, bids, asks, previous) in updates {
-            if self.book.apply(first, final_id, previous, bids, asks)? {
-                applied += 1;
+    fn apply_deltas(&mut self, py: Python<'_>, updates: Vec<DepthDelta>) -> PyResult<usize> {
+        // Run the CPU-heavy batch without holding Python's GIL. Work against a
+        // private clone so a later sequence failure cannot partially mutate
+        // the authoritative book.
+        let current = self.book.clone();
+        let (candidate, applied) = py.allow_threads(move || -> PyResult<(Book, usize)> {
+            let mut candidate = current;
+            let mut applied = 0;
+            for (first, final_id, bids, asks, previous) in updates {
+                if candidate.apply(first, final_id, previous, bids, asks)? {
+                    applied += 1;
+                }
             }
-        }
+            Ok((candidate, applied))
+        })?;
+        self.book = candidate;
         Ok(applied)
     }
 

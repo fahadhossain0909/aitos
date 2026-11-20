@@ -1,9 +1,4 @@
-"""Compute admission policy for optional background and analysis work.
-
-Protected workloads (market-data integrity, order updates, open-position
-monitoring, risk checks, and execution recovery) must not be submitted to this
-optional-work scheduler. They have independent service ownership and capacity.
-"""
+"""Pressure-aware admission for optional analysis and background work."""
 
 from __future__ import annotations
 
@@ -27,12 +22,21 @@ class WorkloadRequest:
     priority: float = 0.0
 
     def __post_init__(self) -> None:
-        if not self.request_id.strip():
+        if not isinstance(self.request_id, str) or not self.request_id.strip():
             raise ValueError("request_id cannot be empty")
+        if not isinstance(self.workload_class, WorkloadClass):
+            raise ValueError("workload_class must be a WorkloadClass")
         if (
-            not isfinite(self.cpu_cost_units)
+            isinstance(self.cpu_cost_units, bool)
+            or not isinstance(self.cpu_cost_units, (int, float))
+            or isinstance(self.priority, bool)
+            or not isinstance(self.priority, (int, float))
+            or not isfinite(self.cpu_cost_units)
             or not isfinite(self.priority)
             or self.cpu_cost_units < 0
+            or self.priority < 0
+            or isinstance(self.memory_cost_mb, bool)
+            or not isinstance(self.memory_cost_mb, int)
             or self.memory_cost_mb < 0
         ):
             raise ValueError(
@@ -46,7 +50,6 @@ class WorkloadAdmission:
     deferred: tuple[str, ...]
     cpu_reserved_units: float
     memory_reserved_mb: int
-    overcommitted: bool
 
 
 def admit_optional_work(
@@ -57,42 +60,61 @@ def admit_optional_work(
     pressure_level: int = 0,
     max_admitted: int | None = None,
 ) -> WorkloadAdmission:
-    """Admit optional work under pressure, preserving priority and hard budgets.
+    """Admit optional work only; protected trading services are out of scope.
 
-    Pressure levels follow PressureLevel ordering: NORMAL=0, WARNING=1,
-    HIGH=2, CRITICAL=3. Warning halves optional capacity; HIGH admits only
-    interactive work; CRITICAL defers all optional work. This function has no
-    authority over protected trading services.
+    Pressure levels: NORMAL=0, WARNING=1, HIGH=2, CRITICAL=3. WARNING halves
+    optional capacity, HIGH leaves a quarter-capacity interactive lane, and
+    CRITICAL defers all optional requests. Protected market-data, order,
+    position, risk, and execution services require separate capacity ownership.
     """
     if (
-        not isfinite(cpu_capacity_units)
+        isinstance(cpu_capacity_units, bool)
+        or not isinstance(cpu_capacity_units, (int, float))
+        or not isfinite(cpu_capacity_units)
         or cpu_capacity_units < 0
+        or isinstance(memory_capacity_mb, bool)
+        or not isinstance(memory_capacity_mb, int)
         or memory_capacity_mb < 0
+        or isinstance(pressure_level, bool)
+        or not isinstance(pressure_level, int)
         or pressure_level not in (0, 1, 2, 3)
-        or (max_admitted is not None and max_admitted < 0)
+        or (
+            max_admitted is not None
+            and (
+                isinstance(max_admitted, bool)
+                or not isinstance(max_admitted, int)
+                or max_admitted < 0
+            )
+        )
     ):
         raise ValueError("invalid optional-work admission limits")
 
+    if not isinstance(requests, (list, tuple)):
+        raise ValueError("requests must be a list or tuple")
+
     seen: set[str] = set()
-    unique: list[WorkloadRequest] = []
     for request in requests:
+        if not isinstance(request, WorkloadRequest):
+            raise ValueError("requests must contain WorkloadRequest values")
         key = request.request_id.strip()
         if key in seen:
             raise ValueError(f"duplicate workload request_id: {key}")
         seen.add(key)
-        unique.append(request)
 
     cpu_limit = cpu_capacity_units
     memory_limit = memory_capacity_mb
     if pressure_level == 1:
         cpu_limit *= 0.5
-        memory_limit = memory_limit // 2
-    elif pressure_level >= 2:
+        memory_limit //= 2
+    elif pressure_level == 2:
+        cpu_limit *= 0.25
+        memory_limit //= 4
+    elif pressure_level == 3:
         cpu_limit = 0.0
         memory_limit = 0
 
     ordered = sorted(
-        unique,
+        requests,
         key=lambda item: (int(item.workload_class), -item.priority, item.request_id),
     )
     admitted: list[str] = []
@@ -108,7 +130,7 @@ def admit_optional_work(
         pressure_allows = not (
             pressure_level == 3
             or (
-                pressure_level >= 2
+                pressure_level == 2
                 and request.workload_class != WorkloadClass.INTERACTIVE
             )
         )
@@ -124,5 +146,4 @@ def admit_optional_work(
         deferred=tuple(deferred),
         cpu_reserved_units=cpu_used,
         memory_reserved_mb=memory_used,
-        overcommitted=False,
     )
