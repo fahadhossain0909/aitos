@@ -173,6 +173,7 @@ def test_capital_veto_produces_no_canonical_opportunity():
         StrategyProtectionPlan(95.0, (99.0,), loss_probability=0.15),
         StrategyProtectionPlan(95.0, (), loss_probability=0.15),
         StrategyProtectionPlan(95.0, (110.0,), loss_probability=0.15, leverage=0.0),
+        StrategyProtectionPlan(95.0, (110.0,), loss_probability=1.5),
     ],
 )
 def test_missing_or_directionally_invalid_protection_is_rejected(plan):
