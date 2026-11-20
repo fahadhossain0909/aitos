@@ -21,17 +21,14 @@ export function getDevServerPolicy(
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
 
-  if (
-    allowedHosts.some(
-      (value) =>
-        value === "*" ||
-        value.includes("://") ||
-        value.includes("/") ||
-        value.includes(":"),
-    )
-  ) {
+  const exactHostname = (value: string) =>
+    value.length <= 253 &&
+    value.split(".").every((label) =>
+      /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label),
+    );
+  if (allowedHosts.some((value) => !exactHostname(value))) {
     throw new Error(
-      "AITOS_VITE_ALLOWED_HOSTS must contain exact hostnames, not wildcards, URLs, paths, or ports",
+      "AITOS_VITE_ALLOWED_HOSTS must contain exact DNS hostnames, not wildcards, URLs, paths, or ports",
     );
   }
   if (!LOOPBACK_HOSTS.has(host.toLowerCase()) && allowedHosts.length === 0) {
