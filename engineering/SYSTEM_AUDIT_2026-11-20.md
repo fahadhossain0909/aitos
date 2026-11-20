@@ -147,6 +147,8 @@ Diff comparison is complete. Both branches are stale relative to current `main` 
 
 **Decision:** retain both as historical work packages for selective extraction, but do not merge or close them automatically. The testnet endpoint/credential work requires an isolated adapter contract and no-live-order test plan; the advanced-statistics work requires individual module dependency, point-in-time and OOS review before cherry-picking. This audit branch implements neither broad stale diff wholesale.
 
+**Update in this branch:** the Futures adapter now supports explicit `mainnet`/`testnet` environment selection. Testnet REST and WebSocket routes use Binance's documented demo endpoints, and testnet credentials are isolated from mainnet environment variables (no fallback). Focused tests cover endpoint selection, REST/WebSocket routing, invalid environment rejection and credential isolation. This is endpoint/configuration coverage only; authenticated testnet account, order lifecycle, protective-order, partial-fill, restart and fee/funding reconciliation remain unverified. See `engineering/BINANCE_FUTURES_TESTNET_CONFIGURATION.md`.
+
 ### P2 — Documentation freshness and product truth
 
 README previously described Futures as the only exchange and contained branch-specific integration statements. Desktop and installation docs did not clearly distinguish the two desktop products. Historical validation reports could be mistaken for current-main certification.
