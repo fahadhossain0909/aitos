@@ -147,7 +147,11 @@ def _memory_values(proc_root: Path, cgroup_root: Path) -> tuple[int, int, int, b
 
     limit_bytes: int | None = None
     current_bytes: int | None = None
-    for relative in ("memory.max", "memory/memory.limit_in_bytes"):
+    for relative in (
+        "memory.max",
+        "memory/memory.limit_in_bytes",
+        "memory.limit_in_bytes",
+    ):
         value = _read_text(cgroup_root / relative)
         if value and value != "max":
             try:
@@ -158,7 +162,11 @@ def _memory_values(proc_root: Path, cgroup_root: Path) -> tuple[int, int, int, b
                     )
             except ValueError:
                 pass
-    for relative in ("memory.current", "memory/memory.usage_in_bytes"):
+    for relative in (
+        "memory.current",
+        "memory/memory.usage_in_bytes",
+        "memory.usage_in_bytes",
+    ):
         value = _read_text(cgroup_root / relative)
         if value:
             try:
@@ -208,8 +216,12 @@ def _cpu_values(proc_root: Path, cgroup_root: Path) -> tuple[int, float, bool]:
             except ValueError:
                 pass
     if quota_cpus is None:
-        quota = _read_text(cgroup_root / "cpu/cpu.cfs_quota_us")
-        period = _read_text(cgroup_root / "cpu/cpu.cfs_period_us")
+        quota = _read_text(cgroup_root / "cpu/cpu.cfs_quota_us") or _read_text(
+            cgroup_root / "cpu.cfs_quota_us"
+        )
+        period = _read_text(cgroup_root / "cpu/cpu.cfs_period_us") or _read_text(
+            cgroup_root / "cpu.cfs_period_us"
+        )
         try:
             if quota and period and int(quota) > 0 and int(period) > 0:
                 quota_cpus = int(quota) / int(period)
