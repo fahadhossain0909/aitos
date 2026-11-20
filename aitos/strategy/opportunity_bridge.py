@@ -111,12 +111,7 @@ def _validate_protection(
 def _close_shadow_reservation(gateway: CapitalGateway) -> None:
     close = getattr(gateway.reservation, "close", None)
     if callable(close):
-        try:
-            close()
-        except Exception:
-            # A shadow-ledger cleanup failure cannot authorize execution; the
-            # report remains non-executable and the failure is surfaced by CI.
-            pass
+        close()
 
 
 def build_risk_governed_opportunities(
