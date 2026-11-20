@@ -74,9 +74,7 @@ class SymbolTelemetryCollector:
                 last_seen=now,
             )
             self._windows[key] = window
-        if now < window.last_seen:
-            raise ValueError("per-symbol telemetry timestamps must be monotonic")
-        window.last_seen = now
+        window.last_seen = max(window.last_seen, now)
         self._windows.move_to_end(key)
         while len(self._windows) > self.max_symbols:
             self._windows.popitem(last=False)
@@ -95,6 +93,8 @@ class SymbolTelemetryCollector:
             raise ValueError("timestamp must be finite and non-negative")
         with self._lock:
             window = self._window(symbol, now)
+            if window.events and now < window.events[-1]:
+                raise ValueError("event timestamps must be monotonic per symbol")
             self._prune(window, now - self.window_seconds)
             window.events.append(now)
 
@@ -106,6 +106,8 @@ class SymbolTelemetryCollector:
         now = self._timestamp(timestamp)
         with self._lock:
             window = self._window(symbol, now)
+            if window.depths and now < window.depths[-1][0]:
+                raise ValueError("depth timestamps must be monotonic per symbol")
             self._prune(window, now - self.window_seconds)
             window.depths.append((now, int(depth_levels)))
 
@@ -113,6 +115,8 @@ class SymbolTelemetryCollector:
         now = self._clock() if timestamp is None else float(timestamp)
         with self._lock:
             window = self._window(symbol, now)
+            if window.analyses and now < window.analyses[-1]:
+                raise ValueError("analysis timestamps must be monotonic per symbol")
             self._prune(window, now - self.window_seconds)
             window.analyses.append(now)
 
