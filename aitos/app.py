@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from math import isfinite
 from typing import Any, Protocol
 
+from aitos.compute.adaptive_runtime import create_adaptive_compute_runtime
+from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
 from aitos.config.tuning import effective_tuning_report, reload_tuning_settings
@@ -268,6 +270,28 @@ async def build_system(
         tuning=tuning,
         world_intelligence_provider=world_intelligence_provider,
     )
+    adaptive_compute = create_adaptive_compute_runtime(tuning)
+    if adaptive_compute is not None:
+        scanner._aitos_adaptive_compute_runtime = adaptive_compute
+        scanner._aitos_symbol_telemetry_collector = SymbolTelemetryCollector(
+            window_seconds=60.0,
+            max_symbols=min(5000, max(100, len(scanner._symbols) * 2)),
+            max_samples_per_metric=4096,
+        )
+        scanner._aitos_protected_symbols = {scanner._reference_symbol}
+        logger.info(
+            "paper adaptive compute enabled",
+            extra={
+                "aitos_extra": {
+                    "effective_cpus": adaptive_compute.resources.effective_cpus,
+                    "memory_limit_mb": adaptive_compute.resources.memory_limit_mb,
+                    "memory_budget_mb": adaptive_compute.budget.memory_budget_mb,
+                    "cpu_workers": adaptive_compute.budget.cpu_workers,
+                    "cpu_capacity_units": adaptive_compute.budget.cpu_capacity_units,
+                    "telemetry_window_seconds": 60,
+                }
+            },
+        )
     rl_feedback = RLFeedbackLoop(event_bus=event_bus, scorer=rl_scorer)
     outcome_classifier = outcome_classifier or TradeOutcomeClassifier()
     ml_feedback = MLExplainerFeedbackLoop(
@@ -823,6 +847,20 @@ async def run_scan_and_trade_cycle(
     accepted_opportunities = 0
     target_opportunities = components.scanner.target_opportunities
     stop_cycle = False
+
+    protected_symbols = {
+        trade.symbol for trade in components.trade_lifecycle.get_open_trades()
+    }
+    protected_symbols.update(
+        str(getattr(order, "symbol"))
+        for order in (portfolio.pending_orders or ())
+        if getattr(order, "symbol", None)
+    )
+    protected_symbols.add(
+        getattr(components.scanner, "_reference_symbol", "BTCUSDT")
+    )
+    if getattr(components.scanner, "_aitos_adaptive_compute_runtime", None) is not None:
+        components.scanner._aitos_protected_symbols = protected_symbols
 
     ranked_batches = [
         batch async for batch in components.scanner.iter_candidate_batches()
