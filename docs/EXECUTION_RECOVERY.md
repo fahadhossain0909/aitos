@@ -220,9 +220,9 @@ based on a report or a model recommendation.
 |---|---|---|
 | Initial STOP recovery | Owner-bound authenticated identity, durable snapshot-before-journal ordering, restart idempotency tests | Implemented; CI validation pending for current PR head |
 | Initial TP recovery | Owner-bound authenticated identity, idempotent `tp_order_ids` persistence, focused restart test | Implemented; CI validation pending for current PR head |
-| Replacement protective-order handover | No durable two-order handover/cancel-ack state machine yet | Not implemented; fail-closed quarantine |
-| Triggered algo / child partial fills | Child lookup is diagnostic only; no cumulative-fill lifecycle application/restart checkpoint | Not implemented; fail-closed quarantine |
-| Venue + SQLite + ClickHouse crash drill | Existing isolated Redis/persistence and embedded ClickHouse tests do not constitute a coordinated three-store crash/restart drill | Not yet accepted |
+| Replacement protective-order handover | Durable STOP and TAKE_PROFIT make-before-break journal/recovery, exact owner and venue identity, old-order status checks around cancel, snapshot-before-ack ordering | Code and fault-injection tests added; current-head CI and authenticated testnet lifecycle remain required |
+| Triggered algo / child partial fills | Decimal cumulative quantity/quote delta validator with strict algo-child linkage and monotonic watermark inputs | Validator and regression tests added; TradeLifecycle application, durable snapshot watermark and restart integration remain open; fail-closed quarantine |
+| Venue + SQLite + ClickHouse crash drill | Isolated fault injection now covers replacement handover persistence failure before cancellation and after cancellation acknowledgement | Partial boundary coverage only; full coordinated three-store crash/restart drill not yet accepted |
 | Authenticated testnet lifecycle | Hosted paper canary previously returned HTTP 451; no verified authenticated end-to-end testnet lifecycle receipt | Blocked by runner/network access; no mainnet fallback |
 | StrategyEngine typed bridge | StrategyEngine remains proposal/allocation/shadow-only pending typed Opportunity and validated risk/stop/account contracts | Intentionally not live-wired |
 
@@ -292,3 +292,42 @@ production settings, migrations or data cleanup were applied during verification
 ## Strict pending-entry exposure projection
 
 `aitos.exchange.binance_pending_exposure.pending_exposures_from_open_orders()` converts a complete standard USD-M `openOrders` response into `PendingOrderExposure` rows. It accounts only for unfilled remainder after partial fills; excludes reduce-only, close-position and hedge-mode closing legs; and requires fresh mark, side-correct protective stop and leverage inputs. The open-order and risk-input timestamps must both be timezone-aware, within five seconds of the supplied current time, and within two seconds of each other. Risk is linear-contract remaining quantity multiplied by mark-to-stop distance. This adapter is not for inverse/coin-margined contracts and is not yet connected to the live account tracker: that provider's authoritative snapshot owner and lifecycle remain an explicit acceptance gate.
+
+
+## Replacement TP handover and child-fill validation follow-up (2026-11-20)
+
+The protective handover journal now stores an explicit `order_type` with an
+additive SQLite migration. Existing rows migrate as `STOP_MARKET`; the same
+guarded PREPARED → NEW_ACCEPTED → OLD_CANCEL_REQUESTED → OLD_CANCELLED → APPLIED
+state machine can now recover `TAKE_PROFIT_MARKET` replacements. TP recovery
+requires the exact prior TP journal owner and quantity, validates the new
+venue algo identity and trigger, replaces the exact TP ID in the restored trade
+snapshot, and only then confirms cancellation of the old TP. It does not
+replace a TP that has already partially filled or whose ownership is ambiguous.
+
+`TradeLifecycle._replace_exchange_side_take_profit()` provides the matching
+make-before-break live operation for legacy static-TP positions. It requires an
+untouched NEW old TP, retrieves its exact original quantity from the scoped
+journal, submits a deterministic owner-bound replacement, persists the new ID
+and level before cancellation, verifies the old order is terminal, persists
+the cleared pending-cancellation marker, and only then acknowledges the new
+intent. EIE-managed TP checkpoints are deliberately excluded because an
+exchange-side TP would bypass HOLD/MANAGE/EXIT arbitration.
+
+The triggered child validator now requires a confirmed TRIGGERED/FINISHED
+conditional algo, exact algo-to-child linkage, symbol/side/type/position-side
+identity, bounded executed quantity, monotonic cumulative executed quantity
+and quote, and positive incremental quote for every new fill. The incremental
+fill price is `delta cumQuote / delta executedQty`; the venue's lifetime
+average price is not incorrectly applied to a partial delta.
+
+**Important remaining boundary:** the child validator is a pure evidence
+contract. It is not yet wired to mutate `TradeLifecycle` or to persist a
+cumulative watermark in the same durable trade snapshot. Therefore triggered
+child fills remain quarantined and must not be treated as applied. The
+replacement handover fault-injection tests exercise crash/restart at the
+ClickHouse snapshot boundary before cancellation and after cancellation ACK,
+but they do not substitute for the full Venue + SQLite + ClickHouse coordinated
+fault-injection drill. Authenticated Binance demo testnet acceptance remains
+blocked when the hosted runner receives HTTP 451; no mainnet fallback is
+permitted.
