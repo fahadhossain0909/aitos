@@ -8,6 +8,7 @@ end-to-end batch replay time for equivalent fixed-point books. Compare on the
 same host, Python version, CPU governor, and build profile. Never infer a
 production latency win from a single run.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,9 +54,7 @@ def benchmark(factory: Callable, updates, depth: int, repeats: int) -> dict:
     return {
         "median_ms": round(median_ns / 1_000_000, 3),
         "p95_ms": round(ordered[p95_index] / 1_000_000, 3),
-        "updates_per_second": round(
-            len(updates) * 1_000_000_000 / median_ns, 1
-        ),
+        "updates_per_second": round(len(updates) * 1_000_000_000 / median_ns, 1),
         "samples": repeats,
     }
 
