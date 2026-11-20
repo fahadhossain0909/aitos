@@ -138,7 +138,21 @@ def build_risk_governed_opportunities(
     gateway = shadow_gateway_factory()
     if not isinstance(gateway, CapitalGateway):
         raise TypeError("shadow gateway factory must return CapitalGateway")
-    if live_reservation is not None and gateway.reservation is live_reservation:
+    shadow_reservation = gateway.reservation
+    same_ledger = (
+        shadow_reservation is live_reservation
+        or (
+            getattr(shadow_reservation, "_conn", None) is not None
+            and getattr(shadow_reservation, "_conn", None)
+            is getattr(live_reservation, "_conn", object())
+        )
+        or (
+            getattr(shadow_reservation, "_path", None) is not None
+            and getattr(shadow_reservation, "_path", None)
+            == getattr(live_reservation, "_path", None)
+        )
+    )
+    if same_ledger:
         raise ValueError("shadow gateway cannot share the live reservation ledger")
 
     shadow = build_strategy_shadow_report(cycle, context)
