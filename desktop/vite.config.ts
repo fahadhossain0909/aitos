@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { getDevServerPolicy } from "./devServerPolicy";
 
 const desktopRoot = dirname(fileURLToPath(import.meta.url));
 export default defineConfig(() => {
@@ -21,8 +22,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      host: "0.0.0.0",
-      allowedHosts: true,
+      ...getDevServerPolicy(process.env),
       proxy: {
         "/console": {
           target: process.env.AITOS_CONSOLE_TARGET || "http://127.0.0.1:8765",
