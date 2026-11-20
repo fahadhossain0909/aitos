@@ -109,6 +109,12 @@ The main CI workflow currently:
 
 **Required action:** introduce a measured, staged coverage threshold; run a maintainable full lint policy (for example Ruff or a scoped Flake8 profile) without enabling a repository-wide noisy gate; add container SBOM/vulnerability and provenance checks; add migration/restore and contract compatibility gates. Do not turn on a strict global lint threshold without first baselining existing violations.
 
+### P2 — Local setup guide lacked resource-fit guidance
+
+The default Compose limits permit Redis 2.5 GiB, ClickHouse 2.5 GiB, Neo4j 2.5 GiB and the paper runner 2 GiB, before Docker Desktop and host overhead. These are caps rather than reserved memory, but a full local stack is not appropriate for a 4 GiB workstation. The paper Compose service also declares all three data services as dependencies, so simply omitting Neo4j is not a supported paper-run configuration.
+
+**Remediation in this branch:** add resource-profile guidance for frontend-only, low-memory development, selective service work and full paper-stack validation. The guide explicitly directs low-memory machines to frontend/sample mode and focused unit tests rather than unsafe memory-limit reductions.
+
 ### P2 — Overlapping open testnet PRs require explicit triage
 
 The current open-PR search returned both #215 and #244, with nearly identical stated scope: enabling Binance Futures Testnet routing for paper trading. Their descriptions overlap; this audit did not compare every branch diff or certify either PR as still needed.
