@@ -1054,3 +1054,84 @@ async def test_handover_crash_after_cancel_ack_replays_without_second_cancel(tmp
     assert second["recovered"] == 1
     assert executor.cancel_resting_order.await_count == 1
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+@pytest.mark.asyncio
+async def test_restart_recovers_replacement_take_profit_without_cancelling_early(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover-tp.sqlite", scope="paper-account")
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=0.5,
+            reference_price=112.0,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id="aitos-tpr-0001",
+            reduce_only=True,
+            owner_trade_id="trade-tp",
+        )
+    )
+    journal.begin_protection_handover(
+        handover_id="tpr-0001",
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        old_order_id="algo:123",
+        new_client_id="aitos-tpr-0001",
+        order_type="TAKE_PROFIT_MARKET",
+    )
+    new_algo = replacement_algo("aitos-tpr-0001")
+    new_algo.update(
+        orderType="TAKE_PROFIT_MARKET",
+        triggerPrice="112.0",
+    )
+    executor = HandoverExecutor("paper-account", new_algo, ["NEW", "CANCELED"])
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:789",
+        tp_order_ids=["algo:123", "algo:124"],
+        agent_consensus={},
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append(list(value.tp_order_ids))
+
+    report = await recover_protection_handovers(
+        executor, journal, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert trade.sl_order_id == "algo:789"
+    assert trade.tp_order_ids == ["algo:456", "algo:124"]
+    assert persisted == [["algo:456", "algo:124"], ["algo:456", "algo:124"]]
+    assert executor.cancel_resting_order.await_count == 1
+    assert journal.protection_handovers()[0]["order_type"] == "TAKE_PROFIT_MARKET"
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+def test_protection_handover_rejects_order_type_identity_reuse(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover-type.sqlite", scope="paper-account")
+    journal.begin_protection_handover(
+        handover_id="same-id",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:123",
+        new_client_id="new-stop",
+        order_type="STOP_MARKET",
+    )
+    with pytest.raises(ValueError, match="different identity"):
+        journal.begin_protection_handover(
+            handover_id="same-id",
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:123",
+            new_client_id="new-stop",
+            order_type="TAKE_PROFIT_MARKET",
+        )
