@@ -98,7 +98,7 @@ def build_risk_governed_opportunities(
     shadow_gateway_factory: Callable[[], CapitalGateway],
     equity_usd: float,
     max_positions: int = 3,
-    live_reservation: object | None = None,
+    live_reservation: object,
 ) -> StrategyOpportunityBridgeReport:
     """Produce canonical Opportunity objects after isolated capital/risk review.
 
@@ -114,6 +114,8 @@ def build_risk_governed_opportunities(
         raise ValueError("shadow portfolio equity must be finite and positive")
     if not callable(shadow_gateway_factory):
         raise TypeError("isolated shadow CapitalGateway factory is required")
+    if live_reservation is None:
+        raise ValueError("live reservation identity is required for isolation")
 
     gateway = shadow_gateway_factory()
     if not isinstance(gateway, CapitalGateway):
@@ -156,8 +158,8 @@ def build_risk_governed_opportunities(
             rejected.append((key, "strategy confidence must be within [0, 1]"))
             continue
         allocated_notional = min(proposal.allocated_notional, allocation.notional)
-        if allocated_notional <= 0:
-            rejected.append((key, "strategy allocation is not positive"))
+        if allocated_notional <= 0 or allocation.projected_loss <= 0:
+            rejected.append((key, "strategy allocation and projected loss must be positive"))
             continue
         detected_at = datetime.fromtimestamp(
             context.now_ns / 1_000_000_000, tz=timezone.utc
@@ -210,7 +212,7 @@ def build_risk_governed_opportunities(
                     funding_bps=plan.funding_bps,
                 )
             )
-            candidates.append((key, opportunity, allocation))
+            candidates.append((key, opportunity, allocation, allocated_notional))
         except (TypeError, ValueError) as exc:
             rejected.append((key, f"capital estimate rejected: {exc}"))
 
@@ -223,20 +225,35 @@ def build_risk_governed_opportunities(
     decisions = {item.symbol: item for item in reviewed.decisions}
     capital = {item.symbol: item for item in reviewed.allocations}
     governed: list[GovernedOpportunity] = []
-    for key, opportunity, strategy_allocation in candidates:
+    for key, opportunity, strategy_allocation, requested_capital_cap in candidates:
         decision = decisions.get(opportunity.symbol)
         approved = capital.get(opportunity.symbol)
         if decision is None or not decision.eligible or approved is None:
             reasons = decision.rejection_reasons if decision else ("risk_review_missing",)
             rejected.append((key, ";".join(reasons)))
             continue
-        amount = min(float(approved.capital_usd), float(strategy_allocation.notional))
-        if amount <= 0 or approved.risk_budget_usd <= 0:
+        amount = min(
+            float(approved.capital_usd),
+            float(strategy_allocation.notional),
+            float(requested_capital_cap),
+        )
+        if amount <= 0 or approved.capital_usd <= 0 or approved.risk_budget_usd <= 0:
             rejected.append((key, "risk gateway returned zero capital or risk budget"))
             continue
         risk_budget = float(approved.risk_budget_usd) * (
             amount / float(approved.capital_usd)
         )
+        strategy_risk_cap = float(strategy_allocation.projected_loss)
+        if not isfinite(strategy_risk_cap) or strategy_risk_cap <= 0:
+            rejected.append((key, "strategy projected-loss cap is invalid"))
+            continue
+        if risk_budget > strategy_risk_cap:
+            scale = strategy_risk_cap / risk_budget
+            amount *= scale
+            risk_budget = strategy_risk_cap
+        if amount <= 0: 
+            rejected.append((key, "strategy risk cap reduced capital to zero"))
+            continue
         receipt = OpportunityRiskReceipt(
             opportunity_id=opportunity.opportunity_id,
             symbol=opportunity.symbol,
