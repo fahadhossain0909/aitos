@@ -321,6 +321,12 @@ class BinanceIncomeReconciliationService(AITOSModule):
         return result
 
     async def run_once(self) -> dict[str, int]:
+        if self._persist_trade is None or not callable(
+            getattr(self._lifecycle, "apply_cost_adjustment", None)
+        ):
+            raise RuntimeError(
+                "durable lifecycle cost-adjustment writer is unavailable"
+            )
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         cursor = await self._state_store.load_income_cursor(self._account)
         trades = self._trades()
