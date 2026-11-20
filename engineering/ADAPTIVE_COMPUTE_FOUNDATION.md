@@ -125,3 +125,23 @@ The default remains disabled. No live trading configuration should enable this
 feature. The scanner's adaptive capacity is a compute admission decision only;
 it does not change signal thresholds, candidate scores, risk ceilings, order
 quantity, leverage, or execution authority.
+
+
+## Native hot-path benchmark gate
+
+AITOS already contains an optional Rust fixed-point order-book core and a
+behaviorally equivalent Python reference. This phase adds
+`benchmarks/benchmark_native_orderbook.py` to compare batch replay throughput
+and end-to-end batch latency on the same host. Run it with
+`python -m benchmarks.benchmark_native_orderbook --updates 20000 --repeats 7`
+after building/installing the optional Rust extension.
+
+The benchmark is deliberately not a CI pass/fail threshold: CPU frequency,
+allocator, Python build, extension build flags, and host contention make fixed
+thresholds misleading. Before selecting Rust in any production hot path, run
+captured and synthetic replays at representative symbol counts/depths, compare
+sequence correctness against `LocalOrderBook`, and report p50/p95/p99,
+allocations, CPU utilization, and queue lag. Python remains the orchestration
+and strategy layer. A Go service is not justified for the current in-process
+book update path; reconsider Go only for a separately deployable network or
+control-plane service with measured concurrency/operational benefits.
