@@ -146,7 +146,11 @@ def build_risk_governed_opportunities(
         raise ValueError("point-in-time strategy timestamp is required")
     if not isfinite(equity_usd) or equity_usd <= 0:
         raise ValueError("shadow portfolio equity must be finite and positive")
-    if isinstance(max_positions, bool) or not isinstance(max_positions, int) or max_positions < 1:
+    if (
+        isinstance(max_positions, bool)
+        or not isinstance(max_positions, int)
+        or max_positions < 1
+    ):
         raise ValueError("max_positions must be a positive integer")
     if not callable(shadow_gateway_factory):
         raise TypeError("isolated shadow CapitalGateway factory is required")
@@ -261,7 +265,9 @@ def build_risk_governed_opportunities(
             rejected.append((key, "market liquidity score is invalid"))
             continue
         if not isfinite(liquidity_score) or not 0.0 <= liquidity_score <= 10.0:
-            rejected.append((key, "market liquidity score must be finite within [0, 10]"))
+            rejected.append(
+                (key, "market liquidity score must be finite within [0, 10]")
+            )
             continue
         consensus = {
             "loss_probability": normalized_plan.loss_probability,
