@@ -268,3 +268,66 @@ async def test_durable_store_persists_exchange_income_cursor():
     assert table == "exchange_income_sync_cursor"
     assert rows[0][0:2] == ["binance_usdm", 123999]
     assert columns == ["account", "cursor_time_ms", "updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_marks_ready_after_clean_income_pass():
+    service, _, store = make_service(FakeExchange(), FakeLifecycle())
+
+    result = await service.reconcile_startup()
+
+    assert result == {"rows": 0, "published": 0, "unattributed": 0}
+    assert service._startup_reconciled is True
+    assert service._startup_error is None
+    assert store.cursor is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_blocks_when_income_is_unattributed():
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle(
+        [
+            make_trade("position-1", entry_time=entry),
+            make_trade("position-2", entry_time=entry + timedelta(minutes=1)),
+        ]
+    )
+    row_time = int(datetime.now(timezone.utc).timestamp() * 1000) - 100
+    exchange = FakeExchange(
+        [
+            {
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.03",
+                "tranId": 9010,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": row_time,
+            }
+        ]
+    )
+    service, _, store = make_service(exchange, lifecycle)
+
+    with pytest.raises(Exception, match="remain unattributed"):
+        await service.reconcile_startup()
+
+    assert service._startup_reconciled is False
+    assert service._startup_error is not None
+    assert store.cursor == row_time - 1
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_does_not_mark_ready_on_exchange_failure():
+    class FailingExchange:
+        async def fetch_income_history(self, **kwargs):
+            raise RuntimeError("exchange unavailable")
+
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    service, _, store = make_service(
+        FailingExchange(), FakeLifecycle([make_trade("position-1", entry_time=entry)])
+    )
+
+    with pytest.raises(RuntimeError, match="exchange unavailable"):
+        await service.reconcile_startup()
+
+    assert service._startup_reconciled is False
+    assert "exchange unavailable" in service._startup_error
+    assert store.saved == []
