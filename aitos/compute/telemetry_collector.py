@@ -118,7 +118,7 @@ class SymbolTelemetryCollector:
             window.depths.append((now, int(depth_levels)))
 
     def record_analysis(self, symbol: str, *, timestamp: float | None = None) -> None:
-        now = self._clock() if timestamp is None else float(timestamp)
+        now = self._timestamp(timestamp)
         with self._lock:
             window = self._window(symbol, now)
             if window.analyses and now < window.analyses[-1]:
