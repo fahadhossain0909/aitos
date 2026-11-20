@@ -105,7 +105,10 @@ def calculate_protection_child_fill_delta(
         allowed_flags = (expected_reduce_only, str(expected_reduce_only).lower())
         if algo.get("reduceOnly") not in allowed_flags:
             raise ProtectionChildReconciliationError("algo reduce-only mismatch")
-        if child.get("reduceOnly") is not None and child.get("reduceOnly") not in allowed_flags:
+        if (
+            child.get("reduceOnly") is not None
+            and child.get("reduceOnly") not in allowed_flags
+        ):
             raise ProtectionChildReconciliationError("child reduce-only mismatch")
 
     status = str(child.get("status", "")).upper()
