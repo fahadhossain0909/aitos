@@ -2070,10 +2070,7 @@ class OpportunityScanner(AITOSModule):
         telemetry_collector = getattr(self, "_aitos_symbol_telemetry_collector", None)
         if adaptive_runtime is not None and telemetry_collector is not None:
             try:
-                from aitos.compute.resource_governor import (
-                    SymbolWorkload,
-                    plan_symbol_capacity,
-                )
+                from aitos.compute.resource_governor import plan_symbol_capacity
                 from aitos.compute.workload_estimator import estimate_symbol_workload
 
                 protected_symbols = set(
@@ -2089,7 +2086,7 @@ class OpportunityScanner(AITOSModule):
                         ranked_scores[symbol] = 0.0
                 count = max(1, len(ranked_scores))
                 workloads = []
-                for rank_index, (symbol, score) in enumerate(
+                for rank_index, (symbol, _score) in enumerate(
                     sorted(
                         ranked_scores.items(),
                         key=lambda item: (-item[1], item[0]),
