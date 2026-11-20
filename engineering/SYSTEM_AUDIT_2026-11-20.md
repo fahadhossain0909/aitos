@@ -91,6 +91,8 @@ The main CI workflow currently:
 - installs Pylint but does not run it;
 - runs Bandit and Safety checks and validates/builds the Docker image.
 
+**Observed in this PR:** the first full CI run failed at the repository-wide Black check because the newly merged compute workload preference condition in `aitos/compute/resource_governor.py` was not Black-formatted. The condition has been reformatted without changing its logic; a fresh full run is required on the updated head.
+
 **Required action:** introduce a measured, staged coverage threshold; run a maintainable full lint policy (for example Ruff or a scoped Flake8 profile) without enabling a repository-wide noisy gate; add container SBOM/vulnerability and provenance checks; add migration/restore and contract compatibility gates. Do not turn on a strict global lint threshold without first baselining existing violations.
 
 ### P2 — Documentation freshness and product truth
@@ -106,6 +108,7 @@ README previously described Futures as the only exchange and contained branch-sp
 - Installation guide now explains how to obtain and build the Tauri candidate, including the required host-native PyInstaller sidecar.
 - Console-quality, Windows-console, Linux-console and Tauri packaging workflows now run on matching changes pushed to `main`, in addition to their relevant PR/manual paths.
 - A regression test protects those post-merge mainline validation triggers.
+- Apply a Black-only formatting correction to the merged compute workload preference expression exposed by the first CI run; no logic changed.
 - No trading strategy, risk-limit, order-routing, credential, database schema, production deployment or live-execution behavior was changed.
 
 ## Acceptance gates still open
