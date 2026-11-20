@@ -1,11 +1,11 @@
 # AITOS Installation & Deployment Guide
 
-This guide documents the two supported ways to use AITOS:
+This guide documents two supported use paths:
 
-1. **Desktop Operator Console** — install the Windows or Linux desktop package on your computer and connect it to an already-running AITOS backend.
+1. **Native Desktop Operator Console** — install the Windows or Linux session-manager package and connect it to an already-running AITOS backend.
 2. **VPS Runtime Deployment** — run the AITOS trading/data services on a Linux VPS using the existing GitHub Actions + Docker Compose deployment pipeline.
 
-These are different layers, not competing installers. The desktop application is an operator interface; it does **not** install, host, or start the trading engine. The VPS method deploys the backend runtime. You can use either method independently, or install the desktop console and connect it to a VPS runtime.
+A separate **Tauri Embedded Desktop** candidate is also built for engineering evaluation; it is not currently a signed/trusted production release and is documented separately in section 1.8. These are different layers, not competing backend installers. Neither desktop application installs, hosts, or starts the trading engine. The VPS method deploys the backend runtime. You can install a desktop client and connect it to a local or remote runtime.
 
 > **Safety:** the desktop console is read-only. The standard VPS deployment starts the paper-trading runtime using public market data and simulated orders. It does not authorize live trading. Do not expose database ports or the backend health/API port directly to the public Internet.
 
@@ -46,7 +46,7 @@ A backend must already be running and have its console endpoint enabled. The des
 | Debian-family ARM64 | `aitos-console_0.1.0_arm64.deb` | Build target when Python 3.12 and dependencies are available |
 | macOS | — | No supported installer yet |
 
-The Windows and Linux installers are native session managers, not the experimental Tauri shell. Do not assume a macOS build, signed release, updater, or one-click backend installation is available.
+The packages in the table above are the native browser-based session managers. They are **not** the Tauri Embedded Desktop shell described in `desktop/README.md`. A separate Tauri workflow builds unsigned evaluation candidates for Windows x64 (NSIS), Linux x64 (AppImage and deb), and macOS (DMG). Those candidates are not signed/trusted releases, do not provide an automatic updater or backend bootstrap, and must not be confused with the session-manager installer. See section 1.8.
 
 ## 1.3 Get the installer
 
@@ -189,6 +189,57 @@ Use an SSH tunnel rather than exposing port 8090 publicly.
 5. Sign in using the separate operator password you created locally.
 
 The SSH tunnel must remain open while using the console. Closing it interrupts remote reads. Never enter the VPS SSH password/key into the desktop app; SSH authentication belongs to your terminal/SSH agent.
+
+## 1.8 Tauri Embedded Desktop — unsigned evaluation candidate
+
+The Tauri 2 application is a separate native shell around the React operator workspace. It bundles a read-only gateway sidecar and a distinct local Trusted Signer Settings window. It is not the Windows/Linux session-manager package in sections 1.2–1.7.
+
+**Current limits:** CI artifacts are unsigned test candidates, retained for a limited period. They are not signed/trusted production releases. There is no automatic updater, one-click backend installation, production remote signer certification, or live-order activation. Credential settings must only be used on a user-controlled trusted device; do not unlock or provision exchange credentials on a provider-managed RDP/VPS if its administrator is outside your trust boundary.
+
+### Obtain a CI candidate
+
+1. Open [GitHub Actions](https://github.com/fahadhossain0909/aitos/actions).
+2. Open the latest successful **Cross-platform embedded desktop (unsigned, no trading)** run for the exact source commit you intend to test. The workflow runs for relevant pull requests, matching `main` updates, and manual dispatch.
+3. Confirm all platform jobs completed successfully and verify the source commit SHA shown by the run.
+4. Download only the matching artifact:
+   - Linux: `UNSIGNED-embedded-desktop-ubuntu-24.04-test-only`
+   - Windows: `UNSIGNED-embedded-desktop-windows-2022-test-only`
+   - macOS: `UNSIGNED-embedded-desktop-macos-14-test-only`
+5. Artifacts are temporary CI outputs (currently seven-day retention), not GitHub Releases. Do not bypass operating-system security warnings or treat an unsigned candidate as trusted software.
+
+### Build from source
+
+Prerequisites: Python 3.12, Node.js 22.12+, Rust stable, the platform's Tauri/WebView prerequisites, and the repository checkout. Build the frontend before freezing the gateway sidecar because the sidecar embeds the generated frontend assets.
+
+Linux/macOS (run from the repository root unless noted):
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r native/shared/requirements.txt
+npm --prefix desktop ci
+npm --prefix desktop test
+npm --prefix desktop run build
+TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+python native/shared/build_sidecar.py --target "$TARGET"
+npm --prefix desktop run tauri -- build
+```
+
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r native/shared/requirements.txt
+npm --prefix desktop ci
+npm --prefix desktop test
+npm --prefix desktop run build
+$target = (rustc -vV | Select-String '^host: ').ToString().Split(' ')[1]
+python native/shared/build_sidecar.py --target $target
+npm --prefix desktop run tauri -- build
+```
+
+The sidecar target must match the machine on which it is built; the build helper supports Windows x64, Linux x64, and macOS x64/ARM64 targets. Linux requires the WebKitGTK/Tauri build libraries; Windows requires WebView2 and the Rust/MSVC toolchain; macOS requires Xcode Command Line Tools. Follow the official Tauri platform prerequisites for the host OS. A successful local build is not a signed-release or security certification.
 
 ---
 
