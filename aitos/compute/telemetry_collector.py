@@ -44,7 +44,7 @@ class SymbolTelemetryCollector:
         max_samples_per_metric: int = 4096,
         clock=monotonic,
     ) -> None:
-        if window_seconds <= 0 or max_symbols < 1 or max_samples_per_metric < 1:
+        if window_seconds < 1 or max_symbols < 1 or max_samples_per_metric < 1:
             raise ValueError("telemetry collector bounds must be positive")
         self.window_seconds = float(window_seconds)
         self.max_symbols = int(max_symbols)
@@ -182,7 +182,9 @@ class SymbolTelemetryCollector:
                 retained_event_samples=sum(
                     len(w.events) for w in self._windows.values()
                 ),
-                retained_depth_samples=sum(len(w.depths) for w in self._windows.values()),
+                retained_depth_samples=sum(
+                    len(w.depths) for w in self._windows.values()
+                ),
                 retained_analysis_samples=sum(
                     len(w.analyses) for w in self._windows.values()
                 ),
