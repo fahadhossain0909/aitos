@@ -76,6 +76,20 @@ The separate `aitos.strategy.StrategyEngine` deliberately stops before the risk 
 
 **Required action:** either keep this engine explicitly research/shadow-only in product documentation, or implement an additive, typed adapter that translates strategy proposals through the existing final capital/risk authority. Do not add a second independent risk gate or dispatch around `TradeLifecycle`.
 
+### P1 — Zero/unknown position risk can be understated in the capital projection
+
+Source inspection found a risk-projection edge case that needs an explicit policy decision before production use:
+
+- `PendingOrderExposure.risk_amount_usd` accepts zero.
+- `capital_runtime._portfolio_consensus` accepts a pending order with zero risk amount and serializes it as a 0% risk projection.
+- `CapitalGateway._snapshot` only adds pending-order risk to `PortfolioRiskSnapshot.position_risk_pct` when `risk_pct > 0`, so that order is omitted from the CapitalGateway portfolio-risk sum. The separate RiskEngine still counts pending notional/open-position count, but that does not replace stop-risk accounting.
+- For an open position with missing/non-positive `risk_amount_usd`, `_portfolio_consensus` substitutes a fixed 1.0 percentage point. That fallback is not derived from the position's actual stop distance or notional and could understate a larger unknown exposure.
+- The projection maps open-position risk and side by symbol. If multiple same-symbol positions exist (for example, both sides in hedge mode), later entries can overwrite earlier ones. `BINANCE_HEDGE_MODE` defaults false, but hedge-mode/duplicate-symbol support must be explicitly proven before enabling it.
+
+**Required action:** trace every pending-order producer and prove that each risk-increasing order has a finite, positive, stop-derived risk amount before it reaches the CapitalGateway. Unknown/missing risk should fail closed or be represented as an explicit conservative unknown exposure, not silently dropped or replaced with an arbitrary 1%. Use a unique instrument+side/position identity if same-symbol multiple positions are supported. Add tests for zero-risk pending orders, missing/zero open-position risk and hedge-mode duplicate symbols.
+
+**Safety decision:** this PR does not change these financial semantics. Fixing them changes order admission and portfolio risk behavior, so it requires a separate focused risk-design review and explicit approval.
+
 ### P1 — Financial source-of-truth and reconciliation matrix
 
 The architecture program explicitly records that financial state is distributed across ClickHouse, Redis, SQLite/scoped journals and other stores, with no single cross-database transaction. The authority matrix for orders, fills, positions, cash, fees, funding, reservations and model artifacts is not yet complete.
