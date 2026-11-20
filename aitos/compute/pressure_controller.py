@@ -114,8 +114,17 @@ class ResourcePressureController:
             if self._candidate != observed:
                 self._candidate = observed
                 self._candidate_since = now_seconds
-            elapsed = now_seconds - (self._candidate_since or now_seconds)
-            if elapsed >= self.policy.recovery_hold_seconds:
+            elapsed = now_seconds - (
+                self._candidate_since
+                if self._candidate_since is not None
+                else now_seconds
+            )
+            cooldown_ok = (
+                self._last_transition is None
+                or now_seconds - self._last_transition
+                >= self.policy.minimum_transition_interval_seconds
+            )
+            if elapsed >= self.policy.recovery_hold_seconds and cooldown_ok:
                 self._level = observed
                 self._last_transition = now_seconds
                 self._candidate = None
