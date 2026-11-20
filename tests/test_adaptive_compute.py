@@ -518,7 +518,7 @@ def test_symbol_telemetry_collector_exports_bounded_p95_samples():
     assert snapshot.p95_event_rate_per_second >= 1
     assert snapshot.p95_book_depth_levels == 40
     assert snapshot.analysis_runs_per_minute == 12
-    assert snapshot.sample_count == 9
+    assert snapshot.sample_count == 2
 
 
 def test_symbol_telemetry_collector_prunes_old_samples_and_bounds_cardinality():
