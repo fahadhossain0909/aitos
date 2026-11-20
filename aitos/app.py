@@ -593,8 +593,21 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
         if drift_task is None or drift_task.done():
             stop_event = asyncio.Event()
             components._governance_drift_stop_event = stop_event
+            background_gate = getattr(
+                components.scanner, "_aitos_adaptive_background_gate", None
+            )
+
+            async def governed_drift_provider():
+                # Drift evaluation is optional background work. Acquire a slot
+                # per batch (not for the lifetime of the worker) so pressure
+                # changes can defer the next batch without cancelling this one.
+                if background_gate is None:
+                    return await drift_provider()
+                async with background_gate.slot():
+                    return await drift_provider()
+
             components._governance_drift_task = asyncio.create_task(
-                drift_scheduler.run_forever(stop_event, drift_provider),
+                drift_scheduler.run_forever(stop_event, governed_drift_provider),
                 name="aitos-statistical-drift-monitor",
             )
     deadline = asyncio.get_running_loop().time() + timeout
