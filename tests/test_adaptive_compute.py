@@ -637,6 +637,7 @@ def test_symbol_telemetry_rejects_invalid_integer_fields():
     else:
         raise AssertionError("fractional book depth must be rejected")
 
+
 def test_telemetry_collector_rejects_out_of_order_samples_per_metric():
     from aitos.compute.telemetry_collector import SymbolTelemetryCollector
 
@@ -826,7 +827,6 @@ def test_detect_resources_honors_cgroup_v1_cpu_and_memory_limits(tmp_path):
     assert result.memory_limit_mb == 4096
     assert result.memory_available_mb == 3072
     assert result.memory_limit_limited is True
-
 
 
 def test_process_pressure_sampler_measures_cpu_rss_and_queue_lag():
