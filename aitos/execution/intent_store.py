@@ -209,7 +209,6 @@ class ExecutionIntentStore:
                     "protection preclaim changed before durable acceptance"
                 )
 
-
     def begin_protection_handover(
         self,
         *,
