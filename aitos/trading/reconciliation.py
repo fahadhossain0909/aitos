@@ -191,7 +191,6 @@ class ReconciliationScheduler(AITOSModule):
                                 handled_trade_ids.update(
                                     str(t.trade_id) for t in open_trades
                                 )
-                                child_blocked += 1
                                 continue
                             trade_id = outcome.get("trade_id")
                             if isinstance(trade_id, str) and trade_id:
