@@ -106,8 +106,7 @@ def test_filled_status_requires_full_original_quantity():
             previously_applied_quantity="0",
         )
 
- 
- 
+
 def test_child_fill_uses_incremental_quote_not_lifetime_average():
     algo, child = snapshots(executed="0.6", average="102.0")
     child["cumQuote"] = "61.2"
@@ -176,6 +175,7 @@ def test_executed_quantity_cannot_exceed_child_original_quantity():
             expected_algo_id="123",
             previously_applied_quantity="0",
         )
+
 
 def test_child_reduce_only_semantics_are_enforced_when_requested():
     algo, child = snapshots()

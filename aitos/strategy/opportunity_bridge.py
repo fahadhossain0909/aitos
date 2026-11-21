@@ -6,6 +6,7 @@ live capital, or grants production approval. A caller must supply a fresh,
 isolated CapitalGateway factory so shadow evaluation cannot mutate live
 reservations.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -86,10 +87,7 @@ class StrategyOpportunityBridgeReport:
 def _validate_protection(
     side: TradeSide, entry: float, plan: StrategyProtectionPlan
 ) -> str | None:
-    if (
-        not isinstance(plan.take_profit_levels, tuple)
-        or not plan.take_profit_levels
-    ):
+    if not isinstance(plan.take_profit_levels, tuple) or not plan.take_profit_levels:
         return "explicit non-empty tuple of take-profit levels is required"
     raw_values = (
         plan.stop_loss_price,
@@ -109,8 +107,7 @@ def _validate_protection(
     except (TypeError, ValueError, OverflowError):
         return "protection plan contains non-numeric values"
     if not all(
-        isfinite(value)
-        for value in (stop, leverage, fees, slippage, funding, *targets)
+        isfinite(value) for value in (stop, leverage, fees, slippage, funding, *targets)
     ):
         return "protection plan contains non-finite values"
     if stop <= 0 or leverage < 1:
@@ -198,10 +195,7 @@ def build_risk_governed_opportunities(
         or context.now_ns - portfolio_risk.observed_at_ns > 5_000_000_000
     ):
         raise ValueError("portfolio risk snapshot is missing, invalid, or stale")
-    if (
-        not isfinite(equity_peak_usd)
-        or equity_peak_usd < equity_usd
-    ):
+    if not isfinite(equity_peak_usd) or equity_peak_usd < equity_usd:
         raise ValueError(
             "portfolio peak equity must be finite and cover current equity"
         )
@@ -398,9 +392,7 @@ def build_risk_governed_opportunities(
             continue
         normalized_plan = StrategyProtectionPlan(
             stop_loss_price=float(plan.stop_loss_price),
-            take_profit_levels=tuple(
-                float(value) for value in plan.take_profit_levels
-            ),
+            take_profit_levels=tuple(float(value) for value in plan.take_profit_levels),
             leverage=float(plan.leverage),
             fee_bps=float(plan.fee_bps),
             slippage_bps=float(plan.slippage_bps),
@@ -488,9 +480,7 @@ def build_risk_governed_opportunities(
         )
 
     try:
-        reviewed = gateway.evaluate(
-            equity_usd, estimates, max_positions=max_positions
-        )
+        reviewed = gateway.evaluate(equity_usd, estimates, max_positions=max_positions)
     except Exception as exc:
         rejected.extend(
             (key, f"capital risk review failed closed: {type(exc).__name__}")
@@ -514,10 +504,9 @@ def build_risk_governed_opportunities(
         )
     decision_symbols = [item.symbol for item in reviewed.decisions]
     allocation_symbols = [item.symbol for item in reviewed.allocations]
-    if (
-        len(decision_symbols) != len(set(decision_symbols))
-        or len(allocation_symbols) != len(set(allocation_symbols))
-    ):
+    if len(decision_symbols) != len(set(decision_symbols)) or len(
+        allocation_symbols
+    ) != len(set(allocation_symbols)):
         return StrategyOpportunityBridgeReport(
             context.now_ns,
             (),
@@ -536,9 +525,7 @@ def build_risk_governed_opportunities(
         approved = capital.get(opportunity.symbol)
         if decision is None or not decision.eligible or approved is None:
             reasons = (
-                decision.rejection_reasons
-                if decision
-                else ("risk_review_missing",)
+                decision.rejection_reasons if decision else ("risk_review_missing",)
             )
             rejected.append((key, ";".join(reasons)))
             continue
@@ -569,10 +556,7 @@ def build_risk_governed_opportunities(
             or not isinstance(decision.rationale, (tuple, list))
             or any(not isinstance(item, str) for item in decision.rationale)
             or not isinstance(decision.rejection_reasons, (tuple, list))
-            or any(
-                not isinstance(item, str)
-                for item in decision.rejection_reasons
-            )
+            or any(not isinstance(item, str) for item in decision.rejection_reasons)
         ):
             rejected.append((key, "risk gateway returned invalid decision evidence"))
             continue

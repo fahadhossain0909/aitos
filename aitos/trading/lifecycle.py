@@ -2534,9 +2534,7 @@ class TradeLifecycle(AITOSModule):
             raise ValueError(
                 "replacement take-profit price must be finite and positive"
             )
-        if (
-            trade.side == TradeSide.LONG and new_price <= trade.entry_price
-        ) or (
+        if (trade.side == TradeSide.LONG and new_price <= trade.entry_price) or (
             trade.side == TradeSide.SHORT and new_price >= trade.entry_price
         ):
             raise ValueError(
@@ -2677,16 +2675,21 @@ class TradeLifecycle(AITOSModule):
             old_status = await status_reader(trade.symbol, old_id)
             if old_status != "NEW":
                 raise ExecutionRecoveryRequired(
-                    trade.symbol, str(old_id),
+                    trade.symbol,
+                    str(old_id),
                     f"old take-profit changed before cancel (status={old_status!r})",
                 )
             await self._order_executor.cancel_resting_order(trade.symbol, old_id)
             old_status = await status_reader(trade.symbol, old_id)
             if old_status not in {
-                "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"
+                "CANCELED",
+                "EXPIRED",
+                "EXPIRED_IN_MATCH",
+                "REJECTED",
             }:
                 raise ExecutionRecoveryRequired(
-                    trade.symbol, str(old_id),
+                    trade.symbol,
+                    str(old_id),
                     (
                         "old take-profit cancellation is unconfirmed "
                         f"(status={old_status!r})"
@@ -2817,14 +2820,14 @@ class TradeLifecycle(AITOSModule):
             previous_quantity = marker.get("cumulative_quantity", "0")
             previous_quote = marker.get("cumulative_quote", "0")
             if watermark is not None:
-                if (
-                    Decimal(str(watermark["cumulative_quantity"]))
-                    > Decimal(str(previous_quantity))
-                    or Decimal(str(watermark["cumulative_quote"]))
-                    > Decimal(str(previous_quote))
+                if Decimal(str(watermark["cumulative_quantity"])) > Decimal(
+                    str(previous_quantity)
+                ) or Decimal(str(watermark["cumulative_quote"])) > Decimal(
+                    str(previous_quote)
                 ):
                     raise ExecutionRecoveryRequired(
-                        trade.symbol, algo_order_id,
+                        trade.symbol,
+                        algo_order_id,
                         "SQLite child-fill watermark exceeds trade snapshot marker",
                     )
             delta = calculate_protection_child_fill_delta(
@@ -2878,18 +2881,24 @@ class TradeLifecycle(AITOSModule):
                     )
                     if delta.delta_quantity == remaining_quantity:
                         if delta.status not in {
-                            "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH"
+                            "FILLED",
+                            "CANCELED",
+                            "EXPIRED",
+                            "EXPIRED_IN_MATCH",
                         }:
                             raise ExecutionRecoveryRequired(
-                                trade.symbol, algo_order_id,
+                                trade.symbol,
+                                algo_order_id,
                                 "full-size child fill is not terminal",
                             )
                         self._confirmed_reductions[trade_id] = (
-                            f"resting:{algo_order_id}", result
+                            f"resting:{algo_order_id}",
+                            result,
                         )
                         try:
                             await self._close_trade_unlocked(
-                                trade_id, float(delta.average_price),
+                                trade_id,
+                                float(delta.average_price),
                                 "exchange_protective_child_filled",
                             )
                         finally:
@@ -2935,7 +2944,11 @@ class TradeLifecycle(AITOSModule):
                     status=delta.status,
                 )
                 terminal = delta.status in {
-                    "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"
+                    "FILLED",
+                    "CANCELED",
+                    "EXPIRED",
+                    "EXPIRED_IN_MATCH",
+                    "REJECTED",
                 }
                 if terminal:
                     await asyncio.to_thread(

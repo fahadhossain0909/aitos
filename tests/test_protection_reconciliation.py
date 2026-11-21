@@ -991,6 +991,7 @@ async def test_replacement_recovery_keeps_old_stop_when_new_algo_is_missing(tmp_
     executor.cancel_resting_order.assert_not_awaited()
     assert journal.protection_handovers()[0]["state"] == "PREPARED"
 
+
 @pytest.mark.asyncio
 async def test_handover_crash_before_cancel_is_recovered_without_duplicate_post(
     tmp_path,
@@ -1033,9 +1034,7 @@ async def test_handover_crash_before_cancel_is_recovered_without_duplicate_post(
     async def persist(_trade):
         persisted.append(True)
 
-    second = await recover_protection_handovers(
-        executor, journal, [trade], persist
-    )
+    second = await recover_protection_handovers(executor, journal, [trade], persist)
     assert second["recovered"] == 1
     assert executor.get_algo_order_by_client_id.await_count == 2
     assert executor.cancel_resting_order.await_count == 1
@@ -1077,12 +1076,11 @@ async def test_handover_crash_after_cancel_ack_replays_without_second_cancel(tmp
     assert journal.protection_handovers()[0]["state"] == "OLD_CANCELLED"
     assert executor.cancel_resting_order.await_count == 1
 
-    second = await recover_protection_handovers(
-        executor, journal, [trade], AsyncMock()
-    )
+    second = await recover_protection_handovers(executor, journal, [trade], AsyncMock())
     assert second["recovered"] == 1
     assert executor.cancel_resting_order.await_count == 1
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
 
 @pytest.mark.asyncio
 async def test_restart_recovers_replacement_take_profit_without_cancelling_early(
@@ -1160,9 +1158,7 @@ async def test_restart_recovers_replacement_take_profit_without_cancelling_early
     async def persist(value):
         persisted.append(list(value.tp_order_ids))
 
-    report = await recover_protection_handovers(
-        executor, journal, [trade], persist
-    )
+    report = await recover_protection_handovers(executor, journal, [trade], persist)
 
     assert report["recovered"] == 1
     assert report["blocked"] == []
@@ -1248,9 +1244,7 @@ async def test_triggered_child_recovery_blocks_duplicate_durable_algo_owners():
                 '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
                 '"order_type":"STOP_MARKET"}'
             )
-            result = (
-                '{"order_id":"algo:123","client_order_id":"duplicate-client"}'
-            )
+            result = '{"order_id":"algo:123","client_order_id":"duplicate-client"}'
             return [
                 {
                     "client_id": "duplicate-client",

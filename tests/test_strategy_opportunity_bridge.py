@@ -292,9 +292,7 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
 
     cycle, context, plans, portfolio_risk = inputs()
     live_gateway = ShadowGateway()
-    live_gateway.reservation = CapitalReservation(
-        path=tmp_path / "live-capital.sqlite"
-    )
+    live_gateway.reservation = CapitalReservation(path=tmp_path / "live-capital.sqlite")
     shadow_gateway = ShadowGateway()
     shadow_gateway.reservation = CapitalReservation(
         path=tmp_path / "live-capital.sqlite"
@@ -473,9 +471,7 @@ def test_real_capital_gateway_receives_typed_open_and_pending_exposure_snapshot(
 
         def evaluate(self, equity_usd, estimates, *, max_positions=3):
             self.reviewed_estimates = tuple(estimates)
-            return super().evaluate(
-                equity_usd, estimates, max_positions=max_positions
-            )
+            return super().evaluate(equity_usd, estimates, max_positions=max_positions)
 
     cycle, context, plans, _ = inputs()
     portfolio_risk = StrategyPortfolioRiskContext(

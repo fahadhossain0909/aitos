@@ -436,10 +436,7 @@ class ExecutionIntentStore:
             ).fetchone()
             if row is not None:
                 current = dict(row)
-                if (
-                    current["trade_id"] != trade_id
-                    or current["symbol"] != symbol
-                ):
+                if current["trade_id"] != trade_id or current["symbol"] != symbol:
                     raise ValueError(
                         "child-fill identity was reused across trade scope"
                     )
@@ -579,19 +576,16 @@ class ExecutionIntentStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def protection_intent_for_order(
-        self, order_id: str, trade_id: str
-    ) -> dict:
+    def protection_intent_for_order(self, order_id: str, trade_id: str) -> dict:
         """Resolve one exact owner-bound protective intent by venue order ID."""
         matches = []
         for row in self.protection_intents():
             result = json.loads(row.get("result_json") or "{}")
             request = json.loads(row.get("request_json") or "{}")
             if str(result.get("order_id") or "") == str(order_id):
-                if (
-                    request.get("owner_trade_id") != str(trade_id)
-                    or row.get("symbol") != request.get("symbol")
-                ):
+                if request.get("owner_trade_id") != str(trade_id) or row.get(
+                    "symbol"
+                ) != request.get("symbol"):
                     raise ExecutionRecoveryRequired(
                         str(row.get("symbol") or ""),
                         str(order_id),

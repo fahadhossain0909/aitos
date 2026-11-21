@@ -1065,8 +1065,10 @@ async def recover_protection_handovers(
             new_matches = [
                 index for index, value in enumerate(tp_ids) if value == new_id
             ]
-            if len(old_matches) > 1 or len(new_matches) > 1 or (
-                not old_matches and not new_matches
+            if (
+                len(old_matches) > 1
+                or len(new_matches) > 1
+                or (not old_matches and not new_matches)
             ):
                 blocked.append(
                     {
@@ -1370,9 +1372,7 @@ async def recover_triggered_protection_child_fills(
                     }
                 )
                 continue
-            client_id = str(
-                result.get("client_order_id") or row.get("client_id") or ""
-            )
+            client_id = str(result.get("client_order_id") or row.get("client_id") or "")
             if not client_id:
                 blocked.append(
                     {

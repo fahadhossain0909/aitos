@@ -4,6 +4,7 @@ This module validates authenticated venue algo/child snapshots and calculates
 unapplied quantity and quote deltas. The lifecycle persists those deltas with
 the trade snapshot before the SQLite mirror watermark is advanced.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -34,9 +35,7 @@ class ProtectionChildFillDelta:
         return self.delta_quantity > 0
 
 
-def _decimal_value(
-    value: Any, field: str, *, allow_zero: bool = False
-) -> Decimal:
+def _decimal_value(value: Any, field: str, *, allow_zero: bool = False) -> Decimal:
     if isinstance(value, bool):
         raise ProtectionChildReconciliationError(f"{field} must be numeric")
     try:
@@ -123,9 +122,7 @@ def calculate_protection_child_fill_delta(
         "REJECTED",
     }
     if status not in allowed_statuses:
-        raise ProtectionChildReconciliationError(
-            "unsupported or missing child status"
-        )
+        raise ProtectionChildReconciliationError("unsupported or missing child status")
 
     cumulative = _decimal_value(
         child.get("executedQty", "0"), "executedQty", allow_zero=True

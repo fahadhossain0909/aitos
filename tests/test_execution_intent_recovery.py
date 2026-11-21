@@ -619,6 +619,7 @@ def test_second_active_handover_for_trade_is_blocked(tmp_path):
             new_client_id="aitos-rpl-0004",
         )
 
+
 def test_existing_protection_handover_database_migrates_order_type(tmp_path):
     import sqlite3
 
@@ -660,6 +661,7 @@ def test_existing_protection_handover_database_migrates_order_type(tmp_path):
     assert journal.protection_handovers(trade_id="trade-2")[0]["order_type"] == (
         "TAKE_PROFIT_MARKET"
     )
+
 
 def test_protection_child_watermark_is_monotonic_and_identity_scoped(tmp_path):
     journal = store(tmp_path)

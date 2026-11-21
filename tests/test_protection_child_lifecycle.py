@@ -195,9 +195,12 @@ async def test_child_fill_applies_only_new_cumulative_delta_and_replays_idempote
     assert Decimal(replay["delta_quantity"]) == Decimal("0")
     assert trade.quantity == pytest.approx(0.5)
     assert len(trade.partial_exits) == 2
-    assert snapshots[-1]["agent_consensus"]["_applied_protection_child_fills"][
-        "123:456"
-    ]["cumulative_quantity"] == "0.5"
+    assert (
+        snapshots[-1]["agent_consensus"]["_applied_protection_child_fills"]["123:456"][
+            "cumulative_quantity"
+        ]
+        == "0.5"
+    )
 
 
 @pytest.mark.asyncio
@@ -242,6 +245,7 @@ async def test_terminal_partial_stop_fill_reprotects_remaining_position(
         == "0.25"
     )
 
+
 @pytest.mark.asyncio
 async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduction(
     event_bus, risk_engine, tmp_path, monkeypatch
@@ -277,9 +281,12 @@ async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduct
             trade.trade_id, algo_snapshot(), child_snapshot()
         )
     assert trade.quantity == pytest.approx(0.75)
-    assert persisted[-1]["agent_consensus"]["_applied_protection_child_fills"][
-        "123:456"
-    ]["cumulative_quantity"] == "0.25"
+    assert (
+        persisted[-1]["agent_consensus"]["_applied_protection_child_fills"]["123:456"][
+            "cumulative_quantity"
+        ]
+        == "0.25"
+    )
 
     # Restore from the durable ClickHouse-like snapshot, with SQLite still behind.
     monkeypatch.setattr(journal, "mark_protection_child_applied", original_mark)
@@ -339,6 +346,7 @@ async def test_sqlite_watermark_ahead_of_trade_snapshot_is_quarantined(
     assert trade.quantity == pytest.approx(1.0)
     lifecycle._execution_state_writer.assert_not_awaited()
 
+
 @pytest.mark.asyncio
 async def test_startup_child_recovery_routes_owned_triggered_algo_to_lifecycle(
     event_bus, risk_engine, tmp_path
@@ -381,6 +389,7 @@ async def test_startup_child_recovery_routes_owned_triggered_algo_to_lifecycle(
         trade.trade_id, algo_snapshot(), child_snapshot()
     )
 
+
 @pytest.mark.asyncio
 async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
     event_bus, risk_engine, tmp_path
@@ -412,15 +421,14 @@ async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
     assert result["terminal"] is True
     assert trade.trade_id not in lifecycle._open_trades
     assert (
-        lifecycle._closed_trades[-1].exit_reason
-        == "exchange_protective_child_filled"
+        lifecycle._closed_trades[-1].exit_reason == "exchange_protective_child_filled"
     )
     assert lifecycle._closed_trades[-1].gross_realized_pnl_usd == pytest.approx(-10.0)
     assert executor.cancelled == ["algo:123"]
     assert (
-        journal.protection_child_watermark("123", "456")["cumulative_quantity"]
-        == "1.0"
+        journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "1.0"
     )
+
 
 @pytest.mark.asyncio
 async def test_child_fill_finishes_protected_intent_owner_ack_after_trade_snapshot(
@@ -475,7 +483,6 @@ async def test_child_fill_finishes_protected_intent_owner_ack_after_trade_snapsh
     assert trade.quantity == pytest.approx(0.75)
 
 
-
 @pytest.mark.asyncio
 async def test_triggered_child_recovery_is_idempotent_across_repeated_restarts(
     event_bus, risk_engine, tmp_path
@@ -517,14 +524,15 @@ async def test_triggered_child_recovery_is_idempotent_across_repeated_restarts(
         assert restored.quantity == pytest.approx(0.75)
         assert restored.gross_realized_pnl_usd == pytest.approx(-2.5)
         assert (
-            journal.protection_child_watermark("123", "456")[
-                "cumulative_quantity"
-            ]
+            journal.protection_child_watermark("123", "456")["cumulative_quantity"]
             == "0.25"
         )
-        assert durable_snapshot["agent_consensus"][
-            "_applied_protection_child_fills"
-        ]["123:456"]["cumulative_quantity"] == "0.25"
+        assert (
+            durable_snapshot["agent_consensus"]["_applied_protection_child_fills"][
+                "123:456"
+            ]["cumulative_quantity"]
+            == "0.25"
+        )
         if restart_number:
             assert restored.quantity == pytest.approx(0.75)
 

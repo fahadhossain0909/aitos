@@ -6,6 +6,7 @@ a deterministic local venue protocol fixture so destructive orders are never
 sent to an exchange. A separate opt-in test performs authenticated, read-only
 Binance demo-testnet inventory checks.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -235,9 +236,7 @@ os._exit(73)
     )
     assert result.returncode == 73, result.stderr
 
-    restarted = ExecutionIntentStore(
-        journal_path, scope="hard-exit-recovery"
-    )
+    restarted = ExecutionIntentStore(journal_path, scope="hard-exit-recovery")
     watermark = restarted.protection_child_watermark("algo-17", "child-29")
     assert watermark is not None
     assert watermark["trade_id"] == "trade-hard-exit"
@@ -341,9 +340,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
         store = await harness.reopen()
         journal = ExecutionIntentStore(journal_path, scope=journal_scope)
         restored = (await store.load_open_trades())[0]
-        restarted = await make_lifecycle(
-            [_trade_from_dict(restored.to_dict())], store
-        )
+        restarted = await make_lifecycle([_trade_from_dict(restored.to_dict())], store)
         second_report = await recover_triggered_protection_child_fills(
             executor, journal, restarted
         )
@@ -362,9 +359,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
             store = await harness.reopen()
             journal = ExecutionIntentStore(journal_path, scope=journal_scope)
             snapshot = (await store.load_open_trades())[0]
-            cold = await make_lifecycle(
-                [_trade_from_dict(snapshot.to_dict())], store
-            )
+            cold = await make_lifecycle([_trade_from_dict(snapshot.to_dict())], store)
             replay_report = await recover_triggered_protection_child_fills(
                 executor, journal, cold
             )
