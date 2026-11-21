@@ -85,7 +85,12 @@ async def _seed_once() -> dict[str, Any]:
                 "exit_time": SMOKE_OPENED.isoformat(),
             },
         )
-        return await _verify_with_adapters(market, journal)
+        verified = await _verify_with_adapters(market, journal)
+        return {
+            **verified,
+            "check": "aitos_postgres_persistence_seed",
+            "write_performed": True,
+        }
     finally:
         await asyncio.gather(market.shutdown(), journal.shutdown())
 
