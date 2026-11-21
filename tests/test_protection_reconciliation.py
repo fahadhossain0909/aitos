@@ -818,6 +818,32 @@ def replacement_algo(client_id="aitos-rpl-0001"):
 
 
 def begin_replacement_handover(journal, trade_id="trade-1"):
+    # A replacement is only recoverable when the old protection is itself
+    # represented by a durable, applied intent owned by the same trade.
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-old-stop",
+            reduce_only=True,
+            owner_trade_id=trade_id,
+        )
+    )
+    journal.record_protection(
+        "aitos-old-stop",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-old-stop",
+        ),
+    )
+    journal.mark_applied("aitos-old-stop", trade_id)
     journal.begin(
         OrderRequest(
             symbol="BTCUSDT",
