@@ -464,3 +464,58 @@ order risk, side/instrument identity, correlation, daily PnL and loss-streak
 evidence. Its observation timestamp must be within five seconds of the
 StrategyContext cycle timestamp. Missing, stale or malformed account-risk
 evidence fails closed before a canonical Opportunity is emitted.
+
+
+## Coordinated three-store fault-injection acceptance (2026-11-21)
+
+The opt-in integration workflow is
+`.github/workflows/three-store-recovery-integration.yml`. Its first job
+starts a disposable real ClickHouse server, creates a unique database per test,
+uses the real SQLite `ExecutionIntentStore`, and exercises the production
+`BinanceFuturesOrderExecutor` signed-request/HMAC path against a deterministic
+local Binance-compatible HTTP protocol fixture. The fixture is intentionally
+not represented as the Binance matching engine: it allows repeatable crash
+injection without placing orders on any exchange.
+
+The integration matrix injects failure at both durable ordering boundaries:
+
+1. ClickHouse trade snapshot write fails after the venue reports a triggered
+   protective child fill.
+2. The ClickHouse snapshot succeeds, but the SQLite child-fill watermark write
+   fails.
+
+Each case discards in-memory lifecycle objects, restores exclusively from the
+ClickHouse snapshot and SQLite journal, then performs four cold-start recovery
+passes. Quantity, realized PnL and cumulative quantity/quote watermark must
+remain stable after the first accepted reduction. The ambiguous-evidence matrix
+also exercises foreign client algo identity, algo/child linkage mismatch,
+wrong child ID, symbol, side, original quantity, position side, overfilled
+quantity, unknown status and negative cumulative quote. Each must remain
+quarantined without writing a trade snapshot or advancing the SQLite watermark.
+
+The workflow's manual `workflow_dispatch` job performs authenticated,
+read-only Binance Futures demo-testnet inventory checks. It requires the
+dedicated `BINANCE_FUTURES_TESTNET_API_KEY` and
+`BINANCE_FUTURES_TESTNET_API_SECRET` GitHub secrets; it fails rather than
+silently passing when they are absent. It reads positions and open algo orders
+only. It does not submit, cancel, amend or trigger any exchange order.
+
+Run locally with a disposable ClickHouse instance:
+
+```bash
+AITOS_ENABLE_THREE_STORE_FAULT_TESTS=1 \
+AITOS_FAULT_CLICKHOUSE_HOST=127.0.0.1 \
+AITOS_FAULT_CLICKHOUSE_PORT=8123 \
+AITOS_FAULT_CLICKHOUSE_USER=default \
+AITOS_FAULT_CLICKHOUSE_PASSWORD= \
+PYTHONPATH=. pytest -q --timeout=120 \
+  tests/integration/test_execution_recovery_three_store.py
+```
+
+This is coordinated ClickHouse/SQLite/venue-adapter fault evidence, not yet
+authenticated venue write-side acceptance. The local venue fixture validates
+the real executor's signed HTTP protocol but does not prove Binance's external
+matching-engine behavior. A separate dedicated demo-testnet account, approved
+test-order budget, isolated runner and explicit operational authorization are
+still required before an entry/protection/partial-fill/exit/restart write-side
+acceptance run. Mainnet fallback is prohibited.
