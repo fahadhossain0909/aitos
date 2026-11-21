@@ -559,6 +559,7 @@ async def test_intelligent_dynamic_tp_extension_veto_keeps_existing_target(
     assert trade.take_profit_levels == [104.0, 110.0]
     assert trade.state == TradeLifecycleState.POSITION_OPENED
 
+
 class LiveTakeProfitHandoverExecutor(FakeExchangeCapableExecutor):
     execution_scope = "account"
     hedge_mode = False
@@ -745,6 +746,7 @@ async def test_live_take_profit_replacement_keeps_old_order_if_snapshot_write_fa
     assert executor.cancel_calls == []
     assert journal.protection_handovers()[0]["state"] == "NEW_ACCEPTED"
 
+
 @pytest.mark.asyncio
 async def test_tp_handover_restart_after_cancel_ack_does_not_cancel_twice(
     event_bus, risk_engine, tmp_path
@@ -819,9 +821,7 @@ async def test_tp_handover_restart_after_cancel_ack_does_not_cancel_twice(
     async def persist(_trade):
         return None
 
-    report = await recover_protection_handovers(
-        executor, journal, [restored], persist
-    )
+    report = await recover_protection_handovers(executor, journal, [restored], persist)
     assert report["recovered"] == 1
     assert report["blocked"] == []
     assert restored.tp_order_ids == ["algo:456"]

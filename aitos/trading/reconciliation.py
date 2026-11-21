@@ -61,9 +61,7 @@ class ReconciliationScheduler(AITOSModule):
         self._last_child_fills_applied = 0
         self._last_child_fills_blocked = 0
         self._last_child_recovery_monotonic = 0.0
-        self._child_recovery_interval_seconds = min(
-            max(interval_seconds, 5.0), 30.0
-        )
+        self._child_recovery_interval_seconds = min(max(interval_seconds, 5.0), 30.0)
 
     # -- AITOSModule contract -------------------------------------------------
 
@@ -146,12 +144,11 @@ class ReconciliationScheduler(AITOSModule):
 
         executor = getattr(self._lifecycle, "_order_executor", None)
         if getattr(executor, "requires_exchange_execution", False):
+
             def has_algo_protection(trade: Any) -> bool:
                 stop_id = getattr(trade, "sl_order_id", None)
                 tp_ids = getattr(trade, "tp_order_ids", ())
-                return (
-                    isinstance(stop_id, str) and stop_id.startswith("algo:")
-                ) or (
+                return (isinstance(stop_id, str) and stop_id.startswith("algo:")) or (
                     isinstance(tp_ids, (list, tuple))
                     and any(
                         isinstance(order_id, str) and order_id.startswith("algo:")

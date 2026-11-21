@@ -263,9 +263,7 @@ class _SchedulerLifecycle:
 async def test_background_child_partial_fill_skips_duplicate_trade_exit(monkeypatch):
     import aitos.trading.reconciliation as reconciliation_module
 
-    lifecycle = _SchedulerLifecycle(
-        _DurableLiveExecutor(), algo_trade_ids=("trade-1",)
-    )
+    lifecycle = _SchedulerLifecycle(_DurableLiveExecutor(), algo_trade_ids=("trade-1",))
     bus = SimpleNamespace(publish=AsyncMock())
     recover = AsyncMock(
         return_value={
@@ -308,9 +306,7 @@ async def test_background_child_partial_fill_skips_duplicate_trade_exit(monkeypa
 async def test_background_ambiguous_child_quarantines_only_its_trade(monkeypatch):
     import aitos.trading.reconciliation as reconciliation_module
 
-    lifecycle = _SchedulerLifecycle(
-        _DurableLiveExecutor(), algo_trade_ids=("trade-1",)
-    )
+    lifecycle = _SchedulerLifecycle(_DurableLiveExecutor(), algo_trade_ids=("trade-1",))
     bus = SimpleNamespace(publish=AsyncMock())
     monkeypatch.setattr(
         reconciliation_module,
@@ -432,9 +428,7 @@ async def test_live_algo_trade_never_falls_through_to_generic_reconcile_between_
 ):
     import aitos.trading.reconciliation as reconciliation_module
 
-    lifecycle = _SchedulerLifecycle(
-        _DurableLiveExecutor(), algo_trade_ids=("trade-1",)
-    )
+    lifecycle = _SchedulerLifecycle(_DurableLiveExecutor(), algo_trade_ids=("trade-1",))
     bus = SimpleNamespace(publish=AsyncMock())
     recover = AsyncMock(
         return_value={"applied": [], "blocked": [], "safe_to_resume": False}
