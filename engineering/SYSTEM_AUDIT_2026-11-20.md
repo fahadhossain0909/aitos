@@ -215,3 +215,10 @@ This report does not certify profitability, production capacity, latency percent
 - Its formatting/critical lint step passed. The ClickHouse/SQLite/venue-adapter test command reported **13 passed, 1 skipped**. The restart/ambiguity regression command—including the new hosted PostgreSQL probe and schema-verification tests—reported **108 passed**.
 - The authenticated Binance demo-testnet read-only job was skipped because this was an ordinary push without the explicit `[testnet-readonly]` marker.
 - This evidence is for `d501daf`, not the later workflow automation commits. A fresh branch-push run is required to validate the automatic full-CI dispatch change on the latest head.
+
+### Latest branch validation and full-CI queue
+
+- Three-Store run #67 (`44941309171`) passed on exact latest branch commit `5f6b649652a2f1e0c8daf432e12b2e3facc8d805`.
+- The new automatic full-CI dispatch step completed successfully. It created full CI run #7496 (`44941391735`) on the same SHA with event `workflow_dispatch`.
+- At the time of inspection, full CI #7496 was `pending` in the concurrency queue behind CI #7494; GitHub had not created any jobs yet. No full-CI PASS is claimed.
+- The read-only Binance Testnet job remained skipped because this push did not contain the explicit `[testnet-readonly]` marker. No account inventory request or exchange write was made.
