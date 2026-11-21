@@ -208,3 +208,10 @@ This report does not certify profitability, production capacity, latency percent
 - No full CI PASS, hosted redeploy, post-restart persistence PASS, or authenticated Testnet result is claimed by these code changes alone.
 
 - The successful branch-push Three-Store job now dispatches the repository-wide `ci.yml` workflow automatically using its existing `actions:write` permission. This avoids relying on the missing branch-only **Run workflow** UI control for full CI. The dispatch occurs only after the preceding Three-Store job steps succeed; the credentialed Testnet preflight remains separately opt-in.
+
+### Hosted-probe code validation evidence
+
+- Three-Store run #64 (`44941120144`) completed successfully on exact commit `d501daf50530d5cf1b85a4ae255709243dc2615b`.
+- Its formatting/critical lint step passed. The ClickHouse/SQLite/venue-adapter test command reported **13 passed, 1 skipped**. The restart/ambiguity regression command—including the new hosted PostgreSQL probe and schema-verification tests—reported **108 passed**.
+- The authenticated Binance demo-testnet read-only job was skipped because this was an ordinary push without the explicit `[testnet-readonly]` marker.
+- This evidence is for `d501daf`, not the later workflow automation commits. A fresh branch-push run is required to validate the automatic full-CI dispatch change on the latest head.
