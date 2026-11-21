@@ -486,8 +486,9 @@ def build_risk_governed_opportunities(
         return StrategyOpportunityBridgeReport(
             context.now_ns,
             (),
-            tuple(
-                (*rejected, (key, "capital gateway returned an invalid review contract"))
+            tuple(rejected)
+            + tuple(
+                (key, "capital gateway returned an invalid review contract")
                 for key, _opportunity, _allocation, _cap in candidates
             ),
             execution_eligible=False,
@@ -501,8 +502,9 @@ def build_risk_governed_opportunities(
         return StrategyOpportunityBridgeReport(
             context.now_ns,
             (),
-            tuple(
-                (*rejected, (key, "capital gateway returned duplicate instrument decisions"))
+            tuple(rejected)
+            + tuple(
+                (key, "capital gateway returned duplicate instrument decisions")
                 for key, _opportunity, _allocation, _cap in candidates
             ),
             execution_eligible=False,
