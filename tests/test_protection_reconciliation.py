@@ -1293,3 +1293,127 @@ async def test_triggered_child_recovery_blocks_duplicate_durable_algo_owners():
     )
     executor.get_algo_order_by_client_id.assert_not_awaited()
     lifecycle.apply_triggered_protection_child_fill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handover_recovery_quarantines_malformed_intent_json():
+    class MalformedHandoverJournal:
+        scope = "paper-account"
+
+        def protection_handovers(self):
+            return [
+                {
+                    "handover_id": "handover-malformed",
+                    "trade_id": "trade-malformed",
+                    "symbol": "BTCUSDT",
+                    "old_order_id": "algo:123",
+                    "new_client_id": "new-client",
+                    "order_type": "STOP_MARKET",
+                    "state": "PREPARED",
+                }
+            ]
+
+        def protection_intents(self):
+            return [
+                {
+                    "client_id": "new-client",
+                    "trade_id": "trade-malformed",
+                    "state": "SUBMITTING",
+                    "request_json": "{",
+                    "result_json": None,
+                }
+            ]
+
+    executor = HandoverExecutor("paper-account", replacement_algo("new-client"), [])
+    trade = SimpleNamespace(
+        trade_id="trade-malformed",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    report = await recover_protection_handovers(
+        executor, MalformedHandoverJournal(), [trade], AsyncMock()
+    )
+    assert report["recovered"] == 0
+    assert report["safe_to_resume"] is False
+    assert any("JSON is malformed" in item["reason"] for item in report["blocked"])
+    executor.get_algo_order_by_client_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handover_recovery_quarantines_duplicate_old_algo_owners():
+    class DuplicateHandoverJournal:
+        scope = "paper-account"
+
+        def protection_handovers(self):
+            return [
+                {
+                    "handover_id": "handover-duplicate",
+                    "trade_id": "trade-duplicate",
+                    "symbol": "BTCUSDT",
+                    "old_order_id": "algo:123",
+                    "new_client_id": "new-client",
+                    "order_type": "STOP_MARKET",
+                    "state": "PREPARED",
+                }
+            ]
+
+        def protection_intents(self):
+            old_request = (
+                '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
+                '"order_type":"STOP_MARKET","quantity":1.0}'
+            )
+            new_request = (
+                '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
+                '"order_type":"STOP_MARKET","quantity":1.0,"reduce_only":true,'
+                '"side":"LONG","reference_price":95.0}'
+            )
+            return [
+                {
+                    "client_id": "old-client-1",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": old_request,
+                    "result_json": '{"order_id":"algo:123"}',
+                },
+                {
+                    "client_id": "old-client-2",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": old_request,
+                    "result_json": '{"order_id":"algo:123"}',
+                },
+                {
+                    "client_id": "new-client",
+                    "trade_id": "trade-duplicate",
+                    "state": "SUBMITTING",
+                    "request_json": new_request,
+                    "result_json": None,
+                },
+            ]
+
+    executor = HandoverExecutor("paper-account", replacement_algo("new-client"), [])
+    trade = SimpleNamespace(
+        trade_id="trade-duplicate",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    report = await recover_protection_handovers(
+        executor, DuplicateHandoverJournal(), [trade], AsyncMock()
+    )
+    assert report["recovered"] == 0
+    assert report["safe_to_resume"] is False
+    assert any(
+        "duplicate durable protective order identity" in item["reason"]
+        for item in report["blocked"]
+    )
+    executor.get_algo_order_by_client_id.assert_not_awaited()
