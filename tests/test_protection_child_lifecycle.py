@@ -1,4 +1,5 @@
 import copy
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -191,7 +192,7 @@ async def test_child_fill_applies_only_new_cumulative_delta_and_replays_idempote
         algo_snapshot(),
         child_snapshot(quantity="0.5", quote="45.0"),
     )
-    assert replay["delta_quantity"] == "0"
+    assert Decimal(replay["delta_quantity"]) == Decimal("0")
     assert trade.quantity == pytest.approx(0.5)
     assert len(trade.partial_exits) == 2
     assert snapshots[-1]["agent_consensus"]["_applied_protection_child_fills"][
