@@ -36,7 +36,7 @@ jobs:
         ports:
           - 8123:8123
         options: >-
-          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-cmd "clickhouse-client --user default --password aitos-integration-password --query 'SELECT 1'"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
