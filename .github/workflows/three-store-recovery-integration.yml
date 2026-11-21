@@ -1,6 +1,9 @@
 name: Three-Store Execution Recovery Integration
 
 on:
+  push:
+    branches:
+      - "audit/system-audit-and-docs-2026-11"
   pull_request:
     paths:
       - "aitos/execution/**"
@@ -55,7 +58,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          pytest -q --timeout=120 tests/test_protection_child_lifecycle.py tests/test_protection_child_reconciliation.py tests/test_strategy_opportunity_bridge.py
+          pytest -q --timeout=120 \
+            tests/test_protection_child_lifecycle.py \
+            tests/test_protection_child_reconciliation.py \
+            tests/test_strategy_opportunity_bridge.py
 
   binance-demo-testnet-read-only:
     if: github.event_name == 'workflow_dispatch'
@@ -76,8 +82,14 @@ jobs:
           BINANCE_FUTURES_TESTNET_API_KEY: ${{ secrets.BINANCE_FUTURES_TESTNET_API_KEY }}
           BINANCE_FUTURES_TESTNET_API_SECRET: ${{ secrets.BINANCE_FUTURES_TESTNET_API_SECRET }}
         run: |
-          test -n "$BINANCE_FUTURES_TESTNET_API_KEY" || (echo "Missing BINANCE_FUTURES_TESTNET_API_KEY secret" && exit 1)
-          test -n "$BINANCE_FUTURES_TESTNET_API_SECRET" || (echo "Missing BINANCE_FUTURES_TESTNET_API_SECRET secret" && exit 1)
+          if [ -z "$BINANCE_FUTURES_TESTNET_API_KEY" ]; then
+            echo "Missing BINANCE_FUTURES_TESTNET_API_KEY secret"
+            exit 1
+          fi
+          if [ -z "$BINANCE_FUTURES_TESTNET_API_SECRET" ]; then
+            echo "Missing BINANCE_FUTURES_TESTNET_API_SECRET secret"
+            exit 1
+          fi
       - name: Verify authenticated demo-testnet inventory (read-only)
         env:
           PYTHONPATH: .
