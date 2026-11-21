@@ -217,8 +217,8 @@ jobs:
           git commit -m "style: format execution recovery and shadow strategy bridge"
           git push origin "HEAD:${GITHUB_REF_NAME}"
           echo "changed=true" >> "$GITHUB_OUTPUT"
-      - name: Dispatch full CI for the formatted commit
-        if: steps.commit_format.outputs.changed == 'true'
+      - name: Dispatch full CI after successful Three-Store branch validation
+        if: github.event_name == 'push' && github.ref_name == 'audit/system-audit-and-docs-2026-11'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
