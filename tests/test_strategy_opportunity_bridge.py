@@ -117,15 +117,18 @@ def inputs(mode=StrategyMode.SHADOW):
 def test_shadow_strategy_candidate_becomes_typed_canonical_opportunity():
     cycle, context, plans, portfolio_risk = inputs()
     gateway = ShadowGateway()
+    live_gateway = ShadowGateway()
     report = build_risk_governed_opportunities(
         cycle,
         context,
         portfolio_risk,
         plans,
         shadow_gateway_factory=lambda: gateway,
-        live_gateway=ShadowGateway(),
+        live_gateway=live_gateway,
     )
 
+    assert live_gateway.seen == []
+    assert live_gateway.reservation.reserved_capital_usd == 0
     assert len(report.opportunities) == 1
     governed = report.opportunities[0]
     opportunity = governed.opportunity
