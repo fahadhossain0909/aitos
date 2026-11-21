@@ -535,6 +535,10 @@ durable intent journal or recovery exception sets the account reconciliation
 gate and prevents new entries; the affected trade is not sent through a second
 close path. Other unaffected trades continue to receive ordinary supervision.
 Startup/manual and periodic passes share an async lock, preventing overlapping
-reconciliation passes from racing the same durable child watermark. Health and
-reconciliation events expose applied/blocked child counts and affected trade
-IDs. The account gate is intentionally not auto-cleared by this scheduler.
+reconciliation passes from racing the same durable child watermark. Authenticated
+child inventory polling is throttled to a bounded 5–30 second interval even
+when the main live scan calls `run_once` more frequently. Algo-protected trades
+never fall through to generic `reconcile_trade` status handling between those
+checks; non-algo legacy orders retain the existing reconciliation path. Health
+and reconciliation events expose applied/blocked child counts and affected
+trade IDs. The account gate is intentionally not auto-cleared by this scheduler.
