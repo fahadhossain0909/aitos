@@ -67,6 +67,58 @@ MIGRATIONS = (
 )
 
 
+async def verify_postgres_schema(pool) -> int:
+    """Validate an existing schema using read-only transactions and no DDL."""
+    async with pool.acquire() as conn, conn.transaction(readonly=True):
+        rows = await conn.fetch(
+            "SELECT version, name, checksum FROM aitos_schema_migrations"
+        )
+        applied = {int(row["version"]): row for row in rows}
+        known = {migration.version for migration in MIGRATIONS}
+        unknown = set(applied) - known
+        if unknown:
+            raise RuntimeError(
+                "PostgreSQL schema is newer than this AITOS build; "
+                "unknown migration versions: "
+                + ", ".join(str(version) for version in sorted(unknown))
+            )
+
+        for migration in MIGRATIONS:
+            previous = applied.get(migration.version)
+            if previous is None:
+                raise RuntimeError(
+                    "PostgreSQL schema is not fully migrated; "
+                    f"missing version {migration.version}"
+                )
+            if (
+                previous["name"] != migration.name
+                or previous["checksum"] != migration.checksum
+            ):
+                raise RuntimeError(
+                    "PostgreSQL migration history mismatch at version "
+                    f"{migration.version}; refusing unsafe read"
+                )
+
+        for table, expected in _REQUIRED_COLUMNS.items():
+            columns = await conn.fetch(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = $1
+                """,
+                table,
+            )
+            actual = {row["column_name"] for row in columns}
+            missing = expected - actual
+            if missing:
+                raise RuntimeError(
+                    f"PostgreSQL schema drift in {table}; missing columns: "
+                    + ", ".join(sorted(missing))
+                )
+
+    return max((migration.version for migration in MIGRATIONS), default=0)
+
+
 _REQUIRED_COLUMNS = {
     "aitos_market_records": {
         "record_id",
