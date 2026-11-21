@@ -303,6 +303,9 @@ def build_risk_governed_opportunities(
     if not isinstance(live_gateway, CapitalGateway):
         raise TypeError("live CapitalGateway identity is required for isolation")
 
+    # Validate and map the strategy cycle before opening a shadow reservation
+    # database; malformed strategy output must not leak a SQLite connection.
+    shadow = build_strategy_shadow_report(cycle, context)
     gateway = shadow_gateway_factory()
     if not isinstance(gateway, CapitalGateway):
         raise TypeError("shadow gateway factory must return CapitalGateway")
@@ -324,7 +327,6 @@ def build_risk_governed_opportunities(
     if same_ledger:
         raise ValueError("shadow gateway cannot share the live reservation ledger")
 
-    shadow = build_strategy_shadow_report(cycle, context)
     allocations = {item.strategy_id: item for item in cycle.allocations}
     results = {item.strategy_id: item for item in cycle.results}
     candidates: list[tuple[str, Opportunity, object, float]] = []
