@@ -63,3 +63,24 @@ This is **not** proof of:
 - testnet account permissions or regional availability.
 
 Those require a separate isolated testnet lifecycle acceptance run with dedicated testnet credentials, durable intent journaling, fault injection and reconciliation evidence. The paper runner continues to use its simulated execution adapter; selecting a market-data environment does not switch paper execution to venue orders. No production deployment, VPS activation or live order was performed by this change.
+
+## Read-only CI preflight trigger
+
+The Three-Store workflow is currently introduced on the audit feature branch, not
+on the repository default branch. GitHub may therefore omit the **Run workflow**
+control for this branch-only workflow even though its YAML declares
+`workflow_dispatch`. Do not merge the Draft PR or change the default branch just
+to expose that control.
+
+The workflow also supports a deliberate push-only opt-in for its authenticated,
+read-only account inventory preflight: a commit pushed to
+`audit/system-audit-and-docs-2026-11` whose commit message contains
+`[testnet-readonly]` runs that preflight job. Ordinary pushes run the recovery
+integration job but skip the credentialed preflight. The opt-in job requires
+the dedicated `BINANCE_FUTURES_TESTNET_API_KEY` and
+`BINANCE_FUTURES_TESTNET_API_SECRET` GitHub Actions secrets and performs no
+order placement, cancellation, amendment or other write operation.
+
+This marker is not authorization for write-side testnet acceptance. Entry,
+protection, partial-fill and exit tests remain disabled until a separate
+explicit operational approval and bounded test-order budget are provided.
