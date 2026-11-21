@@ -461,9 +461,10 @@ and SQLite database path identity before review.
 The bridge additionally requires a typed `StrategyPortfolioRiskContext` with a
 non-empty snapshot identity, current/peak equity, open-position risk, pending
 order risk, side/instrument identity, correlation, daily PnL and loss-streak
-evidence. Its observation timestamp must be within five seconds of the
-StrategyContext cycle timestamp. Missing, stale or malformed account-risk
-evidence fails closed before a canonical Opportunity is emitted.
+evidence. Its observation timestamp must not be future-dated and must be no more than
+five seconds older than the StrategyContext cycle timestamp. Missing, stale,
+future-dated or malformed account-risk evidence fails closed before a
+canonical Opportunity is emitted.
 
 
 ## Coordinated three-store fault-injection acceptance (2026-11-21)
@@ -557,3 +558,14 @@ durable algo-order identities. In the duplicate case, neither claimant is
 selected as the owner; the matching order ID is removed from the recovery map.
 A future-dated portfolio risk snapshot is also rejected, even if it falls
 within the nominal clock-skew tolerance.
+
+
+Replacement-handover recovery now treats ClickHouse trade-snapshot write
+failures as explicit blocked outcomes instead of allowing an uncaught
+exception to obscure the durable handover state. A failure before old-order
+cancellation leaves the handover at `NEW_ACCEPTED` and never sends the cancel;
+a failure after a confirmed cancellation leaves `OLD_CANCELLED`, allowing the
+next restart to persist the new trade state and complete the journal without
+issuing a second cancel. Malformed handover rows/JSON and duplicate client or
+algo-order ownership are reported as quarantined findings; ambiguous owners
+are removed from lookup maps rather than selecting the first row.
