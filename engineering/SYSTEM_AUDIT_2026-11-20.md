@@ -196,3 +196,13 @@ This report does not certify profitability, production capacity, latency percent
 - Added focused tests that use read-only fakes and assert the health verification path never invokes write methods.
 - Added `engineering/POSTGRES_SMOKE_PERSISTENCE.md` describing the one-time seed boundary and the interpretation of a post-restart health check.
 - The code change has not yet been validated by the full repository CI or deployed to Render/Railway. Until a fresh deploy and a successful pre-restart/post-restart read-only check, hosted durable-persistence acceptance remains pending.
+
+### Follow-up: enforce database-level read-only verification and manual-trigger fallback
+
+- Added `verify_postgres_schema`, which checks migration identity/checksum and required columns in a read-only transaction without acquiring a migration lock or issuing DDL.
+- Both PostgreSQL adapters now accept `initialize({"read_only": True})`; the pool sets PostgreSQL `default_transaction_read_only=on`. The hosted health probe uses this mode. The explicit `--seed` path remains a separate normal-write initialization path.
+- Added focused schema-verification tests for valid schema, missing migration, checksum drift and missing columns; hosted-probe tests assert read-only adapter mode and fail-closed behavior.
+- The Three-Store workflow now runs these tests and checks formatting/critical lint for the new adapter and probe files on the audit branch push path.
+- The workflow file is not present on the repository default branch, which explains the absent GitHub **Run workflow** button despite `workflow_dispatch` being declared on this branch. The workflow now also supports an explicit `[testnet-readonly]` commit-message opt-in for the authenticated read-only inventory job. Ordinary pushes continue to skip that credentialed job. No exchange write-side test was enabled.
+- Run #61 (`44940991073`) was observed running on the exact prior probe commit `8e0f19199d09d2d738169e8c83e865a465815dbc`; the read-only Testnet job was skipped for the ordinary push event. Its final result is not yet available in this audit entry.
+- No full CI PASS, hosted redeploy, post-restart persistence PASS, or authenticated Testnet result is claimed by these code changes alone.
