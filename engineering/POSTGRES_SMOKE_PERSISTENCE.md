@@ -5,7 +5,9 @@ trading runtime. Its `/health` endpoint is intentionally read-only.
 
 ## What the health request proves
 
-Every request opens fresh AITOS PostgreSQL adapter pools and reads pre-existing,
+Every request opens fresh AITOS PostgreSQL adapter pools in an enforced
+`default_transaction_read_only=on` session, validates the existing schema inside
+a read-only transaction (without running migrations), and reads pre-existing,
 stable sentinel records:
 
 - The known `AITOSSMOKEUSDT` 1-minute market-data record and its expected close.
