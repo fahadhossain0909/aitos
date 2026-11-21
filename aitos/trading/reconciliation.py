@@ -168,8 +168,16 @@ class ReconciliationScheduler(AITOSModule):
                         },
                     )
                 else:
-                    applied = child_report.get("applied", [])
-                    blocked = child_report.get("blocked", [])
+                    applied = (
+                        child_report.get("applied", [])
+                        if isinstance(child_report, dict)
+                        else None
+                    )
+                    blocked = (
+                        child_report.get("blocked", [])
+                        if isinstance(child_report, dict)
+                        else None
+                    )
                     if not isinstance(applied, list) or not isinstance(blocked, list):
                         child_blocked = len(open_trades) or 1
                         handled_trade_ids.update(str(t.trade_id) for t in open_trades)
@@ -179,6 +187,12 @@ class ReconciliationScheduler(AITOSModule):
                         child_applied = len(applied)
                         child_blocked = len(blocked)
                         for outcome in applied:
+                            if not isinstance(outcome, dict):
+                                handled_trade_ids.update(
+                                    str(t.trade_id) for t in open_trades
+                                )
+                                child_blocked += 1
+                                continue
                             trade_id = outcome.get("trade_id")
                             if isinstance(trade_id, str) and trade_id:
                                 handled_trade_ids.add(trade_id)
@@ -188,6 +202,11 @@ class ReconciliationScheduler(AITOSModule):
                                 )
                                 child_blocked += 1
                         for finding in blocked:
+                            if not isinstance(finding, dict):
+                                handled_trade_ids.update(
+                                    str(t.trade_id) for t in open_trades
+                                )
+                                continue
                             trade_id = finding.get("trade_id")
                             if isinstance(trade_id, str) and trade_id:
                                 handled_trade_ids.add(trade_id)
@@ -200,6 +219,13 @@ class ReconciliationScheduler(AITOSModule):
                             or outcome.get("terminal") is not True
                             for outcome in applied
                         )
+                        if nonterminal:
+                            child_blocked += sum(
+                                1
+                                for outcome in applied
+                                if not isinstance(outcome, dict)
+                                or outcome.get("terminal") is not True
+                            )
                         if blocked or nonterminal or child_blocked:
                             self._lifecycle._account_reconciliation_error = True
 
