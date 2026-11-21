@@ -460,3 +460,54 @@ def test_future_dated_portfolio_risk_snapshot_fails_closed():
             shadow_gateway_factory=ShadowGateway,
             live_gateway=ShadowGateway(),
         )
+
+
+def test_real_capital_gateway_receives_typed_open_and_pending_exposure_snapshot():
+    class InspectingCapitalGateway(CapitalGateway):
+        def __init__(self):
+            super().__init__()
+            self.reviewed_estimates = ()
+
+        def evaluate(self, equity_usd, estimates, *, max_positions=3):
+            self.reviewed_estimates = tuple(estimates)
+            return super().evaluate(
+                equity_usd, estimates, max_positions=max_positions
+            )
+
+    cycle, context, plans, _ = inputs()
+    portfolio_risk = StrategyPortfolioRiskContext(
+        snapshot_id="real-capital-gateway-exposure",
+        observed_at_ns=context.now_ns,
+        equity_usd=1_000.0,
+        equity_peak_usd=1_050.0,
+        position_risk_pct={"ETHUSDT": 0.5},
+        position_sides={"ETHUSDT": "LONG"},
+        position_instruments={"ETHUSDT": "binance:futures:ETHUSDT"},
+        pending_order_risk_pct={"pending-sol": 0.2},
+        pending_order_symbols={"pending-sol": "binance:futures:SOLUSDT"},
+        pending_order_sides={"pending-sol": "SHORT"},
+        correlations={"BTCUSDT:ETHUSDT": 0.92},
+        daily_pnl_pct=-0.5,
+        consecutive_losses=2,
+        liquidation_buffer_pct=12.0,
+    )
+    shadow_gateway = InspectingCapitalGateway()
+    report = build_risk_governed_opportunities(
+        cycle,
+        context,
+        portfolio_risk,
+        plans,
+        shadow_gateway_factory=lambda: shadow_gateway,
+        live_gateway=CapitalGateway(),
+    )
+    assert len(shadow_gateway.reviewed_estimates) == 1
+    metadata = shadow_gateway.reviewed_estimates[0].metadata
+    assert metadata["position_risk_pct"] == {"ETHUSDT": 0.5}
+    assert metadata["pending_order_risk_pct"] == {"pending-sol": 0.2}
+    assert metadata["pending_order_symbols"] == {
+        "pending-sol": "binance:futures:SOLUSDT"
+    }
+    assert metadata["correlations"] == {"BTCUSDT:ETHUSDT": 0.92}
+    assert metadata["daily_pnl_pct"] == -0.5
+    assert metadata["consecutive_losses"] == 2
+    assert report.execution_eligible is False
