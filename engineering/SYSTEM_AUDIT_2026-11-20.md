@@ -187,3 +187,12 @@ README previously described Futures as the only exchange and contained branch-sp
 ## Explicit non-claims
 
 This report does not certify profitability, production capacity, latency percentiles, 24/7 reliability, power-loss durability, high availability, external TLS, signed release trust, real-account reconciliation, exchange testnet execution, or live-trading readiness.
+
+## Hosted persistence probe correction (2026-11-22)
+
+- Replaced the Render/Railway smoke endpoint's write-before-read health path with a read-only verifier for stable market-data, trade-snapshot, journal-entry, decision, trade-link and outcome sentinels.
+- Added an explicit `--seed` operator command for one-time initialization of a genuinely empty smoke database. Seeding is not part of startup or health handling.
+- Missing or changed persistence evidence now fails closed with HTTP 503 instead of silently repairing the database and returning green.
+- Added focused tests that use read-only fakes and assert the health verification path never invokes write methods.
+- Added `engineering/POSTGRES_SMOKE_PERSISTENCE.md` describing the one-time seed boundary and the interpretation of a post-restart health check.
+- The code change has not yet been validated by the full repository CI or deployed to Render/Railway. Until a fresh deploy and a successful pre-restart/post-restart read-only check, hosted durable-persistence acceptance remains pending.
