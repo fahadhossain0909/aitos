@@ -71,7 +71,7 @@ async def clickhouse_store():
     async def reopen_store():
         # Close the old process's ClickHouse client before constructing a new
         # client and store object, just as a cold process restart would.
-        previous = clients[-1]
+        previous = clients.pop()
         await previous.close()
         return await open_store()
 
@@ -79,8 +79,7 @@ async def clickhouse_store():
         yield SimpleNamespace(store=store, reopen=reopen_store, database=database)
     finally:
         for client in clients:
-            if not client.is_closed:
-                await client.close()
+            await client.close()
         admin = await clickhouse_connect.get_async_client(
             host=host, port=port, username=user, password=password
         )
@@ -258,7 +257,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
 
     try:
         first_trade = (await store.load_open_trades())[0]
-        first = await make_lifecycle([first_trade])
+        first = await make_lifecycle([first_trade], store)
 
         if failure_point == "clickhouse_snapshot":
             original_save = store.save_trade
