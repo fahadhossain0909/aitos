@@ -908,7 +908,7 @@ async def recover_protection_handovers(
             algo.get("clientAlgoId") == client_id
             and algo.get("symbol") == symbol
             and algo.get("algoType") == "CONDITIONAL"
-            and algo.get("orderType") == "STOP_MARKET"
+            and algo.get("orderType") == order_type
             and algo.get("side") == expected_side
             and algo.get("closePosition") in (False, "false")
             and exact_quantity
