@@ -1150,21 +1150,44 @@ async def recover_triggered_protection_child_fills(
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded protective intent history is required")
     by_order_id: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        result = row.get("result_json")
-        if isinstance(result, str):
-            result = json.loads(result)
-        if isinstance(result, dict) and result.get("order_id"):
-            order_identity = str(result["order_id"])
-            if order_identity in by_order_id:
-                raise ValueError("duplicate durable protective order identity")
-            by_order_id[order_identity] = row
-
     inspected = 0
     applied: list[dict[str, Any]] = []
     blocked: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            blocked.append(
+                {
+                    "trade_id": "unknown",
+                    "order_id": "unknown",
+                    "reason": "protective intent journal contains a malformed row",
+                }
+            )
+            continue
+        result = row.get("result_json")
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except (TypeError, ValueError):
+                blocked.append(
+                    {
+                        "trade_id": str(row.get("trade_id") or "unknown"),
+                        "order_id": str(row.get("client_id") or "unknown"),
+                        "reason": "protective intent result JSON is malformed",
+                    }
+                )
+                continue
+        if isinstance(result, dict) and result.get("order_id"):
+            order_identity = str(result["order_id"])
+            if order_identity in by_order_id:
+                blocked.append(
+                    {
+                        "trade_id": str(row.get("trade_id") or "unknown"),
+                        "order_id": order_identity,
+                        "reason": "duplicate durable protective order identity",
+                    }
+                )
+                continue
+            by_order_id[order_identity] = row
     for trade in lifecycle.get_open_trades():
         owned_ids = []
         stop_id = getattr(trade, "sl_order_id", None)
@@ -1202,10 +1225,20 @@ async def recover_triggered_protection_child_fills(
                 continue
             result = row.get("result_json")
             request = row.get("request_json")
-            if isinstance(result, str):
-                result = json.loads(result)
-            if isinstance(request, str):
-                request = json.loads(request)
+            try:
+                if isinstance(result, str):
+                    result = json.loads(result)
+                if isinstance(request, str):
+                    request = json.loads(request)
+            except (TypeError, ValueError):
+                blocked.append(
+                    {
+                        "trade_id": str(trade.trade_id),
+                        "order_id": order_id,
+                        "reason": "protective intent request/result JSON is malformed",
+                    }
+                )
+                continue
             if (
                 not isinstance(result, dict)
                 or not isinstance(request, dict)
