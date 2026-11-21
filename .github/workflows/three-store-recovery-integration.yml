@@ -16,6 +16,8 @@ on:
       - "tests/test_protection_child_*.py"
       - "tests/test_strategy_opportunity_bridge.py"
       - "tests/test_reconciliation_scheduler.py"
+      - "scripts/render_postgres_smoke.py"
+      - "tests/test_render_postgres_smoke.py"
       - ".github/workflows/three-store-recovery-integration.yml"
   workflow_dispatch:
 
@@ -74,6 +76,7 @@ jobs:
             tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
+          black --check --diff scripts/render_postgres_smoke.py tests/test_render_postgres_smoke.py
           black --check --diff \
             aitos/execution/intent_store.py \
             aitos/execution/protection_reconciliation.py \
@@ -94,6 +97,7 @@ jobs:
             tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
+          flake8 scripts/render_postgres_smoke.py tests/test_render_postgres_smoke.py --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 \
             aitos/execution/intent_store.py \
             aitos/execution/protection_reconciliation.py \
@@ -160,7 +164,8 @@ jobs:
             tests/test_protection_child_reconciliation.py \
             tests/test_protection_reconciliation.py \
             tests/test_strategy_opportunity_bridge.py \
-            tests/test_reconciliation_scheduler.py
+            tests/test_reconciliation_scheduler.py \
+            tests/test_render_postgres_smoke.py
       - name: Commit formatter output on the dedicated audit branch
         id: commit_format
         if: github.event_name == 'push' && github.ref_name == 'audit/system-audit-and-docs-2026-11'
