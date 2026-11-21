@@ -71,6 +71,13 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest pytest-asyncio
+      - name: Require dedicated demo-testnet credentials
+        env:
+          BINANCE_FUTURES_TESTNET_API_KEY: ${{ secrets.BINANCE_FUTURES_TESTNET_API_KEY }}
+          BINANCE_FUTURES_TESTNET_API_SECRET: ${{ secrets.BINANCE_FUTURES_TESTNET_API_SECRET }}
+        run: |
+          test -n "$BINANCE_FUTURES_TESTNET_API_KEY" || (echo "Missing BINANCE_FUTURES_TESTNET_API_KEY secret" && exit 1)
+          test -n "$BINANCE_FUTURES_TESTNET_API_SECRET" || (echo "Missing BINANCE_FUTURES_TESTNET_API_SECRET secret" && exit 1)
       - name: Verify authenticated demo-testnet inventory (read-only)
         env:
           PYTHONPATH: .
