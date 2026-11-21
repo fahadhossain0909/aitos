@@ -70,6 +70,23 @@ jobs:
             tests/test_protection_child_lifecycle.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
+          black --check --diff \
+            aitos/execution/intent_store.py \
+            aitos/execution/protection_reconciliation.py \
+            aitos/execution/protection_child_reconciliation.py \
+            aitos/execution/order_executor.py \
+            aitos/execution/attributed_executor.py \
+            aitos/execution/binance_executor.py \
+            aitos/trading/lifecycle.py \
+            aitos/strategy/opportunity_bridge.py \
+            aitos/strategy/shadow_bridge.py \
+            run_live_trading.py \
+            tests/test_execution_intent_recovery.py \
+            tests/test_protection_reconciliation.py \
+            tests/test_protection_child_reconciliation.py \
+            tests/test_protection_child_lifecycle.py \
+            tests/test_strategy_opportunity_bridge.py \
+            tests/integration/test_execution_recovery_three_store.py
           flake8 \
             aitos/execution/intent_store.py \
             aitos/execution/protection_reconciliation.py \
