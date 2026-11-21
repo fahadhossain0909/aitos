@@ -16,6 +16,9 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.execution.protection_reconciliation import (
+    recover_triggered_protection_child_fills,
+)
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -53,6 +56,9 @@ class ReconciliationScheduler(AITOSModule):
         self._last_run_trades_closed = 0
         self._total_runs = 0
         self._errors = 0
+        self._run_lock = asyncio.Lock()
+        self._last_child_fills_applied = 0
+        self._last_child_fills_blocked = 0
 
     # -- AITOSModule contract -------------------------------------------------
 
@@ -89,6 +95,8 @@ class ReconciliationScheduler(AITOSModule):
                 "errors": self._errors,
                 "last_run_trades_checked": self._last_run_trades_checked,
                 "last_run_trades_closed": self._last_run_trades_closed,
+                "last_child_fills_applied": self._last_child_fills_applied,
+                "last_child_fills_blocked": self._last_child_fills_blocked,
             },
         )
 
@@ -111,15 +119,94 @@ class ReconciliationScheduler(AITOSModule):
     # -- Public API ---------------------------------------------------------------
 
     async def run_once(self) -> int:
-        """Reconcile every currently open trade immediately (rather than
-        waiting for the next scheduled tick) — call this right after
-        startup or reconnecting to the exchange, in addition to the
-        background loop. Returns how many trades were closed as a result."""
+        """Reconcile protective child fills before ordinary order-status exits.
+
+        This method is shared by the startup caller and the periodic scheduler.
+        Serializing it prevents overlapping passes from applying the same child
+        fill while a previous pass is still persisting the trade snapshot.
+        """
         self._require_initialized()
+        async with self._run_lock:
+            return await self._run_once_locked()
+
+    async def _run_once_locked(self) -> int:
         open_trades = self._lifecycle.get_open_trades()
         closed_count = 0
+        handled_trade_ids: set[str] = set()
+        child_applied = 0
+        child_blocked = 0
+
+        executor = getattr(self._lifecycle, "_order_executor", None)
+        if getattr(executor, "requires_exchange_execution", False):
+            journal = getattr(executor, "execution_intent_store", None)
+            if journal is None:
+                child_blocked = len(open_trades) or 1
+                handled_trade_ids.update(str(t.trade_id) for t in open_trades)
+                self._lifecycle._account_reconciliation_error = True
+                self._errors += 1
+                logger.critical(
+                    "background child-fill recovery has no durable execution journal",
+                    extra={"aitos_extra": {"new_entries_allowed": False}},
+                )
+            else:
+                try:
+                    child_report = await recover_triggered_protection_child_fills(
+                        executor, journal, self._lifecycle
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    child_blocked = len(open_trades) or 1
+                    handled_trade_ids.update(str(t.trade_id) for t in open_trades)
+                    self._lifecycle._account_reconciliation_error = True
+                    self._errors += 1
+                    logger.critical(
+                        "background protective child recovery failed closed",
+                        extra={
+                            "aitos_extra": {
+                                "error": f"{type(exc).__name__}: {exc}",
+                                "new_entries_allowed": False,
+                            }
+                        },
+                    )
+                else:
+                    applied = child_report.get("applied", [])
+                    blocked = child_report.get("blocked", [])
+                    if not isinstance(applied, list) or not isinstance(blocked, list):
+                        child_blocked = len(open_trades) or 1
+                        handled_trade_ids.update(str(t.trade_id) for t in open_trades)
+                        self._lifecycle._account_reconciliation_error = True
+                        self._errors += 1
+                    else:
+                        child_applied = len(applied)
+                        child_blocked = len(blocked)
+                        for outcome in applied:
+                            trade_id = outcome.get("trade_id")
+                            if isinstance(trade_id, str) and trade_id:
+                                handled_trade_ids.add(trade_id)
+                            else:
+                                handled_trade_ids.update(
+                                    str(t.trade_id) for t in open_trades
+                                )
+                                child_blocked += 1
+                        for finding in blocked:
+                            trade_id = finding.get("trade_id")
+                            if isinstance(trade_id, str) and trade_id:
+                                handled_trade_ids.add(trade_id)
+                            else:
+                                handled_trade_ids.update(
+                                    str(t.trade_id) for t in open_trades
+                                )
+                        nonterminal = any(
+                            not isinstance(outcome, dict)
+                            or outcome.get("terminal") is not True
+                            for outcome in applied
+                        )
+                        if blocked or nonterminal or child_blocked:
+                            self._lifecycle._account_reconciliation_error = True
 
         for trade in open_trades:
+            trade_id = str(trade.trade_id)
+            if trade_id in handled_trade_ids:
+                continue
             try:
                 result = await self._lifecycle.reconcile_trade(trade.trade_id)
                 if result.state == TradeLifecycleState.POSITION_CLOSED:
@@ -146,6 +233,8 @@ class ReconciliationScheduler(AITOSModule):
         self._last_run_at = datetime.now(timezone.utc).isoformat()
         self._last_run_trades_checked = len(open_trades)
         self._last_run_trades_closed = closed_count
+        self._last_child_fills_applied = child_applied
+        self._last_child_fills_blocked = child_blocked
 
         await self._event_bus.publish(
             Event(
@@ -153,6 +242,9 @@ class ReconciliationScheduler(AITOSModule):
                 payload={
                     "trades_checked": len(open_trades),
                     "trades_closed": closed_count,
+                    "protective_child_fills_applied": child_applied,
+                    "protective_child_fills_blocked": child_blocked,
+                    "handled_trade_ids": sorted(handled_trade_ids),
                 },
                 source_module=self.module_id,
             )
