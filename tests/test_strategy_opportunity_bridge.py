@@ -441,3 +441,22 @@ def test_boolean_portfolio_risk_evidence_is_rejected(field, value):
             shadow_gateway_factory=ShadowGateway,
             live_gateway=ShadowGateway(),
         )
+
+
+def test_future_dated_portfolio_risk_snapshot_fails_closed():
+    cycle, context, plans, portfolio_risk = inputs()
+    future = StrategyPortfolioRiskContext(
+        snapshot_id=portfolio_risk.snapshot_id,
+        observed_at_ns=context.now_ns + 1,
+        equity_usd=portfolio_risk.equity_usd,
+        equity_peak_usd=portfolio_risk.equity_peak_usd,
+    )
+    with pytest.raises(ValueError, match="missing, invalid, or stale"):
+        build_risk_governed_opportunities(
+            cycle,
+            context,
+            future,
+            plans,
+            shadow_gateway_factory=ShadowGateway,
+            live_gateway=ShadowGateway(),
+        )
