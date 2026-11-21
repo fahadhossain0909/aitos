@@ -12,6 +12,8 @@ import asyncio
 import hashlib
 import hmac
 import os
+import subprocess
+import sys
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -201,6 +203,46 @@ def _seed_intent(journal):
         ),
     )
     journal.mark_applied("fault-stop-client", "trade-three-store")
+
+
+def test_sqlite_child_watermark_survives_hard_process_exit(tmp_path):
+    from aitos.execution.intent_store import ExecutionIntentStore
+
+    journal_path = tmp_path / "hard-exit.sqlite"
+    script = """
+import os
+import sys
+from aitos.execution.intent_store import ExecutionIntentStore
+
+store = ExecutionIntentStore(sys.argv[1], scope="hard-exit-recovery")
+store.mark_protection_child_applied(
+    algo_id="algo-17",
+    child_order_id="child-29",
+    trade_id="trade-hard-exit",
+    symbol="BTCUSDT",
+    cumulative_quantity="0.375",
+    cumulative_quote="33.75",
+    status="PARTIALLY_FILLED",
+)
+os._exit(73)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(journal_path)],
+        cwd=os.getcwd(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 73, result.stderr
+
+    restarted = ExecutionIntentStore(
+        journal_path, scope="hard-exit-recovery"
+    )
+    watermark = restarted.protection_child_watermark("algo-17", "child-29")
+    assert watermark is not None
+    assert watermark["trade_id"] == "trade-hard-exit"
+    assert watermark["cumulative_quantity"] == "0.375"
+    assert watermark["cumulative_quote"] == "33.75"
 
 
 @pytest.mark.asyncio
