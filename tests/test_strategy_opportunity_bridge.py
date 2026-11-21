@@ -380,3 +380,64 @@ def test_typed_portfolio_exposures_are_forwarded_to_capital_gateway():
     assert metadata["pending_order_symbols"] == {"pending-sol": "SOLUSDT"}
     assert metadata["correlations"] == {"BTCUSDT:ETHUSDT": 0.92}
     assert metadata["portfolio_risk_snapshot_id"] == "portfolio-snapshot-with-exposure"
+
+
+def test_capital_gateway_contract_must_be_typed_before_opportunity_emission():
+    class MalformedGateway(ShadowGateway):
+        def evaluate(self, equity_usd, estimates, *, max_positions=3):
+            return SimpleNamespace(decisions=(), allocations=())
+
+    cycle, context, plans, portfolio_risk = inputs()
+    report = build_risk_governed_opportunities(
+        cycle,
+        context,
+        portfolio_risk,
+        plans,
+        shadow_gateway_factory=MalformedGateway,
+        live_gateway=ShadowGateway(),
+    )
+    assert report.opportunities == ()
+    assert any("invalid review contract" in reason for _, reason in report.rejected)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("position_risk_pct", {"ETHUSDT": True}),
+        ("pending_order_risk_pct", {"pending": True}),
+        ("correlations", {"BTCUSDT:ETHUSDT": True}),
+        ("liquidation_buffer_pct", True),
+    ],
+)
+def test_boolean_portfolio_risk_evidence_is_rejected(field, value):
+    cycle, context, plans, original = inputs()
+    values = {
+        "snapshot_id": original.snapshot_id,
+        "observed_at_ns": original.observed_at_ns,
+        "equity_usd": original.equity_usd,
+        "equity_peak_usd": original.equity_peak_usd,
+    }
+    if field == "position_risk_pct":
+        values.update(
+            position_risk_pct=value,
+            position_sides={"ETHUSDT": "LONG"},
+            position_instruments={"ETHUSDT": "ETHUSDT"},
+        )
+    elif field == "pending_order_risk_pct":
+        values.update(
+            pending_order_risk_pct=value,
+            pending_order_symbols={"pending": "ETHUSDT"},
+            pending_order_sides={"pending": "LONG"},
+        )
+    else:
+        values[field] = value
+    portfolio_risk = StrategyPortfolioRiskContext(**values)
+    with pytest.raises(ValueError):
+        build_risk_governed_opportunities(
+            cycle,
+            context,
+            portfolio_risk,
+            plans,
+            shadow_gateway_factory=ShadowGateway,
+            live_gateway=ShadowGateway(),
+        )
