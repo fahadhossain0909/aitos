@@ -194,7 +194,8 @@ def build_risk_governed_opportunities(
         or isinstance(portfolio_risk.observed_at_ns, bool)
         or not isinstance(portfolio_risk.observed_at_ns, int)
         or portfolio_risk.observed_at_ns <= 0
-        or abs(context.now_ns - portfolio_risk.observed_at_ns) > 5_000_000_000
+        or portfolio_risk.observed_at_ns > context.now_ns
+        or context.now_ns - portfolio_risk.observed_at_ns > 5_000_000_000
     ):
         raise ValueError("portfolio risk snapshot is missing, invalid, or stale")
     if (
@@ -231,10 +232,16 @@ def build_risk_governed_opportunities(
     ):
         raise ValueError("open-position risk, side, and instrument identities differ")
     for position_id, side_value in portfolio_risk.position_sides.items():
-        if str(side_value).upper() not in {"LONG", "SHORT"}:
-            raise ValueError("open-position side snapshot is invalid")
-        if not str(portfolio_risk.position_instruments[position_id]).strip():
-            raise ValueError("open-position instrument snapshot is invalid")
+        instrument = portfolio_risk.position_instruments[position_id]
+        if (
+            not isinstance(position_id, str)
+            or not position_id.strip()
+            or not isinstance(side_value, str)
+            or side_value.upper() not in {"LONG", "SHORT"}
+            or not isinstance(instrument, str)
+            or not instrument.strip()
+        ):
+            raise ValueError("open-position identity, side, or instrument is invalid")
     for symbol, risk_pct in portfolio_risk.position_risk_pct.items():
         if isinstance(risk_pct, bool):
             raise ValueError("open-position risk snapshot is invalid")
@@ -262,8 +269,10 @@ def build_risk_governed_opportunities(
             not str(order_id).strip()
             or not isfinite(risk_value)
             or risk_value <= 0
-            or not str(portfolio_risk.pending_order_symbols[order_id]).strip()
-            or str(portfolio_risk.pending_order_sides[order_id]).upper()
+            or not isinstance(portfolio_risk.pending_order_symbols[order_id], str)
+            or not portfolio_risk.pending_order_symbols[order_id].strip()
+            or not isinstance(portfolio_risk.pending_order_sides[order_id], str)
+            or portfolio_risk.pending_order_sides[order_id].upper()
             not in {"LONG", "SHORT"}
         ):
             raise ValueError("pending-order risk snapshot is invalid")
