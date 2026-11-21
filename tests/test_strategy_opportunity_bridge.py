@@ -150,6 +150,7 @@ def test_shadow_gateway_must_not_share_live_reservation_ledger():
         build_risk_governed_opportunities(
             cycle,
             context,
+            portfolio_risk,
             plans,
             shadow_gateway_factory=lambda: live,
             live_gateway=live,
@@ -298,6 +299,7 @@ def test_shadow_gateway_cannot_share_live_sqlite_reservation_database(tmp_path):
         build_risk_governed_opportunities(
             cycle,
             context,
+            portfolio_risk,
             plans,
             shadow_gateway_factory=lambda: shadow_gateway,
             live_gateway=live_gateway,
