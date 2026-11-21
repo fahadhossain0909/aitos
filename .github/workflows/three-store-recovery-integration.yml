@@ -10,10 +10,12 @@ on:
       - "aitos/strategy/**"
       - "aitos/intelligence/capital_protection.py"
       - "aitos/trading/lifecycle.py"
+      - "aitos/trading/reconciliation.py"
       - "aitos/trading/persistent_state.py"
       - "tests/integration/test_execution_recovery_three_store.py"
       - "tests/test_protection_child_*.py"
       - "tests/test_strategy_opportunity_bridge.py"
+      - "tests/test_reconciliation_scheduler.py"
       - ".github/workflows/three-store-recovery-integration.yml"
   workflow_dispatch:
 
@@ -61,7 +63,8 @@ jobs:
           pytest -q --timeout=120 \
             tests/test_protection_child_lifecycle.py \
             tests/test_protection_child_reconciliation.py \
-            tests/test_strategy_opportunity_bridge.py
+            tests/test_strategy_opportunity_bridge.py \
+            tests/test_reconciliation_scheduler.py
 
   binance-demo-testnet-read-only:
     if: github.event_name == 'workflow_dispatch'
