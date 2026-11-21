@@ -65,10 +65,13 @@ jobs:
             aitos/strategy/opportunity_bridge.py \
             aitos/strategy/shadow_bridge.py \
             run_live_trading.py \
+            aitos/trading/reconciliation.py \
             tests/test_execution_intent_recovery.py \
             tests/test_protection_reconciliation.py \
             tests/test_protection_child_reconciliation.py \
             tests/test_protection_child_lifecycle.py \
+            tests/test_exchange_side_stops.py \
+            tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
           black --check --diff \
@@ -82,10 +85,13 @@ jobs:
             aitos/strategy/opportunity_bridge.py \
             aitos/strategy/shadow_bridge.py \
             run_live_trading.py \
+            aitos/trading/reconciliation.py \
             tests/test_execution_intent_recovery.py \
             tests/test_protection_reconciliation.py \
             tests/test_protection_child_reconciliation.py \
             tests/test_protection_child_lifecycle.py \
+            tests/test_exchange_side_stops.py \
+            tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
           flake8 \
@@ -99,10 +105,13 @@ jobs:
             aitos/strategy/opportunity_bridge.py \
             aitos/strategy/shadow_bridge.py \
             run_live_trading.py \
+            aitos/trading/reconciliation.py \
             tests/test_execution_intent_recovery.py \
             tests/test_protection_reconciliation.py \
             tests/test_protection_child_reconciliation.py \
             tests/test_protection_child_lifecycle.py \
+            tests/test_exchange_side_stops.py \
+            tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py \
             --count --select=E9,F63,F7,F82 --show-source --statistics
@@ -164,10 +173,13 @@ jobs:
             aitos/strategy/opportunity_bridge.py \
             aitos/strategy/shadow_bridge.py \
             run_live_trading.py \
+            aitos/trading/reconciliation.py \
             tests/test_execution_intent_recovery.py \
             tests/test_protection_reconciliation.py \
             tests/test_protection_child_reconciliation.py \
             tests/test_protection_child_lifecycle.py \
+            tests/test_exchange_side_stops.py \
+            tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
           if git diff --cached --quiet; then
