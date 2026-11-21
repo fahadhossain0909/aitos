@@ -296,7 +296,7 @@ async def test_snapshot_ahead_of_sqlite_watermark_recovers_without_double_reduct
     replay = await restarted.apply_triggered_protection_child_fill(
         restored.trade_id, algo_snapshot(), child_snapshot()
     )
-    assert replay["delta_quantity"] == "0"
+    assert Decimal(replay["delta_quantity"]) == Decimal("0")
     assert restored.quantity == pytest.approx(0.75)
     assert (
         journal.protection_child_watermark("123", "456")["cumulative_quantity"]
