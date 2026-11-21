@@ -519,3 +519,22 @@ matching-engine behavior. A separate dedicated demo-testnet account, approved
 test-order budget, isolated runner and explicit operational authorization are
 still required before an entry/protection/partial-fill/exit/restart write-side
 acceptance run. Mainnet fallback is prohibited.
+
+
+### Background scheduler ordering
+
+The periodic `ReconciliationScheduler` now invokes the same authenticated,
+durable protective-child recovery before ordinary `TradeLifecycle.reconcile_trade`
+status handling. This is required because the older generic path could observe
+an already-triggered child and issue another market reduction even though the
+venue had already executed part or all of the protective quantity.
+
+A child touched by the recovery pass is excluded from ordinary order-status
+exit handling for that pass. An active partial child, ambiguous child, missing
+durable intent journal or recovery exception sets the account reconciliation
+gate and prevents new entries; the affected trade is not sent through a second
+close path. Other unaffected trades continue to receive ordinary supervision.
+Startup/manual and periodic passes share an async lock, preventing overlapping
+reconciliation passes from racing the same durable child watermark. Health and
+reconciliation events expose applied/blocked child counts and affected trade
+IDs. The account gate is intentionally not auto-cleared by this scheduler.
