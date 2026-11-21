@@ -97,6 +97,9 @@ class ReconciliationScheduler(AITOSModule):
                 "last_run_trades_closed": self._last_run_trades_closed,
                 "last_child_fills_applied": self._last_child_fills_applied,
                 "last_child_fills_blocked": self._last_child_fills_blocked,
+                "account_reconciliation_error": bool(
+                    getattr(self._lifecycle, "_account_reconciliation_error", False)
+                ),
             },
         )
 
@@ -227,6 +230,7 @@ class ReconciliationScheduler(AITOSModule):
                             )
                         if blocked or nonterminal or child_blocked:
                             self._lifecycle._account_reconciliation_error = True
+                            self._errors += 1
 
         for trade in open_trades:
             trade_id = str(trade.trade_id)
