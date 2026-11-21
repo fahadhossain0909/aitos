@@ -10,6 +10,7 @@ from aitos.execution.protection_reconciliation import (
     audit_exchange_protection_inventory,
     recover_accepted_initial_stop_submissions,
     recover_protection_handovers,
+    recover_triggered_protection_child_fills,
     require_live_account_exposure_reconciled,
 )
 from aitos.models.trade import TradeSide
@@ -1168,3 +1169,101 @@ def test_protection_handover_rejects_order_type_identity_reuse(tmp_path):
             new_client_id="new-stop",
             order_type="TAKE_PROFIT_MARKET",
         )
+
+
+@pytest.mark.asyncio
+async def test_triggered_child_recovery_quarantines_malformed_intent_json():
+    class MalformedJournal:
+        scope = "paper-account"
+
+        def protection_intents(self):
+            return [
+                {
+                    "client_id": "broken-protection",
+                    "trade_id": "trade-malformed",
+                    "state": "APPLIED",
+                    "request_json": "{",
+                    "result_json": "{",
+                }
+            ]
+
+    executor = ReadOnlyExecutor("paper-account", [])
+    lifecycle = SimpleNamespace(
+        get_open_trades=lambda: [
+            SimpleNamespace(
+                trade_id="trade-malformed",
+                symbol="BTCUSDT",
+                sl_order_id="algo:123",
+                tp_order_ids=[],
+            )
+        ]
+    )
+    lifecycle.apply_triggered_protection_child_fill = AsyncMock()
+
+    report = await recover_triggered_protection_child_fills(
+        executor, MalformedJournal(), lifecycle
+    )
+
+    assert report["applied"] == []
+    assert report["safe_to_resume"] is False
+    assert len(report["blocked"]) >= 1
+    assert any("JSON is malformed" in item["reason"] for item in report["blocked"])
+    executor.get_algo_order_by_client_id.assert_not_awaited()
+    lifecycle.apply_triggered_protection_child_fill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_triggered_child_recovery_blocks_duplicate_durable_algo_owners():
+    class DuplicateJournal:
+        scope = "paper-account"
+
+        def protection_intents(self):
+            request = (
+                '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
+                '"order_type":"STOP_MARKET"}'
+            )
+            result = (
+                '{"order_id":"algo:123","client_order_id":"duplicate-client"}'
+            )
+            return [
+                {
+                    "client_id": "duplicate-client",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": request,
+                    "result_json": result,
+                },
+                {
+                    "client_id": "duplicate-client-2",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": request,
+                    "result_json": result,
+                },
+            ]
+
+    executor = ReadOnlyExecutor("paper-account", [])
+    lifecycle = SimpleNamespace(
+        get_open_trades=lambda: [
+            SimpleNamespace(
+                trade_id="trade-duplicate",
+                symbol="BTCUSDT",
+                sl_order_id="algo:123",
+                tp_order_ids=[],
+            )
+        ]
+    )
+    lifecycle.apply_triggered_protection_child_fill = AsyncMock()
+
+    report = await recover_triggered_protection_child_fills(
+        executor, DuplicateJournal(), lifecycle
+    )
+
+    assert report["applied"] == []
+    assert report["safe_to_resume"] is False
+    assert any(
+        "duplicate durable protective order identity" in item["reason"]
+        for item in report["blocked"]
+    )
+    executor.get_algo_order_by_client_id.assert_not_awaited()
+    lifecycle.apply_triggered_protection_child_fill.assert_not_awaited()
