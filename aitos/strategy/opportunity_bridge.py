@@ -236,6 +236,8 @@ def build_risk_governed_opportunities(
         if not str(portfolio_risk.position_instruments[position_id]).strip():
             raise ValueError("open-position instrument snapshot is invalid")
     for symbol, risk_pct in portfolio_risk.position_risk_pct.items():
+        if isinstance(risk_pct, bool):
+            raise ValueError("open-position risk snapshot is invalid")
         try:
             risk_value = float(risk_pct)
         except (TypeError, ValueError, OverflowError):
@@ -250,6 +252,8 @@ def build_risk_governed_opportunities(
     if not (pending_keys[0] == pending_keys[1] == pending_keys[2]):
         raise ValueError("pending-order risk snapshot identities do not match")
     for order_id, risk_pct in portfolio_risk.pending_order_risk_pct.items():
+        if isinstance(risk_pct, bool):
+            raise ValueError("pending-order risk snapshot is invalid")
         try:
             risk_value = float(risk_pct)
         except (TypeError, ValueError, OverflowError):
@@ -264,6 +268,8 @@ def build_risk_governed_opportunities(
         ):
             raise ValueError("pending-order risk snapshot is invalid")
     for pair, correlation in portfolio_risk.correlations.items():
+        if isinstance(correlation, bool):
+            raise ValueError("portfolio correlation snapshot is invalid")
         try:
             correlation_value = float(correlation)
         except (TypeError, ValueError, OverflowError):
@@ -277,6 +283,8 @@ def build_risk_governed_opportunities(
         ):
             raise ValueError("portfolio correlation snapshot is invalid")
     if portfolio_risk.liquidation_buffer_pct is not None:
+        if isinstance(portfolio_risk.liquidation_buffer_pct, bool):
+            raise ValueError("liquidation buffer snapshot is invalid")
         try:
             liquidation_buffer = float(portfolio_risk.liquidation_buffer_pct)
         except (TypeError, ValueError, OverflowError):
