@@ -745,18 +745,62 @@ async def recover_protection_handovers(
         or len(intents) > 10000
     ):
         raise ValueError("bounded protective recovery history is required")
-    intent_by_client = {
-        row.get("client_id"): row for row in intents if isinstance(row, dict)
-    }
+    intent_by_client: dict[str, dict[str, Any]] = {}
+    ambiguous_client_ids: set[str] = set()
     intent_by_order_id: dict[str, dict[str, Any]] = {}
+    ambiguous_order_ids: set[str] = set()
+    journal_blocked: list[dict[str, str]] = []
     for row in intents:
         if not isinstance(row, dict):
+            journal_blocked.append(
+                {
+                    "client_id": "unknown",
+                    "reason": "protective intent journal contains a malformed row",
+                }
+            )
             continue
+        client_id = row.get("client_id")
+        if isinstance(client_id, str) and client_id:
+            if client_id in ambiguous_client_ids:
+                pass
+            elif client_id in intent_by_client:
+                intent_by_client.pop(client_id, None)
+                ambiguous_client_ids.add(client_id)
+                journal_blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": "duplicate durable protective client identity",
+                    }
+                )
+            else:
+                intent_by_client[client_id] = row
         result_payload = row.get("result_json")
         if isinstance(result_payload, str):
-            result_payload = json.loads(result_payload)
+            try:
+                result_payload = json.loads(result_payload)
+            except (TypeError, ValueError):
+                journal_blocked.append(
+                    {
+                        "client_id": str(client_id or "unknown"),
+                        "reason": "protective intent result JSON is malformed",
+                    }
+                )
+                continue
         if isinstance(result_payload, dict) and result_payload.get("order_id"):
-            intent_by_order_id[str(result_payload["order_id"])] = row
+            order_id = str(result_payload["order_id"])
+            if order_id in ambiguous_order_ids:
+                continue
+            if order_id in intent_by_order_id:
+                intent_by_order_id.pop(order_id, None)
+                ambiguous_order_ids.add(order_id)
+                journal_blocked.append(
+                    {
+                        "client_id": str(client_id or "unknown"),
+                        "reason": "duplicate durable protective order identity",
+                    }
+                )
+            else:
+                intent_by_order_id[order_id] = row
     by_trade_id: dict[str, list[Any]] = {}
     for trade in tuple(trades):
         trade_id = str(getattr(trade, "trade_id", "") or "")
@@ -764,10 +808,16 @@ async def recover_protection_handovers(
             by_trade_id.setdefault(trade_id, []).append(trade)
 
     recovered: list[str] = []
-    blocked: list[dict[str, str]] = []
+    blocked: list[dict[str, str]] = list(journal_blocked)
     for handover in handovers:
         if not isinstance(handover, dict):
-            raise ValueError("malformed protective handover row")
+            blocked.append(
+                {
+                    "client_id": "unknown",
+                    "reason": "protective handover journal contains a malformed row",
+                }
+            )
+            continue
         state = handover.get("state")
         handover_id = handover.get("handover_id")
         if state == "APPLIED":
@@ -796,6 +846,14 @@ async def recover_protection_handovers(
         trade = owners[0]
         symbol = str(getattr(trade, "symbol", "")).upper()
         old_id = handover.get("old_order_id")
+        if client_id in ambiguous_client_ids:
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "replacement protective client identity is ambiguous",
+                }
+            )
+            continue
         intent = intent_by_client.get(client_id)
         if (
             not isinstance(handover_id, str)
@@ -812,13 +870,30 @@ async def recover_protection_handovers(
             )
             continue
         request = intent.get("request_json")
-        if isinstance(request, str):
-            request = json.loads(request)
-        order_type = request.get("order_type") if isinstance(request, dict) else None
         old_intent = intent_by_order_id.get(str(old_id))
         old_request = old_intent.get("request_json") if old_intent else None
-        if isinstance(old_request, str):
-            old_request = json.loads(old_request)
+        try:
+            if isinstance(request, str):
+                request = json.loads(request)
+            if isinstance(old_request, str):
+                old_request = json.loads(old_request)
+        except (TypeError, ValueError):
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "replacement or old protective intent JSON is malformed",
+                }
+            )
+            continue
+        if str(old_id) in ambiguous_order_ids:
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": "old protective order identity has multiple durable owners",
+                }
+            )
+            continue
+        order_type = request.get("order_type") if isinstance(request, dict) else None
         quantity_matches_trade = (
             _decimal_matches(request.get("quantity"), getattr(trade, "quantity", None))
             if order_type == "STOP_MARKET" and isinstance(request, dict)
