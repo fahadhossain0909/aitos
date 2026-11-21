@@ -333,3 +333,101 @@ async def test_authenticated_binance_demo_testnet_read_only_preflight():
         assert isinstance(algos, list)
     finally:
         await executor.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ambiguity",
+    [
+        "foreign_client_algo_id",
+        "algo_child_link_mismatch",
+        "child_order_id_mismatch",
+        "child_symbol_mismatch",
+        "child_side_mismatch",
+        "child_original_quantity_mismatch",
+        "child_position_side_mismatch",
+        "child_executed_quantity_overflow",
+        "child_unknown_status",
+        "child_negative_cumulative_quote",
+    ],
+)
+async def test_real_venue_adapter_quarantines_ambiguous_child_evidence(
+    ambiguity,
+    clickhouse_store,
+    venue_http,
+    event_bus,
+    risk_engine,
+    tmp_path,
+):
+    from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
+    from aitos.execution.intent_store import ExecutionIntentStore
+    from aitos.execution.protection_reconciliation import (
+        recover_triggered_protection_child_fills,
+    )
+    from aitos.trading.lifecycle import TradeLifecycle
+
+    store = clickhouse_store
+    journal = ExecutionIntentStore(
+        tmp_path / f"ambiguous-{ambiguity}.sqlite",
+        scope=f"isolated-{ambiguity}",
+    )
+    _seed_intent(journal)
+    await store.save_trade(_trade())
+    base_url, requests, algo, child = venue_http
+    if ambiguity == "foreign_client_algo_id":
+        algo["clientAlgoId"] = "foreign-client"
+    elif ambiguity == "algo_child_link_mismatch":
+        algo["actualOrderId"] = 999
+    elif ambiguity == "child_order_id_mismatch":
+        child["orderId"] = 999
+    elif ambiguity == "child_symbol_mismatch":
+        child["symbol"] = "ETHUSDT"
+    elif ambiguity == "child_side_mismatch":
+        child["side"] = "BUY"
+    elif ambiguity == "child_original_quantity_mismatch":
+        child["origQty"] = "2.0"
+    elif ambiguity == "child_position_side_mismatch":
+        child["positionSide"] = "LONG"
+    elif ambiguity == "child_executed_quantity_overflow":
+        child["executedQty"] = "1.1"
+        child["cumQuote"] = "99.0"
+    elif ambiguity == "child_unknown_status":
+        child["status"] = "UNKNOWN"
+    elif ambiguity == "child_negative_cumulative_quote":
+        child["cumQuote"] = "-1.0"
+
+    executor = BinanceFuturesOrderExecutor(
+        "integration-key",
+        "integration-secret",
+        testnet=True,
+        intent_store=journal,
+    )
+    executor._base_url = base_url
+    await executor.connect()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    restored = (await store.load_open_trades())[0]
+    lifecycle._open_trades[restored.trade_id] = restored
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    try:
+        report = await recover_triggered_protection_child_fills(
+            executor, journal, lifecycle
+        )
+        assert report["applied"] == []
+        assert len(report["blocked"]) == 1
+        assert report["safe_to_resume"] is False
+        assert restored.quantity == pytest.approx(1.0)
+        assert lifecycle._execution_state_writer.await_count == 0
+        assert journal.protection_child_watermark("123", "456") is None
+        persisted = (await store.load_open_trades())[0]
+        assert persisted.quantity == pytest.approx(1.0)
+        assert requests
+        assert all(method == "GET" for method, _, _ in requests)
+    finally:
+        await executor.close()
