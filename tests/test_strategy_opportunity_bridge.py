@@ -203,6 +203,7 @@ def test_live_or_paper_context_cannot_enter_shadow_opportunity_bridge():
         build_risk_governed_opportunities(
             cycle,
             context,
+            portfolio_risk,
             plans,
             shadow_gateway_factory=ShadowGateway,
             live_gateway=ShadowGateway(),
