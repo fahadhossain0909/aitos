@@ -146,17 +146,23 @@ class ReconciliationScheduler(AITOSModule):
 
         executor = getattr(self._lifecycle, "_order_executor", None)
         if getattr(executor, "requires_exchange_execution", False):
+            def has_algo_protection(trade: Any) -> bool:
+                stop_id = getattr(trade, "sl_order_id", None)
+                tp_ids = getattr(trade, "tp_order_ids", ())
+                return (
+                    isinstance(stop_id, str) and stop_id.startswith("algo:")
+                ) or (
+                    isinstance(tp_ids, (list, tuple))
+                    and any(
+                        isinstance(order_id, str) and order_id.startswith("algo:")
+                        for order_id in tp_ids
+                    )
+                )
+
             algo_protected_trade_ids = {
                 str(trade.trade_id)
                 for trade in open_trades
-                if (
-                    isinstance(getattr(trade, "sl_order_id", None), str)
-                    and trade.sl_order_id.startswith("algo:")
-                )
-                or any(
-                    isinstance(order_id, str) and order_id.startswith("algo:")
-                    for order_id in getattr(trade, "tp_order_ids", [])
-                )
+                if has_algo_protection(trade)
             }
             # The generic reconcile_trade path is not authoritative for an
             # algo child fill: it can issue a second market reduction. Every
@@ -169,6 +175,8 @@ class ReconciliationScheduler(AITOSModule):
                 >= self._child_recovery_interval_seconds
             )
             journal = getattr(executor, "execution_intent_store", None)
+            if child_recovery_due:
+                self._last_child_recovery_monotonic = now_monotonic
             if not child_recovery_due:
                 journal = None
             if child_recovery_due and journal is None:
@@ -180,7 +188,6 @@ class ReconciliationScheduler(AITOSModule):
                     extra={"aitos_extra": {"new_entries_allowed": False}},
                 )
             elif child_recovery_due:
-                self._last_child_recovery_monotonic = now_monotonic
                 try:
                     child_report = await recover_triggered_protection_child_fills(
                         executor, journal, self._lifecycle
