@@ -125,7 +125,7 @@ async def venue_http():
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
     try:
-        yield f"http://127.0.0.1:{port}", requests
+        yield f"http://127.0.0.1:{port}", requests, algo, child
     finally:
         await runner.cleanup()
 
@@ -212,7 +212,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
     # test cannot accidentally manufacture a timestamp-tie ambiguity.
     await asyncio.sleep(0.01)
 
-    base_url, requests = venue_http
+    base_url, requests, _algo, _child = venue_http
     executor = BinanceFuturesOrderExecutor(
         "integration-key",
         "integration-secret",
@@ -286,16 +286,30 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
         recovered = restarted.get_open_trades()[0]
         assert recovered.quantity == pytest.approx(0.75)
         assert recovered.gross_realized_pnl_usd == pytest.approx(-2.5)
+
+        # Continue through three more cold starts. Each process reconstructs
+        # from ClickHouse; the SQLite watermark and snapshot marker must prevent
+        # another reduction or duplicate realized-PnL booking.
+        for _restart in range(3):
+            await asyncio.sleep(0.01)
+            snapshot = (await store.load_open_trades())[0]
+            cold = await make_lifecycle([_trade_from_dict(snapshot.to_dict())])
+            replay_report = await recover_triggered_protection_child_fills(
+                executor, journal, cold
+            )
+            assert replay_report["blocked"] == []
+            assert len(replay_report["applied"]) == 1
+            recovered = cold.get_open_trades()[0]
+            assert recovered.quantity == pytest.approx(0.75)
+            assert recovered.gross_realized_pnl_usd == pytest.approx(-2.5)
+
         watermark = journal.protection_child_watermark("123", "456")
         assert watermark["cumulative_quantity"] == "0.25"
         assert watermark["cumulative_quote"] == "22.5"
         assert any(path == "/fapi/v1/algoOrder" for _, path, _ in requests)
         assert any(path == "/fapi/v1/order" for _, path, _ in requests)
         assert all(method == "GET" for method, _, _ in requests)
-        assert all(
-            "signature" not in str(query)
-            for _, _, query in requests
-        )
+        assert all("signature" not in str(query) for _, _, query in requests)
     finally:
         await executor.close()
 
