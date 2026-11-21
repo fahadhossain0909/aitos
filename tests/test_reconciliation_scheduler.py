@@ -320,6 +320,9 @@ async def test_background_ambiguous_child_quarantines_only_its_trade(monkeypatch
         assert lifecycle.reconcile_calls == ["trade-2"]
         assert lifecycle._account_reconciliation_error is True
         assert scheduler._last_child_fills_blocked == 1
+        health = await scheduler.health_check()
+        assert health.status.value == "degraded"
+        assert health.details["account_reconciliation_error"] is True
     finally:
         await scheduler.shutdown()
 
