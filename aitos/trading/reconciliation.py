@@ -12,6 +12,7 @@ correctly instead of leaving a stale `POSITION_OPENED` record forever.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
@@ -59,6 +60,10 @@ class ReconciliationScheduler(AITOSModule):
         self._run_lock = asyncio.Lock()
         self._last_child_fills_applied = 0
         self._last_child_fills_blocked = 0
+        self._last_child_recovery_monotonic = 0.0
+        self._child_recovery_interval_seconds = min(
+            max(interval_seconds, 5.0), 30.0
+        )
 
     # -- AITOSModule contract -------------------------------------------------
 
@@ -141,24 +146,47 @@ class ReconciliationScheduler(AITOSModule):
 
         executor = getattr(self._lifecycle, "_order_executor", None)
         if getattr(executor, "requires_exchange_execution", False):
+            algo_protected_trade_ids = {
+                str(trade.trade_id)
+                for trade in open_trades
+                if (
+                    isinstance(getattr(trade, "sl_order_id", None), str)
+                    and trade.sl_order_id.startswith("algo:")
+                )
+                or any(
+                    isinstance(order_id, str) and order_id.startswith("algo:")
+                    for order_id in getattr(trade, "tp_order_ids", [])
+                )
+            }
+            # The generic reconcile_trade path is not authoritative for an
+            # algo child fill: it can issue a second market reduction. Every
+            # algo-protected trade stays out of that path, even between
+            # throttled authenticated child-inventory checks.
+            handled_trade_ids.update(algo_protected_trade_ids)
+            now_monotonic = time.monotonic()
+            child_recovery_due = (
+                now_monotonic - self._last_child_recovery_monotonic
+                >= self._child_recovery_interval_seconds
+            )
             journal = getattr(executor, "execution_intent_store", None)
-            if journal is None:
-                child_blocked = len(open_trades) or 1
-                handled_trade_ids.update(str(t.trade_id) for t in open_trades)
+            if not child_recovery_due:
+                journal = None
+            if child_recovery_due and journal is None:
+                child_blocked = len(algo_protected_trade_ids) or 1
                 self._lifecycle._account_reconciliation_error = True
                 self._errors += 1
                 logger.critical(
                     "background child-fill recovery has no durable execution journal",
                     extra={"aitos_extra": {"new_entries_allowed": False}},
                 )
-            else:
+            elif child_recovery_due:
+                self._last_child_recovery_monotonic = now_monotonic
                 try:
                     child_report = await recover_triggered_protection_child_fills(
                         executor, journal, self._lifecycle
                     )
                 except Exception as exc:  # noqa: BLE001
-                    child_blocked = len(open_trades) or 1
-                    handled_trade_ids.update(str(t.trade_id) for t in open_trades)
+                    child_blocked = len(algo_protected_trade_ids) or 1
                     self._lifecycle._account_reconciliation_error = True
                     self._errors += 1
                     logger.critical(
@@ -182,8 +210,7 @@ class ReconciliationScheduler(AITOSModule):
                         else None
                     )
                     if not isinstance(applied, list) or not isinstance(blocked, list):
-                        child_blocked = len(open_trades) or 1
-                        handled_trade_ids.update(str(t.trade_id) for t in open_trades)
+                        child_blocked = len(algo_protected_trade_ids) or 1
                         self._lifecycle._account_reconciliation_error = True
                         self._errors += 1
                     else:
@@ -191,9 +218,7 @@ class ReconciliationScheduler(AITOSModule):
                         child_blocked = len(blocked)
                         for outcome in applied:
                             if not isinstance(outcome, dict):
-                                handled_trade_ids.update(
-                                    str(t.trade_id) for t in open_trades
-                                )
+                                handled_trade_ids.update(algo_protected_trade_ids)
                                 continue
                             trade_id = outcome.get("trade_id")
                             if isinstance(trade_id, str) and trade_id:
