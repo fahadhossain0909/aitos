@@ -542,3 +542,18 @@ never fall through to generic `reconcile_trade` status handling between those
 checks; non-algo legacy orders retain the existing reconciliation path. Health
 and reconciliation events expose applied/blocked child counts and affected
 trade IDs. The account gate is intentionally not auto-cleared by this scheduler.
+
+
+The SQLite durability gate also starts a separate Python process, commits a
+child-fill cumulative watermark, terminates that process with `os._exit`, and
+opens a new journal instance to verify the committed identity, quantity and
+quote survived an ungraceful process exit. The ClickHouse recovery matrix now
+closes and recreates both the ClickHouse client and `DurableTradingStateStore`
+for every cold-start pass, and reconstructs `ExecutionIntentStore` from the
+same SQLite file rather than reusing the prior journal object.
+
+Startup recovery additionally quarantines malformed JSON rows and duplicate
+durable algo-order identities. In the duplicate case, neither claimant is
+selected as the owner; the matching order ID is removed from the recovery map.
+A future-dated portfolio risk snapshot is also rejected, even if it falls
+within the nominal clock-skew tolerance.
