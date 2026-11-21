@@ -1014,7 +1014,19 @@ async def recover_protection_handovers(
         if old_id not in pending:
             pending.append(old_id)
         trade.updated_at = datetime.now(timezone.utc).isoformat()
-        await persist_trade(trade)
+        try:
+            await persist_trade(trade)
+        except Exception as exc:  # noqa: BLE001
+            blocked.append(
+                {
+                    "client_id": client_id,
+                    "reason": (
+                        "replacement trade snapshot persist failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                }
+            )
+            continue
 
         if intent_state == "SUBMITTING":
             result = OrderResult(
@@ -1088,7 +1100,19 @@ async def recover_protection_handovers(
             while old_id in pending:
                 pending.remove(old_id)
             trade.updated_at = datetime.now(timezone.utc).isoformat()
-            await persist_trade(trade)
+            try:
+                await persist_trade(trade)
+            except Exception as exc:  # noqa: BLE001
+                blocked.append(
+                    {
+                        "client_id": client_id,
+                        "reason": (
+                            "post-cancellation trade snapshot persist failed: "
+                            f"{type(exc).__name__}: {exc}"
+                        ),
+                    }
+                )
+                continue
             await asyncio.to_thread(
                 intent_store.complete_protection_handover, handover_id
             )
