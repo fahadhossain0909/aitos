@@ -623,6 +623,14 @@ async def test_duplicate_durable_algo_identity_blocks_all_child_recovery(
     trade.sl_order_id = "algo:123"
     lifecycle._open_trades[trade.trade_id] = trade
 
-    with pytest.raises(ValueError, match="duplicate durable protective order"):
-        await recover_triggered_protection_child_fills(executor, journal, lifecycle)
+    report = await recover_triggered_protection_child_fills(
+        executor, journal, lifecycle
+    )
+    assert report["applied"] == []
+    assert report["safe_to_resume"] is False
+    assert any(
+        "duplicate durable protective order identity" in item["reason"]
+        for item in report["blocked"]
+    )
+    executor.get_algo_order_by_client_id.assert_not_awaited()
     assert trade.quantity == pytest.approx(1.0)
