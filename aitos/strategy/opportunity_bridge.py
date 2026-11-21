@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Callable, Mapping
 
-from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_gateway import CapitalGateway, CapitalGatewayResult
 from aitos.models.trade import Opportunity, TradeSide
 
 from .contracts import StrategyContext, StrategyMode
@@ -482,6 +482,31 @@ def build_risk_governed_opportunities(
         )
     finally:
         _close_shadow_reservation(gateway)
+    if not isinstance(reviewed, CapitalGatewayResult):
+        return StrategyOpportunityBridgeReport(
+            context.now_ns,
+            (),
+            tuple(
+                (*rejected, (key, "capital gateway returned an invalid review contract"))
+                for key, _opportunity, _allocation, _cap in candidates
+            ),
+            execution_eligible=False,
+        )
+    decision_symbols = [item.symbol for item in reviewed.decisions]
+    allocation_symbols = [item.symbol for item in reviewed.allocations]
+    if (
+        len(decision_symbols) != len(set(decision_symbols))
+        or len(allocation_symbols) != len(set(allocation_symbols))
+    ):
+        return StrategyOpportunityBridgeReport(
+            context.now_ns,
+            (),
+            tuple(
+                (*rejected, (key, "capital gateway returned duplicate instrument decisions"))
+                for key, _opportunity, _allocation, _cap in candidates
+            ),
+            execution_eligible=False,
+        )
     decisions = {item.symbol: item for item in reviewed.decisions}
     capital = {item.symbol: item for item in reviewed.allocations}
     governed: list[GovernedOpportunity] = []
@@ -501,6 +526,7 @@ def build_risk_governed_opportunities(
             approved_risk = float(approved.risk_budget_usd)
             strategy_capital = float(strategy_allocation.notional)
             strategy_risk_cap = float(strategy_allocation.projected_loss)
+            expected_edge = float(decision.expected_net_edge_pct)
         except (TypeError, ValueError, OverflowError):
             rejected.append((key, "risk gateway returned malformed allocation values"))
             continue
@@ -511,9 +537,23 @@ def build_risk_governed_opportunities(
                 approved_risk,
                 strategy_capital,
                 strategy_risk_cap,
+                expected_edge,
             )
         ):
             rejected.append((key, "risk gateway returned non-finite allocation values"))
+            continue
+        if (
+            expected_edge <= 0
+            or approved_risk > approved_capital
+            or not isinstance(decision.rationale, (tuple, list))
+            or any(not isinstance(item, str) for item in decision.rationale)
+            or not isinstance(decision.rejection_reasons, (tuple, list))
+            or any(
+                not isinstance(item, str)
+                for item in decision.rejection_reasons
+            )
+        ):
+            rejected.append((key, "risk gateway returned invalid decision evidence"))
             continue
         amount = min(
             approved_capital,
@@ -540,7 +580,7 @@ def build_risk_governed_opportunities(
             side=opportunity.side.value,
             capital_usd=amount,
             risk_budget_usd=risk_budget,
-            expected_net_edge_pct=float(decision.expected_net_edge_pct),
+            expected_net_edge_pct=expected_edge,
             rejection_reasons=tuple(decision.rejection_reasons),
             rationale=tuple(decision.rationale),
             evaluated_at_ns=context.now_ns,
