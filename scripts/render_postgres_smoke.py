@@ -151,7 +151,10 @@ async def _verify_persisted() -> dict[str, Any]:
     market = PostgresMarketDataRepository(dsn, min_size=1, max_size=2)
     journal = PostgresJournalRepository(dsn, min_size=1, max_size=2)
     try:
-        await asyncio.gather(market.initialize({}), journal.initialize({}))
+        await asyncio.gather(
+            market.initialize({"read_only": True}),
+            journal.initialize({"read_only": True}),
+        )
         return await _verify_with_adapters(market, journal)
     finally:
         await asyncio.gather(market.shutdown(), journal.shutdown())
