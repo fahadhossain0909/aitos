@@ -1150,6 +1150,7 @@ async def recover_triggered_protection_child_fills(
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded protective intent history is required")
     by_order_id: dict[str, dict[str, Any]] = {}
+    ambiguous_order_ids: set[str] = set()
     inspected = 0
     applied: list[dict[str, Any]] = []
     blocked: list[dict[str, str]] = []
@@ -1178,7 +1179,11 @@ async def recover_triggered_protection_child_fills(
                 continue
         if isinstance(result, dict) and result.get("order_id"):
             order_identity = str(result["order_id"])
+            if order_identity in ambiguous_order_ids:
+                continue
             if order_identity in by_order_id:
+                by_order_id.pop(order_identity, None)
+                ambiguous_order_ids.add(order_identity)
                 blocked.append(
                     {
                         "trade_id": str(row.get("trade_id") or "unknown"),
