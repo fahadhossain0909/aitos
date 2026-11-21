@@ -49,17 +49,38 @@ async def clickhouse_store():
         await admin.command(f"CREATE DATABASE {database}")
     finally:
         await admin.close()
-    client = await clickhouse_connect.get_async_client(
-        host=host, port=port, username=user, password=password, database=database
-    )
-    from aitos.trading.persistent_state import DurableTradingStateStore
+    clients = []
 
-    store = DurableTradingStateStore(SimpleNamespace(_client=client))
-    await store.initialize()
+    async def open_store():
+        client = await clickhouse_connect.get_async_client(
+            host=host,
+            port=port,
+            username=user,
+            password=password,
+            database=database,
+        )
+        clients.append(client)
+        from aitos.trading.persistent_state import DurableTradingStateStore
+
+        store = DurableTradingStateStore(SimpleNamespace(_client=client))
+        await store.initialize()
+        return store
+
+    store = await open_store()
+
+    async def reopen_store():
+        # Close the old process's ClickHouse client before constructing a new
+        # client and store object, just as a cold process restart would.
+        previous = clients[-1]
+        await previous.close()
+        return await open_store()
+
     try:
-        yield store
+        yield SimpleNamespace(store=store, reopen=reopen_store, database=database)
     finally:
-        await client.close()
+        for client in clients:
+            if not client.is_closed:
+                await client.close()
         admin = await clickhouse_connect.get_async_client(
             host=host, port=port, username=user, password=password
         )
@@ -202,10 +223,11 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
     from aitos.trading.lifecycle import TradeLifecycle
     from aitos.trading.persistent_state import _trade_from_dict
 
-    store = clickhouse_store
-    journal = ExecutionIntentStore(
-        tmp_path / "three-store.sqlite", scope="isolated-testnet-fault-drill"
-    )
+    harness = clickhouse_store
+    store = harness.store
+    journal_path = tmp_path / "three-store.sqlite"
+    journal_scope = "isolated-testnet-fault-drill"
+    journal = ExecutionIntentStore(journal_path, scope=journal_scope)
     _seed_intent(journal)
     await store.save_trade(_trade())
     # Runtime snapshots use DateTime64(3); separate versions by >1 ms so the
@@ -222,7 +244,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
     executor._base_url = base_url
     await executor.connect()
 
-    async def make_lifecycle(trades):
+    async def make_lifecycle(trades, state_store):
         lifecycle = TradeLifecycle(
             event_bus=event_bus,
             risk_engine=risk_engine,
@@ -230,7 +252,7 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
             use_exchange_side_stops=True,
         )
         lifecycle._open_trades.update({trade.trade_id: trade for trade in trades})
-        lifecycle._execution_state_writer = store.save_trade
+        lifecycle._execution_state_writer = state_store.save_trade
         lifecycle._execution_position_verifier = AsyncMock()
         return lifecycle
 
@@ -275,8 +297,12 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
         # exclusively from the durable ClickHouse snapshot and SQLite journal.
         monkeypatch.undo()
         await asyncio.sleep(0.01)
+        store = await harness.reopen()
+        journal = ExecutionIntentStore(journal_path, scope=journal_scope)
         restored = (await store.load_open_trades())[0]
-        restarted = await make_lifecycle([_trade_from_dict(restored.to_dict())])
+        restarted = await make_lifecycle(
+            [_trade_from_dict(restored.to_dict())], store
+        )
         second_report = await recover_triggered_protection_child_fills(
             executor, journal, restarted
         )
@@ -292,8 +318,12 @@ async def test_three_store_child_fill_recovery_survives_crash_and_restart(
         # another reduction or duplicate realized-PnL booking.
         for _restart in range(3):
             await asyncio.sleep(0.01)
+            store = await harness.reopen()
+            journal = ExecutionIntentStore(journal_path, scope=journal_scope)
             snapshot = (await store.load_open_trades())[0]
-            cold = await make_lifecycle([_trade_from_dict(snapshot.to_dict())])
+            cold = await make_lifecycle(
+                [_trade_from_dict(snapshot.to_dict())], store
+            )
             replay_report = await recover_triggered_protection_child_fills(
                 executor, journal, cold
             )
@@ -366,7 +396,7 @@ async def test_real_venue_adapter_quarantines_ambiguous_child_evidence(
     )
     from aitos.trading.lifecycle import TradeLifecycle
 
-    store = clickhouse_store
+    store = clickhouse_store.store
     journal = ExecutionIntentStore(
         tmp_path / f"ambiguous-{ambiguity}.sqlite",
         scope=f"isolated-{ambiguity}",
