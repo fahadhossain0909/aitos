@@ -17,6 +17,9 @@ on:
       - "tests/test_strategy_opportunity_bridge.py"
       - "tests/test_reconciliation_scheduler.py"
       - "scripts/render_postgres_smoke.py"
+      - "aitos/storage/postgres_migrations.py"
+      - "aitos/data/postgres_repository.py"
+      - "aitos/journal/postgres_repository.py"
       - "tests/test_render_postgres_smoke.py"
       - "tests/storage/test_postgres_migrations.py"
       - ".github/workflows/three-store-recovery-integration.yml"
@@ -77,7 +80,13 @@ jobs:
             tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
-          black --check --diff scripts/render_postgres_smoke.py tests/test_render_postgres_smoke.py tests/storage/test_postgres_migrations.py
+          black --check --diff \
+            scripts/render_postgres_smoke.py \
+            tests/test_render_postgres_smoke.py \
+            aitos/storage/postgres_migrations.py \
+            aitos/data/postgres_repository.py \
+            aitos/journal/postgres_repository.py \
+            tests/storage/test_postgres_migrations.py
           black --check --diff \
             aitos/execution/intent_store.py \
             aitos/execution/protection_reconciliation.py \
@@ -98,7 +107,14 @@ jobs:
             tests/test_reconciliation_scheduler.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/integration/test_execution_recovery_three_store.py
-          flake8 scripts/render_postgres_smoke.py tests/test_render_postgres_smoke.py tests/storage/test_postgres_migrations.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 \
+            scripts/render_postgres_smoke.py \
+            tests/test_render_postgres_smoke.py \
+            aitos/storage/postgres_migrations.py \
+            aitos/data/postgres_repository.py \
+            aitos/journal/postgres_repository.py \
+            tests/storage/test_postgres_migrations.py \
+            --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 \
             aitos/execution/intent_store.py \
             aitos/execution/protection_reconciliation.py \
