@@ -67,6 +67,7 @@ jobs:
           pytest -q --timeout=120 \
             tests/test_protection_child_lifecycle.py \
             tests/test_protection_child_reconciliation.py \
+            tests/test_protection_reconciliation.py \
             tests/test_strategy_opportunity_bridge.py \
             tests/test_reconciliation_scheduler.py
 
