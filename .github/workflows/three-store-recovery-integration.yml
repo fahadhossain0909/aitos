@@ -87,7 +87,7 @@ jobs:
             aitos/storage/postgres_migrations.py \
             aitos/data/postgres_repository.py \
             aitos/journal/postgres_repository.py \
-            tests/storage/test_postgres_migrations.py \\
+            tests/storage/test_postgres_migrations.py \
             tests/test_three_store_workflow_contract.py
           black --check --diff \
             aitos/execution/intent_store.py \
@@ -186,7 +186,8 @@ jobs:
             tests/test_strategy_opportunity_bridge.py \
             tests/test_reconciliation_scheduler.py \
             tests/test_render_postgres_smoke.py \
-            tests/storage/test_postgres_migrations.py
+            tests/storage/test_postgres_migrations.py \
+            tests/test_three_store_workflow_contract.py
       - name: Commit formatter output on the dedicated audit branch
         id: commit_format
         if: github.event_name == 'push' && github.ref_name == 'audit/system-audit-and-docs-2026-11'
