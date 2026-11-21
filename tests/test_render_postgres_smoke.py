@@ -34,7 +34,7 @@ class _Market:
         self.closed = False
 
     async def initialize(self, config):
-        return None
+        assert config == {"read_only": True}
 
     async def get_recent_klines(self, symbol, timeframe, limit):
         assert (symbol, timeframe, limit) == (
