@@ -84,3 +84,12 @@ order placement, cancellation, amendment or other write operation.
 This marker is not authorization for write-side testnet acceptance. Entry,
 protection, partial-fill and exit tests remain disabled until a separate
 explicit operational approval and bounded test-order budget are provided.
+
+## Credentialed preflight enabled (2026-11-22)
+
+The repository owner confirmed that both dedicated Futures Demo/Testnet secrets
+have been configured in GitHub Actions. This commit intentionally carries the
+`[testnet-readonly]` opt-in marker to request the authenticated inventory
+preflight. The workflow must still report a successful job before account
+readiness is considered verified. Secret values are never copied into the
+repository, logs, artifacts or this document.
