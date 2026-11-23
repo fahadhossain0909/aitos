@@ -35,6 +35,17 @@ jobs:
         run: python -m pip install --upgrade pip black==25.12.0
       - name: Check Black formatting
         run: black --check --diff .
+      - name: Generate static workflow governance audit
+        run: |
+          python scripts/audit_workflow_governance.py --json /tmp/workflow-audit.json --markdown /tmp/workflow-audit.md
+      - name: Upload workflow governance report
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: workflow-governance-audit
+          path: |
+            /tmp/workflow-audit.json
+            /tmp/workflow-audit.md
 
   lint:
     needs: format
