@@ -175,7 +175,9 @@ async def test_closed_trade_in_other_account_scope_does_not_suppress_open_trade(
     persistence = TradeStatePersistence(event_bus, lifecycle, store)
 
     assert await persistence.restore() == 1
-    assert lifecycle._open_trades[open_trade.trade_id].account_scope == "paper-account-b"
+    assert (
+        lifecycle._open_trades[open_trade.trade_id].account_scope == "paper-account-b"
+    )
 
 
 @pytest.mark.asyncio
