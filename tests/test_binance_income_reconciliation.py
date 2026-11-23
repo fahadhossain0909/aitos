@@ -309,6 +309,13 @@ async def test_durable_store_persists_exchange_income_cursor():
     assert table == "exchange_income_sync_cursor"
     assert rows[0][0:2] == ["binance_usdm", 123999]
     assert columns == ["account", "cursor_time_ms", "updated_at"]
+    assert await store.load_income_retry_floor("binance_usdm") == 123456
+    await store.record_income_retry("retry-1", 123400, "binance_usdm")
+    table, rows, columns = client.inserted[-1]
+    assert table == "exchange_income_sync_retry"
+    assert rows[0][0:4] == ["binance_usdm", "retry-1", 123400, "pending"]
+    await store.resolve_income_retry("retry-1", "binance_usdm")
+    assert client.inserted[-1][1][0][1:4] == ["retry-1", 0, "resolved"]
 
 
 @pytest.mark.asyncio
