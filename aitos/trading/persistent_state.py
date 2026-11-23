@@ -735,7 +735,9 @@ class DurableTradingStateStore:
         """Restore complete realized evidence or fail; never silently lose PnL."""
         result = await self._client().query(CLOSED_RECOVERY_QUERY)
         try:
-            observed_scopes = {str(row[0]) for row in result.result_rows if len(row) == 4}
+            observed_scopes = {
+                str(row[0]) for row in result.result_rows if len(row) == 4
+            }
             if len(observed_scopes) > 1 or (
                 observed_scopes and observed_scopes != {self.account_scope}
             ):
