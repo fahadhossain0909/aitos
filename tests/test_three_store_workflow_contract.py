@@ -38,3 +38,14 @@ def test_successful_three_store_push_dispatches_full_repository_ci():
         "github.ref_name == 'audit/system-audit-and-docs-2026-11'"
     ) in source
     assert "/actions/workflows/ci.yml/dispatches" in source
+
+
+
+def test_write_capable_recovery_workflow_excludes_pull_request_code():
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    triggers = source.split("\\njobs:", 1)[0]
+    assert "\\n  pull_request:" not in triggers
+    assert "\\n  push:" in triggers
+    assert "\\n  workflow_dispatch:" in triggers
+    assert "\\npermissions:\\n  contents: write\\n  actions: write" in source
