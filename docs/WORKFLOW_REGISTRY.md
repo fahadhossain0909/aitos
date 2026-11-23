@@ -50,10 +50,6 @@ consolidation. The registry intentionally does not merge or disable workflows.
   `strategy-performance-audit.yml`, `strategy-trade-lifecycle-audit.yml` —
   strategy/lifecycle diagnostics.
 
-## Remaining inventory
-
-- `trade-path-diagnostic.yml` — execution-path diagnostics.
-
 ## Consolidation policy
 
 1. Keep one authoritative full CI workflow; specialized workflows should either be
