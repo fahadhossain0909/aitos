@@ -98,9 +98,11 @@ FROM (
     SELECT trade_id, any(payload_json) AS latest_payload,
            uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
     FROM paper_closed_trade_ledger
-    WHERE (trade_id, updated_at) IN (
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+      AND (trade_id, updated_at) IN (
         SELECT trade_id, max(updated_at)
         FROM paper_closed_trade_ledger
+        WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
         GROUP BY trade_id
     )
     GROUP BY trade_id
@@ -670,7 +672,12 @@ class DurableTradingStateStore:
             raise ValueError("invalid bounded history query")
         result = await self._client().query(
             CLOSED_HISTORY_QUERY,
-            parameters={"symbol": symbol, "limit": limit, "offset": offset},
+            parameters={
+                "symbol": symbol,
+                "limit": limit,
+                "offset": offset,
+                "account_scope": self.account_scope,
+            },
         )
         return [_closed_payload(row) for row in result.result_rows]
 
@@ -680,7 +687,12 @@ class DurableTradingStateStore:
             raise ValueError("invalid bounded snapshot query")
         result = await self._client().query(
             CLOSED_HISTORY_QUERY,
-            parameters={"symbol": "", "limit": limit + 1, "offset": 0},
+            parameters={
+                "symbol": "",
+                "limit": limit + 1,
+                "offset": 0,
+                "account_scope": self.account_scope,
+            },
         )
         # Validate the extra row too; never hide a known revision conflict.
         payloads = [_closed_payload(row) for row in result.result_rows]
@@ -698,7 +710,7 @@ class DurableTradingStateStore:
             raise ValueError("invalid bounded performance query")
         result = await self._client().query(
             CLOSED_PERFORMANCE_QUERY,
-            parameters={"limit": limit + 1},
+            parameters={"limit": limit + 1, "account_scope": self.account_scope},
         )
         rows = result.result_rows
         # Validate the extra row too: a known conflict must not be hidden.
