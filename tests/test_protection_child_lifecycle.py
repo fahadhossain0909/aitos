@@ -646,8 +646,6 @@ async def test_duplicate_durable_algo_identity_blocks_all_child_recovery(
     executor.get_algo_order_by_client_id.assert_not_awaited()
     assert trade.quantity == pytest.approx(1.0)
 
-
-
 @pytest.mark.asyncio
 async def test_replacement_cancel_race_retains_old_stop_for_child_recovery(
     event_bus, risk_engine, tmp_path
