@@ -19,7 +19,7 @@ def store(rows):
 
 
 async def test_latest_state_is_selected_before_filtering_open_state():
-    value, query = store([("t", json.dumps(dict(trade_id="t")), 1)])
+    value, query = store([("", "t", json.dumps(dict(trade_id="t")), 1)])
     with patch(
         "aitos.trading.persistent_state._trade_from_dict",
         return_value=SimpleNamespace(state=TradeLifecycleState.POSITION_CLOSED),
@@ -42,10 +42,10 @@ async def test_valid_latest_open_record_is_restored():
 @pytest.mark.parametrize(
     "row",
     [
-        ("t", "{}", 2),
-        ("t", "{}", 0),
-        ("t", "invalid json", 1),
-        ("t", json.dumps(dict(trade_id="wrong")), 1),
+        ("", "t", "{}", 2),
+        ("", "t", "{}", 0),
+        ("", "t", "invalid json", 1),
+        ("", "t", json.dumps(dict(trade_id="wrong")), 1),
         ("t", "{}"),
     ],
 )
