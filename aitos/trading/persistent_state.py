@@ -647,9 +647,7 @@ class DurableTradingStateStore:
             [
                 [
                     trade.trade_id,
-                    json.dumps(
-                        trade.to_dict(), sort_keys=True, default=str, allow_nan=False
-                    ),
+                    payload_json,
                     datetime.now(timezone.utc),
                 ]
             ],
@@ -877,6 +875,7 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
             else None
         ),
         updated_at=str(data.get("updated_at") or data["entry_time"]),
+        account_scope=str(data.get("account_scope") or ""),
     )
 
 
