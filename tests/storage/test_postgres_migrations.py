@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from aitos.storage.postgres_migrations import (
-    MIGRATIONS,
     _REQUIRED_COLUMNS,
+    MIGRATIONS,
     verify_postgres_schema,
 )
 

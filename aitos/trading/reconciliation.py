@@ -26,11 +26,11 @@ from aitos.core.contracts import (
 )
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
-from aitos.logging_setup import get_logger
-from aitos.models.trade import TradeLifecycleState
 from aitos.execution.protection_reconciliation import (
     recover_triggered_protection_child_fills,
 )
+from aitos.logging_setup import get_logger
+from aitos.models.trade import TradeLifecycleState
 from aitos.trading.lifecycle import TradeLifecycle
 
 logger = get_logger("aitos.trading.reconciliation")

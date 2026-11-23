@@ -122,7 +122,7 @@ def test_child_fill_uses_incremental_quote_not_lifetime_average():
     )
     assert delta.delta_quantity == Decimal("0.2")
     assert delta.delta_quote == Decimal("20.6")
-    assert delta.average_price == Decimal("103")
+    assert delta.average_price == Decimal(103)
 
 
 @pytest.mark.parametrize(

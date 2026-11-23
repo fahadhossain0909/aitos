@@ -64,14 +64,14 @@ from aitos.execution.intent_store import (
     ExecutionRecoveryRequired,
     ExecutionUncertainError,
 )
-from aitos.execution.protection_child_reconciliation import (
-    calculate_protection_child_fill_delta,
-)
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
     OrderResult,
     SimulatedOrderExecutor,
+)
+from aitos.execution.protection_child_reconciliation import (
+    calculate_protection_child_fill_delta,
 )
 from aitos.kernel.ai_kernel import Action, AIKernel
 from aitos.logging_setup import get_logger

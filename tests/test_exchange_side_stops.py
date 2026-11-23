@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from aitos.execution.intent_store import ExecutionIntentStore
-from aitos.execution.protection_reconciliation import recover_protection_handovers
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
     OrderResult,
     SimulatedOrderExecutor,
 )
+from aitos.execution.protection_reconciliation import recover_protection_handovers
 from aitos.intelligence.exit_intelligence.models import ExitAction
 from aitos.models.trade import (
     Opportunity,

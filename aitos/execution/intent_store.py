@@ -11,10 +11,10 @@ import json
 import math
 import re
 import sqlite3
-from decimal import Decimal, InvalidOperation
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .order_executor import OrderRequest, OrderResult

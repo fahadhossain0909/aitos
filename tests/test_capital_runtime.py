@@ -19,7 +19,6 @@ from aitos.risk.models import (
     PendingOrderExposure,
     PortfolioState,
     PositionExposure,
-    PendingOrderExposure,
 )
 from aitos.trading.lifecycle import TradeLifecycle
 

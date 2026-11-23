@@ -18,9 +18,9 @@ from typing import Any
 
 from aitos.execution.intent_store import ExecutionUncertainError
 from aitos.execution.order_executor import OrderResult
-from aitos.models.trade import TradeSide
 from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.protection_audit import audit_protection_inventory
+from aitos.models.trade import TradeSide
 
 
 def _decimal_matches(left: Any, right: Any) -> bool:

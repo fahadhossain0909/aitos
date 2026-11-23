@@ -9,10 +9,10 @@ reservations.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Callable, Mapping
 
 from aitos.intelligence.capital_gateway import CapitalGateway, CapitalGatewayResult
 from aitos.models.trade import Opportunity, TradeSide
