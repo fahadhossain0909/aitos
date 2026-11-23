@@ -195,13 +195,37 @@ async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
     await _seed_live_universe(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
-    await run_scan_and_trade_cycle(components, tracker)
-    second_round_submitted = await run_scan_and_trade_cycle(components, tracker)
+    # Exercise the real candidate batch once, then replay the exact same
+    # immutable candidate snapshot. The second cycle is specifically testing
+    # the open-symbol guard, not a second market-data ingestion pass (which
+    # can block on unrelated feed/backfill work in slower Python 3.10 CI).
+    original_iter = components.scanner.iter_candidate_batches
+    captured_batches = []
 
-    assert second_round_submitted == 0
-    assert len(components.trade_lifecycle.get_open_trades()) == 1
+    async def capture_batches():
+        async for batch in original_iter():
+            snapshot = list(batch)
+            captured_batches.append(snapshot)
+            yield snapshot
 
-    await shutdown_all(components)
+    components.scanner.iter_candidate_batches = capture_batches
+    try:
+        await asyncio.wait_for(run_scan_and_trade_cycle(components, tracker), timeout=30.0)
+        assert captured_batches, "first scan must produce a deterministic candidate batch"
+
+        async def replay_batches():
+            for batch in captured_batches:
+                yield list(batch)
+
+        components.scanner.iter_candidate_batches = replay_batches
+        second_round_submitted = await asyncio.wait_for(
+            run_scan_and_trade_cycle(components, tracker), timeout=10.0
+        )
+
+        assert second_round_submitted == 0
+        assert len(components.trade_lifecycle.get_open_trades()) == 1
+    finally:
+        await asyncio.wait_for(shutdown_all(components), timeout=15.0)
 
 
 @pytest.mark.integration
