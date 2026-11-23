@@ -136,7 +136,7 @@ jobs:
           CLICKHOUSE_USER=$CLICKHOUSE_USER
           CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
           CLICKHOUSE_DATABASE=$CLICKHOUSE_DATABASE
-          printf '\\nREDIS_PASSWORD=ci-only-not-used\\nAITOS_RUNTIME_IMAGE=ghcr.io/fahadhossain0909/aitos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' >> .env
+          sed -i 's|^AITOS_RUNTIME_IMAGE=.*|AITOS_RUNTIME_IMAGE=ghcr.io/fahadhossain0909/aitos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|' .env
           EOF
       - name: Run unit and integration tests with coverage
         env:
