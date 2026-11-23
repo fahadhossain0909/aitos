@@ -388,13 +388,28 @@ async def test_authenticated_binance_demo_testnet_read_only_preflight():
     secret = os.getenv("BINANCE_FUTURES_TESTNET_API_SECRET")
     if not key or not secret:
         pytest.skip("dedicated Binance Futures demo-testnet credentials are required")
-    from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
+    from aitos.execution.binance_executor import (
+        BinanceAPIError,
+        BinanceFuturesOrderExecutor,
+    )
 
     executor = BinanceFuturesOrderExecutor(key, secret, testnet=True)
     await executor.connect()
     try:
-        positions = await executor.get_position_risk()
-        algos = await executor.get_open_algo_orders()
+        try:
+            positions = await executor.get_position_risk()
+            algos = await executor.get_open_algo_orders()
+        except BinanceAPIError as exc:
+            # Binance may reject otherwise valid demo-testnet requests based on
+            # the hosted runner's egress location. This is an external
+            # eligibility limitation, not an AITOS regression; keep it visible
+            # as skipped rather than failing code CI or claiming verification.
+            if "restricted location" in str(exc).lower():
+                pytest.skip(
+                    "Binance demo-testnet is unavailable from this runner's "
+                    "network location; authenticated inventory was not verified"
+                )
+            raise
         assert isinstance(positions, list)
         assert isinstance(algos, list)
     finally:
