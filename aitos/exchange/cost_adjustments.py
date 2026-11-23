@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime, timezone
@@ -238,6 +240,21 @@ class BinanceIncomeReconciliationService(AITOSModule):
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
+    @staticmethod
+    def _income_retry_id(row: dict[str, Any]) -> str:
+        transaction_id = str(row.get("tranId", "")).strip()
+        if not transaction_id:
+            raise ValueError("income retry requires an exchange transaction ID")
+        identity = {
+            "account": "binance_usdm",
+            "income_type": str(row.get("incomeType", "")).upper(),
+            "symbol": str(row.get("symbol", "")).upper(),
+            "transaction_id": transaction_id,
+        }
+        return hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
     def resolve_trade_id(self, row: dict[str, Any]) -> str | None:
         symbol = str(row.get("symbol", "")).strip().upper()
         if not symbol:
@@ -329,20 +346,29 @@ class BinanceIncomeReconciliationService(AITOSModule):
             )
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         cursor = await self._state_store.load_income_cursor(self._account)
+        load_retry_floor = getattr(self._state_store, "load_income_retry_floor", None)
+        retry_floor = (
+            await load_retry_floor(self._account) if callable(load_retry_floor) else None
+        )
         trades = self._trades()
+        entry_times = [
+            self._parse_time(getattr(trade, "entry_time", None)) for trade in trades
+        ]
+        valid_entry_times = [value for value in entry_times if value is not None]
         if cursor is None:
-            entry_times = [
-                self._parse_time(getattr(trade, "entry_time", None)) for trade in trades
-            ]
-            valid_entry_times = [value for value in entry_times if value is not None]
-            if not valid_entry_times:
+            if valid_entry_times:
+                start_time_ms = int(min(valid_entry_times).timestamp() * 1000)
+            elif retry_floor is not None:
+                start_time_ms = int(retry_floor)
+            else:
                 await self._state_store.save_income_cursor(now_ms, self._account)
                 self._runs += 1
                 self._last_run_at = datetime.now(timezone.utc).isoformat()
                 return {"rows": 0, "published": 0, "unattributed": 0}
-            start_time_ms = int(min(valid_entry_times).timestamp() * 1000)
         else:
             start_time_ms = max(0, int(cursor) - self._overlap_ms)
+        if retry_floor is not None:
+            start_time_ms = min(start_time_ms, int(retry_floor))
 
         rows = await self._exchange.fetch_income_history(
             start_time_ms=start_time_ms,
@@ -359,27 +385,46 @@ class BinanceIncomeReconciliationService(AITOSModule):
         published = 0
         unresolved_times: list[int] = []
         for row in rows:
+            income_type = str(row.get("incomeType", "")).upper()
+            if income_type not in {"COMMISSION", "FUNDING_FEE"}:
+                continue
+            retry_id = self._income_retry_id(row)
             try:
                 published += await self._publisher.publish_income_rows([row])
             except UnattributedCostAdjustment:
                 self._unattributed += 1
                 try:
-                    unresolved_times.append(int(row.get("time", 0)))
+                    event_time_ms = int(row.get("time", 0))
                 except (TypeError, ValueError):
-                    unresolved_times.append(start_time_ms)
+                    event_time_ms = start_time_ms
+                record_retry = getattr(self._state_store, "record_income_retry", None)
+                if not callable(record_retry):
+                    raise RuntimeError(
+                        "durable income retry ledger is required before cursor advancement"
+                    )
+                await record_retry(retry_id, max(0, event_time_ms), self._account)
+                unresolved_times.append(max(0, event_time_ms))
                 logger.error(
-                    "Binance income row could not be uniquely attributed; cursor held",
+                    "Binance income row is unattributed; durable retry recorded",
                     extra={
                         "aitos_extra": {
                             "tran_id": row.get("tranId"),
                             "symbol": row.get("symbol"),
-                            "income_type": row.get("incomeType"),
+                            "income_type": income_type,
                             "time": row.get("time"),
+                            "retry_recorded": True,
                         }
                     },
                 )
+            else:
+                resolve_retry = getattr(self._state_store, "resolve_income_retry", None)
+                if callable(resolve_retry):
+                    await resolve_retry(retry_id, self._account)
 
-        next_cursor = max(0, min(unresolved_times) - 1) if unresolved_times else now_ms
+        # This cursor is a monotonic high-water mark. Older unresolved records
+        # are retained in the separate retry ledger and lower the next query's
+        # start bound without rewinding the high-water mark.
+        next_cursor = max(int(cursor or 0), now_ms)
         await self._state_store.save_income_cursor(next_cursor, self._account)
         self._runs += 1
         self._published += published
