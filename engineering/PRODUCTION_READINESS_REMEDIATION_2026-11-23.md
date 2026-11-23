@@ -79,8 +79,10 @@ No automatic financial migration or authority cutover is performed in this branc
 
 ### Phase 4 — Signed approval control plane
 
-The existing live runner still has a terminal confirmation gate. A complete
-replacement requires an authenticated desktop/control-plane issuer, WebAuthn or
+The live kernel now reads `require_human_approval_for_prod` from typed settings
+instead of hardcoding `True`, but the runner still has a terminal confirmation
+gate that trusts a self-entered operator label. A complete replacement requires
+an authenticated desktop/control-plane issuer, WebAuthn or
 hardware-backed identity, RBAC policy, signed short-lived approval envelope,
 durable single-use/replay protection, audit retention and runtime verification.
 The current read-only operator gateway is not an authenticated trading mutation
