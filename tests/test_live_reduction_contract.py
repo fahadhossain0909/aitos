@@ -281,12 +281,20 @@ async def test_terminal_partial_stop_reconciles_without_second_market_reduction(
     value, position = await lifecycle(event_bus, risk_engine, venue)
     value._use_exchange_side_stops = True
     position.sl_order_id = "algo:12"
-    result = await value.reconcile_trade(position.trade_id)
-    assert result.quantity == 1
-    assert result.state == TradeLifecycleState.POSITION_OPENED
-    assert result.take_profit_levels == [120]
-    assert result.sl_order_id == "algo:456"
+    from aitos.execution.intent_store import ExecutionRecoveryRequired
+
+    with pytest.raises(
+        ExecutionRecoveryRequired,
+        match="authenticated child-fill reconciliation",
+    ):
+        await value.reconcile_trade(position.trade_id)
+    # The algo child has not yet been authenticated/reconciled. Preserve the
+    # original identity and full local quantity; never submit a second reduce.
+    assert position.quantity == 2
+    assert position.sl_order_id == "algo:12"
     assert not venue.requests
+    venue.place_stop_loss_order.assert_not_awaited()
+    venue.cancel_resting_order.assert_not_awaited()
 
 
 async def test_partial_exit_is_not_reported_as_completed_close(
