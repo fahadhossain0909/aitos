@@ -206,7 +206,11 @@ class DurableTradingStateStore:
     """Small ClickHouse-backed state store used by live trading recovery."""
 
     def __init__(self, repository: Any, *, account_scope: str = "") -> None:
-        if type(account_scope) is not str or len(account_scope) > 256 or "\x00" in account_scope:
+        if (
+            type(account_scope) is not str
+            or len(account_scope) > 256
+            or "\x00" in account_scope
+        ):
             raise ValueError("bounded account scope required")
         self._repository = repository
         self.account_scope = account_scope
@@ -630,7 +634,11 @@ class DurableTradingStateStore:
             except Exception as exc:
                 logger.error(
                     "runtime recovery blocked by invalid or ambiguous state",
-                    extra={"aitos_extra": {"trade_id": row[1] if row and len(row) > 1 else None}},
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": row[1] if row and len(row) > 1 else None
+                        }
+                    },
                 )
                 raise RuntimeError(
                     "runtime recovery requires unambiguous valid latest trade state"
@@ -645,7 +653,9 @@ class DurableTradingStateStore:
         if trade.account_scope and trade.account_scope != self.account_scope:
             raise ValueError("trade account scope does not match state-store scope")
         trade.account_scope = self.account_scope
-        payload_json = json.dumps(trade.to_dict(), sort_keys=True, default=str, allow_nan=False)
+        payload_json = json.dumps(
+            trade.to_dict(), sort_keys=True, default=str, allow_nan=False
+        )
         _closed_payload((trade.trade_id, payload_json, 1))
         await client.insert(
             "paper_closed_trade_ledger",
