@@ -1323,7 +1323,10 @@ async def recover_triggered_protection_child_fills(
             for value in pending_ids
             if isinstance(value, str) and value.startswith("algo:")
         )
-        pending_ids = set(pending_ids)
+        pending_ids = {
+            value for value in pending_ids if isinstance(value, str)
+        }
+        tp_ids = tp_ids if isinstance(tp_ids, list) else []
         for order_id in dict.fromkeys(owned_ids):
             row = by_order_id.get(order_id)
             if row is None:
