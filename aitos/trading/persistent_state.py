@@ -121,9 +121,11 @@ FROM (
     SELECT trade_id, any(payload_json) AS latest_payload,
            uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
     FROM paper_closed_trade_ledger
-    WHERE (trade_id, updated_at) IN (
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+      AND (trade_id, updated_at) IN (
         SELECT trade_id, max(updated_at)
         FROM paper_closed_trade_ledger
+        WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
         GROUP BY trade_id
     )
     GROUP BY trade_id
