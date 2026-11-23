@@ -123,7 +123,7 @@ def make_store(rows):
 
 async def test_performance_is_one_bounded_query_with_truncation_evidence():
     rows = [row(0), row(1, -5)]
-    store, query = make_store([("", r["trade_id"], json.dumps(r), 1) for r in rows])
+    store, query = make_store([(r["trade_id"], json.dumps(r), 1) for r in rows])
     report = await store.query_closed_performance(limit=1)
     assert query.await_count == 1
     assert query.call_args.kwargs["parameters"] == {"limit": 2}
