@@ -731,9 +731,7 @@ def test_execution_transitions_are_append_only_and_use_transaction_sequence(tmp_
         "INTENT_CREATED",
         "INTENT_STATE_CHANGED",
     ]
-    assert [event["event_type"] for event in second_page] == [
-        "INTENT_STATE_CHANGED"
-    ]
+    assert [event["event_type"] for event in second_page] == ["INTENT_STATE_CHANGED"]
     assert [event["sequence"] for event in first_page + second_page] == sorted(
         event["sequence"] for event in first_page + second_page
     )
@@ -750,9 +748,7 @@ def test_execution_transitions_are_append_only_and_use_transaction_sequence(tmp_
                 "WHERE sequence=1"
             )
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
-            conn.execute(
-                "DELETE FROM execution_transition_events WHERE sequence=1"
-            )
+            conn.execute("DELETE FROM execution_transition_events WHERE sequence=1")
 
 
 def test_execution_transition_sequence_is_scoped_and_survives_reopen(tmp_path):
