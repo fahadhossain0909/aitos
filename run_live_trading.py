@@ -121,7 +121,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     raw_order_executor = await prepare_live_executor(settings, symbols)
     cleanup.push_async_callback(raw_order_executor.close)
     order_executor = IdempotentOrderExecutor(raw_order_executor)
-    state_store = DurableTradingStateStore(market_repo)
+    state_store = DurableTradingStateStore(
+        market_repo, account_scope=raw_order_executor.execution_scope
+    )
     await state_store.initialize()
     trade_state_persistence = None
     rl_scorer = DeepValueRLScorer()
