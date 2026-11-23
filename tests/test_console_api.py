@@ -145,6 +145,7 @@ async def test_history_query_is_parameterized():
         "limit": 10,
         "offset": 2,
         "symbol": "BTC'OR1=1",
+        "account_scope": "",
     }
     with pytest.raises(ValueError):
         await store.query_closed_history(limit=101)
