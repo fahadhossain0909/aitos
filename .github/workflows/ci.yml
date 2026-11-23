@@ -125,9 +125,10 @@ jobs:
       - name: Create .env file for tests
         run: |
           cat > .env << EOF
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          API_KEY=${{ secrets.API_KEY }}
-          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          # Disposable CI-only credentials; never materialize repository secrets in .env.
+          DATABASE_URL=sqlite:///./.ci-test.db
+          API_KEY=ci-only-not-a-secret
+          SECRET_KEY=ci-only-not-a-secret
           DEBUG=true
           TESTING=true
           CLICKHOUSE_HOST=$CLICKHOUSE_HOST
@@ -173,7 +174,7 @@ jobs:
           pip install --upgrade "setuptools>=83.0.0"
           pip install bandit safety
       - name: Run Bandit security scan
-        run: bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -ll -f json -o bandit-report.json
+        run: bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -l -f json -o bandit-report.json
       - name: Check project dependencies for vulnerabilities
         run: safety check --file requirements.txt --json
       - name: Upload security reports
@@ -195,7 +196,9 @@ jobs:
           cp .env.example .env
           printf '\nREDIS_PASSWORD=ci-only-not-used\n' >> .env
       - name: Validate Docker Compose configuration
-        run: docker compose config >/dev/null
+        run: |
+          docker compose config --format json > /tmp/aitos-compose.json
+          python scripts/validate_compose_policy.py /tmp/aitos-compose.json
       - name: Lowercase repository name
         id: repo
         run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
