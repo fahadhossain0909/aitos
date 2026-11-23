@@ -347,7 +347,9 @@ class BinanceIncomeReconciliationService(AITOSModule):
         cursor = await self._state_store.load_income_cursor(self._account)
         load_retry_floor = getattr(self._state_store, "load_income_retry_floor", None)
         retry_floor = (
-            await load_retry_floor(self._account) if callable(load_retry_floor) else None
+            await load_retry_floor(self._account)
+            if callable(load_retry_floor)
+            else None
         )
         trades = self._trades()
         entry_times = [
