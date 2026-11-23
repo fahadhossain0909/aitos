@@ -1306,9 +1306,7 @@ async def recover_triggered_protection_child_fills(
                 for value in tp_ids
                 if isinstance(value, str) and value.startswith("algo:")
             )
-        pending_ids = trade.agent_consensus.get(
-            "_pending_stop_cancellations", []
-        )
+        pending_ids = trade.agent_consensus.get("_pending_stop_cancellations", [])
         if not isinstance(pending_ids, list):
             blocked.append(
                 {
@@ -1323,9 +1321,7 @@ async def recover_triggered_protection_child_fills(
             for value in pending_ids
             if isinstance(value, str) and value.startswith("algo:")
         )
-        pending_ids = {
-            value for value in pending_ids if isinstance(value, str)
-        }
+        pending_ids = {value for value in pending_ids if isinstance(value, str)}
         tp_ids = tp_ids if isinstance(tp_ids, list) else []
         for order_id in dict.fromkeys(owned_ids):
             row = by_order_id.get(order_id)
@@ -1380,17 +1376,11 @@ async def recover_triggered_protection_child_fills(
                 or not (
                     (
                         request.get("order_type") == "STOP_MARKET"
-                        and (
-                            order_id == stop_id
-                            or order_id in pending_ids
-                        )
+                        and (order_id == stop_id or order_id in pending_ids)
                     )
                     or (
                         request.get("order_type") == "TAKE_PROFIT_MARKET"
-                        and (
-                            order_id in tp_ids
-                            or order_id in pending_ids
-                        )
+                        and (order_id in tp_ids or order_id in pending_ids)
                     )
                 )
             ):
