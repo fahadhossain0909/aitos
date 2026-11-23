@@ -8,6 +8,7 @@ from scripts.migrate_scoped_clickhouse_state import (
     RUNTIME_SOURCE,
     _ddl,
     _manifest,
+    main,
     prepare_record,
     source_fingerprint,
 )
@@ -244,3 +245,15 @@ def test_scoped_import_rejects_a_preexisting_payload_hash_mismatch():
             {fingerprint: "paper:account-a"},
             runtime=True,
         )
+
+
+
+def test_apply_cli_requires_explicit_writer_freeze_and_backup_acknowledgements(
+    monkeypatch,
+):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["migrate_scoped_clickhouse_state.py", "--apply"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 2
