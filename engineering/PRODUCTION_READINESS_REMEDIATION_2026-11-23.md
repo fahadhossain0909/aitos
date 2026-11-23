@@ -53,7 +53,10 @@ deployment, database migration, testnet order, or live trading activation.
 ### Phase 3 — Financial authority and execution recovery
 
 The current active lifecycle still uses multiple stores and the revision journal
-prototype remains unwired. AUD-20261106-46/47/48/49 remain OPEN:
+prototype remains unwired. AUD-20261106-46/47/48 remain OPEN. AUD-20261106-49 has
+a code-level remediation in this branch (monotonic high-water cursor plus a
+separate durable unresolved-income retry table); exact-head CI and real ClickHouse
+restart/retry verification are still pending:
 
 - replacement-merge conflict loss needs an active append-only financial authority
   and a non-destructive legacy reconciliation/import plan;
@@ -61,8 +64,11 @@ prototype remains unwired. AUD-20261106-46/47/48/49 remain OPEN:
   not merely proven in an isolated SQLite prototype;
 - trade identity must be consistently scoped through runtime, ledger, income and
   recovery readers before multi-account/shared-data use;
-- the income cursor needs a monotonic high-water mark plus durable unresolved-row
-  retry state, not a timestamp-only last-writer-wins value.
+- AUD-49: `load_income_cursor` now reads `maxOrNull(cursor_time_ms)` and unresolved
+  rows are persisted in an account-scoped retry ledger before the high-water cursor
+  advances. Retry-floor reads re-query older unresolved rows without cursor rewind.
+  This is code-level implementation, not yet accepted multi-store/ClickHouse
+  crash-recovery evidence.
 
 The protective POST-to-ID path still requires end-to-end venue acknowledgement,
 durable identity, restart and partial/triggered child-fill acceptance across the
@@ -84,6 +90,9 @@ introduced as if it solved this requirement.
 ### Remaining CI and operational gates
 
 - Full current-head GitHub Actions matrix and all specialized workflows must finish.
+- A 48-file GitHub Actions inventory and consolidation policy are now in
+  `docs/WORKFLOW_REGISTRY.md`; per-workflow trigger/permission/secret/destructive
+  review and any safe archive/migration are still pending.
 - Real Compose runtime inspection is NOT MEASURED by source/CI policy alone.
 - Production/staging deployment, persistence/restart acceptance, authenticated
   testnet account verification, venue POST-to-ACK fault injection, independent
