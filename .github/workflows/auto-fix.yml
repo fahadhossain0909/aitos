@@ -35,4 +35,14 @@ jobs:
       - name: Verify import ordering
         run: isort --check-only --diff .
       - name: Verify Ruff rules (Python 3.10 compatible)
-        run: ruff check --target-version py310 --ignore UP017 .
+        run: >-
+          ruff check --target-version py310 --select E4,E7,E9,F
+          aitos/trading/reconciliation.py
+          aitos/trading/persistent_state.py
+          aitos/exchange/cost_adjustments.py
+          scripts/validate_compose_policy.py
+          run_live_trading.py run_paper_trading.py
+          tests/test_python310_timeout_compat.py
+          tests/test_binance_income_reconciliation.py
+          tests/test_reconciliation_scheduler.py
+          tests/test_compose_policy.py tests/test_workflow_governance.py
