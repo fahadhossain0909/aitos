@@ -7,6 +7,12 @@ from aitos.execution.binance_executor import TESTNET_URL
 from aitos.live_trading import confirm_live_trading, prepare_live_executor
 
 
+def test_confirm_live_trading_blocks_mainnet_without_hardware_approval():
+    with pytest.raises(SystemExit) as exc_info:
+        confirm_live_trading(["BTCUSDT"], testnet=False, input_fn=lambda prompt: "")
+    assert exc_info.value.code == 1
+
+
 def test_confirm_live_trading_succeeds_with_exact_phrase():
     inputs = iter(["fahad", "I APPROVE LIVE TRADING"])
     operator = confirm_live_trading(
