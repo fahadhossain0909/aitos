@@ -2501,6 +2501,39 @@ class TradeLifecycle(AITOSModule):
             # Only a durable, venue-confirmed replacement permits cancellation.
             intent_store.mark_handover_old_cancel_requested(handover_id)
             await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+            status_reader = getattr(
+                self._order_executor, "get_resting_order_status", None
+            )
+            if not callable(status_reader):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    old_id,
+                    "authenticated post-cancel status lookup is unavailable",
+                )
+            old_status = await status_reader(trade.symbol, old_id)
+            if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
+                intent_store.block_protection_handover(
+                    handover_id,
+                    "old stop triggered during replacement cancellation; "
+                    "authenticated child-fill reconciliation required",
+                )
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    old_id,
+                    "old stop triggered during replacement cancellation; "
+                    "child-fill identity retained for reconciliation",
+                )
+            if old_status not in {
+                "CANCELED",
+                "EXPIRED",
+                "EXPIRED_IN_MATCH",
+                "REJECTED",
+            }:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    old_id,
+                    f"old stop cancellation is unconfirmed: {old_status!r}",
+                )
             intent_store.mark_handover_old_cancelled(handover_id)
             pending.remove(old_id)
             trade.updated_at = utc_now_iso()
@@ -2750,15 +2783,25 @@ class TradeLifecycle(AITOSModule):
             algo_order_id = f"algo:{algo_id}"
             child_id = str(child.get("orderId", ""))
             order_type = str(algo.get("orderType", ""))
+            pending_protection = trade.agent_consensus.get(
+                "_pending_stop_cancellations", []
+            )
+            if not isinstance(pending_protection, list):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "pending protective identity collection is malformed",
+                )
+            is_pending = algo_order_id in pending_protection
             if order_type == "STOP_MARKET":
-                if trade.sl_order_id != algo_order_id:
+                if trade.sl_order_id != algo_order_id and not is_pending:
                     raise ExecutionRecoveryRequired(
                         trade.symbol,
                         algo_order_id,
                         "triggered stop is not owned by restored trade",
                     )
             elif order_type == "TAKE_PROFIT_MARKET":
-                if algo_order_id not in trade.tp_order_ids:
+                if algo_order_id not in trade.tp_order_ids and not is_pending:
                     raise ExecutionRecoveryRequired(
                         trade.symbol,
                         algo_order_id,
