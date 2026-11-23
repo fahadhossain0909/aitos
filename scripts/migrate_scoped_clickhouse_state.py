@@ -373,7 +373,10 @@ def run(
                 "runtime_rows": len(sources[RUNTIME_SOURCE]),
                 "closed_rows": len(sources[CLOSED_SOURCE]),
                 "unattributed_records": 0,
-                "message": "No writes performed. Review attribution and rerun with --apply.",
+                "message": (
+                    "No writes performed. Review attribution and rerun "
+                    "with --apply."
+                ),
             }
 
         client.command(_ddl(RUNTIME_TARGET, runtime=True))
