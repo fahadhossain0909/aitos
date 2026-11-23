@@ -121,11 +121,15 @@ def prepare_record(
 def _read_sources(client: Any) -> dict[str, list[tuple[Any, ...]]]:
     runtime = client.query(
         "SELECT trade_id, symbol, state, payload_json, updated_at "
-        "FROM trade_runtime_state"
+        "FROM trade_runtime_state "
+        "SETTINGS max_result_rows=250000, max_result_bytes=536870912, "
+        "result_overflow_mode='throw', read_overflow_mode='throw'"
     ).result_rows
     closed = client.query(
         "SELECT trade_id, payload_json, updated_at "
-        "FROM paper_closed_trade_ledger"
+        "FROM paper_closed_trade_ledger "
+        "SETTINGS max_result_rows=250000, max_result_bytes=536870912, "
+        "result_overflow_mode='throw', read_overflow_mode='throw'"
     ).result_rows
     return {RUNTIME_SOURCE: list(runtime), CLOSED_SOURCE: list(closed)}
 
@@ -211,7 +215,7 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
         f"SELECT count() FROM {target} WHERE source_fingerprint IN {{fps:Array(String)}}",
         parameters={"fps": fingerprints},
     ).result_rows[0][0] if fingerprints else 0
-    if int(verified) < expected:
+    if int(verified) != expected:
         raise RuntimeError(f"{target} verification incomplete: expected {expected}, observed {verified}")
     conflicts = client.query(
         f"SELECT count() FROM (SELECT source_fingerprint, source_occurrence "
