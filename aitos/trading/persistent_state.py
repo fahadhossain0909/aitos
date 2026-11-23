@@ -551,8 +551,9 @@ class DurableTradingStateStore:
         try:
             await client.command(
                 "ALTER TABLE trade_runtime_state DELETE "
-                "WHERE trade_id = {trade_id:String}",
-                parameters={"trade_id": trade_id},
+                "WHERE trade_id = {trade_id:String} "
+                "AND JSONExtractString(payload_json, 'account_scope') = {account_scope:String}",
+                parameters={"trade_id": trade_id, "account_scope": self.account_scope},
             )
         except Exception:
             logger.exception(
@@ -625,7 +626,7 @@ class DurableTradingStateStore:
             except Exception as exc:
                 logger.error(
                     "runtime recovery blocked by invalid or ambiguous state",
-                    extra={"aitos_extra": {"trade_id": row[0] if row else None}},
+                    extra={"aitos_extra": {"trade_id": row[1] if row and len(row) > 1 else None}},
                 )
                 raise RuntimeError(
                     "runtime recovery requires unambiguous valid latest trade state"
