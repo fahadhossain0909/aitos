@@ -75,6 +75,13 @@ async def prepare_live_executor(
     rather than guessing), and loads real per-symbol precision from
     ``/fapi/v1/exchangeInfo`` before returning.
     """
+    if not settings.binance.testnet:
+        logger.critical(
+            "mainnet executor construction is blocked until the authenticated "
+            "approval control plane is integrated"
+        )
+        raise SystemExit(1)
+
     api_key, api_secret = settings.binance.execution_credentials
     if not api_key or not api_secret:
         credential_names = (
