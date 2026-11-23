@@ -58,7 +58,7 @@ def audit(path: Path) -> dict:
         workflow_permission_values = [
             line.strip()
             for line in workflow_permissions
-            if re.match(r"^\\s+[A-Za-z0-9_-]+:\\s*(?:read|write|none)\\s*$", line)
+            if re.match(r"^\s+[A-Za-z0-9_-]+:\s*(?:read|write|none)\s*$", line)
         ]
 
     job_permissions = {}
@@ -69,14 +69,14 @@ def audit(path: Path) -> dict:
             line = lines[index]
             if line and not line.startswith(" "):
                 break
-            match = re.match(r"^  ([A-Za-z0-9_-]+):\\s*(?:#.*)?$", line)
+            match = re.match(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$", line)
             if match:
                 job_indices.append((index, match.group(1)))
         for position, (index, job_name) in enumerate(job_indices):
             block_end = job_indices[position + 1][0] if position + 1 < len(job_indices) else len(lines)
             job_lines = lines[index + 1 : block_end]
             permission_line = next(
-                (offset for offset, item in enumerate(job_lines) if re.match(r"^    permissions:\\s*$", item)),
+                (offset for offset, item in enumerate(job_lines) if re.match(r"^    permissions:\s*$", item)),
                 None,
             )
             if permission_line is None:
@@ -90,7 +90,7 @@ def audit(path: Path) -> dict:
             job_permissions[job_name] = [
                 item.strip()
                 for item in permission_block
-                if re.match(r"^\\s{6,}[A-Za-z0-9_-]+:\\s*(?:read|write|none)\\s*$", item)
+                if re.match(r"^\s{6,}[A-Za-z0-9_-]+:\s*(?:read|write|none)\s*$", item)
             ]
 
     permissions = workflow_permission_values or [
@@ -99,7 +99,7 @@ def audit(path: Path) -> dict:
     uses = sorted(set(USES_RE.findall(source)))
     secrets = sorted(set(SECRET_RE.findall(source)))
     trigger_match = re.search(
-        r"^on:\\s*\\n((?:^[ \\t].*\\n|^[ \\t]*\\n)+)", source, re.MULTILINE
+        r"^on:\s*\n((?:^[ \t].*\n|^[ \t]*\n)+)", source, re.MULTILINE
     )
     triggers = (
         [
@@ -121,7 +121,7 @@ def audit(path: Path) -> dict:
         findings.append("untrusted_event_expression_in_workflow_source")
     if RISK_RE.search(source):
         findings.append("destructive_or_high_impact_command_review")
-    if secrets and not re.search(r"^\\s*environment:\\s*", source, re.MULTILINE):
+    if secrets and not re.search(r"^\s*environment:\s*", source, re.MULTILINE):
         findings.append("secrets_without_detected_environment_protection")
     unpinned = [ref for ref in uses if not re.search(r"@[0-9a-f]{40}$", ref)]
     if unpinned:
