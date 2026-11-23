@@ -247,7 +247,6 @@ def test_scoped_import_rejects_a_preexisting_payload_hash_mismatch():
         )
 
 
-
 def test_apply_cli_requires_explicit_writer_freeze_and_backup_acknowledgements(
     monkeypatch,
 ):
