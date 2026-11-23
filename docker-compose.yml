@@ -118,7 +118,6 @@ services:
     command: ["python3", "/app/run_paper_trading.py"]
     env_file: [.env]
     volumes:
-      - "${AITOS_SOURCE_ROOT:-.}:/app:ro"
       - "${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"
     environment:
       REDIS_HOST: redis
