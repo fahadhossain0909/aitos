@@ -9,7 +9,7 @@ import argparse
 import hashlib
 import json
 import os
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -52,7 +52,9 @@ def _timestamp(value: Any) -> datetime:
     return result.astimezone(timezone.utc)
 
 
-def source_fingerprint(table: str, trade_id: str, payload_json: str, updated_at: Any) -> str:
+def source_fingerprint(
+    table: str, trade_id: str, payload_json: str, updated_at: Any
+) -> str:
     stamp = _timestamp(updated_at).isoformat(timespec="milliseconds")
     material = "\0".join((table, str(trade_id), stamp, payload_json))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -160,7 +162,7 @@ def _manifest(sources: dict[str, list[tuple[Any, ...]]]) -> list[dict[str, Any]]
     return [items[key] for key in sorted(items)]
 
 
-def _target_existing(client: Any, table: str, fingerprints: list[str]) -> dict[tuple[str, int], str]:
+def _target_existing(\n    client: Any, table: str, fingerprints: list[str]\n) -> dict[tuple[str, int], str]:
     found: dict[tuple[str, int], str] = {}
     for start in range(0, len(fingerprints), CHUNK_SIZE):
         chunk = fingerprints[start:start + CHUNK_SIZE]
@@ -175,7 +177,7 @@ def _target_existing(client: Any, table: str, fingerprints: list[str]) -> dict[t
         )
         for fingerprint, occurrence, payload_hash, versions in result.result_rows:
             if int(versions) != 1:
-                raise RuntimeError("target contains conflicting source occurrence evidence")
+                raise RuntimeError(\n                    "target contains conflicting source occurrence evidence"\n                )
             found[(str(fingerprint), int(occurrence))] = str(payload_hash)
     return found
 
@@ -191,7 +193,7 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
         fingerprint = source_fingerprint(source, trade_id, raw, stamp)
         occurrence = occurrences[fingerprint]
         occurrences[fingerprint] += 1
-        _, record = prepare_record(source, row, scope_map=scope_map, occurrence=occurrence)
+        _, record = prepare_record(\n            source, row, scope_map=scope_map, occurrence=occurrence\n        )
         prepared.append(record)
 
     fingerprints = sorted(occurrences)
@@ -222,27 +224,27 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
 
     expected = sum(occurrences.values())
     verified = client.query(
-        f"SELECT count() FROM {target} WHERE source_fingerprint IN {{fps:Array(String)}}",
+        f"SELECT count() FROM {target} "\n        "WHERE source_fingerprint IN {fps:Array(String)}",
         parameters={"fps": fingerprints},
-    ).result_rows[0][0] if fingerprints else 0
+    ).result_rows[0][0]\n    if fingerprints\n    else 0
     if int(verified) != expected:
-        raise RuntimeError(f"{target} verification incomplete: expected {expected}, observed {verified}")
+        raise RuntimeError(\n            f"{target} verification incomplete: expected {expected}, "\n            f"observed {verified}"\n        )
     conflicts = client.query(
         f"SELECT count() FROM (SELECT source_fingerprint, source_occurrence "
         f"FROM {target} WHERE source_fingerprint IN {{fps:Array(String)}} "
         "GROUP BY source_fingerprint, source_occurrence HAVING count() != 1 OR uniqExact(payload_sha256) != 1)",
         parameters={"fps": fingerprints},
-    ).result_rows[0][0] if fingerprints else 0
+    ).result_rows[0][0]\n    if fingerprints\n    else 0
     if int(conflicts):
         raise RuntimeError(f"{target} contains conflicting imported evidence")
     return expected
 
 
-def run(*, apply: bool, scope_map: dict[str, str], manifest_out: Path | None) -> dict[str, Any]:
+def run(\n    *, apply: bool, scope_map: dict[str, str], manifest_out: Path | None\n) -> dict[str, Any]:
     try:
         import clickhouse_connect
     except ImportError as exc:
-        raise RuntimeError("install clickhouse-connect to run this migration tool") from exc
+        raise RuntimeError(\n            "install clickhouse-connect to run this migration tool"\n        ) from exc
     client = clickhouse_connect.get_client(
         host=os.getenv("CLICKHOUSE_HOST", "localhost"),
         port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
@@ -268,7 +270,7 @@ def run(*, apply: bool, scope_map: dict[str, str], manifest_out: Path | None) ->
                 "closed_rows": len(sources[CLOSED_SOURCE]),
                 "unattributed_records": len(missing),
                 "manifest": str(manifest_out) if manifest_out else None,
-                "message": "No writes performed. Assign every listed fingerprint an account scope, then rerun with --apply.",
+                "message": (\n                    "No writes performed. Assign every listed fingerprint an "\n                    "account scope, then rerun with --apply."\n                ),
             }
         if not apply:
             return {
@@ -302,9 +304,9 @@ def run(*, apply: bool, scope_map: dict[str, str], manifest_out: Path | None) ->
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apply", action="store_true", help="create/import into v2 tables; never alters legacy tables")
-    parser.add_argument("--scope-map", type=Path, help="JSON object mapping source_fingerprint to explicit account_scope")
-    parser.add_argument("--manifest-out", type=Path, default=Path("scoped-state-attribution-manifest.json"), help="write exact legacy-row attribution manifest")
+    parser.add_argument(\n        "--apply",\n        action="store_true",\n        help="create/import into v2 tables; never alters legacy tables",\n    )
+    parser.add_argument(\n        "--scope-map",\n        type=Path,\n        help="JSON object mapping source_fingerprint to explicit account_scope",\n    )
+    parser.add_argument(\n        "--manifest-out",\n        type=Path,\n        default=Path("scoped-state-attribution-manifest.json"),\n        help="write exact legacy-row attribution manifest",\n    )
     args = parser.parse_args()
     mapping = json.loads(args.scope_map.read_text(encoding="utf-8")) if args.scope_map else {}
     if not isinstance(mapping, dict):
