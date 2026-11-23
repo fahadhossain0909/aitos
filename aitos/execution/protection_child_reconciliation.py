@@ -61,6 +61,8 @@ def calculate_protection_child_fill_delta(
     previously_applied_quantity: Any,
     previously_applied_quote: Any = "0",
     expected_position_side: str | None = None,
+    expected_reduce_only: bool | None = None,
+    expected_original_quantity: Any | None = None,
 ) -> ProtectionChildFillDelta:
     """Validate one authenticated triggered-algo child and calculate new fills.
 
@@ -101,6 +103,15 @@ def calculate_protection_child_fill_delta(
             raise ProtectionChildReconciliationError("algo position-side mismatch")
         if child.get("positionSide") != expected_position_side:
             raise ProtectionChildReconciliationError("child position-side mismatch")
+    if expected_reduce_only is not None:
+        allowed_flags = (expected_reduce_only, str(expected_reduce_only).lower())
+        if algo.get("reduceOnly") not in allowed_flags:
+            raise ProtectionChildReconciliationError("algo reduce-only mismatch")
+        if (
+            child.get("reduceOnly") is not None
+            and child.get("reduceOnly") not in allowed_flags
+        ):
+            raise ProtectionChildReconciliationError("child reduce-only mismatch")
 
     status = str(child.get("status", "")).upper()
     allowed_statuses = {
@@ -123,6 +134,14 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "executed child quantity exceeds original quantity"
         )
+    if expected_original_quantity is not None:
+        expected_original = _decimal_value(
+            expected_original_quantity, "expected_original_quantity"
+        )
+        if original != expected_original:
+            raise ProtectionChildReconciliationError(
+                "child original quantity does not match durable protective intent"
+            )
     applied = _decimal_value(
         previously_applied_quantity,
         "previously_applied_quantity",
