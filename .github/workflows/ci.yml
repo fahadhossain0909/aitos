@@ -208,6 +208,7 @@ jobs:
         run: |
           cp .env.example .env
           printf '\nREDIS_PASSWORD=ci-only-not-used\n' >> .env
+          sed -i 's|^AITOS_RUNTIME_IMAGE=.*|AITOS_RUNTIME_IMAGE=ghcr.io/fahadhossain0909/aitos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|' .env
       - name: Validate Docker Compose configuration
         run: |
           docker compose config --format json > /tmp/aitos-compose.json
