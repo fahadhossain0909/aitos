@@ -103,7 +103,7 @@ Click any topic below to jump directly to that section.
    Neo4j ── optional knowledge graph; Rust/PyO3 ── optional order-book kernel
 ```
 
-The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Production actions are additionally protected by risk controls and human-approval governance.
+The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Live startup currently retains a terminal session-confirmation gate and independent risk controls; a signed desktop approval control plane with WebAuthn/MFA and RBAC is still an open production-readiness gate.
 
 [↑ Back to Index](#-interactive-index)
 
