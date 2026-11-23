@@ -171,3 +171,13 @@ or deployment command is executed by this remediation.
   versions already discarded by historical ReplacingMergeTree merges cannot be
   reconstructed by any importer; independent backup/reconciliation evidence is
   required. V2 staging verification is not cutover acceptance.
+
+- Before any `--apply` run, all writers to both legacy tables must be stopped
+  and a maintenance snapshot/backup retained; the two source SELECTs are not one
+  cross-table snapshot transaction. Resume only after the captured source set is
+  confirmed unchanged. The importer intentionally refuses sources above its
+  per-table 250,000-row / 512 MiB safety bound.
+- A fingerprint shared by byte-identical unscoped rows can only be mapped to one
+  scope as a group. If those indistinguishable rows may belong to different
+  accounts, no mapping is safe: obtain stronger backup/source evidence and do not
+  apply this importer to those rows.
