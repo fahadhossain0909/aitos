@@ -1,15 +1,9 @@
 name: Render-equivalent Binance Paper Canary
 
+# This canary requires live public access to Binance Demo Futures. GitHub-hosted
+# runner egress may receive HTTP 451 based on location; keep it operator-triggered
+# so an external venue restriction cannot make ordinary code-review CI fail.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/paper-canary.yml
-      - run_paper_trading.py
-      - aitos/**
-      - requirements.txt
-      - pyproject.toml
-      - Dockerfile
   workflow_dispatch:
 
 permissions:
