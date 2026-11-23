@@ -61,6 +61,9 @@ class TriggeredChildExecutor:
         self.cancelled.append(order_id)
         self.statuses[order_id] = "CANCELED"
 
+    async def get_resting_order_status(self, symbol, order_id):
+        return self.statuses.get(order_id)
+
     def acknowledge_protection(self, result, trade_id):
         self.intent_store.mark_applied(result.client_order_id, trade_id)
 
@@ -642,3 +645,40 @@ async def test_duplicate_durable_algo_identity_blocks_all_child_recovery(
     )
     executor.get_algo_order_by_client_id.assert_not_awaited()
     assert trade.quantity == pytest.approx(1.0)
+
+
+
+@pytest.mark.asyncio
+async def test_replacement_cancel_race_retains_old_stop_for_child_recovery(
+    event_bus, risk_engine, tmp_path
+):
+    journal = ExecutionIntentStore(
+        tmp_path / "child-handover-race.sqlite", scope="child-account"
+    )
+    seed_stop(journal)
+    executor = TriggeredChildExecutor(journal)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    trade = make_trade()
+    lifecycle._open_trades[trade.trade_id] = trade
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    async def cancel_with_fill_race(symbol, order_id):
+        executor.cancelled.append(order_id)
+        executor.statuses[order_id] = "FILLED"
+
+    executor.cancel_resting_order = cancel_with_fill_race
+
+    with pytest.raises(ExecutionRecoveryRequired, match="triggered during replacement"):
+        await lifecycle._refresh_live_protection(trade)
+
+    assert trade.sl_order_id == "algo:999"
+    assert trade.agent_consensus["_pending_stop_cancellations"] == ["algo:123"]
+    handover = journal.protection_handovers()[0]
+    assert handover["state"] == "BLOCKED"
+    assert executor.cancelled == ["algo:123"]
