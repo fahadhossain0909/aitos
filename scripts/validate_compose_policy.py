@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -67,6 +69,13 @@ def validate(config: dict[str, Any]) -> list[str]:
             errors.append(
                 "Paper and Live must resolve to the exact same runtime image reference."
             )
+        if os.getenv("AITOS_REQUIRE_DIGEST_IMAGES", "").strip().lower() == "true":
+            if not isinstance(paper_image, str) or not re.search(
+                r"@sha256:[0-9a-f]{64}$", paper_image
+            ):
+                errors.append(
+                    "Production Paper/Live runtime image must be pinned by sha256 digest."
+                )
         paper_mounts = paper.get("volumes", [])
         if any(
             isinstance(mount, dict)
