@@ -418,12 +418,29 @@ def main() -> int:
         help="JSON object mapping source_fingerprint to explicit account_scope",
     )
     parser.add_argument(
+        "--confirm-writers-stopped",
+        action="store_true",
+        help="operator attests both legacy writers are stopped",
+    )
+    parser.add_argument(
+        "--confirm-backup-retained",
+        action="store_true",
+        help="operator attests a restorable source backup exists",
+    )
+    parser.add_argument(
         "--manifest-out",
         type=Path,
         default=Path("scoped-state-attribution-manifest.json"),
         help="write exact legacy-row attribution manifest",
     )
     args = parser.parse_args()
+    if args.apply and not (
+        args.confirm_writers_stopped and args.confirm_backup_retained
+    ):
+        parser.error(
+            "--apply requires --confirm-writers-stopped and "
+            "--confirm-backup-retained"
+        )
     mapping = (
         json.loads(args.scope_map.read_text(encoding="utf-8")) if args.scope_map else {}
     )
