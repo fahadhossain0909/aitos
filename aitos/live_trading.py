@@ -35,6 +35,13 @@ def confirm_live_trading(
     forgetting to check a return value must never be how this gate fails
     open.
     """
+    if not testnet:
+        logger.critical(
+            "mainnet trading is blocked: authenticated hardware-backed approval "
+            "control plane is not yet integrated"
+        )
+        raise SystemExit(1)
+
     target = "TESTNET" if testnet else "MAINNET — REAL MONEY"
     print("=" * 70)
     print(f"AITOS is about to start LIVE trading against Binance {target}.")
