@@ -142,7 +142,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         graph_driver=graph_driver,
         kernel=AIKernel(
             event_bus=event_bus,
-            require_human_approval_for_prod=True,
+            require_human_approval_for_prod=settings.require_human_approval_for_prod,
         ),
         rl_scorer=rl_scorer,
         outcome_classifier=outcome_classifier,
