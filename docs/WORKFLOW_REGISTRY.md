@@ -1,7 +1,7 @@
 # GitHub Actions Workflow Registry
 
 **Baseline:** `main` at `fbdac28e6eed6623845d84ef5359e965713a3275`  
-**Inventory:** 48 YAML workflow files under `.github/workflows/` (directory listing verified 2026-11-23).
+**Inventory:** 49 YAML workflow files under `.github/workflows/` (directory listing verified 2026-11-23).
 
 This is an inventory, not a claim that all workflows are redundant or safe to delete.
 Each workflow must be reviewed for triggers, permissions, environment protection,
@@ -33,7 +33,7 @@ consolidation. The registry intentionally does not merge or disable workflows.
 
 - `isolated-redis-recovery.yml`, `ledger-quality.yml`,
   `persistence-quality.yml`, `postgres-storage-integration.yml`,
-  `three-store-recovery-integration.yml` — isolated storage/recovery tests.
+  `three-store-recovery-integration.yml`, `three-store-recovery-ci.yml` — isolated storage/recovery tests; the latter is PR-triggered with read-only permissions and a local venue fixture.
 - `security-intent-quality.yml`, `production-audit.yml`,
   `root-cause-forensics.yml` — security/audit evidence.
 
