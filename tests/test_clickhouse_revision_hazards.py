@@ -57,8 +57,10 @@ class Client:
         return SimpleNamespace(result_rows=rows(self.engine, sql, parameters))
 
 
-def store(engine):
-    return DurableTradingStateStore(SimpleNamespace(_client=Client(engine)))
+def store(engine, account_scope=""):
+    return DurableTradingStateStore(
+        SimpleNamespace(_client=Client(engine)), account_scope=account_scope
+    )
 
 
 def payload(stamp, *, state="position_opened", quantity=1, pnl=0, symbol="BTCUSDT"):
@@ -158,7 +160,7 @@ async def test_counterexample_submillisecond_updates_collapse_to_one_version(eng
         await store(engine).load_open_trades()
 
 
-async def test_account_scoped_reader_separates_reused_trade_ids_before_merge(engine):
+async def test_mixed_account_scopes_block_single_runtime_recovery(engine):
     for account, symbol, stamp in [
         ("synthetic-paper-a", "BTCUSDT", "2026-11-02 12:00:00.001"),
         ("synthetic-paper-b", "ETHUSDT", "2026-11-02 12:00:00.002"),
@@ -167,9 +169,8 @@ async def test_account_scoped_reader_separates_reused_trade_ids_before_merge(eng
         item["account_scope"] = account
         insert(engine, "trade_runtime_state", item, stamp)
 
-    restored = await store(engine).load_open_trades()
-    assert len(restored) == 2
-    assert {trade.symbol for trade in restored} == {"BTCUSDT", "ETHUSDT"}
+    with pytest.raises(RuntimeError, match="account scope mismatch or mixed scopes"):
+        await store(engine, account_scope="synthetic-paper-a").load_open_trades()
 
 
 async def test_legacy_replacing_key_still_collapses_reused_ids_after_merge(engine):
@@ -186,7 +187,12 @@ async def test_legacy_replacing_key_still_collapses_reused_ids_after_merge(engin
     engine.query("SYSTEM START MERGES trade_runtime_state")
     engine.query("OPTIMIZE TABLE trade_runtime_state FINAL")
     assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
-    assert len(await store(engine).load_open_trades()) == 1
+    winner = rows(
+        engine,
+        "SELECT DISTINCT JSONExtractString(payload_json, 'account_scope') "
+        "FROM trade_runtime_state",
+    )[0][0]
+    assert len(await store(engine, account_scope=winner).load_open_trades()) == 1
 
 
 async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engine):
@@ -197,7 +203,9 @@ async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engi
     opened["account_scope"] = "synthetic-paper-b"
     insert(engine, "paper_closed_trade_ledger", closed, stamp)
     insert(engine, "trade_runtime_state", opened, stamp)
-    restored = await store(engine).load_open_trades()
+    restored = await store(
+        engine, account_scope="synthetic-paper-b"
+    ).load_open_trades()
     assert len(restored) == 1
     assert restored[0].symbol == "ETHUSDT"
     assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
