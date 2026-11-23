@@ -348,7 +348,8 @@ class ReconciliationScheduler(AITOSModule):
                 if self._errors > errors_before:
                     self._consecutive_failures += 1
                     delay = min(
-                        self._interval_seconds * (2 ** min(self._consecutive_failures, 8)),
+                        self._interval_seconds
+                        * (2 ** min(self._consecutive_failures, 8)),
                         self._max_backoff_seconds,
                     )
                     logger.critical(
