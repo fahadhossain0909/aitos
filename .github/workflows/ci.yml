@@ -145,7 +145,7 @@ jobs:
           CLICKHOUSE_USER=$CLICKHOUSE_USER
           CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
           CLICKHOUSE_DATABASE=$CLICKHOUSE_DATABASE
-          sed -i 's|^AITOS_RUNTIME_IMAGE=.*|AITOS_RUNTIME_IMAGE=ghcr.io/fahadhossain0909/aitos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|' .env
+          AITOS_RUNTIME_IMAGE=ghcr.io/fahadhossain0909/aitos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           EOF
       - name: Run unit and integration tests with coverage
         env:
