@@ -13,7 +13,7 @@
 
 AITOS is a Python-first, event-driven quantitative trading platform. Binance USDⓈ-M Futures is the established execution core; a separately isolated Binance Spot runtime is now present but remains opt-in, testnet-first, and execution-disabled by default. The repository combines canonical market-data contracts, Redis Streams, ClickHouse history, optional Neo4j knowledge-graph support, shared portfolio/capital controls, opportunity and research intelligence, paper trading, guarded Futures execution, XAI/journaling, continual learning, historical/L2 replay, observability, and Docker-based deployment. Options are an identity/architecture extension point only; no Options strategy or execution is available.
 
-> **Canonical documentation:** this README is the project overview. For installation, follow the [AITOS Installation & Deployment Guide](INSTALLATION.md), which documents both desktop installation and VPS runtime deployment.
+> **Canonical documentation:** this README is the project overview; [docs/INDEX.md](docs/INDEX.md) is the curated engineering/operator documentation index. For installation, follow the [AITOS Installation & Deployment Guide](INSTALLATION.md), the canonical installation and deployment procedure.
 
 ## Credential security and remote signing
 
@@ -67,6 +67,7 @@ Click any topic below to jump directly to that section.
 - [Binance Spot integration and rollout limits](docs/SPOT_MARKET_INTEGRATION.md)
 - [Architecture Evolution Program](engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md)
 - [System audit and open acceptance gates](engineering/SYSTEM_AUDIT_2026-11-20.md)
+- [Production-readiness remediation status](engineering/PRODUCTION_READINESS_REMEDIATION_2026-11-23.md)
 - [Financial state authority & reconciliation contract](engineering/FINANCIAL_STATE_AUTHORITY_AND_RECONCILIATION.md)
 
 ---
