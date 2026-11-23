@@ -529,7 +529,9 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             }
         },
     )
-    state_store = DurableTradingStateStore(market_repo)
+    state_store = DurableTradingStateStore(
+        market_repo, account_scope=os.getenv("AITOS_PAPER_ACCOUNT_SCOPE", "paper:default")
+    )
     # Explicitly opted-in shadow mirror only: legacy recovery remains authoritative.
     from aitos.trading.paper_shadow_runtime import (
         MirroredPaperStateStore,
