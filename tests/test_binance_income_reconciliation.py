@@ -303,7 +303,9 @@ async def test_durable_store_persists_exchange_income_cursor():
 
     await store.initialize()
     assert any("exchange_income_sync_cursor" in query for query in client.commands)
+    assert any("exchange_income_sync_retry" in query for query in client.commands)
     assert await store.load_income_cursor("binance_usdm") == 123456
+    assert "maxOrNull(cursor_time_ms)" in client.last_query[0]
 
     await store.save_income_cursor(123999, "binance_usdm")
     table, rows, columns = client.inserted[-1]
@@ -311,6 +313,7 @@ async def test_durable_store_persists_exchange_income_cursor():
     assert rows[0][0:2] == ["binance_usdm", 123999]
     assert columns == ["account", "cursor_time_ms", "updated_at"]
     assert await store.load_income_retry_floor("binance_usdm") == 123456
+    assert "minOrNull(event_time_ms)" in client.last_query[0]
     await store.record_income_retry("retry-1", 123400, "binance_usdm")
     table, rows, columns = client.inserted[-1]
     assert table == "exchange_income_sync_retry"
