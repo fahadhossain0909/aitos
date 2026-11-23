@@ -85,16 +85,22 @@ def render_markdown(reports: list[dict]) -> str:
             f"| {item['workflow']} | {findings} | "
             f"{'; '.join(item['permissions'])} | {', '.join(item['secrets']) or '—'} |"
         )
-    lines.extend([
-        "", "## Required human review", "",
-        "- Confirm event triggers and workflow-call/fork trust boundaries.",
-        "- Verify least-privilege workflow and job permissions.",
-        "- Review every secret use, protected environment and approval gate.",
-        "- Review action pins, shell interpolation, artifact provenance and deployment targets.",
-        "- Confirm destructive workflows are manually gated, scoped and backed up.",
-        "- Check required-check consumers and dispatch references before archival.",
-        "", "This report does not change, disable, merge, or delete any workflow.", "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Required human review",
+            "",
+            "- Confirm event triggers and workflow-call/fork trust boundaries.",
+            "- Verify least-privilege workflow and job permissions.",
+            "- Review every secret use, protected environment and approval gate.",
+            "- Review action pins, shell interpolation, artifact provenance and deployment targets.",
+            "- Confirm destructive workflows are manually gated, scoped and backed up.",
+            "- Check required-check consumers and dispatch references before archival.",
+            "",
+            "This report does not change, disable, merge, or delete any workflow.",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
