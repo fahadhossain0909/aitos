@@ -210,8 +210,12 @@ async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
 
     components.scanner.iter_candidate_batches = capture_batches
     try:
-        await asyncio.wait_for(run_scan_and_trade_cycle(components, tracker), timeout=30.0)
-        assert captured_batches, "first scan must produce a deterministic candidate batch"
+        await asyncio.wait_for(
+            run_scan_and_trade_cycle(components, tracker), timeout=30.0
+        )
+        assert (
+            captured_batches
+        ), "first scan must produce a deterministic candidate batch"
 
         async def replay_batches():
             for batch in captured_batches:
