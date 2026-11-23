@@ -117,11 +117,11 @@ introduced as if it solved this requirement.
 
 ### Remaining CI and operational gates
 
-- Full current-head GitHub Actions matrix and all specialized workflows must finish.
+- Exact-head GitHub Actions verification completed successfully: Main CI (Python 3.10, 3.11 and 3.12), Formatting/Lint, Backtest, PostgreSQL Storage Integration, Redis Recovery, Ledger SQL Quality, Market Data Contract Audit and isolated persistence evidence all PASS. Binance WebSocket and Order-book targeted diagnostics were skipped by their workflow conditions; they are not reported as passes.
 - A 48-file GitHub Actions inventory and consolidation policy are now in
   `docs/WORKFLOW_REGISTRY.md`; per-workflow trigger/permission/secret/destructive
   review and any safe archive/migration are still pending.
-- A static workflow governance audit tool and per-file report are being added; the
+- The static workflow governance audit tool and CI artifact are implemented. The
   48-workflow inventory is not considered a completed human security review until
   each finding is adjudicated and safe consolidation is reviewed.
 - Real Compose runtime inspection is NOT MEASURED by source/CI policy alone.
