@@ -203,9 +203,7 @@ async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engi
     opened["account_scope"] = "synthetic-paper-b"
     insert(engine, "paper_closed_trade_ledger", closed, stamp)
     insert(engine, "trade_runtime_state", opened, stamp)
-    restored = await store(
-        engine, account_scope="synthetic-paper-b"
-    ).load_open_trades()
+    restored = await store(engine, account_scope="synthetic-paper-b").load_open_trades()
     assert len(restored) == 1
     assert restored[0].symbol == "ETHUSDT"
     assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
