@@ -158,21 +158,35 @@ async def test_counterexample_submillisecond_updates_collapse_to_one_version(eng
         await store(engine).load_open_trades()
 
 
-async def test_account_scope_separates_reused_trade_ids_across_accounts(
-    engine,
-):
+async def test_account_scoped_reader_separates_reused_trade_ids_before_merge(engine):
     for account, symbol, stamp in [
         ("synthetic-paper-a", "BTCUSDT", "2026-11-02 12:00:00.001"),
         ("synthetic-paper-b", "ETHUSDT", "2026-11-02 12:00:00.002"),
     ]:
         item = payload(stamp, symbol=symbol)
-        item["account_scope"] = (
-            account
-        )
+        item["account_scope"] = account
         insert(engine, "trade_runtime_state", item, stamp)
+
     restored = await store(engine).load_open_trades()
     assert len(restored) == 2
     assert {trade.symbol for trade in restored} == {"BTCUSDT", "ETHUSDT"}
+
+
+async def test_legacy_replacing_key_still_collapses_reused_ids_after_merge(engine):
+    for account, symbol, stamp in [
+        ("synthetic-paper-a", "BTCUSDT", "2026-11-02 12:00:00.001"),
+        ("synthetic-paper-b", "ETHUSDT", "2026-11-02 12:00:00.002"),
+    ]:
+        item = payload(stamp, symbol=symbol)
+        item["account_scope"] = account
+        insert(engine, "trade_runtime_state", item, stamp)
+
+    # The reader is scope-aware, but the legacy ReplacingMergeTree ORDER BY
+    # trade_id is not. A merge can still erase one account's distinct trade.
+    engine.query("SYSTEM START MERGES trade_runtime_state")
+    engine.query("OPTIMIZE TABLE trade_runtime_state FINAL")
+    assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
+    assert len(await store(engine).load_open_trades()) == 1
 
 
 async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engine):
