@@ -160,18 +160,23 @@ def _manifest(sources: dict[str, list[tuple[Any, ...]]]) -> list[dict[str, Any]]
     return [items[key] for key in sorted(items)]
 
 
-def _target_existing(client: Any, table: str, fingerprints: list[str]) -> set[tuple[str, int]]:
-    found: set[tuple[str, int]] = set()
+def _target_existing(client: Any, table: str, fingerprints: list[str]) -> dict[tuple[str, int], str]:
+    found: dict[tuple[str, int], str] = {}
     for start in range(0, len(fingerprints), CHUNK_SIZE):
         chunk = fingerprints[start:start + CHUNK_SIZE]
         if not chunk:
             continue
         result = client.query(
-            f"SELECT source_fingerprint, source_occurrence FROM {table} "
-            "WHERE source_fingerprint IN {fps:Array(String)}",
+            f"SELECT source_fingerprint, source_occurrence, "
+            f"any(payload_sha256), uniqExact(payload_sha256) FROM {table} "
+            "WHERE source_fingerprint IN {fps:Array(String)} "
+            "GROUP BY source_fingerprint, source_occurrence",
             parameters={"fps": chunk},
         )
-        found.update((str(fp), int(occ)) for fp, occ in result.result_rows)
+        for fingerprint, occurrence, payload_hash, versions in result.result_rows:
+            if int(versions) != 1:
+                raise RuntimeError("target contains conflicting source occurrence evidence")
+            found[(str(fingerprint), int(occurrence))] = str(payload_hash)
     return found
 
 
@@ -204,9 +209,14 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
         fp_index = 7 if runtime else 5
         occ_index = 8 if runtime else 6
         identity = (str(record[fp_index]), int(record[occ_index]))
-        if identity not in existing:
+        hash_index = 9 if runtime else 7
+        expected_hash = str(record[hash_index])
+        if identity in existing:
+            if existing[identity] != expected_hash:
+                raise RuntimeError("target source occurrence payload hash mismatch")
+        else:
             pending.append(record)
-            existing.add(identity)
+            existing[identity] = expected_hash
     for start in range(0, len(pending), CHUNK_SIZE):
         client.insert(target, pending[start:start + CHUNK_SIZE], column_names=columns)
 
@@ -294,7 +304,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="create/import into v2 tables; never alters legacy tables")
     parser.add_argument("--scope-map", type=Path, help="JSON object mapping source_fingerprint to explicit account_scope")
-    parser.add_argument("--manifest-out", type=Path, help="write exact legacy-row attribution manifest")
+    parser.add_argument("--manifest-out", type=Path, default=Path("scoped-state-attribution-manifest.json"), help="write exact legacy-row attribution manifest")
     args = parser.parse_args()
     mapping = json.loads(args.scope_map.read_text(encoding="utf-8")) if args.scope_map else {}
     if not isinstance(mapping, dict):
