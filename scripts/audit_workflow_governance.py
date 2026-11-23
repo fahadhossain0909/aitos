@@ -73,10 +73,18 @@ def audit(path: Path) -> dict:
             if match:
                 job_indices.append((index, match.group(1)))
         for position, (index, job_name) in enumerate(job_indices):
-            block_end = job_indices[position + 1][0] if position + 1 < len(job_indices) else len(lines)
+            block_end = (
+                job_indices[position + 1][0]
+                if position + 1 < len(job_indices)
+                else len(lines)
+            )
             job_lines = lines[index + 1 : block_end]
             permission_line = next(
-                (offset for offset, item in enumerate(job_lines) if re.match(r"^    permissions:\s*$", item)),
+                (
+                    offset
+                    for offset, item in enumerate(job_lines)
+                    if re.match(r"^    permissions:\s*$", item)
+                ),
                 None,
             )
             if permission_line is None:
