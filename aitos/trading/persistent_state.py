@@ -270,8 +270,22 @@ class DurableTradingStateStore:
             raise ValueError("income retry identity and non-negative time are required")
         await self._client().insert(
             "exchange_income_sync_retry",
-            [[account, retry_id, int(event_time_ms), "pending", datetime.now(timezone.utc)]],
-            column_names=["account", "retry_id", "event_time_ms", "state", "updated_at"],
+            [
+                [
+                    account,
+                    retry_id,
+                    int(event_time_ms),
+                    "pending",
+                    datetime.now(timezone.utc),
+                ]
+            ],
+            column_names=[
+                "account",
+                "retry_id",
+                "event_time_ms",
+                "state",
+                "updated_at",
+            ],
         )
 
     async def resolve_income_retry(
