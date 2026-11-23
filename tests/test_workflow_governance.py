@@ -19,9 +19,9 @@ def test_ci_test_environment_uses_disposable_credentials_not_repository_secrets(
     test_env = source.split("      - name: Create .env file for tests", 1)[1].split(
         "      - name: Run unit and integration tests", 1
     )[0]
-    compose_setup = source.split("      - name: Prepare safe CI environment", 1)[1].split(
-        "      - name: Validate Docker Compose configuration", 1
-    )[0]
+    compose_setup = source.split("      - name: Prepare safe CI environment", 1)[
+        1
+    ].split("      - name: Validate Docker Compose configuration", 1)[0]
 
     assert "ci-only-not-a-secret" in test_env
     assert "secrets." not in test_env
