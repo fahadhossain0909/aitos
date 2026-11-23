@@ -53,15 +53,21 @@ deployment, database migration, testnet order, or live trading activation.
 ### Phase 3 — Financial authority and execution recovery
 
 The current active lifecycle still uses multiple stores and the revision journal
-prototype remains unwired. AUD-20261106-46/47/48 remain OPEN. AUD-20261106-49 has
+prototype remains unwired. AUD-20261106-46/47/48 remain OPEN. The active
+`ExecutionIntentStore` now writes immutable, transaction-ordered transition evidence
+for order intents, protection handovers and child-fill watermarks using SQLite
+triggers in the same transaction as each state mutation. This is a migration bridge
+and forensic audit stream—not yet the canonical financial ledger, not a CAS/fenced
+multi-writer OMS, and not a replacement for the trade/equity/fee/funding stores. AUD-20261106-49 has
 a code-level remediation in this branch (monotonic high-water cursor plus a
 separate durable unresolved-income retry table); exact-head CI and real ClickHouse
 restart/retry verification are still pending:
 
 - replacement-merge conflict loss needs an active append-only financial authority
   and a non-destructive legacy reconciliation/import plan;
-- causal revision and writer fencing must be wired into the active writer topology,
-  not merely proven in an isolated SQLite prototype;
+- causal revision and writer fencing must be wired into the active writer topology;
+  the new transition sequence provides transaction order for evidence only and does
+  not yet prevent stale writers or replace active state projections;
 - trade identity must be consistently scoped through runtime, ledger, income and
   recovery readers before multi-account/shared-data use;
 - AUD-49: `load_income_cursor` now reads `maxOrNull(cursor_time_ms)` and unresolved
@@ -95,6 +101,9 @@ introduced as if it solved this requirement.
 - A 48-file GitHub Actions inventory and consolidation policy are now in
   `docs/WORKFLOW_REGISTRY.md`; per-workflow trigger/permission/secret/destructive
   review and any safe archive/migration are still pending.
+- A static workflow governance audit tool and per-file report are being added; the
+  48-workflow inventory is not considered a completed human security review until
+  each finding is adjudicated and safe consolidation is reviewed.
 - Real Compose runtime inspection is NOT MEASURED by source/CI policy alone.
 - Production/staging deployment, persistence/restart acceptance, authenticated
   testnet account verification, venue POST-to-ACK fault injection, independent
