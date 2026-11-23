@@ -51,6 +51,26 @@ deployment, database migration, testnet order, or live trading activation.
 ## Explicitly open — not claimed as fixed
 
 ### Phase 3 — Financial authority and execution recovery
+### Account-scope recovery hardening
+
+- Live runtime state is now bound to the durable execution-intent scope; paper state
+  uses the explicit `AITOS_PAPER_ACCOUNT_SCOPE` value (default
+  `paper:default`). New runtime and closed-ledger payloads retain this scope.
+- Open/closed recovery refuses mixed or unexpected account scopes rather than
+  loading several accounts into a lifecycle keyed only by trade ID.
+- Closed/open anti-join, terminal-history reads, performance reads and runtime
+  deletion are scoped to the active store. The close-recovery comparison uses
+  `(account_scope, trade_id)`, so a closed trade in another scope cannot suppress
+  an open position.
+- This is a fail-closed code safeguard, not a physical schema migration. Existing
+  unscoped records require an explicit, reviewed account-attribution/import plan
+  before switching a runtime to a non-empty scope.
+- The legacy ClickHouse `ReplacingMergeTree` still uses `ORDER BY trade_id`.
+  Embedded counterexample coverage confirms that a background/final merge can
+  collapse distinct same-ID trades across scopes even though the reader query is
+  scope-aware. A versioned scope-keyed table, lossless import, verification and
+  controlled cutover are still required; this remains an open Phase 3 blocker.
+
 
 The current active lifecycle still uses multiple stores and the revision journal
 prototype remains unwired. AUD-20261106-46/47/48 remain OPEN. The active
