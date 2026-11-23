@@ -1560,9 +1560,19 @@ class TradeLifecycle(AITOSModule):
                 trade.symbol, trade.sl_order_id
             )
             if status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
-                # Remember the exchange-filled order but retain its ID until
-                # close succeeds, so a failed cancellation of another order
-                # cannot lose the reconciliation signal.
+                # Conditional algo stops may have produced a child order with
+                # a partial fill. Never route that evidence through the generic
+                # market-close path: it could reduce the remaining exposure a
+                # second time. The authenticated child-fill reconciler owns
+                # cumulative quantity/quote application and durable watermarking.
+                if trade.sl_order_id.startswith("algo:"):
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        trade.sl_order_id,
+                        "triggered protective algo requires authenticated child-fill reconciliation",
+                    )
+                # Legacy resting orders retain their existing reconciliation
+                # path; keep the filled identity until the close is durable.
                 filled_ids = set(
                     getattr(trade, "_aitos_filled_resting_order_ids", set())
                 )
