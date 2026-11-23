@@ -39,8 +39,6 @@ def test_successful_three_store_push_dispatches_full_repository_ci():
     ) in source
     assert "/actions/workflows/ci.yml/dispatches" in source
 
-
-
 def test_write_capable_recovery_workflow_excludes_pull_request_code():
     source = WORKFLOW.read_text(encoding="utf-8")
 
