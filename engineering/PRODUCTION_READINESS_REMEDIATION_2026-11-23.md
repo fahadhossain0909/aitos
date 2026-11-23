@@ -181,3 +181,18 @@ or deployment command is executed by this remediation.
   scope as a group. If those indistinguishable rows may belong to different
   accounts, no mapping is safe: obtain stronger backup/source evidence and do not
   apply this importer to those rows.
+
+
+### Three-store fault matrix — PR-safe CI wiring added
+
+- Added `.github/workflows/three-store-recovery-ci.yml`, a separate
+  pull-request workflow with only `contents: read`. It starts a disposable real
+  ClickHouse service, uses the real SQLite execution journal and the production
+  Binance executor's signed HTTP/HMAC path against a deterministic local venue
+  protocol fixture, then runs the crash/restart and ambiguous child-evidence matrix.
+- It uses no Binance credentials and submits no external venue order. The existing
+  write-capable/manual integration workflow remains separate and is not invoked by
+  this PR. The new workflow's first exact-head run is pending.
+- A successful run proves the isolated three-store adapter/restart contract only;
+  it does not certify Binance's matching engine, authenticated demo-testnet writes,
+  Render/Railway persistence or host/power-loss behavior.
