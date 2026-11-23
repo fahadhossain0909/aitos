@@ -21,7 +21,8 @@ snapshots, not current operational instructions unless explicitly adopted below.
 - [Execution recovery](EXECUTION_RECOVERY.md) — durable intent, protective orders and restart behavior.
 - [Root-cause register](../engineering/ROOT_CAUSE_REGISTER.md) — findings, evidence and open/closed status.
 - [System audit 2026-11-20](../engineering/SYSTEM_AUDIT_2026-11-20.md) — baseline audit and acceptance gates.
-- [Production-readiness remediation 2026-11-23](../engineering/PRODUCTION_READINESS_REMEDIATION_2026-11-23.md) — current remediation branch status and remaining gates.
+- [Production-readiness remediation 2026-11-23](../engineering/PRODUCTION_READINESS_REMEDIATION_2026-11-23.md)
+- [GitHub Actions workflow registry](WORKFLOW_REGISTRY.md) — workflow inventory and safe consolidation policy. — current remediation branch status and remaining gates.
 
 ## Market and research domains
 
