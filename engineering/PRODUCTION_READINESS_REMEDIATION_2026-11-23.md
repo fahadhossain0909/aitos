@@ -165,7 +165,7 @@ or deployment command is executed by this remediation.
   `python scripts/migrate_scoped_clickhouse_state.py --manifest-out scoped-state-manifest.json`
   then create and review a `fingerprint -> account_scope` JSON mapping for every
   unscoped row, followed by
-  `python scripts/migrate_scoped_clickhouse_state.py --scope-map reviewed-scope-map.json --apply`.
+  `python scripts/migrate_scoped_clickhouse_state.py --scope-map reviewed-scope-map.json --apply --confirm-writers-stopped --confirm-backup-retained`.
 - **Not executed in this code change.** No ClickHouse host was contacted, no
   data was copied, and no runtime reader/writer was switched. Existing source
   versions already discarded by historical ReplacingMergeTree merges cannot be
