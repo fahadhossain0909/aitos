@@ -137,3 +137,37 @@ introduced as if it solved this requirement.
 Revert this branch's commits. The branch does not mutate persistent runtime data.
 For deployment, the previous commit-tagged image remains addressable; no rollback
 or deployment command is executed by this remediation.
+
+
+### Scoped ClickHouse v2 staging migrator — code added, not executed
+
+- `scripts/migrate_scoped_clickhouse_state.py` creates separate
+  `trade_runtime_state_v2` and `paper_closed_trade_ledger_v2` append-only
+  MergeTree tables keyed by `(account_scope, trade_id, updated_at,
+  source_fingerprint, source_occurrence)`. The old ReplacingMergeTree tables
+  are never altered or dropped by this tool.
+- The importer fingerprints the exact source table, trade ID, millisecond
+  timestamp and raw payload. It retains the byte-for-byte legacy payload beside
+  the scoped payload, and assigns an occurrence ordinal so identical physical
+  source rows are not collapsed during staging.
+- Rows with an existing payload scope retain it. An unscoped row requires an
+  explicit JSON mapping from its exact source fingerprint to an account scope;
+  the tool emits a manifest for attribution review and performs no writes when
+  attribution is incomplete. Conflicting attribution, malformed JSON, identity
+  mismatch, nonterminal closed rows, conflicting target evidence, or incomplete
+  target counts fail closed.
+- Reads are bounded to 250,000 rows / 512 MiB per source query. Larger datasets
+  stop before writes and require a separately implemented partitioned migration
+  path. Import is resumable by source fingerprint + occurrence and verifies
+  exact row counts and payload hashes. Concurrent migration processes are not
+  supported; run only one operator-controlled migrator at a time.
+- Example review flow (run only in a controlled maintenance environment):
+  `python scripts/migrate_scoped_clickhouse_state.py --manifest-out scoped-state-manifest.json`
+  then create and review a `fingerprint -> account_scope` JSON mapping for every
+  unscoped row, followed by
+  `python scripts/migrate_scoped_clickhouse_state.py --scope-map reviewed-scope-map.json --apply`.
+- **Not executed in this code change.** No ClickHouse host was contacted, no
+  data was copied, and no runtime reader/writer was switched. Existing source
+  versions already discarded by historical ReplacingMergeTree merges cannot be
+  reconstructed by any importer; independent backup/reconciliation evidence is
+  required. V2 staging verification is not cutover acceptance.
