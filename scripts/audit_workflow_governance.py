@@ -29,24 +29,77 @@ WRITE_RE = re.compile(
 )
 
 
+def _indented_block(lines: list[str], start: int, indent: int) -> list[str]:
+    """Return a YAML-like block until the next non-empty line at same/lower indent."""
+    block = []
+    for line in lines[start + 1 :]:
+        if line.strip() and not line.lstrip().startswith("#"):
+            current_indent = len(line) - len(line.lstrip(" "))
+            if current_indent <= indent:
+                break
+        block.append(line)
+    return block
+
+
 def audit(path: Path) -> dict:
     source = path.read_text(encoding="utf-8")
-    permission_match = re.search(
-        r"^permissions:\s*\n((?:^[ \t]+[^\n]+\n)+)", source, re.MULTILINE
-    )
-    permissions = (
-        [
+    lines = source.splitlines()
+
+    workflow_permissions = None
+    jobs_start = None
+    for index, line in enumerate(lines):
+        if line == "permissions:":
+            workflow_permissions = _indented_block(lines, index, 0)
+        if line == "jobs:":
+            jobs_start = index
+
+    workflow_permission_values = []
+    if workflow_permissions is not None:
+        workflow_permission_values = [
             line.strip()
-            for line in permission_match.group(1).splitlines()
-            if line.strip()
+            for line in workflow_permissions
+            if re.match(r"^\\s+[A-Za-z0-9_-]+:\\s*(?:read|write|none)\\s*$", line)
         ]
-        if permission_match
-        else ["implicit/default — verify repository/org policy"]
-    )
+
+    job_permissions = {}
+    jobs_without_permissions = []
+    if jobs_start is not None:
+        job_indices = []
+        for index in range(jobs_start + 1, len(lines)):
+            line = lines[index]
+            if line and not line.startswith(" "):
+                break
+            match = re.match(r"^  ([A-Za-z0-9_-]+):\\s*(?:#.*)?$", line)
+            if match:
+                job_indices.append((index, match.group(1)))
+        for position, (index, job_name) in enumerate(job_indices):
+            block_end = job_indices[position + 1][0] if position + 1 < len(job_indices) else len(lines)
+            job_lines = lines[index + 1 : block_end]
+            permission_line = next(
+                (offset for offset, item in enumerate(job_lines) if re.match(r"^    permissions:\\s*$", item)),
+                None,
+            )
+            if permission_line is None:
+                jobs_without_permissions.append(job_name)
+                continue
+            permission_block = []
+            for item in job_lines[permission_line + 1 :]:
+                if item.strip() and len(item) - len(item.lstrip(" ")) <= 4:
+                    break
+                permission_block.append(item)
+            job_permissions[job_name] = [
+                item.strip()
+                for item in permission_block
+                if re.match(r"^\\s{6,}[A-Za-z0-9_-]+:\\s*(?:read|write|none)\\s*$", item)
+            ]
+
+    permissions = workflow_permission_values or [
+        "workflow-level permissions absent; jobs inherit repository defaults unless overridden"
+    ]
     uses = sorted(set(USES_RE.findall(source)))
     secrets = sorted(set(SECRET_RE.findall(source)))
     trigger_match = re.search(
-        r"^on:\s*\n((?:^[ \t].*\n|^[ \t]*\n)+)", source, re.MULTILINE
+        r"^on:\\s*\\n((?:^[ \\t].*\\n|^[ \\t]*\\n)+)", source, re.MULTILINE
     )
     triggers = (
         [
@@ -58,15 +111,17 @@ def audit(path: Path) -> dict:
         else []
     )
     findings = []
-    if "implicit/default — verify repository/org policy" in permissions:
+    if workflow_permissions is None and jobs_without_permissions:
         findings.append("permissions_not_explicit")
+    if jobs_without_permissions:
+        findings.append("jobs_inherit_workflow_or_repository_permissions")
     if WRITE_RE.search(source):
         findings.append("write_permission_requires_justification")
     if UNTRUSTED_RE.search(source):
         findings.append("untrusted_event_expression_in_workflow_source")
     if RISK_RE.search(source):
         findings.append("destructive_or_high_impact_command_review")
-    if secrets and not re.search(r"^\s*environment:\s*", source, re.MULTILINE):
+    if secrets and not re.search(r"^\\s*environment:\\s*", source, re.MULTILINE):
         findings.append("secrets_without_detected_environment_protection")
     unpinned = [ref for ref in uses if not re.search(r"@[0-9a-f]{40}$", ref)]
     if unpinned:
@@ -77,12 +132,13 @@ def audit(path: Path) -> dict:
         "workflow": path.name,
         "triggers": triggers,
         "permissions": permissions,
+        "job_permissions": job_permissions,
+        "jobs_without_explicit_permissions": jobs_without_permissions,
         "secrets": secrets,
         "actions": uses,
         "unpinned_actions": unpinned,
         "findings": findings,
     }
-
 
 def render_markdown(reports: list[dict]) -> str:
     lines = [
