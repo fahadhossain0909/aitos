@@ -158,7 +158,7 @@ async def test_counterexample_submillisecond_updates_collapse_to_one_version(eng
         await store(engine).load_open_trades()
 
 
-async def test_counterexample_table_key_cannot_separate_reused_ids_across_accounts(
+async def test_account_scope_separates_reused_trade_ids_across_accounts(
     engine,
 ):
     for account, symbol, stamp in [
@@ -167,11 +167,12 @@ async def test_counterexample_table_key_cannot_separate_reused_ids_across_accoun
     ]:
         item = payload(stamp, symbol=symbol)
         item["account_scope"] = (
-            account  # Existing reader/key do not enforce this field.
+            account
         )
         insert(engine, "trade_runtime_state", item, stamp)
     restored = await store(engine).load_open_trades()
-    assert len(restored) == 1 and restored[0].symbol == "ETHUSDT"
+    assert len(restored) == 2
+    assert {trade.symbol for trade in restored} == {"BTCUSDT", "ETHUSDT"}
 
 
 async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engine):
