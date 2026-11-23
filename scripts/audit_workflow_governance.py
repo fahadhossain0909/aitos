@@ -54,7 +54,7 @@ def audit(path: Path) -> dict:
             for line in trigger_match.group(1).splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         ][:20]
-        if trigger_match else []
+        if trigger_match\n        else []
     )
     findings = []
     if "implicit/default — verify repository/org policy" in permissions:
