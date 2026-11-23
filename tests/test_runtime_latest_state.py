@@ -32,6 +32,17 @@ async def test_latest_state_is_selected_before_filtering_open_state():
     assert "paper_closed_trade_ledger" in sql
 
 
+async def test_mixed_or_unexpected_account_scope_blocks_recovery():
+    value, _ = store(
+        [
+            ("account-a", "trade-a", json.dumps(dict(trade_id="trade-a")), 1),
+            ("account-b", "trade-b", json.dumps(dict(trade_id="trade-b")), 1),
+        ]
+    )
+    with pytest.raises(RuntimeError, match="account scope mismatch or mixed scopes"):
+        await value.load_open_trades()
+
+
 async def test_valid_latest_open_record_is_restored():
     value, _ = store([("t", json.dumps(dict(trade_id="t")), 1)])
     trade = SimpleNamespace(state=TradeLifecycleState.POSITION_OPENED)
