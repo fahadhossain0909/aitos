@@ -192,7 +192,8 @@ or deployment command is executed by this remediation.
   protocol fixture, then runs the crash/restart and ambiguous child-evidence matrix.
 - It uses no Binance credentials and submits no external venue order. The existing
   write-capable/manual integration workflow remains separate and is not invoked by
-  this PR. The new workflow's first exact-head run is pending.
+  this PR. Exact-head run on `acdc4e148517a820841722cf68dfb7936bbf54da` PASSed,
+  including the real ClickHouse + SQLite crash matrix and ambiguity regressions.
 - A successful run proves the isolated three-store adapter/restart contract only;
   it does not certify Binance's matching engine, authenticated demo-testnet writes,
   Render/Railway persistence or host/power-loss behavior.
