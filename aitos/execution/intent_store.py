@@ -92,6 +92,102 @@ class ExecutionIntentStore:
                     PRIMARY KEY(scope, algo_id, child_order_id)
                 )"""
             )
+            # Append-only transactional evidence for every execution-state mutation.
+            # SQLite's INTEGER PRIMARY KEY sequence is the causal ordering; timestamps
+            # are informational only and are never used for ordering or conflict wins.
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS execution_transition_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope TEXT NOT NULL,
+                    aggregate_type TEXT NOT NULL,
+                    aggregate_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    before_json TEXT,
+                    after_json TEXT NOT NULL,
+                    recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_execution_transition_scope_seq "
+                "ON execution_transition_events(scope, sequence)"
+            )
+            trigger_sql = (
+                """CREATE TRIGGER IF NOT EXISTS execution_intent_insert_event
+                AFTER INSERT ON execution_intents BEGIN
+                  INSERT INTO execution_transition_events
+                    (scope,aggregate_type,aggregate_id,event_type,before_json,after_json)
+                  VALUES (NEW.scope,'execution_intent',NEW.client_id,'INTENT_CREATED',NULL,
+                    json_object('symbol',NEW.symbol,'request_json',NEW.request_json,
+                      'state',NEW.state,'result_json',NEW.result_json,'trade_id',NEW.trade_id));
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS execution_intent_update_event
+                AFTER UPDATE ON execution_intents BEGIN
+                  INSERT INTO execution_transition_events
+                    (scope,aggregate_type,aggregate_id,event_type,before_json,after_json)
+                  VALUES (NEW.scope,'execution_intent',NEW.client_id,'INTENT_STATE_CHANGED',
+                    json_object('symbol',OLD.symbol,'request_json',OLD.request_json,
+                      'state',OLD.state,'result_json',OLD.result_json,'trade_id',OLD.trade_id),
+                    json_object('symbol',NEW.symbol,'request_json',NEW.request_json,
+                      'state',NEW.state,'result_json',NEW.result_json,'trade_id',NEW.trade_id));
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS protection_handover_insert_event
+                AFTER INSERT ON protection_handovers BEGIN
+                  INSERT INTO execution_transition_events
+                    (scope,aggregate_type,aggregate_id,event_type,before_json,after_json)
+                  VALUES (NEW.scope,'protection_handover',NEW.handover_id,'HANDOVER_CREATED',NULL,
+                    json_object('trade_id',NEW.trade_id,'symbol',NEW.symbol,
+                      'old_order_id',NEW.old_order_id,'new_client_id',NEW.new_client_id,
+                      'new_order_id',NEW.new_order_id,'state',NEW.state,
+                      'blocked_reason',NEW.blocked_reason,'order_type',NEW.order_type));
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS protection_handover_update_event
+                AFTER UPDATE ON protection_handovers BEGIN
+                  INSERT INTO execution_transition_events
+                    (scope,aggregate_type,aggregate_id,event_type,before_json,after_json)
+                  VALUES (NEW.scope,'protection_handover',NEW.handover_id,'HANDOVER_STATE_CHANGED',
+                    json_object('trade_id',OLD.trade_id,'symbol',OLD.symbol,
+                      'old_order_id',OLD.old_order_id,'new_client_id',OLD.new_client_id,
+                      'new_order_id',OLD.new_order_id,'state',OLD.state,
+                      'blocked_reason',OLD.blocked_reason,'order_type',OLD.order_type),
+                    json_object('trade_id',NEW.trade_id,'symbol',NEW.symbol,
+                      'old_order_id',NEW.old_order_id,'new_client_id',NEW.new_client_id,
+                      'new_order_id',NEW.new_order_id,'state',NEW.state,
+                      'blocked_reason',NEW.blocked_reason,'order_type',NEW.order_type));
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS protection_child_insert_event
+                AFTER INSERT ON protection_child_fills BEGIN
+                  INSERT INTO execution_transition_events
+                    (scope,aggregate_type,aggregate_id,event_type,before_json,after_json)
+                  VALUES (NEW.scope,'protection_child_fill',
+                    NEW.algo_id || ':' || NEW.child_order_id,'CHILD_FILL_WATERMARK_CREATED',NULL,
+                    json_object('trade_id',NEW.trade_id,'symbol',NEW.symbol,
+                      'cumulative_quantity',NEW.cumulative_quantity,
+                      'cumulative_quote',NEW.cumulative_quote,'status',NEW.status));
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS protection_child_update_event
+                AFTER UPDATE ON protection_child_fills BEGIN
+                  INSERT INTO execution_transition_events
+                    (scope,aggregate_type,aggregate_id,event_type,before_json,after_json)
+                  VALUES (NEW.scope,'protection_child_fill',
+                    NEW.algo_id || ':' || NEW.child_order_id,'CHILD_FILL_WATERMARK_ADVANCED',
+                    json_object('trade_id',OLD.trade_id,'symbol',OLD.symbol,
+                      'cumulative_quantity',OLD.cumulative_quantity,
+                      'cumulative_quote',OLD.cumulative_quote,'status',OLD.status),
+                    json_object('trade_id',NEW.trade_id,'symbol',NEW.symbol,
+                      'cumulative_quantity',NEW.cumulative_quantity,
+                      'cumulative_quote',NEW.cumulative_quote,'status',NEW.status));
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS execution_transition_no_update
+                BEFORE UPDATE ON execution_transition_events BEGIN
+                  SELECT RAISE(ABORT,'execution transition journal is append-only');
+                END""",
+                """CREATE TRIGGER IF NOT EXISTS execution_transition_no_delete
+                BEFORE DELETE ON execution_transition_events BEGIN
+                  SELECT RAISE(ABORT,'execution transition journal is append-only');
+                END""",
+            )
+            for statement in trigger_sql:
+                conn.execute(statement)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -600,6 +696,27 @@ class ExecutionIntentStore:
             )
         row, request = matches[0]
         return {**row, "request": request}
+
+    def read_transition_events(
+        self, *, after_sequence: int = 0, limit: int = 500
+    ) -> list[dict]:
+        """Read immutable transaction-order evidence for this exact account scope.
+
+        Sequence is the only ordering cursor. recorded_at is display metadata;
+        it must never be used as a causal version or as a conflict-resolution key.
+        """
+        if type(after_sequence) is not int or after_sequence < 0:
+            raise ValueError("non-negative transition sequence required")
+        if type(limit) is not int or not 1 <= limit <= 5000:
+            raise ValueError("bounded transition page size required")
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT sequence,scope,aggregate_type,aggregate_id,event_type,"
+                "before_json,after_json,recorded_at FROM execution_transition_events "
+                "WHERE scope=? AND sequence>? ORDER BY sequence LIMIT ?",
+                (self.scope, after_sequence, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def assert_ready(self) -> None:
         rows = self.unresolved()
