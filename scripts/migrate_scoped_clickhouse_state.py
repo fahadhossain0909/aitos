@@ -3,6 +3,7 @@
 This tool stages legacy rows into scope-keyed append-only v2 tables. It never
 mutates or drops legacy tables and deliberately does not switch runtime readers.
 """
+
 from __future__ import annotations
 
 import argparse
