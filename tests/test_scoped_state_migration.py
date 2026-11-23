@@ -142,3 +142,102 @@ def test_scope_mapping_is_bound_to_exact_source_fingerprint():
             scope_map={fp_a: "paper:a"},
             occurrence=0,
         )
+
+
+
+class FakeClickHouse:
+    def __init__(self):
+        self.rows = {}
+
+    def insert(self, table, rows, column_names):
+        self.rows.setdefault(table, []).extend(tuple(row) for row in rows)
+
+    def query(self, sql, parameters=None):
+        from types import SimpleNamespace
+
+        table = "trade_runtime_state_v2" if "trade_runtime_state_v2" in sql else "paper_closed_trade_ledger_v2"
+        rows = self.rows.get(table, [])
+        fingerprints = set((parameters or {}).get("fps", []))
+        selected = [row for row in rows if row[-3] in fingerprints]
+        if "any(payload_sha256)" in sql:
+            grouped = {}
+            for row in selected:
+                grouped.setdefault((row[-3], row[-2]), set()).add(row[-1])
+            result = [
+                (fingerprint, occurrence, next(iter(hashes)), len(hashes))
+                for (fingerprint, occurrence), hashes in grouped.items()
+            ]
+        elif "HAVING count()" in sql:
+            counts = {}
+            for row in selected:
+                key = (row[-3], row[-2])
+                counts[key] = counts.get(key, 0) + 1
+            result = [(sum(count != 1 for count in counts.values()),)]
+        else:
+            result = [(len(selected),)]
+        return SimpleNamespace(result_rows=result)
+
+
+def test_scoped_import_preserves_duplicate_source_occurrences_and_is_resumable():
+    from scripts.migrate_scoped_clickhouse_state import (
+        RUNTIME_TARGET,
+        _insert_table,
+    )
+
+    row = runtime_row()
+    fingerprint = source_fingerprint(RUNTIME_SOURCE, row[0], row[3], row[4])
+    client = FakeClickHouse()
+
+    first = _insert_table(
+        client,
+        RUNTIME_SOURCE,
+        RUNTIME_TARGET,
+        [row, row],
+        {fingerprint: "paper:account-a"},
+        runtime=True,
+    )
+    assert first == 2
+    assert len(client.rows[RUNTIME_TARGET]) == 2
+    assert [record[8] for record in client.rows[RUNTIME_TARGET]] == [0, 1]
+
+    second = _insert_table(
+        client,
+        RUNTIME_SOURCE,
+        RUNTIME_TARGET,
+        [row, row],
+        {fingerprint: "paper:account-a"},
+        runtime=True,
+    )
+    assert second == 2
+    assert len(client.rows[RUNTIME_TARGET]) == 2
+
+
+def test_scoped_import_rejects_a_preexisting_payload_hash_mismatch():
+    from scripts.migrate_scoped_clickhouse_state import (
+        RUNTIME_TARGET,
+        _insert_table,
+        prepare_record,
+    )
+
+    row = runtime_row()
+    fingerprint = source_fingerprint(RUNTIME_SOURCE, row[0], row[3], row[4])
+    _, record = prepare_record(
+        RUNTIME_SOURCE,
+        row,
+        scope_map={fingerprint: "paper:account-a"},
+        occurrence=0,
+    )
+    corrupted = list(record)
+    corrupted[-1] = "0" * 64
+    client = FakeClickHouse()
+    client.rows[RUNTIME_TARGET] = [tuple(corrupted)]
+
+    with pytest.raises(RuntimeError, match="payload hash mismatch"):
+        _insert_table(
+            client,
+            RUNTIME_SOURCE,
+            RUNTIME_TARGET,
+            [row],
+            {fingerprint: "paper:account-a"},
+            runtime=True,
+        )
