@@ -89,9 +89,14 @@ def test_runtime_identity_mismatch_is_rejected():
     row[3] = json.dumps(payload)
 
     with pytest.raises(ValueError, match="symbol does not match"):
-        prepare_record(RUNTIME_SOURCE, tuple(row), scope_map={
-            source_fingerprint(RUNTIME_SOURCE, row[0], row[3], row[4]): "paper:a"
-        }, occurrence=0)
+        prepare_record(
+            RUNTIME_SOURCE,
+            tuple(row),
+            scope_map={
+                source_fingerprint(RUNTIME_SOURCE, row[0], row[3], row[4]): "paper:a"
+            },
+            occurrence=0,
+        )
 
 
 def test_closed_ledger_only_accepts_terminal_records():
