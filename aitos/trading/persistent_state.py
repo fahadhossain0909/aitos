@@ -133,19 +133,20 @@ SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
 """
 
 CLOSED_RECOVERY_QUERY = """
-SELECT trade_id, latest_payload, payload_versions
-FROM (
-    SELECT trade_id, any(payload_json) AS latest_payload,
-           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
+       trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS payload_versions
+FROM paper_closed_trade_ledger
+WHERE (
+    JSONExtractString(payload_json, 'account_scope'), trade_id, updated_at
+) IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'),
+           trade_id, max(updated_at)
     FROM paper_closed_trade_ledger
-    WHERE (trade_id, updated_at) IN (
-        SELECT trade_id, max(updated_at)
-        FROM paper_closed_trade_ledger
-        GROUP BY trade_id
-    )
-    GROUP BY trade_id
+    GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
 )
-ORDER BY trade_id
+GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+ORDER BY account_scope, trade_id
 """
 
 
@@ -200,8 +201,11 @@ _install_ingestion_registry()
 class DurableTradingStateStore:
     """Small ClickHouse-backed state store used by live trading recovery."""
 
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any, *, account_scope: str = "") -> None:
+        if type(account_scope) is not str or len(account_scope) > 256 or "\x00" in account_scope:
+            raise ValueError("bounded account scope required")
         self._repository = repository
+        self.account_scope = account_scope
 
     async def initialize(self) -> None:
         if self._repository is None or self._repository._client is None:
@@ -503,6 +507,10 @@ class DurableTradingStateStore:
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
         payload = trade.to_dict()
+        if trade.account_scope and trade.account_scope != self.account_scope:
+            raise ValueError("trade account scope does not match state-store scope")
+        payload["account_scope"] = self.account_scope
+        trade.account_scope = self.account_scope
         try:
             await client.insert(
                 "trade_runtime_state",
@@ -562,7 +570,8 @@ class DurableTradingStateStore:
             # to the empty scope and can only match other missing-scope rows.
             result = await client.query(
                 """
-                SELECT trade_id, any(payload_json) AS latest_payload,
+                SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
+                       trade_id, any(payload_json) AS latest_payload,
                        uniqExact(payload_json) AS latest_payload_versions
                 FROM trade_runtime_state
                 WHERE (
@@ -592,13 +601,21 @@ class DurableTradingStateStore:
             logger.exception("failed to load open trades from runtime state")
             raise
         trades: list[Trade] = []
+        observed_scopes = {str(row[0]) for row in result.result_rows if len(row) == 4}
+        if len(observed_scopes) > 1 or (
+            observed_scopes and observed_scopes != {self.account_scope}
+        ):
+            raise RuntimeError(
+                "runtime recovery blocked: account scope mismatch or mixed scopes"
+            )
         for row in result.result_rows:
             try:
-                if len(row) != 3 or row[2] != 1:
+                if len(row) != 4 or row[3] != 1:
                     raise ValueError("ambiguous latest runtime payload")
-                payload = json.loads(row[1])
-                if payload.get("trade_id") != row[0]:
+                payload = json.loads(row[2])
+                if payload.get("trade_id") != row[1]:
                     raise ValueError("runtime payload identity mismatch")
+                payload["account_scope"] = str(row[0])
                 trade = _trade_from_dict(payload)
                 if trade.state in {
                     TradeLifecycleState.POSITION_OPENED,
@@ -620,9 +637,11 @@ class DurableTradingStateStore:
         if trade.state != TradeLifecycleState.POSITION_CLOSED:
             raise ValueError("only closed trades can be archived")
         client = self._client()
-        _closed_payload(
-            (trade.trade_id, json.dumps(trade.to_dict(), allow_nan=False), 1)
-        )
+        if trade.account_scope and trade.account_scope != self.account_scope:
+            raise ValueError("trade account scope does not match state-store scope")
+        trade.account_scope = self.account_scope
+        payload_json = json.dumps(trade.to_dict(), sort_keys=True, default=str, allow_nan=False)
+        _closed_payload((trade.trade_id, payload_json, 1))
         await client.insert(
             "paper_closed_trade_ledger",
             [
@@ -693,9 +712,21 @@ class DurableTradingStateStore:
         """Restore complete realized evidence or fail; never silently lose PnL."""
         result = await self._client().query(CLOSED_RECOVERY_QUERY)
         try:
-            return [
-                _trade_from_dict(_closed_payload(row)) for row in result.result_rows
-            ]
+            observed_scopes = {str(row[0]) for row in result.result_rows if len(row) == 4}
+            if len(observed_scopes) > 1 or (
+                observed_scopes and observed_scopes != {self.account_scope}
+            ):
+                raise RuntimeError(
+                    "closed-ledger recovery blocked: account scope mismatch or mixed scopes"
+                )
+            trades = []
+            for row in result.result_rows:
+                if len(row) != 4:
+                    raise ValueError("invalid scoped closed-ledger row")
+                payload = _closed_payload(row[1:])
+                payload["account_scope"] = str(row[0])
+                trades.append(_trade_from_dict(payload))
+            return trades
         except Exception as exc:
             raise RuntimeError(
                 "closed-ledger recovery requires valid unambiguous terminal records"
@@ -903,13 +934,13 @@ class TradeStatePersistence:
         """
         load_closed = getattr(self._store, "load_closed_trades", None)
         closed_trades = await load_closed() if callable(load_closed) else []
-        closed_ids = {trade.trade_id for trade in closed_trades}
+        closed_ids = {(trade.account_scope, trade.trade_id) for trade in closed_trades}
         trades = await self._store.load_open_trades()
         restored_open_count = 0
         for trade in trades:
             # A close archive is authoritative if a crash occurred between
             # archiving the close and deleting the stale open-state row.
-            if trade.trade_id not in closed_ids:
+            if (trade.account_scope, trade.trade_id) not in closed_ids:
                 self._lifecycle._open_trades[trade.trade_id] = trade
                 restored_open_count += 1
         if closed_trades and hasattr(self._lifecycle, "_closed_trades"):
