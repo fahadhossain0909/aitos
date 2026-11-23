@@ -69,6 +69,15 @@ class FakeSettings:
 
 
 @pytest.mark.asyncio
+async def test_prepare_live_executor_blocks_direct_mainnet_construction():
+    settings = FakeSettings()
+    settings.binance.testnet = False
+    with pytest.raises(SystemExit) as exc_info:
+        await prepare_live_executor(settings, ["BTCUSDT"])
+    assert exc_info.value.code == 1
+
+
+@pytest.mark.asyncio
 async def test_prepare_live_executor_exits_without_credentials():
     settings = FakeSettings()
     settings.binance.futures_testnet_api_key = ""
