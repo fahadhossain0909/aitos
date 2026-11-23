@@ -488,14 +488,16 @@ async def test_income_retry_write_failure_prevents_cursor_advance():
     )
     row_time = int(datetime.now(timezone.utc).timestamp() * 1000) - 10
     exchange = FakeExchange(
-        [{
-            "incomeType": "FUNDING_FEE",
-            "income": "-0.03",
-            "tranId": 9902,
-            "asset": "USDT",
-            "symbol": "BTCUSDT",
-            "time": row_time,
-        }]
+        [
+            {
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.03",
+                "tranId": 9902,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": row_time,
+            }
+        ]
     )
     service, _, store = make_service(
         exchange, lifecycle, store=RetryWriteFailStore(cursor=500_000)
