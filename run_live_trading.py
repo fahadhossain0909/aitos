@@ -482,7 +482,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 stop_event.wait(),
                 timeout=get_settings().tuning.scanner.refresh_interval_seconds,
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             pass
 
 
