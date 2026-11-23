@@ -216,7 +216,7 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
     conflicts = client.query(
         f"SELECT count() FROM (SELECT source_fingerprint, source_occurrence "
         f"FROM {target} WHERE source_fingerprint IN {{fps:Array(String)}} "
-        "GROUP BY source_fingerprint, source_occurrence HAVING uniqExact(payload_sha256) != 1)",
+        "GROUP BY source_fingerprint, source_occurrence HAVING count() != 1 OR uniqExact(payload_sha256) != 1)",
         parameters={"fps": fingerprints},
     ).result_rows[0][0] if fingerprints else 0
     if int(conflicts):
