@@ -25,6 +25,8 @@ env:
 
 jobs:
   publish-image:
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -39,6 +41,7 @@ jobs:
       - id: repo
         run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Build immutable staging image
+        id: build
         uses: docker/build-push-action@v7.3.0
         with:
           context: .
@@ -95,12 +98,13 @@ jobs:
           BINANCE_TESTNET: ${{ secrets.BINANCE_TESTNET || 'true' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          AITOS_RUNTIME_IMAGE: ghcr.io/fahadhossain0909/aitos@${{ needs.publish-image.outputs.digest }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_staging_key
           command_timeout: 20m
-          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN
+          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,AITOS_RUNTIME_IMAGE
           script: |
             set -Eeuo pipefail
             : "${AITOS_DATA_ROOT:=/mnt/aitos-staging-data}"
@@ -189,6 +193,7 @@ jobs:
             COMPOSE_PROJECT_NAME=aitos-staging
             AITOS_IMAGE=$IMAGE
             AITOS_IMAGE_TAG=staging-sha-${COMMIT}
+            AITOS_RUNTIME_IMAGE=$AITOS_RUNTIME_IMAGE
             DATABASE_URL=$DATABASE_URL
             SENTRY_DSN=$SENTRY_DSN
             ENVEOF
@@ -202,7 +207,8 @@ jobs:
             ! grep -q '^COMPOSE_PROJECT_NAME=aitos$' .env
 
             echo '=== STAGING DOCKER DEPLOYMENT ==='
-            docker compose config >/dev/null
+            docker compose config --format json > /tmp/aitos-staging-compose.json
+            AITOS_REQUIRE_DIGEST_IMAGES=true python3 scripts/validate_compose_policy.py /tmp/aitos-staging-compose.json
             docker compose pull
             docker compose down --remove-orphans --timeout 30 || true
             docker compose up -d --remove-orphans --force-recreate
