@@ -54,6 +54,18 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+CREATE_EXCHANGE_INCOME_RETRY = """
+CREATE TABLE IF NOT EXISTS exchange_income_sync_retry (
+    account LowCardinality(String),
+    retry_id String,
+    event_time_ms UInt64,
+    state LowCardinality(String),
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (account, retry_id)
+"""
+
+
 CREATE_ORDER_EXECUTION_LEDGER = """
 CREATE TABLE IF NOT EXISTS order_execution_ledger (
     client_order_id String,
@@ -202,6 +214,7 @@ class DurableTradingStateStore:
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
             await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
             await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
+            await self._repository._client.command(CREATE_EXCHANGE_INCOME_RETRY)
             await self._repository._client.command(CREATE_ORDER_EXECUTION_LEDGER)
             logger.info("durable trading state tables ensured")
         except Exception:
@@ -212,7 +225,7 @@ class DurableTradingStateStore:
         client = self._client()
         result = await client.query(
             """
-            SELECT argMax(cursor_time_ms, updated_at)
+            SELECT max(cursor_time_ms)
             FROM exchange_income_sync_cursor
             WHERE account = {account:String}
             """,
@@ -232,6 +245,42 @@ class DurableTradingStateStore:
             "exchange_income_sync_cursor",
             [[account, int(cursor_time_ms), datetime.now(timezone.utc)]],
             column_names=["account", "cursor_time_ms", "updated_at"],
+        )
+
+    async def load_income_retry_floor(self, account: str = "binance_usdm") -> int | None:
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT min(event_time_ms)
+            FROM exchange_income_sync_retry FINAL
+            WHERE account = {account:String} AND state = 'pending'
+            """,
+            parameters={"account": account},
+        )
+        if not result.result_rows or result.result_rows[0][0] is None:
+            return None
+        return int(result.result_rows[0][0])
+
+    async def record_income_retry(
+        self, retry_id: str, event_time_ms: int, account: str = "binance_usdm"
+    ) -> None:
+        if not retry_id or event_time_ms < 0:
+            raise ValueError("income retry identity and non-negative time are required")
+        await self._client().insert(
+            "exchange_income_sync_retry",
+            [[account, retry_id, int(event_time_ms), "pending", datetime.now(timezone.utc)]],
+            column_names=["account", "retry_id", "event_time_ms", "state", "updated_at"],
+        )
+
+    async def resolve_income_retry(
+        self, retry_id: str, account: str = "binance_usdm"
+    ) -> None:
+        if not retry_id:
+            raise ValueError("income retry identity is required")
+        await self._client().insert(
+            "exchange_income_sync_retry",
+            [[account, retry_id, 0, "resolved", datetime.now(timezone.utc)]],
+            column_names=["account", "retry_id", "event_time_ms", "state", "updated_at"],
         )
 
     async def save_order_intent(
