@@ -132,9 +132,10 @@ async def test_snapshot_source_uses_fixed_bound_sql_and_checks_extra_row():
         query=AsyncMock(return_value=SimpleNamespace(result_rows=[]))
     )
     store._client = lambda: client
+    store.account_scope = ""
     assert await store.query_closed_snapshot(limit=10) == dict(rows=[], truncated=False)
     client.query.assert_awaited_once_with(
-        CLOSED_HISTORY_QUERY, parameters={"symbol": "", "limit": 11, "offset": 0}
+        CLOSED_HISTORY_QUERY, parameters={"symbol": "", "limit": 11, "offset": 0, "account_scope": ""}
     )
     with pytest.raises(ValueError):
         await store.query_closed_snapshot(limit=True)
