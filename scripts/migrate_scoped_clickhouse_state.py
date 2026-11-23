@@ -22,10 +22,14 @@ CHUNK_SIZE = 500
 
 
 def _ddl(table: str, *, runtime: bool) -> str:
-    extra = """
+    extra = (
+        """
     symbol LowCardinality(String),
     state LowCardinality(String),
-""" if runtime else ""
+"""
+        if runtime
+        else ""
+    )
     return f"""
 CREATE TABLE IF NOT EXISTS {table} (
     account_scope String,
@@ -62,7 +66,9 @@ def source_fingerprint(
 
 def _scope(value: Any) -> str:
     if type(value) is not str or not value or len(value) > 256 or "\x00" in value:
-        raise ValueError("each imported record requires an explicit valid account scope")
+        raise ValueError(
+            "each imported record requires an explicit valid account scope"
+        )
     return value
 
 
@@ -103,20 +109,48 @@ def prepare_record(
 
     payload["account_scope"] = account_scope
     canonical_payload = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-        allow_nan=False, default=str,
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+        default=str,
     )
     payload_hash = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
     common = (
-        account_scope, str(trade_id), _timestamp(updated_at), fingerprint,
-        int(occurrence), canonical_payload, raw_payload, payload_hash,
+        account_scope,
+        str(trade_id),
+        _timestamp(updated_at),
+        fingerprint,
+        int(occurrence),
+        canonical_payload,
+        raw_payload,
+        payload_hash,
     )
     if table == RUNTIME_SOURCE:
-        record = (common[0], common[1], str(symbol), str(state), common[5],
-                  common[6], common[2], common[3], common[4], common[7])
+        record = (
+            common[0],
+            common[1],
+            str(symbol),
+            str(state),
+            common[5],
+            common[6],
+            common[2],
+            common[3],
+            common[4],
+            common[7],
+        )
         return fingerprint, record
-    record = (common[0], common[1], common[5], common[6], common[2],
-              common[3], common[4], common[7])
+    record = (
+        common[0],
+        common[1],
+        common[5],
+        common[6],
+        common[2],
+        common[3],
+        common[4],
+        common[7],
+    )
     return fingerprint, record
 
 
@@ -147,17 +181,26 @@ def _manifest(sources: dict[str, list[tuple[Any, ...]]]) -> list[dict[str, Any]]
                 symbol = state = ""
             fingerprint = source_fingerprint(table, str(trade_id), str(raw), stamp)
             payload = json.loads(str(raw))
-            item = items.setdefault(fingerprint, {
-                "source_table": table,
-                "source_fingerprint": fingerprint,
-                "trade_id": str(trade_id),
-                "updated_at": _timestamp(stamp).isoformat(),
-                "symbol": str(symbol),
-                "state": str(state),
-                "payload_sha256": hashlib.sha256(str(raw).encode("utf-8")).hexdigest(),
-                "embedded_account_scope": payload.get("account_scope") if isinstance(payload, dict) else None,
-                "occurrences": 0,
-            })
+            item = items.setdefault(
+                fingerprint,
+                {
+                    "source_table": table,
+                    "source_fingerprint": fingerprint,
+                    "trade_id": str(trade_id),
+                    "updated_at": _timestamp(stamp).isoformat(),
+                    "symbol": str(symbol),
+                    "state": str(state),
+                    "payload_sha256": hashlib.sha256(
+                        str(raw).encode("utf-8")
+                    ).hexdigest(),
+                    "embedded_account_scope": (
+                        payload.get("account_scope")
+                        if isinstance(payload, dict)
+                        else None
+                    ),
+                    "occurrences": 0,
+                },
+            )
             item["occurrences"] += 1
     return [items[key] for key in sorted(items)]
 
@@ -167,7 +210,7 @@ def _target_existing(
 ) -> dict[tuple[str, int], str]:
     found: dict[tuple[str, int], str] = {}
     for start in range(0, len(fingerprints), CHUNK_SIZE):
-        chunk = fingerprints[start:start + CHUNK_SIZE]
+        chunk = fingerprints[start : start + CHUNK_SIZE]
         if not chunk:
             continue
         result = client.query(
@@ -186,8 +229,15 @@ def _target_existing(
     return found
 
 
-def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, ...]],
-                  scope_map: dict[str, str], *, runtime: bool) -> int:
+def _insert_table(
+    client: Any,
+    source: str,
+    target: str,
+    rows: list[tuple[Any, ...]],
+    scope_map: dict[str, str],
+    *,
+    runtime: bool,
+) -> int:
     occurrences: Counter[str] = Counter()
     prepared: list[tuple[Any, ...]] = []
     for row in rows:
@@ -205,12 +255,29 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
     fingerprints = sorted(occurrences)
     existing = _target_existing(client, target, fingerprints)
     columns = (
-        ["account_scope", "trade_id", "symbol", "state", "payload_json",
-         "legacy_payload_json", "updated_at", "source_fingerprint",
-         "source_occurrence", "payload_sha256"]
-        if runtime else
-        ["account_scope", "trade_id", "payload_json", "legacy_payload_json",
-         "updated_at", "source_fingerprint", "source_occurrence", "payload_sha256"]
+        [
+            "account_scope",
+            "trade_id",
+            "symbol",
+            "state",
+            "payload_json",
+            "legacy_payload_json",
+            "updated_at",
+            "source_fingerprint",
+            "source_occurrence",
+            "payload_sha256",
+        ]
+        if runtime
+        else [
+            "account_scope",
+            "trade_id",
+            "payload_json",
+            "legacy_payload_json",
+            "updated_at",
+            "source_fingerprint",
+            "source_occurrence",
+            "payload_sha256",
+        ]
     )
     pending = []
     for record in prepared:
@@ -226,7 +293,7 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
             pending.append(record)
             existing[identity] = expected_hash
     for start in range(0, len(pending), CHUNK_SIZE):
-        client.insert(target, pending[start:start + CHUNK_SIZE], column_names=columns)
+        client.insert(target, pending[start : start + CHUNK_SIZE], column_names=columns)
 
     expected = sum(occurrences.values())
     verified = (
@@ -282,7 +349,8 @@ def run(
         if manifest_out is not None:
             manifest_out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         missing = [
-            item["source_fingerprint"] for item in manifest
+            item["source_fingerprint"]
+            for item in manifest
             if not item["embedded_account_scope"]
             and item["source_fingerprint"] not in scope_map
         ]
@@ -310,12 +378,20 @@ def run(
         client.command(_ddl(RUNTIME_TARGET, runtime=True))
         client.command(_ddl(CLOSED_TARGET, runtime=False))
         runtime_count = _insert_table(
-            client, RUNTIME_SOURCE, RUNTIME_TARGET, sources[RUNTIME_SOURCE],
-            scope_map, runtime=True,
+            client,
+            RUNTIME_SOURCE,
+            RUNTIME_TARGET,
+            sources[RUNTIME_SOURCE],
+            scope_map,
+            runtime=True,
         )
         closed_count = _insert_table(
-            client, CLOSED_SOURCE, CLOSED_TARGET, sources[CLOSED_SOURCE],
-            scope_map, runtime=False,
+            client,
+            CLOSED_SOURCE,
+            CLOSED_TARGET,
+            sources[CLOSED_SOURCE],
+            scope_map,
+            runtime=False,
         )
         return {
             "mode": "staged-and-verified",
@@ -347,7 +423,9 @@ def main() -> int:
         help="write exact legacy-row attribution manifest",
     )
     args = parser.parse_args()
-    mapping = json.loads(args.scope_map.read_text(encoding="utf-8")) if args.scope_map else {}
+    mapping = (
+        json.loads(args.scope_map.read_text(encoding="utf-8")) if args.scope_map else {}
+    )
     if not isinstance(mapping, dict):
         parser.error("--scope-map must contain a JSON object")
     result = run(apply=args.apply, scope_map=mapping, manifest_out=args.manifest_out)
