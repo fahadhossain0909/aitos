@@ -1306,6 +1306,24 @@ async def recover_triggered_protection_child_fills(
                 for value in tp_ids
                 if isinstance(value, str) and value.startswith("algo:")
             )
+        pending_ids = trade.agent_consensus.get(
+            "_pending_stop_cancellations", []
+        )
+        if not isinstance(pending_ids, list):
+            blocked.append(
+                {
+                    "trade_id": str(trade.trade_id),
+                    "order_id": "pending-protection",
+                    "reason": "pending protective identity collection is malformed",
+                }
+            )
+            pending_ids = []
+        owned_ids.extend(
+            value
+            for value in pending_ids
+            if isinstance(value, str) and value.startswith("algo:")
+        )
+        pending_ids = set(pending_ids)
         for order_id in dict.fromkeys(owned_ids):
             row = by_order_id.get(order_id)
             if row is None:
@@ -1355,10 +1373,22 @@ async def recover_triggered_protection_child_fills(
                 or request.get("owner_trade_id") != str(trade.trade_id)
                 or request.get("symbol") != trade.symbol
                 or request.get("order_type")
-                != (
-                    "STOP_MARKET"
-                    if order_id == getattr(trade, "sl_order_id", None)
-                    else "TAKE_PROFIT_MARKET"
+                not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}
+                or not (
+                    (
+                        request.get("order_type") == "STOP_MARKET"
+                        and (
+                            order_id == stop_id
+                            or order_id in pending_ids
+                        )
+                    )
+                    or (
+                        request.get("order_type") == "TAKE_PROFIT_MARKET"
+                        and (
+                            order_id in tp_ids
+                            or order_id in pending_ids
+                        )
+                    )
                 )
             ):
                 blocked.append(
