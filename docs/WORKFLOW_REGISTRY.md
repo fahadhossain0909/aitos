@@ -65,9 +65,20 @@ consolidation. The registry intentionally does not merge or disable workflows.
 5. Archive superseded workflows only after inbound references and historical
    evidence are preserved. Do not delete a workflow based on filename alone.
 
+## Static audit tooling
+
+`scripts/audit_workflow_governance.py` now scans every YAML workflow and emits a
+per-file JSON/Markdown report. The main CI format job publishes this report as the
+`workflow-governance-audit` artifact. It flags implicit permissions, write scopes,
+untrusted event expressions, secret/environment patterns, unpinned actions and
+high-impact shell commands. These are heuristic flags: they require manual
+adjudication and do not prove YAML semantics or effective GitHub policy.
+
 ## Next inventory pass
 
 For each file, record exact `on:` triggers, top-level/job-level permissions,
 environment names, secret references, destructive shell commands, concurrency
 group, called workflows and required-check usage. The directory count and
-classification above are verified; that per-file security review is still pending.
+classification above are verified; the automated per-file static scan is now wired
+into CI, while human adjudication, effective permissions/environment checks and
+safe consolidation decisions remain pending.
