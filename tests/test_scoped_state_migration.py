@@ -155,7 +155,11 @@ class FakeClickHouse:
     def query(self, sql, parameters=None):
         from types import SimpleNamespace
 
-        table = "trade_runtime_state_v2" if "trade_runtime_state_v2" in sql else "paper_closed_trade_ledger_v2"
+        table = (
+            "trade_runtime_state_v2"
+            if "trade_runtime_state_v2" in sql
+            else "paper_closed_trade_ledger_v2"
+        )
         rows = self.rows.get(table, [])
         fingerprints = set((parameters or {}).get("fps", []))
         selected = [row for row in rows if row[-3] in fingerprints]
