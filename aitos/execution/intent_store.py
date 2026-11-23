@@ -11,6 +11,7 @@ import json
 import math
 import re
 import sqlite3
+from decimal import Decimal, InvalidOperation
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -50,6 +51,45 @@ class ExecutionIntentStore:
                     state TEXT NOT NULL, result_json TEXT, trade_id TEXT,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(scope, client_id)
+                )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS protection_handovers (
+                    scope TEXT NOT NULL,
+                    handover_id TEXT NOT NULL,
+                    trade_id TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    old_order_id TEXT NOT NULL,
+                    new_client_id TEXT NOT NULL,
+                    new_order_id TEXT,
+                    state TEXT NOT NULL,
+                    blocked_reason TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(scope, handover_id),
+                    UNIQUE(scope, new_client_id)
+                )"""
+            )
+            handover_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(protection_handovers)")
+            }
+            if "order_type" not in handover_columns:
+                conn.execute(
+                    "ALTER TABLE protection_handovers ADD COLUMN order_type TEXT "
+                    "NOT NULL DEFAULT 'STOP_MARKET'"
+                )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS protection_child_fills (
+                    scope TEXT NOT NULL,
+                    algo_id TEXT NOT NULL,
+                    child_order_id TEXT NOT NULL,
+                    trade_id TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    cumulative_quantity TEXT NOT NULL,
+                    cumulative_quote TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(scope, algo_id, child_order_id)
                 )"""
             )
 
@@ -193,6 +233,264 @@ class ExecutionIntentStore:
                     "protection preclaim changed before durable acceptance"
                 )
 
+    def begin_protection_handover(
+        self,
+        *,
+        handover_id: str,
+        trade_id: str,
+        symbol: str,
+        old_order_id: str,
+        new_client_id: str,
+        order_type: str = "STOP_MARKET",
+    ) -> dict:
+        """Durably claim a replacement before its venue submission.
+
+        Replays are accepted only when every identity matches. A pending or
+        blocked handover for the same trade prevents a second replacement.
+        """
+        values = (handover_id, trade_id, symbol, old_order_id, new_client_id)
+        if order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+            raise ValueError("unsupported protective handover order type")
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("complete protective handover identity is required")
+        if old_order_id == new_client_id:
+            raise ValueError("old and new protective identities must differ")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", handover_id):
+            raise ValueError("invalid protective handover identity")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", new_client_id):
+            raise ValueError("invalid replacement client identity")
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT * FROM protection_handovers WHERE scope=? AND handover_id=?",
+                (self.scope, handover_id),
+            ).fetchone()
+            if existing is not None:
+                row = dict(existing)
+                expected = {
+                    "trade_id": trade_id,
+                    "symbol": symbol,
+                    "old_order_id": old_order_id,
+                    "new_client_id": new_client_id,
+                    "order_type": order_type,
+                }
+                if any(row[key] != value for key, value in expected.items()):
+                    raise ValueError(
+                        "protective handover ID reused for different identity"
+                    )
+                return row
+            active = conn.execute(
+                "SELECT handover_id FROM protection_handovers WHERE scope=? "
+                "AND trade_id=? AND state NOT IN ('APPLIED') LIMIT 1",
+                (self.scope, trade_id),
+            ).fetchone()
+            if active is not None:
+                raise ExecutionRecoveryRequired(
+                    symbol,
+                    str(active["handover_id"]),
+                    "another protective handover requires reconciliation",
+                )
+            conn.execute(
+                "INSERT INTO protection_handovers(scope,handover_id,trade_id,symbol,"
+                "old_order_id,new_client_id,order_type,state) "
+                "VALUES (?,?,?,?,?,?,?,'PREPARED')",
+                (
+                    self.scope,
+                    handover_id,
+                    trade_id,
+                    symbol,
+                    old_order_id,
+                    new_client_id,
+                    order_type,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM protection_handovers WHERE scope=? AND handover_id=?",
+                (self.scope, handover_id),
+            ).fetchone()
+            return dict(row)
+
+    def record_handover_new_order(self, handover_id: str, new_order_id: str) -> None:
+        if not re.fullmatch(r"algo:[1-9][0-9]{0,29}", str(new_order_id or "")):
+            raise ValueError("valid replacement algo order ID required")
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET new_order_id=?,state='NEW_ACCEPTED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('PREPARED','NEW_ACCEPTED') "
+                "AND (new_order_id IS NULL OR new_order_id=?)",
+                (new_order_id, self.scope, handover_id, new_order_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("replacement acceptance conflicts with handover state")
+
+    def mark_handover_old_cancel_requested(self, handover_id: str) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='OLD_CANCEL_REQUESTED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('NEW_ACCEPTED','OLD_CANCEL_REQUESTED') "
+                "AND new_order_id IS NOT NULL",
+                (self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("old-stop cancellation requires accepted replacement")
+
+    def mark_handover_old_cancelled(self, handover_id: str) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='OLD_CANCELLED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('OLD_CANCEL_REQUESTED','OLD_CANCELLED')",
+                (self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("old-stop cancellation was not durably requested")
+
+    def complete_protection_handover(self, handover_id: str) -> None:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='APPLIED',"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state IN ('OLD_CANCELLED','APPLIED')",
+                (self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "handover cannot complete before old stop cancellation"
+                )
+
+    def block_protection_handover(self, handover_id: str, reason: str) -> None:
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("handover quarantine reason is required")
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE protection_handovers SET state='BLOCKED',blocked_reason=?,"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND handover_id=? "
+                "AND state!='APPLIED'",
+                (reason[:500], self.scope, handover_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("handover cannot be quarantined")
+
+    def protection_handovers(self, *, trade_id: str | None = None) -> list[dict]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM protection_handovers WHERE scope=? "
+                "ORDER BY updated_at,handover_id",
+                (self.scope,),
+            ).fetchall()
+        return [
+            dict(row) for row in rows if trade_id is None or row["trade_id"] == trade_id
+        ]
+
+    def protection_child_watermark(
+        self, algo_id: str, child_order_id: str
+    ) -> dict | None:
+        """Return the last applied child cumulative watermark for this account."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM protection_child_fills WHERE scope=? AND algo_id=? "
+                "AND child_order_id=?",
+                (self.scope, str(algo_id), str(child_order_id)),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def mark_protection_child_applied(
+        self,
+        *,
+        algo_id: str,
+        child_order_id: str,
+        trade_id: str,
+        symbol: str,
+        cumulative_quantity: str,
+        cumulative_quote: str,
+        status: str,
+    ) -> dict:
+        """Advance the SQLite mirror only after the durable trade snapshot write.
+
+        The trade snapshot's per-child marker remains the replay authority across
+        a crash between the ClickHouse write and this journal acknowledgement.
+        """
+        identities = (algo_id, child_order_id, trade_id, symbol, status)
+        if any(not isinstance(value, str) or not value.strip() for value in identities):
+            raise ValueError("complete child-fill application identity is required")
+        try:
+            quantity = Decimal(str(cumulative_quantity))
+            quote = Decimal(str(cumulative_quote))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("child cumulative values must be decimals") from None
+        if (
+            not quantity.is_finite()
+            or not quote.is_finite()
+            or quantity < 0
+            or quote < 0
+        ):
+            raise ValueError("child cumulative values must be finite and non-negative")
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM protection_child_fills WHERE scope=? AND algo_id=? "
+                "AND child_order_id=?",
+                (self.scope, algo_id, child_order_id),
+            ).fetchone()
+            if row is not None:
+                current = dict(row)
+                if current["trade_id"] != trade_id or current["symbol"] != symbol:
+                    raise ValueError(
+                        "child-fill identity was reused across trade scope"
+                    )
+                previous_quantity = Decimal(current["cumulative_quantity"])
+                previous_quote = Decimal(current["cumulative_quote"])
+                if quantity < previous_quantity or quote < previous_quote:
+                    raise ValueError("child-fill cumulative watermark regressed")
+                if (quantity == previous_quantity) != (quote == previous_quote):
+                    raise ValueError("child-fill quantity/quote watermark diverged")
+                if quantity == previous_quantity:
+                    conn.execute(
+                        "UPDATE protection_child_fills SET status=?,"
+                        "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND algo_id=? "
+                        "AND child_order_id=?",
+                        (status, self.scope, algo_id, child_order_id),
+                    )
+                    current["status"] = status
+                    return current
+                conn.execute(
+                    "UPDATE protection_child_fills SET cumulative_quantity=?,"
+                    "cumulative_quote=?,status=?,updated_at=CURRENT_TIMESTAMP "
+                    "WHERE scope=? AND algo_id=? AND child_order_id=?",
+                    (
+                        str(quantity),
+                        str(quote),
+                        status,
+                        self.scope,
+                        algo_id,
+                        child_order_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO protection_child_fills(scope,algo_id,child_order_id,"
+                    "trade_id,symbol,cumulative_quantity,cumulative_quote,status) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        self.scope,
+                        algo_id,
+                        child_order_id,
+                        trade_id,
+                        symbol,
+                        str(quantity),
+                        str(quote),
+                        status,
+                    ),
+                )
+            result = conn.execute(
+                "SELECT * FROM protection_child_fills WHERE scope=? AND algo_id=? "
+                "AND child_order_id=?",
+                (self.scope, algo_id, child_order_id),
+            ).fetchone()
+            return dict(result)
+
     def mark_protection_terminal(
         self,
         order_id: str,
@@ -277,6 +575,31 @@ class ExecutionIntentStore:
                 (self.scope,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def protection_intent_for_order(self, order_id: str, trade_id: str) -> dict:
+        """Resolve one exact owner-bound protective intent by venue order ID."""
+        matches = []
+        for row in self.protection_intents():
+            result = json.loads(row.get("result_json") or "{}")
+            request = json.loads(row.get("request_json") or "{}")
+            if str(result.get("order_id") or "") == str(order_id):
+                if request.get("owner_trade_id") != str(trade_id) or row.get(
+                    "symbol"
+                ) != request.get("symbol"):
+                    raise ExecutionRecoveryRequired(
+                        str(row.get("symbol") or ""),
+                        str(order_id),
+                        "protective order ID is bound to a different owner",
+                    )
+                matches.append((row, request))
+        if len(matches) != 1:
+            raise ExecutionRecoveryRequired(
+                "",
+                str(order_id),
+                "protective order ID has missing or ambiguous durable intent",
+            )
+        row, request = matches[0]
+        return {**row, "request": request}
 
     def assert_ready(self) -> None:
         rows = self.unresolved()

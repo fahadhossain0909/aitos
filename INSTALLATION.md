@@ -1,15 +1,15 @@
 # AITOS Installation & Deployment Guide
 
-This guide documents the two supported ways to use AITOS:
+This guide documents two supported use paths:
 
-1. **Desktop Operator Console** — install the Windows or Linux desktop package on your computer and connect it to an already-running AITOS backend.
+1. **Native Desktop Operator Console** — install the Windows or Linux session-manager package and connect it to an already-running AITOS backend.
 2. **VPS Runtime Deployment** — run the AITOS trading/data services on a Linux VPS using the existing GitHub Actions + Docker Compose deployment pipeline.
 
-These are different layers, not competing installers. The desktop application is an operator interface; it does **not** install, host, or start the trading engine. The VPS method deploys the backend runtime. You can use either method independently, or install the desktop console and connect it to a VPS runtime.
+A separate **Tauri Embedded Desktop** candidate is also built for engineering evaluation; it is not currently a signed/trusted production release and is documented separately in section 1.8. These are different layers, not competing backend installers. Neither desktop application installs, hosts, or starts the trading engine. The VPS method deploys the backend runtime. You can install a desktop client and connect it to a local or remote runtime.
 
 > **Safety:** the desktop console is read-only. The standard VPS deployment starts the paper-trading runtime using public market data and simulated orders. It does not authorize live trading. Do not expose database ports or the backend health/API port directly to the public Internet.
 
-> **Credential warning for provider-hosted RDP/VPS:** do not enter an exchange API Secret on an RDP/VPS if the hosting provider's administrators are outside your trust boundary. Windows Credential Manager or Linux Secret Service does not protect a secret from a privileged administrator of that same host. The current desktop app stores only its operator password/backend bearer; it has no exchange-key entry flow. Existing live execution configuration that places `BINANCE_API_KEY` / `BINANCE_API_SECRET` in the VPS environment is visible to sufficiently privileged host administrators. Review the [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md); the separate remote signer is not yet implemented.
+> **Credential warning for provider-hosted RDP/VPS:** do not enter an exchange API Secret on an RDP/VPS if the hosting provider's administrators are outside your trust boundary. Windows Credential Manager or Linux Secret Service does not protect a secret from a privileged administrator of that same host. The native Console Session Manager stores only its operator password/backend bearer and has no exchange-key entry flow. The separate Tauri evaluation candidate includes a local Trusted Signer Settings window that can provision Binance Futures Testnet credentials into a local credential provider; this is not a production remote signer or live-dispatch capability. Use that window only on a user-controlled trusted device, never on a provider-managed RDP/VPS whose administrator is outside your trust boundary. Existing live execution configuration that places `BINANCE_API_KEY` / `BINANCE_API_SECRET` in the VPS environment is visible to sufficiently privileged host administrators. Review the [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md); production remote signing and live dispatch remain disabled and uncertified.
 
 ## Which method should I choose?
 
@@ -23,6 +23,8 @@ These are different layers, not competing installers. The desktop application is
 ---
 
 # Method 1 — Install the Desktop Operator Console
+
+For page-by-page usage, sample/runtime workspace behavior, security boundaries and troubleshooting, see the [Desktop Operator User Manual](docs/USER_MANUAL.md).
 
 ## 1.1 What the desktop app does
 
@@ -46,7 +48,7 @@ A backend must already be running and have its console endpoint enabled. The des
 | Debian-family ARM64 | `aitos-console_0.1.0_arm64.deb` | Build target when Python 3.12 and dependencies are available |
 | macOS | — | No supported installer yet |
 
-The Windows and Linux installers are native session managers, not the experimental Tauri shell. Do not assume a macOS build, signed release, updater, or one-click backend installation is available.
+The packages in the table above are the native browser-based session managers. They are **not** the Tauri Embedded Desktop shell described in `desktop/README.md`. A separate Tauri workflow builds unsigned evaluation candidates for Windows x64 (NSIS), Linux x64 (AppImage and deb), and macOS (DMG). Those candidates are not signed/trusted releases, do not provide an automatic updater or backend bootstrap, and must not be confused with the session-manager installer. See section 1.8.
 
 ## 1.3 Get the installer
 
@@ -190,6 +192,57 @@ Use an SSH tunnel rather than exposing port 8090 publicly.
 
 The SSH tunnel must remain open while using the console. Closing it interrupts remote reads. Never enter the VPS SSH password/key into the desktop app; SSH authentication belongs to your terminal/SSH agent.
 
+## 1.8 Tauri Embedded Desktop — unsigned evaluation candidate
+
+The Tauri 2 application is a separate native shell around the React operator workspace. It bundles a read-only gateway sidecar and a distinct local Trusted Signer Settings window. It is not the Windows/Linux session-manager package in sections 1.2–1.7.
+
+**Current limits:** CI artifacts are unsigned test candidates, retained for a limited period. They are not signed/trusted production releases. There is no automatic updater, one-click backend installation, production remote signer certification, or live-order activation. Credential settings must only be used on a user-controlled trusted device; do not unlock or provision exchange credentials on a provider-managed RDP/VPS if its administrator is outside your trust boundary.
+
+### Obtain a CI candidate
+
+1. Open [GitHub Actions](https://github.com/fahadhossain0909/aitos/actions).
+2. Open the latest successful **Cross-platform embedded desktop (unsigned, no trading)** run for the exact source commit you intend to test. The workflow runs for relevant pull requests, matching `main` updates, and manual dispatch.
+3. Confirm all platform jobs completed successfully and verify the source commit SHA shown by the run.
+4. Download only the matching artifact:
+   - Linux: `UNSIGNED-embedded-desktop-ubuntu-24.04-test-only`
+   - Windows: `UNSIGNED-embedded-desktop-windows-2022-test-only`
+   - macOS: `UNSIGNED-embedded-desktop-macos-14-test-only`
+5. Artifacts are temporary CI outputs (currently seven-day retention), not GitHub Releases. Do not bypass operating-system security warnings or treat an unsigned candidate as trusted software.
+
+### Build from source
+
+Prerequisites: Python 3.12, Node.js 22.12+, Rust stable, the platform's Tauri/WebView prerequisites, and the repository checkout. Build the frontend before freezing the gateway sidecar because the sidecar embeds the generated frontend assets.
+
+Linux/macOS (run from the repository root unless noted):
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r native/shared/requirements.txt
+npm --prefix desktop ci
+npm --prefix desktop test
+npm --prefix desktop run build
+TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+python native/shared/build_sidecar.py --target "$TARGET"
+npm --prefix desktop run tauri -- build
+```
+
+Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r native/shared/requirements.txt
+npm --prefix desktop ci
+npm --prefix desktop test
+npm --prefix desktop run build
+$target = (rustc -vV | Select-String '^host: ').ToString().Split(' ')[1]
+python native/shared/build_sidecar.py --target $target
+npm --prefix desktop run tauri -- build
+```
+
+The sidecar target must match the machine on which it is built; the build helper supports Windows x64, Linux x64, and macOS x64/ARM64 targets. Linux requires the WebKitGTK/Tauri build libraries; Windows requires WebView2 and the Rust/MSVC toolchain; macOS requires Xcode Command Line Tools. Follow the official Tauri platform prerequisites for the host OS. A successful local build is not a signed-release or security certification.
+
 ---
 
 # Method 2 — Deploy the AITOS Runtime on a VPS
@@ -308,8 +361,10 @@ Create or use an environment named `papertrade`. Add these secrets:
 | `AITOS_CONSOLE_TOKEN` | For desktop remote console | Strong backend bearer token, minimum 32 characters |
 | `CLICKHOUSE_USER` | Optional | Defaults to `default` |
 | `NEO4J_USER` | Optional | Defaults to `neo4j` |
-| `BINANCE_API_KEY` / `BINANCE_API_SECRET` | Optional | Not needed for public-market-data paper trading |
-| `BINANCE_TESTNET` | Optional | Defaults to `true` |
+| `BINANCE_API_KEY` / `BINANCE_API_SECRET` | Optional | Mainnet credentials only; not needed for public-market-data paper trading |
+| `BINANCE_FUTURES_TESTNET_API_KEY` / `BINANCE_FUTURES_TESTNET_API_SECRET` | Optional | Dedicated Futures demo/testnet credentials; never fall back to mainnet keys |
+| `BINANCE_TESTNET` | Optional | Defaults to `true`; retained as the compatibility environment selector |
+| `AITOS_BINANCE_FUTURES_ENVIRONMENT` | Optional | Explicit `mainnet` or `testnet` override; takes precedence over `BINANCE_TESTNET` |
 | `DATABASE_URL`, `SENTRY_DSN`, `SLACK_WEBHOOK_URL` | Optional | External integrations |
 
 Use unique strong passwords. Do not reuse staging credentials or production secrets without an explicit isolation/security decision. Never grant withdrawal permission to exchange keys.

@@ -545,3 +545,173 @@ async def test_confirmed_binance_algo_cancel_updates_protection_journal(tmp_path
     assert result["status"] == "CANCELED"
     assert journal.unresolved() == []
     assert journal.protection_intents()[0]["state"] == "TERMINAL"
+
+
+def test_protection_handover_requires_new_order_before_old_cancel(tmp_path):
+    journal = store(tmp_path)
+    prepared = journal.begin_protection_handover(
+        handover_id="replace-stop-1",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0001",
+    )
+    assert prepared["state"] == "PREPARED"
+    with pytest.raises(ValueError, match="accepted replacement"):
+        journal.mark_handover_old_cancel_requested("replace-stop-1")
+
+    journal.record_handover_new_order("replace-stop-1", "algo:200")
+    journal.mark_handover_old_cancel_requested("replace-stop-1")
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCEL_REQUESTED"
+    journal.mark_handover_old_cancelled("replace-stop-1")
+    journal.complete_protection_handover("replace-stop-1")
+    assert store(tmp_path).protection_handovers()[0]["state"] == "APPLIED"
+
+
+def test_protection_handover_restart_is_idempotent_and_identity_bound(tmp_path):
+    journal = store(tmp_path)
+    journal.begin_protection_handover(
+        handover_id="replace-stop-2",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0002",
+    )
+    journal.record_handover_new_order("replace-stop-2", "algo:201")
+    reopened = store(tmp_path)
+    row = reopened.protection_handovers()[0]
+    assert row["state"] == "NEW_ACCEPTED"
+    assert row["new_order_id"] == "algo:201"
+
+    replay = reopened.begin_protection_handover(
+        handover_id="replace-stop-2",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0002",
+    )
+    assert replay["state"] == "NEW_ACCEPTED"
+    with pytest.raises(ValueError, match="different identity"):
+        reopened.begin_protection_handover(
+            handover_id="replace-stop-2",
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:999",
+            new_client_id="aitos-rpl-0002",
+        )
+
+
+def test_second_active_handover_for_trade_is_blocked(tmp_path):
+    journal = store(tmp_path)
+    journal.begin_protection_handover(
+        handover_id="replace-stop-3",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:100",
+        new_client_id="aitos-rpl-0003",
+    )
+    with pytest.raises(ExecutionRecoveryRequired, match="another protective handover"):
+        journal.begin_protection_handover(
+            handover_id="replace-stop-4",
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:100",
+            new_client_id="aitos-rpl-0004",
+        )
+
+
+def test_existing_protection_handover_database_migrates_order_type(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy-handover.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """CREATE TABLE protection_handovers (
+                scope TEXT NOT NULL,
+                handover_id TEXT NOT NULL,
+                trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                old_order_id TEXT NOT NULL,
+                new_client_id TEXT NOT NULL,
+                new_order_id TEXT,
+                state TEXT NOT NULL,
+                blocked_reason TEXT,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(scope, handover_id),
+                UNIQUE(scope, new_client_id)
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO protection_handovers(scope,handover_id,trade_id,symbol,"
+            "old_order_id,new_client_id,state) VALUES (?,?,?,?,?,?,?)",
+            ("scope", "legacy", "trade", "BTCUSDT", "algo:1", "new-stop", "PREPARED"),
+        )
+
+    journal = ExecutionIntentStore(path, scope="scope")
+    rows = journal.protection_handovers()
+    assert rows[0]["order_type"] == "STOP_MARKET"
+    journal.begin_protection_handover(
+        handover_id="tp-new",
+        trade_id="trade-2",
+        symbol="BTCUSDT",
+        old_order_id="algo:2",
+        new_client_id="new-tp",
+        order_type="TAKE_PROFIT_MARKET",
+    )
+    assert journal.protection_handovers(trade_id="trade-2")[0]["order_type"] == (
+        "TAKE_PROFIT_MARKET"
+    )
+
+
+def test_protection_child_watermark_is_monotonic_and_identity_scoped(tmp_path):
+    journal = store(tmp_path)
+    first = journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-one",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.25",
+        cumulative_quote="22.5",
+        status="PARTIALLY_FILLED",
+    )
+    assert first["cumulative_quantity"] == "0.25"
+    replay = journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-one",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.25",
+        cumulative_quote="22.5",
+        status="CANCELED",
+    )
+    assert replay["status"] == "CANCELED"
+    advanced = journal.mark_protection_child_applied(
+        algo_id="123",
+        child_order_id="456",
+        trade_id="trade-one",
+        symbol="BTCUSDT",
+        cumulative_quantity="0.5",
+        cumulative_quote="45",
+        status="FILLED",
+    )
+    assert advanced["cumulative_quantity"] == "0.5"
+    with pytest.raises(ValueError, match="regressed"):
+        journal.mark_protection_child_applied(
+            algo_id="123",
+            child_order_id="456",
+            trade_id="trade-one",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.4",
+            cumulative_quote="36",
+            status="FILLED",
+        )
+    with pytest.raises(ValueError, match="reused across trade scope"):
+        journal.mark_protection_child_applied(
+            algo_id="123",
+            child_order_id="456",
+            trade_id="trade-two",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.5",
+            cumulative_quote="45",
+            status="FILLED",
+        )

@@ -8,6 +8,9 @@ from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.order_executor import OrderRequest, OrderResult
 from aitos.execution.protection_reconciliation import (
     audit_exchange_protection_inventory,
+    recover_accepted_initial_stop_submissions,
+    recover_protection_handovers,
+    recover_triggered_protection_child_fills,
     require_live_account_exposure_reconciled,
 )
 from aitos.models.trade import TradeSide
@@ -63,6 +66,7 @@ def inventory_row():
         "triggerPrice": "90.0",
         "algoStatus": "NEW",
         "reduceOnly": True,
+        "closePosition": False,
     }
 
 
@@ -533,3 +537,877 @@ async def test_live_account_audit_requires_local_stop_in_authenticated_inventory
         finding["status"] == "local_stop_missing_from_venue_inventory"
         for finding in report["findings"]
     )
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_accepted_initial_stop_and_applies_after_durable_trade_write(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id=None,
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append((value.trade_id, value.sl_order_id))
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert persisted == [("trade-1", "algo:123")]
+    assert trade.sl_order_id == "algo:123"
+    assert store.unresolved() == []
+    history = store.protection_intents()[0]
+    assert history["state"] == "APPLIED"
+    assert history["trade_id"] == "trade-1"
+
+
+@pytest.mark.asyncio
+async def test_restart_finishes_journal_ack_after_trade_snapshot_was_already_written(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    store.record_protection(
+        "aitos-protection-1",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-protection-1",
+        ),
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append(value.sl_order_id)
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert persisted == ["algo:123"]
+    assert store.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_restart_does_not_recover_stop_for_different_existing_protection(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:old-stop",
+        updated_at="",
+    )
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "different stop" in report["blocked"][0]["reason"]
+    assert store.unresolved()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovery_quarantines_legacy_preclaim_without_trade_owner(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "legacy.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+        )
+    )
+    executor = ReadOnlyExecutor("paper-account", [inventory_row()])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id=None,
+        updated_at="",
+    )
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "no owner_trade_id" in report["blocked"][0]["reason"]
+    assert store.unresolved()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovery_rejects_venue_stop_quantity_mismatch(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "mismatch.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-protection-1",
+            reduce_only=True,
+            owner_trade_id="trade-1",
+        )
+    )
+    mismatched = inventory_row()
+    mismatched["quantity"] = "0.5"
+    executor = ReadOnlyExecutor("paper-account", [mismatched])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id=None,
+        updated_at="",
+    )
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], AsyncMock()
+    )
+
+    assert report["recovered"] == 0
+    assert "identity mismatch" in report["blocked"][0]["reason"]
+    assert trade.sl_order_id is None
+    assert store.unresolved()[0]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_accepted_initial_take_profit_without_duplicate_order(
+    tmp_path,
+):
+    store = ExecutionIntentStore(tmp_path / "recover-tp.sqlite", scope="paper-account")
+    store.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=110.0,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id="aitos-tp-1",
+            reduce_only=True,
+            owner_trade_id="trade-tp-1",
+        )
+    )
+    venue_tp = inventory_row()
+    venue_tp.update(
+        algoId=456,
+        clientAlgoId="aitos-tp-1",
+        orderType="TAKE_PROFIT_MARKET",
+        triggerPrice="110.0",
+    )
+    executor = ReadOnlyExecutor("paper-account", [venue_tp])
+    executor.get_algo_order_by_client_id = AsyncMock(return_value=venue_tp)
+    trade = SimpleNamespace(
+        trade_id="trade-tp-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append((value.sl_order_id, list(value.tp_order_ids)))
+
+    report = await recover_accepted_initial_stop_submissions(
+        executor, store, [trade], persist
+    )
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert persisted == [("algo:123", ["algo:456"])]
+    assert trade.tp_order_ids == ["algo:456"]
+    assert store.unresolved() == []
+    assert store.protection_intents()[0]["state"] == "APPLIED"
+
+
+class HandoverExecutor(ReadOnlyExecutor):
+    def __init__(self, scope, algo, old_statuses):
+        super().__init__(scope, [])
+        self.algo = algo
+        self.get_algo_order_by_client_id = AsyncMock(return_value=algo)
+        self.get_resting_order_status = AsyncMock(side_effect=old_statuses)
+        self.cancel_resting_order = AsyncMock()
+        self.acknowledge_protection = AsyncMock()
+        self.hedge_mode = False
+
+
+def replacement_algo(client_id="aitos-rpl-0001"):
+    row = inventory_row()
+    row.update(
+        algoId=456,
+        clientAlgoId=client_id,
+        orderType="STOP_MARKET",
+        triggerPrice="95.0",
+    )
+    return row
+
+
+def begin_replacement_handover(journal, trade_id="trade-1"):
+    # A replacement is only recoverable when the old protection is itself
+    # represented by a durable, applied intent owned by the same trade.
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-old-stop",
+            reduce_only=True,
+            owner_trade_id=trade_id,
+        )
+    )
+    journal.record_protection(
+        "aitos-old-stop",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="aitos-old-stop",
+        ),
+    )
+    journal.mark_applied("aitos-old-stop", trade_id)
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=95.0,
+            order_type="STOP_MARKET",
+            client_order_id="aitos-rpl-0001",
+            reduce_only=True,
+            owner_trade_id=trade_id,
+        )
+    )
+    journal.begin_protection_handover(
+        handover_id="rpl-0001",
+        trade_id=trade_id,
+        symbol="BTCUSDT",
+        old_order_id="algo:123",
+        new_client_id="aitos-rpl-0001",
+    )
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_replacement_stop_before_cancelling_old_stop(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["NEW", "CANCELED"]
+    )
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append(
+            (
+                value.sl_order_id,
+                list(value.agent_consensus.get("_pending_stop_cancellations", [])),
+            )
+        )
+
+    report = await recover_protection_handovers(executor, journal, [trade], persist)
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert executor.cancel_resting_order.await_count == 1
+    assert persisted == [
+        ("algo:456", ["algo:123"]),
+        ("algo:456", []),
+    ]
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+    assert journal.protection_intents()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_crash_after_old_stop_was_already_cancelled(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    journal.record_handover_new_order("rpl-0001", "algo:456")
+    journal.mark_handover_old_cancel_requested("rpl-0001")
+    executor = HandoverExecutor("paper-account", replacement_algo(), ["CANCELED"])
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+
+    async def persist(_trade):
+        return None
+
+    report = await recover_protection_handovers(executor, journal, [trade], persist)
+
+    assert report["recovered"] == 1
+    executor.cancel_resting_order.assert_not_awaited()
+    assert trade.sl_order_id == "algo:456"
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_replacement_recovery_quarantines_old_stop_partial_fill(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    journal.record_handover_new_order("rpl-0001", "algo:456")
+    journal.mark_handover_old_cancel_requested("rpl-0001")
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["PARTIALLY_FILLED_TERMINAL"]
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+
+    report = await recover_protection_handovers(executor, journal, [trade], AsyncMock())
+
+    assert report["recovered"] == 0
+    assert "partial" in report["blocked"][0]["reason"]
+    executor.cancel_resting_order.assert_not_awaited()
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCEL_REQUESTED"
+
+
+@pytest.mark.asyncio
+async def test_replacement_recovery_keeps_old_stop_when_new_algo_is_missing(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor("paper-account", None, [])
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+
+    report = await recover_protection_handovers(executor, journal, [trade], AsyncMock())
+
+    assert report["recovered"] == 0
+    assert trade.sl_order_id == "algo:123"
+    executor.cancel_resting_order.assert_not_awaited()
+    assert journal.protection_handovers()[0]["state"] == "PREPARED"
+
+
+@pytest.mark.asyncio
+async def test_handover_crash_before_cancel_is_recovered_without_duplicate_post(
+    tmp_path,
+):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["NEW", "CANCELED"]
+    )
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    calls = 0
+
+    async def fail_first_persist(_trade):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("simulated ClickHouse unavailable")
+
+    first = await recover_protection_handovers(
+        executor, journal, [trade], fail_first_persist
+    )
+    assert first["recovered"] == 0
+    assert journal.protection_handovers()[0]["state"] == "NEW_ACCEPTED"
+    executor.cancel_resting_order.assert_not_awaited()
+
+    persisted = []
+
+    async def persist(_trade):
+        persisted.append(True)
+
+    second = await recover_protection_handovers(executor, journal, [trade], persist)
+    assert second["recovered"] == 1
+    assert executor.get_algo_order_by_client_id.await_count == 2
+    assert executor.cancel_resting_order.await_count == 1
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_handover_crash_after_cancel_ack_replays_without_second_cancel(tmp_path):
+    journal = ExecutionIntentStore(tmp_path / "handover.sqlite", scope="paper-account")
+    begin_replacement_handover(journal)
+    executor = HandoverExecutor(
+        "paper-account", replacement_algo(), ["NEW", "CANCELED"]
+    )
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    calls = 0
+
+    async def fail_second_persist(_trade):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated ClickHouse write failure after cancel")
+
+    first = await recover_protection_handovers(
+        executor, journal, [trade], fail_second_persist
+    )
+    assert first["recovered"] == 0
+    assert journal.protection_handovers()[0]["state"] == "OLD_CANCELLED"
+    assert executor.cancel_resting_order.await_count == 1
+
+    second = await recover_protection_handovers(executor, journal, [trade], AsyncMock())
+    assert second["recovered"] == 1
+    assert executor.cancel_resting_order.await_count == 1
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+@pytest.mark.asyncio
+async def test_restart_recovers_replacement_take_profit_without_cancelling_early(
+    tmp_path,
+):
+    journal = ExecutionIntentStore(
+        tmp_path / "handover-tp.sqlite", scope="paper-account"
+    )
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=0.5,
+            reference_price=108.0,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id="aitos-tp-old",
+            reduce_only=True,
+            owner_trade_id="trade-tp",
+        )
+    )
+    journal.record_protection(
+        "aitos-tp-old",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            108.0,
+            client_order_id="aitos-tp-old",
+        ),
+    )
+    journal.mark_applied("aitos-tp-old", "trade-tp")
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=0.5,
+            reference_price=112.0,
+            order_type="TAKE_PROFIT_MARKET",
+            client_order_id="aitos-tpr-0001",
+            reduce_only=True,
+            owner_trade_id="trade-tp",
+        )
+    )
+    journal.begin_protection_handover(
+        handover_id="tpr-0001",
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        old_order_id="algo:123",
+        new_client_id="aitos-tpr-0001",
+        order_type="TAKE_PROFIT_MARKET",
+    )
+    new_algo = replacement_algo("aitos-tpr-0001")
+    new_algo.update(
+        orderType="TAKE_PROFIT_MARKET",
+        triggerPrice="112.0",
+        quantity="0.5",
+    )
+    executor = HandoverExecutor("paper-account", new_algo, ["NEW", "CANCELED"])
+    executor.acknowledge_protection = lambda result, trade_id: journal.mark_applied(
+        result.client_order_id, trade_id
+    )
+    trade = SimpleNamespace(
+        trade_id="trade-tp",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:789",
+        tp_order_ids=["algo:123", "algo:124"],
+        agent_consensus={},
+        updated_at="",
+    )
+    persisted = []
+
+    async def persist(value):
+        persisted.append(list(value.tp_order_ids))
+
+    report = await recover_protection_handovers(executor, journal, [trade], persist)
+
+    assert report["recovered"] == 1
+    assert report["blocked"] == []
+    assert trade.sl_order_id == "algo:789"
+    assert trade.tp_order_ids == ["algo:456", "algo:124"]
+    assert persisted == [["algo:456", "algo:124"], ["algo:456", "algo:124"]]
+    assert executor.cancel_resting_order.await_count == 1
+    assert journal.protection_handovers()[0]["order_type"] == "TAKE_PROFIT_MARKET"
+    assert journal.protection_handovers()[0]["state"] == "APPLIED"
+
+
+def test_protection_handover_rejects_order_type_identity_reuse(tmp_path):
+    journal = ExecutionIntentStore(
+        tmp_path / "handover-type.sqlite", scope="paper-account"
+    )
+    journal.begin_protection_handover(
+        handover_id="same-id",
+        trade_id="trade-1",
+        symbol="BTCUSDT",
+        old_order_id="algo:123",
+        new_client_id="new-stop",
+        order_type="STOP_MARKET",
+    )
+    with pytest.raises(ValueError, match="different identity"):
+        journal.begin_protection_handover(
+            handover_id="same-id",
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:123",
+            new_client_id="new-stop",
+            order_type="TAKE_PROFIT_MARKET",
+        )
+
+
+@pytest.mark.asyncio
+async def test_triggered_child_recovery_quarantines_malformed_intent_json():
+    class MalformedJournal:
+        scope = "paper-account"
+
+        def protection_intents(self):
+            return [
+                {
+                    "client_id": "broken-protection",
+                    "trade_id": "trade-malformed",
+                    "state": "APPLIED",
+                    "request_json": "{",
+                    "result_json": "{",
+                }
+            ]
+
+    executor = ReadOnlyExecutor("paper-account", [])
+    lifecycle = SimpleNamespace(
+        get_open_trades=lambda: [
+            SimpleNamespace(
+                trade_id="trade-malformed",
+                symbol="BTCUSDT",
+                sl_order_id="algo:123",
+                tp_order_ids=[],
+            )
+        ]
+    )
+    lifecycle.apply_triggered_protection_child_fill = AsyncMock()
+
+    report = await recover_triggered_protection_child_fills(
+        executor, MalformedJournal(), lifecycle
+    )
+
+    assert report["applied"] == []
+    assert report["safe_to_resume"] is False
+    assert len(report["blocked"]) >= 1
+    assert any("JSON is malformed" in item["reason"] for item in report["blocked"])
+    executor.get_algo_order_by_client_id.assert_not_awaited()
+    lifecycle.apply_triggered_protection_child_fill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_triggered_child_recovery_blocks_duplicate_durable_algo_owners():
+    class DuplicateJournal:
+        scope = "paper-account"
+
+        def protection_intents(self):
+            request = (
+                '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
+                '"order_type":"STOP_MARKET"}'
+            )
+            result = '{"order_id":"algo:123","client_order_id":"duplicate-client"}'
+            return [
+                {
+                    "client_id": "duplicate-client",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": request,
+                    "result_json": result,
+                },
+                {
+                    "client_id": "duplicate-client-2",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": request,
+                    "result_json": result,
+                },
+            ]
+
+    executor = ReadOnlyExecutor("paper-account", [])
+    lifecycle = SimpleNamespace(
+        get_open_trades=lambda: [
+            SimpleNamespace(
+                trade_id="trade-duplicate",
+                symbol="BTCUSDT",
+                sl_order_id="algo:123",
+                tp_order_ids=[],
+            )
+        ]
+    )
+    lifecycle.apply_triggered_protection_child_fill = AsyncMock()
+
+    report = await recover_triggered_protection_child_fills(
+        executor, DuplicateJournal(), lifecycle
+    )
+
+    assert report["applied"] == []
+    assert report["safe_to_resume"] is False
+    assert any(
+        "duplicate durable protective order identity" in item["reason"]
+        for item in report["blocked"]
+    )
+    executor.get_algo_order_by_client_id.assert_not_awaited()
+    lifecycle.apply_triggered_protection_child_fill.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handover_recovery_quarantines_malformed_intent_json():
+    class MalformedHandoverJournal:
+        scope = "paper-account"
+
+        def protection_handovers(self):
+            return [
+                {
+                    "handover_id": "handover-malformed",
+                    "trade_id": "trade-malformed",
+                    "symbol": "BTCUSDT",
+                    "old_order_id": "algo:123",
+                    "new_client_id": "new-client",
+                    "order_type": "STOP_MARKET",
+                    "state": "PREPARED",
+                }
+            ]
+
+        def protection_intents(self):
+            return [
+                {
+                    "client_id": "new-client",
+                    "trade_id": "trade-malformed",
+                    "state": "SUBMITTING",
+                    "request_json": "{",
+                    "result_json": None,
+                }
+            ]
+
+    executor = HandoverExecutor("paper-account", replacement_algo("new-client"), [])
+    trade = SimpleNamespace(
+        trade_id="trade-malformed",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    report = await recover_protection_handovers(
+        executor, MalformedHandoverJournal(), [trade], AsyncMock()
+    )
+    assert report["recovered"] == 0
+    assert report["safe_to_resume"] is False
+    assert any("JSON is malformed" in item["reason"] for item in report["blocked"])
+    executor.get_algo_order_by_client_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handover_recovery_quarantines_duplicate_old_algo_owners():
+    class DuplicateHandoverJournal:
+        scope = "paper-account"
+
+        def protection_handovers(self):
+            return [
+                {
+                    "handover_id": "handover-duplicate",
+                    "trade_id": "trade-duplicate",
+                    "symbol": "BTCUSDT",
+                    "old_order_id": "algo:123",
+                    "new_client_id": "new-client",
+                    "order_type": "STOP_MARKET",
+                    "state": "PREPARED",
+                }
+            ]
+
+        def protection_intents(self):
+            old_request = (
+                '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
+                '"order_type":"STOP_MARKET","quantity":1.0}'
+            )
+            new_request = (
+                '{"owner_trade_id":"trade-duplicate","symbol":"BTCUSDT",'
+                '"order_type":"STOP_MARKET","quantity":1.0,"reduce_only":true,'
+                '"side":"LONG","reference_price":95.0}'
+            )
+            return [
+                {
+                    "client_id": "old-client-1",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": old_request,
+                    "result_json": '{"order_id":"algo:123"}',
+                },
+                {
+                    "client_id": "old-client-2",
+                    "trade_id": "trade-duplicate",
+                    "state": "APPLIED",
+                    "request_json": old_request,
+                    "result_json": '{"order_id":"algo:123"}',
+                },
+                {
+                    "client_id": "new-client",
+                    "trade_id": "trade-duplicate",
+                    "state": "SUBMITTING",
+                    "request_json": new_request,
+                    "result_json": None,
+                },
+            ]
+
+    executor = HandoverExecutor("paper-account", replacement_algo("new-client"), [])
+    trade = SimpleNamespace(
+        trade_id="trade-duplicate",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=1.0,
+        sl_order_id="algo:123",
+        tp_order_ids=[],
+        agent_consensus={},
+        updated_at="",
+    )
+    report = await recover_protection_handovers(
+        executor, DuplicateHandoverJournal(), [trade], AsyncMock()
+    )
+    assert report["recovered"] == 0
+    assert report["safe_to_resume"] is False
+    assert any(
+        "duplicate durable protective order identity" in item["reason"]
+        for item in report["blocked"]
+    )
+    executor.get_algo_order_by_client_id.assert_not_awaited()

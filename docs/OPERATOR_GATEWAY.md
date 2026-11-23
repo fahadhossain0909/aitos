@@ -151,9 +151,10 @@ into Chromium's process environment. No system package installation is required
 by this helper. Browser tests currently target Linux, not native OS certification. Headless CI
 process/sandbox flags are not a certified native-browser security profile.
 
-The new operator-quality workflow runs these checks on relevant PRs/manual
-execution, without deployment or real credentials. Its remote execution has not
-been observed in this session.
+The operator-quality workflow runs these checks on relevant PRs and manual
+execution, without deployment or real credentials. Treat each result as specific
+to its exact commit SHA. The workflow does not certify external TLS termination,
+hostile-network security or production account reconciliation.
 
 ## Limits and nonlocal deployment gate
 

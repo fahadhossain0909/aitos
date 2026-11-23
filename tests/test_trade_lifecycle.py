@@ -564,7 +564,12 @@ async def test_existing_sector_hard_cap_rejects_candidate_before_order(
     portfolio = make_portfolio(
         # 41% existing exchange-token notional is above the configured 40% absolute hard cap.
         positions=(
-            PositionExposure(symbol="BNBUSDT", notional_usd=4100.0, leverage=1.0),
+            PositionExposure(
+                symbol="BNBUSDT",
+                notional_usd=4100.0,
+                leverage=1.0,
+                risk_amount_usd=41.0,
+            ),
         ),
     )
     trade = await lifecycle.submit_opportunity(opportunity, portfolio)

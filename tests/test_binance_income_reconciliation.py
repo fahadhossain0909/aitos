@@ -30,6 +30,7 @@ class FakeStateStore:
     def __init__(self, cursor=None):
         self.cursor = cursor
         self.saved = []
+        self.persisted = []
 
     async def load_income_cursor(self, account):
         return self.cursor
@@ -43,6 +44,21 @@ class FakeLifecycle:
     def __init__(self, open_trades=None, closed_trades=None):
         self.open_trades = list(open_trades or [])
         self.closed_trades = list(closed_trades or [])
+        self.adjustments = []
+
+    async def apply_cost_adjustment(self, trade_id, *, adjustment_id, kind, amount_usd):
+        trade = next(
+            (
+                item
+                for item in (*self.open_trades, *self.closed_trades)
+                if item.trade_id == trade_id
+            ),
+            None,
+        )
+        if trade is None:
+            raise ValueError("trade not found")
+        self.adjustments.append((trade_id, adjustment_id, kind, amount_usd))
+        return trade
 
     def get_open_trades(self):
         return list(self.open_trades)
@@ -72,7 +88,13 @@ def make_trade(
 def make_service(exchange, lifecycle, bus=None, store=None):
     bus = bus or FakeEventBus()
     store = store or FakeStateStore()
-    service = BinanceIncomeReconciliationService(exchange, lifecycle, bus, store)
+
+    async def persist_trade(trade):
+        store.persisted.append(trade.trade_id)
+
+    service = BinanceIncomeReconciliationService(
+        exchange, lifecycle, bus, store, persist_trade=persist_trade
+    )
     return service, bus, store
 
 
@@ -168,6 +190,8 @@ async def test_run_once_publishes_fee_and_advances_durable_cursor():
     assert bus.events[0].payload["adjustment_id"] == "binance:income:9001"
     assert bus.events[0].payload["kind"] == "fee"
     assert bus.events[0].payload["amount_usd"] == 0.12
+    assert lifecycle.adjustments == [("position-1", "binance:income:9001", "fee", 0.12)]
+    assert store.persisted == ["position-1"]
     assert store.saved and store.cursor >= int(now.timestamp() * 1000)
     assert exchange.calls[0]["start_time_ms"] <= int(entry.timestamp() * 1000)
 
@@ -268,3 +292,117 @@ async def test_durable_store_persists_exchange_income_cursor():
     assert table == "exchange_income_sync_cursor"
     assert rows[0][0:2] == ["binance_usdm", 123999]
     assert columns == ["account", "cursor_time_ms", "updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_marks_ready_after_clean_income_pass():
+    service, _, store = make_service(FakeExchange(), FakeLifecycle())
+
+    result = await service.reconcile_startup()
+
+    assert result == {"rows": 0, "published": 0, "unattributed": 0}
+    assert service._startup_reconciled is True
+    assert service._startup_error is None
+    assert store.cursor is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_blocks_when_income_is_unattributed():
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle(
+        [
+            make_trade("position-1", entry_time=entry),
+            make_trade("position-2", entry_time=entry + timedelta(minutes=1)),
+        ]
+    )
+    row_time = int(datetime.now(timezone.utc).timestamp() * 1000) - 100
+    exchange = FakeExchange(
+        [
+            {
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.03",
+                "tranId": 9010,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": row_time,
+            }
+        ]
+    )
+    service, _, store = make_service(exchange, lifecycle)
+
+    with pytest.raises(Exception, match="remain unattributed"):
+        await service.reconcile_startup()
+
+    assert service._startup_reconciled is False
+    assert service._startup_error is not None
+    assert store.cursor == row_time - 1
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_does_not_mark_ready_on_exchange_failure():
+    class FailingExchange:
+        async def fetch_income_history(self, **kwargs):
+            raise RuntimeError("exchange unavailable")
+
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    service, _, store = make_service(
+        FailingExchange(), FakeLifecycle([make_trade("position-1", entry_time=entry)])
+    )
+
+    with pytest.raises(RuntimeError, match="exchange unavailable"):
+        await service.reconcile_startup()
+
+    assert service._startup_reconciled is False
+    assert "exchange unavailable" in service._startup_error
+    assert store.saved == []
+
+
+@pytest.mark.asyncio
+async def test_trade_write_failure_prevents_income_cursor_advancement():
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle([make_trade("position-1", entry_time=entry)])
+    row_time = int(datetime.now(timezone.utc).timestamp() * 1000) - 10
+    exchange = FakeExchange(
+        [
+            {
+                "incomeType": "COMMISSION",
+                "income": "-0.10",
+                "tranId": 9020,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": row_time,
+            }
+        ]
+    )
+    bus = FakeEventBus()
+    store = FakeStateStore()
+
+    async def failing_persist(trade):
+        raise RuntimeError("durable trade write failed")
+
+    service = BinanceIncomeReconciliationService(
+        exchange, lifecycle, bus, store, persist_trade=failing_persist
+    )
+
+    with pytest.raises(RuntimeError, match="durable trade write failed"):
+        await service.run_once()
+
+    assert store.saved == []
+    assert store.cursor is None
+    assert bus.events == []
+    assert len(lifecycle.adjustments) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_requires_durable_trade_writer():
+    exchange = FakeExchange()
+    service = BinanceIncomeReconciliationService(
+        exchange, FakeLifecycle(), FakeEventBus(), FakeStateStore()
+    )
+
+    with pytest.raises(RuntimeError, match="durable lifecycle cost-adjustment writer"):
+        await service.reconcile_startup()
+
+    assert exchange.calls == []
+    assert service._startup_reconciled is False
+    assert service._startup_error is not None

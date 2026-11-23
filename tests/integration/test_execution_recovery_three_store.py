@@ -1,0 +1,514 @@
+"""Opt-in three-store recovery drill: real ClickHouse + SQLite + Binance adapter.
+
+The fault matrix talks to a real ClickHouse server and a real SQLite journal.
+The BinanceFuturesOrderExecutor uses its real aiohttp/HMAC request path against
+a deterministic local venue protocol fixture so destructive orders are never
+sent to an exchange. A separate opt-in test performs authenticated, read-only
+Binance demo-testnet inventory checks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import hmac
+import os
+import subprocess
+import sys
+import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from urllib.parse import parse_qs
+
+from aiohttp import web
+import pytest
+import pytest_asyncio
+
+pytestmark = pytest.mark.integration
+
+
+def _clickhouse_enabled() -> bool:
+    return os.getenv("AITOS_ENABLE_THREE_STORE_FAULT_TESTS") == "1"
+
+
+@pytest_asyncio.fixture
+async def clickhouse_store():
+    if not _clickhouse_enabled():
+        pytest.skip("set AITOS_ENABLE_THREE_STORE_FAULT_TESTS=1 to opt in")
+    pytest.importorskip("clickhouse_connect")
+    import clickhouse_connect
+
+    host = os.getenv("AITOS_FAULT_CLICKHOUSE_HOST")
+    if not host:
+        pytest.skip("AITOS_FAULT_CLICKHOUSE_HOST is required")
+    port = int(os.getenv("AITOS_FAULT_CLICKHOUSE_PORT", "8123"))
+    user = os.getenv("AITOS_FAULT_CLICKHOUSE_USER", "default")
+    password = os.getenv("AITOS_FAULT_CLICKHOUSE_PASSWORD", "")
+    database = "aitos_fault_" + uuid.uuid4().hex[:12]
+    admin = await clickhouse_connect.get_async_client(
+        host=host, port=port, username=user, password=password
+    )
+    try:
+        await admin.command(f"CREATE DATABASE {database}")
+    finally:
+        await admin.close()
+    clients = []
+
+    async def open_store():
+        client = await clickhouse_connect.get_async_client(
+            host=host,
+            port=port,
+            username=user,
+            password=password,
+            database=database,
+        )
+        clients.append(client)
+        from aitos.trading.persistent_state import DurableTradingStateStore
+
+        store = DurableTradingStateStore(SimpleNamespace(_client=client))
+        await store.initialize()
+        return store
+
+    store = await open_store()
+
+    async def reopen_store():
+        # Close the old process's ClickHouse client before constructing a new
+        # client and store object, just as a cold process restart would.
+        previous = clients.pop()
+        await previous.close()
+        return await open_store()
+
+    try:
+        yield SimpleNamespace(store=store, reopen=reopen_store, database=database)
+    finally:
+        for client in clients:
+            await client.close()
+        admin = await clickhouse_connect.get_async_client(
+            host=host, port=port, username=user, password=password
+        )
+        try:
+            await admin.command(f"DROP DATABASE IF EXISTS {database}")
+        finally:
+            await admin.close()
+
+
+@pytest_asyncio.fixture
+async def venue_http():
+    """A deterministic Binance-compatible HTTP endpoint, not an exchange."""
+    secret = "integration-secret"
+    algo = {
+        "algoId": 123,
+        "actualOrderId": 456,
+        "clientAlgoId": "fault-stop-client",
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "algoType": "CONDITIONAL",
+        "orderType": "STOP_MARKET",
+        "algoStatus": "TRIGGERED",
+        "positionSide": "BOTH",
+        "reduceOnly": True,
+        "closePosition": False,
+    }
+    child = {
+        "orderId": 456,
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "positionSide": "BOTH",
+        "status": "PARTIALLY_FILLED",
+        "origQty": "1.0",
+        "executedQty": "0.25",
+        "cumQuote": "22.5",
+        "avgPrice": "90",
+    }
+    requests = []
+
+    async def handle(request):
+        assert request.method == "GET"
+        assert request.headers.get("X-MBX-APIKEY") == "integration-key"
+        raw = request.query_string
+        assert "&signature=" in raw
+        unsigned, signature = raw.rsplit("&signature=", 1)
+        expected = hmac.new(
+            secret.encode(), unsigned.encode(), hashlib.sha256
+        ).hexdigest()
+        assert hmac.compare_digest(signature, expected)
+        query = parse_qs(unsigned)
+        requests.append((request.method, request.path, query))
+        if request.path == "/fapi/v1/algoOrder":
+            return web.json_response(algo)
+        if request.path == "/fapi/v1/order":
+            return web.json_response(child)
+        return web.json_response({"code": -404, "msg": "unknown route"}, status=404)
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    try:
+        yield f"http://127.0.0.1:{port}", requests, algo, child
+    finally:
+        await runner.cleanup()
+
+
+def _trade():
+    from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
+
+    return Trade(
+        trade_id="trade-three-store",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=10.0,
+        strategy_id="fault-drill",
+        agent_consensus={},
+        explanation="isolated three-store fault drill",
+        sl_price=90.0,
+        tp_price=110.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-11-20T00:00:00+00:00",
+        sl_order_id="algo:123",
+    )
+
+
+def _seed_intent(journal):
+    from aitos.execution.order_executor import OrderRequest, OrderResult
+    from aitos.models.trade import TradeSide
+
+    journal.begin(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=1.0,
+            reference_price=90.0,
+            order_type="STOP_MARKET",
+            client_order_id="fault-stop-client",
+            reduce_only=True,
+            owner_trade_id="trade-three-store",
+        )
+    )
+    journal.record_protection(
+        "fault-stop-client",
+        OrderResult(
+            "algo:123",
+            "BTCUSDT",
+            TradeSide.LONG,
+            0.0,
+            90.0,
+            client_order_id="fault-stop-client",
+        ),
+    )
+    journal.mark_applied("fault-stop-client", "trade-three-store")
+
+
+def test_sqlite_child_watermark_survives_hard_process_exit(tmp_path):
+    from aitos.execution.intent_store import ExecutionIntentStore
+
+    journal_path = tmp_path / "hard-exit.sqlite"
+    script = """
+import os
+import sys
+from aitos.execution.intent_store import ExecutionIntentStore
+
+store = ExecutionIntentStore(sys.argv[1], scope="hard-exit-recovery")
+store.mark_protection_child_applied(
+    algo_id="algo-17",
+    child_order_id="child-29",
+    trade_id="trade-hard-exit",
+    symbol="BTCUSDT",
+    cumulative_quantity="0.375",
+    cumulative_quote="33.75",
+    status="PARTIALLY_FILLED",
+)
+os._exit(73)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(journal_path)],
+        cwd=os.getcwd(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 73, result.stderr
+
+    restarted = ExecutionIntentStore(journal_path, scope="hard-exit-recovery")
+    watermark = restarted.protection_child_watermark("algo-17", "child-29")
+    assert watermark is not None
+    assert watermark["trade_id"] == "trade-hard-exit"
+    assert watermark["cumulative_quantity"] == "0.375"
+    assert watermark["cumulative_quote"] == "33.75"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ["clickhouse_snapshot", "sqlite_watermark"])
+async def test_three_store_child_fill_recovery_survives_crash_and_restart(
+    failure_point,
+    clickhouse_store,
+    venue_http,
+    event_bus,
+    risk_engine,
+    tmp_path,
+    monkeypatch,
+):
+    from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
+    from aitos.execution.intent_store import ExecutionIntentStore
+    from aitos.execution.protection_reconciliation import (
+        recover_triggered_protection_child_fills,
+    )
+    from aitos.trading.lifecycle import TradeLifecycle
+    from aitos.trading.persistent_state import _trade_from_dict
+
+    harness = clickhouse_store
+    store = harness.store
+    journal_path = tmp_path / "three-store.sqlite"
+    journal_scope = "isolated-testnet-fault-drill"
+    journal = ExecutionIntentStore(journal_path, scope=journal_scope)
+    _seed_intent(journal)
+    await store.save_trade(_trade())
+    # Runtime snapshots use DateTime64(3); separate versions by >1 ms so the
+    # test cannot accidentally manufacture a timestamp-tie ambiguity.
+    await asyncio.sleep(0.01)
+
+    base_url, requests, _algo, _child = venue_http
+    executor = BinanceFuturesOrderExecutor(
+        "integration-key",
+        "integration-secret",
+        testnet=True,
+        intent_store=journal,
+    )
+    executor._base_url = base_url
+    await executor.connect()
+
+    async def make_lifecycle(trades, state_store):
+        lifecycle = TradeLifecycle(
+            event_bus=event_bus,
+            risk_engine=risk_engine,
+            order_executor=executor,
+            use_exchange_side_stops=True,
+        )
+        lifecycle._open_trades.update({trade.trade_id: trade for trade in trades})
+        lifecycle._execution_state_writer = state_store.save_trade
+        lifecycle._execution_position_verifier = AsyncMock()
+        return lifecycle
+
+    try:
+        first_trade = (await store.load_open_trades())[0]
+        first = await make_lifecycle([first_trade], store)
+
+        if failure_point == "clickhouse_snapshot":
+            original_save = store.save_trade
+            failed = False
+
+            async def fail_snapshot(trade):
+                nonlocal failed
+                if not failed:
+                    failed = True
+                    raise OSError("injected ClickHouse snapshot outage")
+                await original_save(trade)
+
+            first._execution_state_writer = fail_snapshot
+        else:
+            original_watermark = journal.mark_protection_child_applied
+            failed = False
+
+            def fail_watermark(**kwargs):
+                nonlocal failed
+                if not failed:
+                    failed = True
+                    raise OSError("injected SQLite watermark outage")
+                return original_watermark(**kwargs)
+
+            monkeypatch.setattr(
+                journal, "mark_protection_child_applied", fail_watermark
+            )
+
+        first_report = await recover_triggered_protection_child_fills(
+            executor, journal, first
+        )
+        assert len(first_report["blocked"]) == 1
+        assert first_report["safe_to_resume"] is False
+
+        # Model process death: discard all in-memory lifecycle objects and restore
+        # exclusively from the durable ClickHouse snapshot and SQLite journal.
+        monkeypatch.undo()
+        await asyncio.sleep(0.01)
+        store = await harness.reopen()
+        journal = ExecutionIntentStore(journal_path, scope=journal_scope)
+        restored = (await store.load_open_trades())[0]
+        restarted = await make_lifecycle([_trade_from_dict(restored.to_dict())], store)
+        second_report = await recover_triggered_protection_child_fills(
+            executor, journal, restarted
+        )
+
+        assert second_report["blocked"] == []
+        assert len(second_report["applied"]) == 1
+        recovered = restarted.get_open_trades()[0]
+        assert recovered.quantity == pytest.approx(0.75)
+        assert recovered.gross_realized_pnl_usd == pytest.approx(-2.5)
+
+        # Continue through three more cold starts. Each process reconstructs
+        # from ClickHouse; the SQLite watermark and snapshot marker must prevent
+        # another reduction or duplicate realized-PnL booking.
+        for _restart in range(3):
+            await asyncio.sleep(0.01)
+            store = await harness.reopen()
+            journal = ExecutionIntentStore(journal_path, scope=journal_scope)
+            snapshot = (await store.load_open_trades())[0]
+            cold = await make_lifecycle([_trade_from_dict(snapshot.to_dict())], store)
+            replay_report = await recover_triggered_protection_child_fills(
+                executor, journal, cold
+            )
+            assert replay_report["blocked"] == []
+            assert len(replay_report["applied"]) == 1
+            recovered = cold.get_open_trades()[0]
+            assert recovered.quantity == pytest.approx(0.75)
+            assert recovered.gross_realized_pnl_usd == pytest.approx(-2.5)
+
+        watermark = journal.protection_child_watermark("123", "456")
+        assert watermark["cumulative_quantity"] == "0.25"
+        assert watermark["cumulative_quote"] == "22.5"
+        assert any(path == "/fapi/v1/algoOrder" for _, path, _ in requests)
+        assert any(path == "/fapi/v1/order" for _, path, _ in requests)
+        assert all(method == "GET" for method, _, _ in requests)
+        assert all("signature" not in str(query) for _, _, query in requests)
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_authenticated_binance_demo_testnet_read_only_preflight():
+    if os.getenv("AITOS_ENABLE_BINANCE_TESTNET_READONLY") != "1":
+        pytest.skip("authenticated testnet preflight is opt-in")
+    key = os.getenv("BINANCE_FUTURES_TESTNET_API_KEY")
+    secret = os.getenv("BINANCE_FUTURES_TESTNET_API_SECRET")
+    if not key or not secret:
+        pytest.skip("dedicated Binance Futures demo-testnet credentials are required")
+    from aitos.execution.binance_executor import (
+        BinanceAPIError,
+        BinanceFuturesOrderExecutor,
+    )
+
+    executor = BinanceFuturesOrderExecutor(key, secret, testnet=True)
+    await executor.connect()
+    try:
+        try:
+            positions = await executor.get_position_risk()
+            algos = await executor.get_open_algo_orders()
+        except BinanceAPIError as exc:
+            # Binance may reject otherwise valid demo-testnet requests based on
+            # the hosted runner's egress location. This is an external
+            # eligibility limitation, not an AITOS regression; keep it visible
+            # as skipped rather than failing code CI or claiming verification.
+            if "restricted location" in str(exc).lower():
+                pytest.skip(
+                    "Binance demo-testnet is unavailable from this runner's "
+                    "network location; authenticated inventory was not verified"
+                )
+            raise
+        assert isinstance(positions, list)
+        assert isinstance(algos, list)
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ambiguity",
+    [
+        "foreign_client_algo_id",
+        "algo_child_link_mismatch",
+        "child_order_id_mismatch",
+        "child_symbol_mismatch",
+        "child_side_mismatch",
+        "child_original_quantity_mismatch",
+        "child_position_side_mismatch",
+        "child_executed_quantity_overflow",
+        "child_unknown_status",
+        "child_negative_cumulative_quote",
+    ],
+)
+async def test_real_venue_adapter_quarantines_ambiguous_child_evidence(
+    ambiguity,
+    clickhouse_store,
+    venue_http,
+    event_bus,
+    risk_engine,
+    tmp_path,
+):
+    from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
+    from aitos.execution.intent_store import ExecutionIntentStore
+    from aitos.execution.protection_reconciliation import (
+        recover_triggered_protection_child_fills,
+    )
+    from aitos.trading.lifecycle import TradeLifecycle
+
+    store = clickhouse_store.store
+    journal = ExecutionIntentStore(
+        tmp_path / f"ambiguous-{ambiguity}.sqlite",
+        scope=f"isolated-{ambiguity}",
+    )
+    _seed_intent(journal)
+    await store.save_trade(_trade())
+    base_url, requests, algo, child = venue_http
+    if ambiguity == "foreign_client_algo_id":
+        algo["clientAlgoId"] = "foreign-client"
+    elif ambiguity == "algo_child_link_mismatch":
+        algo["actualOrderId"] = 999
+    elif ambiguity == "child_order_id_mismatch":
+        child["orderId"] = 999
+    elif ambiguity == "child_symbol_mismatch":
+        child["symbol"] = "ETHUSDT"
+    elif ambiguity == "child_side_mismatch":
+        child["side"] = "BUY"
+    elif ambiguity == "child_original_quantity_mismatch":
+        child["origQty"] = "2.0"
+    elif ambiguity == "child_position_side_mismatch":
+        child["positionSide"] = "LONG"
+    elif ambiguity == "child_executed_quantity_overflow":
+        child["executedQty"] = "1.1"
+        child["cumQuote"] = "99.0"
+    elif ambiguity == "child_unknown_status":
+        child["status"] = "UNKNOWN"
+    elif ambiguity == "child_negative_cumulative_quote":
+        child["cumQuote"] = "-1.0"
+
+    executor = BinanceFuturesOrderExecutor(
+        "integration-key",
+        "integration-secret",
+        testnet=True,
+        intent_store=journal,
+    )
+    executor._base_url = base_url
+    await executor.connect()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    restored = (await store.load_open_trades())[0]
+    lifecycle._open_trades[restored.trade_id] = restored
+    lifecycle._execution_state_writer = AsyncMock()
+    lifecycle._execution_position_verifier = AsyncMock()
+
+    try:
+        report = await recover_triggered_protection_child_fills(
+            executor, journal, lifecycle
+        )
+        assert report["applied"] == []
+        assert len(report["blocked"]) == 1
+        assert report["safe_to_resume"] is False
+        assert restored.quantity == pytest.approx(1.0)
+        assert lifecycle._execution_state_writer.await_count == 0
+        assert journal.protection_child_watermark("123", "456") is None
+        persisted = (await store.load_open_trades())[0]
+        assert persisted.quantity == pytest.approx(1.0)
+        assert requests
+        assert all(method == "GET" for method, _, _ in requests)
+    finally:
+        await executor.close()

@@ -1,7 +1,10 @@
 name: Console quality (no deployment)
 on:
   push:
-    branches: [arena/ed127d35-aitos]
+    branches: [main, arena/ed127d35-aitos]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/console-quality.yml'
   pull_request:
     paths:
       - 'desktop/**'

@@ -36,6 +36,8 @@ class OrderRequest:
     client_order_id: str | None = None
     # Executors must fail closed if venue reduce-only semantics are unavailable.
     reduce_only: bool = False
+    # Durable ownership hint for recovering an accepted protective order after a crash.
+    owner_trade_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,11 @@ class OrderExecutor(ABC):
     def requires_exchange_execution(self) -> bool:
         """Live positions must be reduced at the venue, never by local PnL alone."""
         return False
+
+    @property
+    def intent_store(self):
+        """Durable venue intent journal, when the adapter provides one."""
+        return None
 
     def has_unresolved_orders(self, symbol: str | None = None) -> bool:
         return False
@@ -90,14 +97,28 @@ class OrderExecutor(ABC):
         return False
 
     async def place_stop_loss_order(
-        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        stop_price: float,
+        *,
+        owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support exchange-side stop orders"
         )
 
     async def place_take_profit_order(
-        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+        self,
+        symbol: str,
+        side: TradeSide,
+        quantity: float,
+        take_profit_price: float,
+        *,
+        owner_trade_id: str | None = None,
+        client_order_id: str | None = None,
     ) -> OrderResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support exchange-side take-profit orders"

@@ -1,7 +1,13 @@
 # AITOS Operator Console — local-first preview
 
-Seven-page React/TypeScript workspace: overview, portfolio, trade journal,
-research lab, observability, connections and configuration. Self-hosted fonts,
+This guide describes the **Tauri Embedded Desktop** track. The separate native
+Windows/Linux browser session-manager packages are documented in
+[`native/windows/README.md`](../native/windows/README.md) and
+[`native/linux/README.md`](../native/linux/README.md); they are not the Tauri shell.
+
+Ten-page React/TypeScript workspace: overview, portfolio, trade journal,
+research lab, observability, connections, configuration, quality/readiness,
+performance and persistence/recovery. Self-hosted fonts,
 custom SVG charts and responsive olive/ivory/lime styling; no external CDN.
 
 ## Run safely
@@ -20,12 +26,26 @@ npm ci
 npm run dev -- --port 5173
 ```
 
-Open port 5173. The initial **Sample workspace** is explicitly illustrative.
-Switch to **Runtime view**: an unattached adapter has empty financial state,
-not sample positions. API failures clear snapshots instead of retaining stale
-financial records. Polling is sequential, cancellable and bounded to 8 seconds.
-The browser uses same-origin `/console` requests, never browser localhost for a
-separate backend.
+The dev server binds to `127.0.0.1` by default. The initial **Sample
+workspace** is explicitly illustrative. Switch to **Runtime view**: an
+unattached adapter has empty financial state, not sample positions. API failures
+clear snapshots instead of retaining stale financial records. Polling is
+sequential, cancellable and bounded to 8 seconds. The browser uses same-origin
+`/console` requests, never browser localhost for a separate backend.
+
+For an isolated Codespaces/public preview only, set an explicit host and exact
+allowed hostname; never use a wildcard host allowlist or attach real financial
+data to this unauthenticated development proxy:
+
+```sh
+AITOS_VITE_HOST=0.0.0.0 \
+AITOS_VITE_ALLOWED_HOSTS=YOUR-CODESPACE-FORWARDED-HOST \
+npm run dev -- --port 5173
+```
+
+The development proxy strips browser authorization and cookies and refuses
+`AITOS_CONSOLE_TOKEN`; it is not a production gateway. Keep the workspace
+unattached and use the authenticated gateway for any approved runtime reads.
 
 ## Attach an already-approved runtime
 
@@ -37,9 +57,11 @@ Use the separately authenticated built-console gateway instead, with the backend
 token only in that gateway's server environment. See
 [`docs/OPERATOR_GATEWAY.md`](../docs/OPERATOR_GATEWAY.md).
 
-Do not use a `VITE_`-prefixed secret, commit credentials, paste passwords/API keys
-into chat, or put exchange API keys in this UI. Do not start live trading to test
-the console. The public development preview remains an unattached/sample sandbox,
+Do not use a `VITE_`-prefixed secret, commit credentials, or paste passwords/API
+keys into chat. The operator workspace and Vite preview never accept exchange
+keys; the separate Trusted Signer Settings window is a different trust boundary
+and currently provisions testnet credentials only. Use it only on a trusted,
+user-controlled device. Do not start live trading to test the console. The public development preview remains an unattached/sample sandbox,
 not a route to real financial data.
 
 **Security boundary:** the new gateway implements single-process read-only
@@ -109,18 +131,28 @@ per-platform packaging smoke. CI packages are **unsigned test software**, not
 signed/trusted releases. No automatic updater, backend bootstrap, live trading
 activation, or production release signing is included.
 
-Build locally from `desktop/` with Node.js 22 and the platform Tauri
-prerequisites:
+Build locally on the target platform with Python 3.12, Node.js 22.12+, Rust
+stable and the platform Tauri prerequisites. The frozen sidecar embeds the built
+React assets, so build the frontend first and then freeze the sidecar from the
+repository root:
 
 ```sh
-npm ci
-npm test
-npm run build
-npm run tauri -- build
+python -m pip install -r native/shared/requirements.txt
+npm --prefix desktop ci
+npm --prefix desktop test
+npm --prefix desktop run build
+TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+python native/shared/build_sidecar.py --target "$TARGET"
+npm --prefix desktop run tauri -- build
 ```
 
-See the canonical [Installation & Deployment Guide](../INSTALLATION.md) for
-runtime setup, backend connection and SSH-tunnel access. The browser/PWA
+The target triple must match the host (`x86_64-pc-windows-msvc`,
+`x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, or
+`aarch64-apple-darwin`). Cross-compiling the PyInstaller sidecar is not supported
+by this helper. See [Installation & Deployment](../INSTALLATION.md#18-tauri-embedded-desktop--unsigned-evaluation-candidate)
+for platform prerequisites and CI artifact retrieval.
+
+See the [Desktop Operator User Manual](../docs/USER_MANUAL.md) for page-by-page usage, sample/runtime behavior and troubleshooting. See the canonical [Installation & Deployment Guide](../INSTALLATION.md) for runtime setup, backend connection and SSH-tunnel access. The browser/PWA
 manifest remains a separate browser starting point; it does not grant native
 signer access and does not cache financial/API responses.
 
@@ -145,9 +177,11 @@ The declared backend mode is now supplied explicitly by canonical runners;
 unknown mode stays unknown rather than defaulting a live process to paper.
 Workspace mode controls still do not activate or change that runtime.
 
-The new `.github/workflows/console-quality.yml` runs frontend unit contracts,
-build and audit on relevant PRs or manual dispatch. It never deploys or launches
-trading. Its remote CI execution has not yet been observed.
+The `.github/workflows/console-quality.yml` workflow runs frontend unit contracts,
+production build and dependency audit for relevant PRs, matching `main` updates,
+and manual dispatch. It never deploys or launches trading. Check the Actions run
+for the exact commit being evaluated; historic workflow results do not certify a
+newer `main` SHA.
 
 ## Research + ledger performance update (2026-11-07)
 

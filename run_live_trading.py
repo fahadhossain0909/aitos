@@ -20,6 +20,9 @@ from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.execution.protection_reconciliation import (
+    recover_accepted_initial_stop_submissions,
+    recover_protection_handovers,
+    recover_triggered_protection_child_fills,
     require_live_account_exposure_reconciled,
 )
 from aitos.health_server import HealthServer
@@ -98,7 +101,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     graph_driver = await try_connect_neo4j(settings, logger=logger)
     if graph_driver is not None:
         cleanup.push_async_callback(graph_driver.close)
-    exchange = BinanceFuturesAdapter()
+    exchange = BinanceFuturesAdapter(
+        environment="testnet" if settings.binance.testnet else "mainnet"
+    )
     cleanup.push_async_callback(exchange.close)
     symbols = await resolve_live_universe(
         exchange,
@@ -166,39 +171,125 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     # resulting local ledger against the entire account before any new entry.
     if components.reconciliation is not None:
         await components.reconciliation.run_once()
-    await require_live_account_exposure_reconciled(
+    protection_recovery = await recover_accepted_initial_stop_submissions(
         raw_order_executor,
         raw_order_executor.execution_intent_store,
         components.trade_lifecycle.get_open_trades(),
+        trade_state_persistence.persist_execution_state,
+    )
+    if protection_recovery["recovered"]:
+        logger.warning(
+            "recovered accepted protective stops from durable preclaims",
+            extra={
+                "aitos_extra": {
+                    "recovered": protection_recovery["recovered"],
+                    "client_ids": protection_recovery["recovered_client_ids"],
+                }
+            },
+        )
+    if protection_recovery["blocked"]:
+        logger.error(
+            "protective-order preclaims remain quarantined after startup recovery",
+            extra={"aitos_extra": {"blocked": protection_recovery["blocked"]}},
+        )
+    handover_recovery = await recover_protection_handovers(
+        raw_order_executor,
+        raw_order_executor.execution_intent_store,
+        components.trade_lifecycle.get_open_trades(),
+        trade_state_persistence.persist_execution_state,
+    )
+    if handover_recovery["recovered"]:
+        logger.warning(
+            "recovered interrupted protective-order handovers",
+            extra={
+                "aitos_extra": {
+                    "recovered": handover_recovery["recovered"],
+                    "handover_ids": handover_recovery["recovered_handover_ids"],
+                }
+            },
+        )
+    if handover_recovery["blocked"]:
+        logger.error(
+            "protective-order handovers remain quarantined after startup recovery",
+            extra={"aitos_extra": {"blocked": handover_recovery["blocked"]}},
+        )
+    child_fill_recovery = await recover_triggered_protection_child_fills(
+        raw_order_executor,
+        raw_order_executor.execution_intent_store,
+        components.trade_lifecycle,
+    )
+    if child_fill_recovery["applied"]:
+        logger.warning(
+            "applied authenticated triggered protective child fills",
+            extra={"aitos_extra": child_fill_recovery},
+        )
+    if child_fill_recovery["blocked"]:
+        logger.critical(
+            "triggered protective child fills remain quarantined",
+            extra={"aitos_extra": {"blocked": child_fill_recovery["blocked"]}},
+        )
+    child_reconciliation_ready = not child_fill_recovery["blocked"] and all(
+        item.get("terminal") is True for item in child_fill_recovery["applied"]
+    )
+    account_reconciliation_ready = child_reconciliation_ready
+    try:
+        await require_live_account_exposure_reconciled(
+            raw_order_executor,
+            raw_order_executor.execution_intent_store,
+            components.trade_lifecycle.get_open_trades(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        account_reconciliation_ready = False
+        logger.critical(
+            "live startup entering manage-only mode: "
+            "account exposure is not reconciled",
+            extra={
+                "aitos_extra": {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "new_entries_allowed": False,
+                }
+            },
+        )
+    components.trade_lifecycle._account_reconciliation_error = (
+        not account_reconciliation_ready
     )
     gateway = components.trade_lifecycle._aitos_capital_gateway
     restored_trades = components.trade_lifecycle.get_open_trades()
     active_symbols = {trade.symbol for trade in restored_trades}
     # A crash after durable close but before release may leave a flat lease.
     # Only the matched full-account snapshot and this stable owner permit release.
-    for reservation in gateway.reservation.snapshot():
-        if reservation.symbol not in active_symbols:
-            gateway.release(reservation.symbol)
-    for trade in restored_trades:
-        if trade.leverage <= 0:
-            raise ValueError("restored exposure has invalid leverage")
-        gateway.reservation.restore_confirmed_exposure(
-            Reservation(
-                trade.symbol,
-                trade.position_size_usd / trade.leverage,
-                trade.risk_amount_usd,
+    if account_reconciliation_ready:
+        for reservation in gateway.reservation.snapshot():
+            if reservation.symbol not in active_symbols:
+                gateway.release(reservation.symbol)
+    if account_reconciliation_ready:
+        for trade in restored_trades:
+            if trade.leverage <= 0:
+                raise ValueError("restored exposure has invalid leverage")
+            gateway.reservation.restore_confirmed_exposure(
+                Reservation(
+                    trade.symbol,
+                    trade.position_size_usd / trade.leverage,
+                    trade.risk_amount_usd,
+                )
             )
+        gateway.assert_reservations_cover(
+            [
+                Reservation(
+                    trade.symbol,
+                    trade.position_size_usd / trade.leverage,
+                    trade.risk_amount_usd,
+                )
+                for trade in restored_trades
+            ]
         )
-    gateway.assert_reservations_cover(
-        [
-            Reservation(
-                trade.symbol,
-                trade.position_size_usd / trade.leverage,
-                trade.risk_amount_usd,
-            )
-            for trade in restored_trades
-        ]
-    )
+    else:
+        logger.critical(
+            "capital reservations were not reconciled because "
+            "venue exposure is unverified; "
+            "runtime remains manage-only",
+            extra={"aitos_extra": {"new_entries_allowed": False}},
+        )
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
@@ -221,8 +312,30 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         components.trade_lifecycle,
         event_bus,
         state_store,
+        persist_trade=trade_state_persistence.persist_execution_state,
     )
     cleanup.push_async_callback(income_reconciler.shutdown)
+    income_reconciliation_ready = False
+    try:
+        income_result = await income_reconciler.reconcile_startup()
+        income_reconciliation_ready = True
+        logger.info(
+            "startup Binance fee/funding reconciliation completed",
+            extra={"aitos_extra": income_result},
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Do not allow fresh exposure when fees/funding cannot be attributed
+        # or the venue history is unavailable. Existing positions remain
+        # managed by the shutdown/recovery path; no journal/cursor is cleared.
+        logger.critical(
+            "live startup blocked: Binance fee/funding reconciliation incomplete",
+            extra={
+                "aitos_extra": {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "new_entries_allowed": False,
+                }
+            },
+        )
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
@@ -269,10 +382,26 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await tracker.restore()
     await income_reconciler.initialize({})
     stop_event = asyncio.Event()
-    if not position_recovery_ready:
-        # Fail closed through the managed shutdown path; never scan or submit
-        # orders while a restored position is outside verified feed coverage.
-        stop_event.set()
+    new_entries_allowed = (
+        position_recovery_ready
+        and income_reconciliation_ready
+        and account_reconciliation_ready
+    )
+    if not new_entries_allowed:
+        # Keep market ingestion, lifecycle price management, exchange protection
+        # reconciliation and existing-position supervision alive, but do not
+        # run a fresh-exposure scan until an operator restarts after remediation.
+        logger.critical(
+            "live runtime entering manage-only mode; fresh exposure is disabled",
+            extra={
+                "aitos_extra": {
+                    "position_recovery_ready": position_recovery_ready,
+                    "income_reconciliation_ready": income_reconciliation_ready,
+                    "account_reconciliation_ready": account_reconciliation_ready,
+                    "new_entries_allowed": False,
+                }
+            },
+        )
     install_signal_handlers(stop_event)
     # One teardown owner on both startup failure and normal exit. Draining is
     # last registered so durable writers/executor remain available until done.
@@ -294,12 +423,29 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 raw_order_executor.execution_intent_store,
                 components.trade_lifecycle.get_open_trades(),
             )
-            submitted = await run_scan_and_trade_cycle(
-                components,
-                tracker,
-                is_production=True,
-                approved_by=approved_by,
-            )
+            if new_entries_allowed:
+                submitted = await run_scan_and_trade_cycle(
+                    components,
+                    tracker,
+                    is_production=True,
+                    approved_by=approved_by,
+                )
+            else:
+                # Market events continue to drive TradeLifecycle price/EIE
+                # management; this loop still reconciles fills, positions and
+                # protective orders, but never creates new exposure.
+                submitted = 0
+                logger.warning(
+                    "manage-only cycle: fresh-exposure scan remains disabled",
+                    extra={
+                        "aitos_extra": {
+                            "open_trades": len(
+                                components.trade_lifecycle.get_open_trades()
+                            ),
+                            "new_entries_allowed": False,
+                        }
+                    },
+                )
             # These do blocking pickle.dump()+file-replace I/O. Run them
             # off the event loop -- a synchronous call here previously
             # stalled *all* concurrent async work (websocket recv,

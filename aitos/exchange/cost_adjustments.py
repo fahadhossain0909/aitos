@@ -35,9 +35,15 @@ class BinanceCostAdjustmentPublisher:
     internal position owns a fee or funding payment.
     """
 
-    def __init__(self, event_bus: Any, resolve_trade_id: TradeResolver) -> None:
+    def __init__(
+        self,
+        event_bus: Any,
+        resolve_trade_id: TradeResolver,
+        apply_adjustment: Callable[..., Awaitable[Any]] | None = None,
+    ) -> None:
         self._event_bus = event_bus
         self._resolve_trade_id = resolve_trade_id
+        self._apply_adjustment = apply_adjustment
 
     async def publish_income_rows(self, rows: Iterable[dict[str, Any]]) -> int:
         published = 0
@@ -72,6 +78,16 @@ class BinanceCostAdjustmentPublisher:
             # Binance reports commission as a negative income; lifecycle fee
             # accounting expects a positive cost. Funding remains signed.
             amount_usd = abs(amount) if kind == "fee" else amount
+            if self._apply_adjustment is not None:
+                # Apply and write through to the durable trade snapshot before
+                # advancing the exchange cursor. The event below is a replayable
+                # notification, not the sole financial persistence path.
+                await self._apply_adjustment(
+                    str(trade_id),
+                    f"binance:income:{transaction_id}",
+                    kind,
+                    amount_usd,
+                )
             await self._event_bus.publish(
                 Event(
                     topic="trade.cost_adjustment",
@@ -114,6 +130,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
         overlap_ms: int = 60_000,
         commission_close_grace_ms: int = 120_000,
         account: str = "binance_usdm",
+        persist_trade: Callable[[Any], Awaitable[None]] | None = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
@@ -127,8 +144,11 @@ class BinanceIncomeReconciliationService(AITOSModule):
         self._overlap_ms = int(overlap_ms)
         self._commission_close_grace_ms = int(commission_close_grace_ms)
         self._account = account
+        self._persist_trade = persist_trade
         self._publisher = BinanceCostAdjustmentPublisher(
-            event_bus, self.resolve_trade_id
+            event_bus,
+            self.resolve_trade_id,
+            self._apply_and_persist_adjustment if persist_trade is not None else None,
         )
         self._task: asyncio.Task | None = None
         self._initialized = False
@@ -138,6 +158,8 @@ class BinanceIncomeReconciliationService(AITOSModule):
         self._unattributed = 0
         self._last_run_at: str | None = None
         self._last_error: str | None = None
+        self._startup_reconciled = False
+        self._startup_error: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -181,6 +203,8 @@ class BinanceIncomeReconciliationService(AITOSModule):
                 "errors": self._errors,
                 "last_error": self._last_error,
                 "account": self._account,
+                "startup_reconciled": self._startup_reconciled,
+                "startup_error": self._startup_error,
             },
         )
 
@@ -251,7 +275,58 @@ class BinanceIncomeReconciliationService(AITOSModule):
         unique_matches = list(dict.fromkeys(matches))
         return unique_matches[0] if len(unique_matches) == 1 else None
 
+    async def _apply_and_persist_adjustment(
+        self, trade_id: str, adjustment_id: str, kind: str, amount_usd: float
+    ) -> None:
+        apply_adjustment = getattr(self._lifecycle, "apply_cost_adjustment", None)
+        if not callable(apply_adjustment) or self._persist_trade is None:
+            raise RuntimeError(
+                "durable lifecycle cost-adjustment application is unavailable"
+            )
+        trade = await apply_adjustment(
+            trade_id,
+            adjustment_id=adjustment_id,
+            kind=kind,
+            amount_usd=amount_usd,
+        )
+        await self._persist_trade(trade)
+
+    async def reconcile_startup(self) -> dict[str, int]:
+        """Run one complete durable fee/funding pass before live entries.
+
+        Ambiguous attribution, unavailable venue history, missing lifecycle
+        application or failed trade write-through leaves startup unready. The
+        caller must keep new exposure disabled and retry only through an
+        explicit subsequent startup/reconciliation cycle.
+        """
+        self._startup_reconciled = False
+        self._startup_error = None
+        if self._persist_trade is None or not callable(
+            getattr(self._lifecycle, "apply_cost_adjustment", None)
+        ):
+            self._startup_error = (
+                "durable lifecycle cost-adjustment writer is unavailable"
+            )
+            raise RuntimeError(self._startup_error)
+        try:
+            result = await self.run_once()
+            if result["unattributed"]:
+                raise UnattributedCostAdjustment(
+                    f"{result['unattributed']} Binance income rows remain unattributed"
+                )
+        except Exception as exc:
+            self._startup_error = f"{type(exc).__name__}: {exc}"
+            raise
+        self._startup_reconciled = True
+        return result
+
     async def run_once(self) -> dict[str, int]:
+        if self._persist_trade is None or not callable(
+            getattr(self._lifecycle, "apply_cost_adjustment", None)
+        ):
+            raise RuntimeError(
+                "durable lifecycle cost-adjustment writer is unavailable"
+            )
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         cursor = await self._state_store.load_income_cursor(self._account)
         trades = self._trades()

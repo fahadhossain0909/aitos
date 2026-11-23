@@ -54,13 +54,26 @@ class PostgresJournalRepository:
             return
         import asyncpg
 
+        read_only = bool((config or {}).get("read_only", False))
+        pool_options = {}
+        if read_only:
+            pool_options["server_settings"] = {"default_transaction_read_only": "on"}
         self._pool = await asyncpg.create_pool(
-            dsn=self._dsn, min_size=self._min_size, max_size=self._max_size
+            dsn=self._dsn,
+            min_size=self._min_size,
+            max_size=self._max_size,
+            **pool_options,
         )
         try:
-            from aitos.storage.postgres_migrations import apply_postgres_migrations
+            from aitos.storage.postgres_migrations import (
+                apply_postgres_migrations,
+                verify_postgres_schema,
+            )
 
-            await apply_postgres_migrations(self._pool)
+            if read_only:
+                await verify_postgres_schema(self._pool)
+            else:
+                await apply_postgres_migrations(self._pool)
         except Exception:
             await self._pool.close()
             self._pool = None

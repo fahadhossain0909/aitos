@@ -396,8 +396,10 @@ class CapitalReservation:
         self._owner_id = owner_id or uuid.uuid4().hex
         self._lease_seconds = float(lease_seconds)
         self._conn: sqlite3.Connection | None = None
+        self._path: str | None = None
         if path is not None:
-            target = Path(path)
+            target = Path(path).expanduser().resolve()
+            self._path = str(target)
             target.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(
                 str(target), check_same_thread=False, timeout=5.0

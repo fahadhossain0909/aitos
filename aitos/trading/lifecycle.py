@@ -39,10 +39,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import time
+import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from aitos.config.paths import get_model_data_dir
@@ -60,6 +63,9 @@ from aitos.eventbus.redis_bus import EventBus
 from aitos.execution.intent_store import (
     ExecutionRecoveryRequired,
     ExecutionUncertainError,
+)
+from aitos.execution.protection_child_reconciliation import (
+    calculate_protection_child_fill_delta,
 )
 from aitos.execution.order_executor import (
     OrderExecutor,
@@ -1554,9 +1560,19 @@ class TradeLifecycle(AITOSModule):
                 trade.symbol, trade.sl_order_id
             )
             if status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
-                # Remember the exchange-filled order but retain its ID until
-                # close succeeds, so a failed cancellation of another order
-                # cannot lose the reconciliation signal.
+                # Conditional algo stops may have produced a child order with
+                # a partial fill. Never route that evidence through the generic
+                # market-close path: it could reduce the remaining exposure a
+                # second time. The authenticated child-fill reconciler owns
+                # cumulative quantity/quote application and durable watermarking.
+                if trade.sl_order_id.startswith("algo:"):
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        trade.sl_order_id,
+                        "triggered protective algo requires authenticated child-fill reconciliation",
+                    )
+                # Legacy resting orders retain their existing reconciliation
+                # path; keep the filled identity until the close is durable.
                 filled_ids = set(
                     getattr(trade, "_aitos_filled_resting_order_ids", set())
                 )
@@ -1609,7 +1625,15 @@ class TradeLifecycle(AITOSModule):
             else trade.sl_price
         )
         sl_result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, exchange_stop_price
+            trade.symbol,
+            trade.side,
+            trade.quantity,
+            exchange_stop_price,
+            **(
+                {"owner_trade_id": trade.trade_id}
+                if self._order_executor.requires_exchange_execution
+                else {}
+            ),
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
@@ -1644,7 +1668,15 @@ class TradeLifecycle(AITOSModule):
             )
             remaining_qty -= leg_qty
             tp_result = await self._order_executor.place_take_profit_order(
-                trade.symbol, trade.side, leg_qty, level_price
+                trade.symbol,
+                trade.side,
+                leg_qty,
+                level_price,
+                **(
+                    {"owner_trade_id": trade.trade_id}
+                    if self._order_executor.requires_exchange_execution
+                    else {}
+                ),
             )
             if tp_result.success:
                 trade.tp_order_ids.append(tp_result.order_id)
@@ -2420,40 +2452,298 @@ class TradeLifecycle(AITOSModule):
         return result
 
     async def _refresh_live_protection(self, trade: Trade) -> None:
-        # Keep the old protective stop until its replacement is accepted and
-        # durably recorded. A failed replacement must not cancel protection.
+        # The handover journal is committed before the replacement POST. The old
+        # stop remains active until the new stop is accepted and durably owned.
         old_id = trade.sl_order_id
+        if not isinstance(old_id, str) or not old_id:
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                trade.trade_id,
+                "replacement requires an existing durable stop",
+            )
+        intent_store = getattr(self._order_executor, "intent_store", None)
+        if intent_store is None:
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                trade.trade_id,
+                "durable protective handover journal unavailable",
+            )
+        handover_token = uuid.uuid4().hex[:16]
+        handover_id = f"rpl-{handover_token}"
+        new_client_id = f"aitos-rpl-{handover_token}"
         stop_price = (
             self._emergency_stop_price(trade)
             if self._position_manager
             else trade.sl_price
         )
-        result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, stop_price
+        intent_store.begin_protection_handover(
+            handover_id=handover_id,
+            trade_id=trade.trade_id,
+            symbol=trade.symbol,
+            old_order_id=old_id,
+            new_client_id=new_client_id,
         )
-        if not result.success:
-            raise ExecutionUncertainError(
-                trade.symbol, trade.trade_id, "remaining exposure protection failed"
+        try:
+            result = await self._order_executor.place_stop_loss_order(
+                trade.symbol,
+                trade.side,
+                trade.quantity,
+                stop_price,
+                owner_trade_id=trade.trade_id,
+                client_order_id=new_client_id,
             )
-        trade.sl_order_id = result.order_id
-        if old_id and old_id != result.order_id:
+            if not result.success or result.client_order_id != new_client_id:
+                raise ExecutionUncertainError(
+                    trade.symbol,
+                    new_client_id,
+                    "replacement stop acceptance is uncertain",
+                )
+            intent_store.record_handover_new_order(handover_id, result.order_id)
+            trade.sl_order_id = result.order_id
             pending = trade.agent_consensus.setdefault(
                 "_pending_stop_cancellations", []
             )
             if old_id not in pending:
                 pending.append(old_id)
-        trade.updated_at = utc_now_iso()
-        try:
-            await self._execution_state_writer(trade)
-            for previous_id in list(
-                trade.agent_consensus.get("_pending_stop_cancellations", [])
-            ):
-                await self._order_executor.cancel_resting_order(
-                    trade.symbol, previous_id
-                )
-                trade.agent_consensus["_pending_stop_cancellations"].remove(previous_id)
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
+
+            # Only a durable, venue-confirmed replacement permits cancellation.
+            intent_store.mark_handover_old_cancel_requested(handover_id)
+            await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+            status_reader = getattr(
+                self._order_executor, "get_resting_order_status", None
+            )
+            if not callable(status_reader):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    old_id,
+                    "authenticated post-cancel status lookup is unavailable",
+                )
+            old_status = await status_reader(trade.symbol, old_id)
+            if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
+                intent_store.block_protection_handover(
+                    handover_id,
+                    "old stop triggered during replacement cancellation; "
+                    "authenticated child-fill reconciliation required",
+                )
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    old_id,
+                    "old stop triggered during replacement cancellation; "
+                    "child-fill identity retained for reconciliation",
+                )
+            if old_status not in {
+                "CANCELED",
+                "EXPIRED",
+                "EXPIRED_IN_MATCH",
+                "REJECTED",
+            }:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    old_id,
+                    f"old stop cancellation is unconfirmed: {old_status!r}",
+                )
+            intent_store.mark_handover_old_cancelled(handover_id)
+            pending.remove(old_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+            intent_store.complete_protection_handover(handover_id)
+            await self._execution_position_verifier()
+            self._order_executor.acknowledge_protection(result, trade.trade_id)
+        except BaseException:
+            # Preserve the last durable handover stage. Startup recovery must
+            # query the deterministic client ID before deciding whether the
+            # replacement was accepted or whether old-stop cancellation ran.
+            self._execution_recovery_required = True
+            raise
+
+    async def _replace_exchange_side_take_profit(
+        self, trade: Trade, tp_index: int, new_price: float
+    ) -> None:
+        """Replace one resting TP with a durable make-before-break handover.
+
+        This operation is intentionally unavailable to EIE-managed positions:
+        their TP levels are decision checkpoints, not exchange-side orders.
+        The old TP must be a uniquely owned, untouched resting order.
+        """
+        if not self._order_executor.requires_exchange_execution:
+            raise RuntimeError("durable take-profit handover requires live execution")
+        if self._position_manager is not None:
+            raise RuntimeError(
+                "EIE-managed take-profit checkpoints are not exchange orders"
+            )
+        if not _valid_market_price(new_price):
+            raise ValueError(
+                "replacement take-profit price must be finite and positive"
+            )
+        if (trade.side == TradeSide.LONG and new_price <= trade.entry_price) or (
+            trade.side == TradeSide.SHORT and new_price >= trade.entry_price
+        ):
+            raise ValueError(
+                "replacement take-profit must remain on the profitable side"
+            )
+        self._require_execution_writer()
+        self._assert_execution_unlatched(trade.trade_id)
+        if self._open_trades.get(trade.trade_id) is not trade:
+            raise TradeNotFoundError(trade.trade_id)
+        if (
+            not isinstance(trade.tp_order_ids, list)
+            or not isinstance(trade.take_profit_levels, list)
+            or tp_index < 0
+            or tp_index >= len(trade.tp_order_ids)
+            or tp_index >= len(trade.take_profit_levels)
+        ):
+            raise ValueError("take-profit index is not durably owned by the trade")
+
+        old_id = trade.tp_order_ids[tp_index]
+        intent_store = getattr(self._order_executor, "intent_store", None)
+        if intent_store is None:
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                trade.trade_id,
+                "durable protective handover journal unavailable",
+            )
+        matches = []
+        for row in await asyncio.to_thread(intent_store.protection_intents):
+            result = row.get("result_json")
+            request = row.get("request_json")
+            if isinstance(result, str):
+                result = json.loads(result)
+            if isinstance(request, str):
+                request = json.loads(request)
+            if isinstance(result, dict) and result.get("order_id") == old_id:
+                matches.append((row, request))
+        if len(matches) != 1:
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                str(old_id),
+                "old take-profit ownership is missing or ambiguous",
+            )
+        _, old_request = matches[0]
+        if (
+            not isinstance(old_request, dict)
+            or old_request.get("owner_trade_id") != trade.trade_id
+            or old_request.get("order_type") != "TAKE_PROFIT_MARKET"
+            or old_request.get("reduce_only") is not True
+            or old_request.get("symbol") != trade.symbol
+            or str(old_request.get("side", "")).upper() != trade.side.value
+        ):
+            raise ExecutionRecoveryRequired(
+                trade.symbol, str(old_id), "old take-profit journal identity mismatch"
+            )
+        try:
+            old_quantity = float(old_request["quantity"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            old_quantity = float("nan")
+        if (
+            not math.isfinite(old_quantity)
+            or old_quantity <= 0
+            or old_quantity > trade.quantity
+            or not _valid_market_price(old_request.get("reference_price"))
+            or not math.isclose(
+                float(old_request["reference_price"]),
+                float(trade.take_profit_levels[tp_index]),
+                rel_tol=1e-12,
+                abs_tol=0.0,
+            )
+        ):
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                str(old_id),
+                (
+                    "old take-profit quantity or trigger is inconsistent "
+                    "with trade snapshot"
+                ),
+            )
+        status_reader = getattr(self._order_executor, "get_resting_order_status", None)
+        if not callable(status_reader):
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                str(old_id),
+                "authenticated TP status lookup is unavailable",
+            )
+        old_status = await status_reader(trade.symbol, old_id)
+        if old_status != "NEW":
+            raise ExecutionRecoveryRequired(
+                trade.symbol,
+                str(old_id),
+                f"old take-profit is not untouched NEW (status={old_status!r})",
+            )
+
+        token = uuid.uuid4().hex[:16]
+        handover_id = f"tpr-{token}"
+        new_client_id = f"aitos-tpr-{token}"
+        intent_store.begin_protection_handover(
+            handover_id=handover_id,
+            trade_id=trade.trade_id,
+            symbol=trade.symbol,
+            old_order_id=old_id,
+            new_client_id=new_client_id,
+            order_type="TAKE_PROFIT_MARKET",
+        )
+        try:
+            result = await self._order_executor.place_take_profit_order(
+                trade.symbol,
+                trade.side,
+                old_quantity,
+                new_price,
+                owner_trade_id=trade.trade_id,
+                client_order_id=new_client_id,
+            )
+            if not result.success or result.client_order_id != new_client_id:
+                raise ExecutionUncertainError(
+                    trade.symbol,
+                    new_client_id,
+                    "replacement take-profit acceptance is uncertain",
+                )
+            intent_store.record_handover_new_order(handover_id, result.order_id)
+            trade.tp_order_ids[tp_index] = result.order_id
+            trade.take_profit_levels[tp_index] = float(new_price)
+            pending = trade.agent_consensus.setdefault(
+                "_pending_stop_cancellations", []
+            )
+            if not isinstance(pending, list):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    new_client_id,
+                    "pending protection cancellation state is malformed",
+                )
+            if old_id not in pending:
+                pending.append(old_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+
+            intent_store.mark_handover_old_cancel_requested(handover_id)
+            old_status = await status_reader(trade.symbol, old_id)
+            if old_status != "NEW":
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    str(old_id),
+                    f"old take-profit changed before cancel (status={old_status!r})",
+                )
+            await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+            old_status = await status_reader(trade.symbol, old_id)
+            if old_status not in {
+                "CANCELED",
+                "EXPIRED",
+                "EXPIRED_IN_MATCH",
+                "REJECTED",
+            }:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    str(old_id),
+                    (
+                        "old take-profit cancellation is unconfirmed "
+                        f"(status={old_status!r})"
+                    ),
+                )
+            intent_store.mark_handover_old_cancelled(handover_id)
+            while old_id in pending:
+                pending.remove(old_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+            intent_store.complete_protection_handover(handover_id)
             self._order_executor.acknowledge_protection(result, trade.trade_id)
         except BaseException:
             self._execution_recovery_required = True
@@ -2469,6 +2759,287 @@ class TradeLifecycle(AITOSModule):
         self._execution_faults.pop(trade.trade_id, None)
         if hasattr(trade, "_aitos_filled_resting_order_ids"):
             del trade._aitos_filled_resting_order_ids
+
+    async def apply_triggered_protection_child_fill(
+        self, trade_id: str, algo: Mapping[str, Any], child: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Apply a verified cumulative child fill exactly once to the trade ledger.
+
+        The ClickHouse trade snapshot stores the cumulative child marker in the
+        same payload as quantity/PnL. SQLite's watermark is advanced only after
+        that snapshot write. On restart, a snapshot-ahead-of-SQLite state is
+        completed idempotently; SQLite-ahead-of-snapshot is quarantined.
+        """
+        if not self._order_executor.requires_exchange_execution:
+            raise RuntimeError(
+                "protective child reconciliation requires live execution"
+            )
+        self._require_execution_writer()
+        if not isinstance(algo, Mapping) or not isinstance(child, Mapping):
+            raise ValueError("authenticated algo and child snapshots are required")
+        async with self._execution_locks.setdefault(trade_id, asyncio.Lock()):
+            trade = self._open_trades.get(trade_id)
+            if trade is None:
+                raise TradeNotFoundError(trade_id)
+            intent_store = getattr(self._order_executor, "intent_store", None)
+            if intent_store is None:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, trade_id, "durable child-fill journal unavailable"
+                )
+            algo_id_raw = algo.get("algoId")
+            if isinstance(algo_id_raw, bool) or not str(algo_id_raw or "").isdigit():
+                raise ValueError("protective algo ID is invalid")
+            algo_id = str(int(algo_id_raw))
+            algo_order_id = f"algo:{algo_id}"
+            child_id = str(child.get("orderId", ""))
+            order_type = str(algo.get("orderType", ""))
+            pending_protection = trade.agent_consensus.get(
+                "_pending_stop_cancellations", []
+            )
+            if not isinstance(pending_protection, list):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "pending protective identity collection is malformed",
+                )
+            is_pending = algo_order_id in pending_protection
+            if order_type == "STOP_MARKET":
+                if trade.sl_order_id != algo_order_id and not is_pending:
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        algo_order_id,
+                        "triggered stop is not owned by restored trade",
+                    )
+            elif order_type == "TAKE_PROFIT_MARKET":
+                if algo_order_id not in trade.tp_order_ids and not is_pending:
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        algo_order_id,
+                        "triggered TP is not owned by restored trade",
+                    )
+            else:
+                raise ValueError("unsupported protective algo type")
+
+            expected_side = "SELL" if trade.side == TradeSide.LONG else "BUY"
+            hedge_mode = bool(getattr(self._order_executor, "hedge_mode", False))
+            expected_position_side = trade.side.value if hedge_mode else "BOTH"
+            intent_row = await asyncio.to_thread(
+                intent_store.protection_intent_for_order,
+                algo_order_id,
+                trade_id,
+            )
+            intent_request = intent_row.get("request")
+            if (
+                not isinstance(intent_request, dict)
+                or intent_row.get("client_id") != algo.get("clientAlgoId")
+                or intent_request.get("owner_trade_id") != trade_id
+                or intent_request.get("symbol") != trade.symbol
+                or intent_request.get("order_type") != order_type
+                or intent_request.get("quantity") is None
+                or bool(intent_request.get("reduce_only")) != (not hedge_mode)
+            ):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "triggered child does not match its owner-bound protective intent",
+                )
+            marker_map = trade.agent_consensus.setdefault(
+                "_applied_protection_child_fills", {}
+            )
+            if not isinstance(marker_map, dict):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id, "trade child-fill marker is malformed"
+                )
+            marker_key = f"{algo_id}:{child_id}"
+            marker = marker_map.get(marker_key, {})
+            if not isinstance(marker, dict):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "trade child-fill marker identity is malformed",
+                )
+            watermark = await asyncio.to_thread(
+                intent_store.protection_child_watermark, algo_id, child_id
+            )
+            if watermark is not None and not marker:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    (
+                        "SQLite child-fill watermark is ahead of the durable "
+                        "trade snapshot"
+                    ),
+                )
+            previous_quantity = marker.get("cumulative_quantity", "0")
+            previous_quote = marker.get("cumulative_quote", "0")
+            if watermark is not None:
+                if Decimal(str(watermark["cumulative_quantity"])) > Decimal(
+                    str(previous_quantity)
+                ) or Decimal(str(watermark["cumulative_quote"])) > Decimal(
+                    str(previous_quote)
+                ):
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        algo_order_id,
+                        "SQLite child-fill watermark exceeds trade snapshot marker",
+                    )
+            delta = calculate_protection_child_fill_delta(
+                dict(algo),
+                dict(child),
+                expected_symbol=trade.symbol,
+                expected_side=expected_side,
+                expected_algo_id=algo_id,
+                previously_applied_quantity=previous_quantity,
+                previously_applied_quote=previous_quote,
+                expected_position_side=expected_position_side,
+                expected_reduce_only=not hedge_mode,
+                expected_original_quantity=intent_request["quantity"],
+            )
+            remaining_quantity = Decimal(str(trade.quantity))
+            if delta.delta_quantity > remaining_quantity:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "child cumulative fill exceeds restored open trade quantity",
+                )
+
+            marker_map[marker_key] = {
+                "algo_id": algo_id,
+                "child_order_id": child_id,
+                "cumulative_quantity": str(delta.cumulative_quantity),
+                "cumulative_quote": str(delta.cumulative_quote),
+                "status": delta.status,
+            }
+            pending = trade.agent_consensus.setdefault(
+                "_pending_stop_cancellations", []
+            )
+            if not isinstance(pending, list):
+                raise ExecutionRecoveryRequired(
+                    trade.symbol, algo_order_id, "pending protection state is malformed"
+                )
+            if (
+                delta.status in {"NEW", "PARTIALLY_FILLED"}
+                and algo_order_id not in pending
+            ):
+                pending.append(algo_order_id)
+
+            try:
+                if delta.delta_quantity > 0:
+                    result = OrderResult(
+                        order_id=child_id,
+                        symbol=trade.symbol,
+                        side=trade.side,
+                        filled_quantity=float(delta.delta_quantity),
+                        fill_price=float(delta.average_price),
+                    )
+                    if delta.delta_quantity == remaining_quantity:
+                        if delta.status not in {
+                            "FILLED",
+                            "CANCELED",
+                            "EXPIRED",
+                            "EXPIRED_IN_MATCH",
+                        }:
+                            raise ExecutionRecoveryRequired(
+                                trade.symbol,
+                                algo_order_id,
+                                "full-size child fill is not terminal",
+                            )
+                        self._confirmed_reductions[trade_id] = (
+                            f"resting:{algo_order_id}",
+                            result,
+                        )
+                        try:
+                            await self._close_trade_unlocked(
+                                trade_id,
+                                float(delta.average_price),
+                                "exchange_protective_child_filled",
+                            )
+                        finally:
+                            self._confirmed_reductions.pop(trade_id, None)
+                    else:
+                        await self._partial_close_unlocked(
+                            trade,
+                            float(delta.average_price),
+                            float(delta.delta_quantity / Decimal(str(trade.quantity))),
+                            execution_result=result,
+                            refresh_protection=False,
+                        )
+                else:
+                    trade.updated_at = utc_now_iso()
+                    await self._execution_state_writer(trade)
+                    await self._execution_position_verifier()
+
+                # The durable trade snapshot (including its marker) must exist
+                # before either SQLite acknowledgement or terminal transition.
+                client_id = str(algo.get("clientAlgoId", ""))
+                intent_rows = await asyncio.to_thread(intent_store.protection_intents)
+                owned_rows = [
+                    row for row in intent_rows if row.get("client_id") == client_id
+                ]
+                if len(owned_rows) != 1:
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        algo_order_id,
+                        "triggered child has no unique durable client-algo intent",
+                    )
+                if owned_rows[0].get("state") == "PROTECTED":
+                    await asyncio.to_thread(
+                        intent_store.mark_applied, client_id, trade_id
+                    )
+                await asyncio.to_thread(
+                    intent_store.mark_protection_child_applied,
+                    algo_id=algo_id,
+                    child_order_id=child_id,
+                    trade_id=trade_id,
+                    symbol=trade.symbol,
+                    cumulative_quantity=str(delta.cumulative_quantity),
+                    cumulative_quote=str(delta.cumulative_quote),
+                    status=delta.status,
+                )
+                terminal = delta.status in {
+                    "FILLED",
+                    "CANCELED",
+                    "EXPIRED",
+                    "EXPIRED_IN_MATCH",
+                    "REJECTED",
+                }
+                if terminal:
+                    await asyncio.to_thread(
+                        intent_store.mark_protection_terminal,
+                        algo_order_id,
+                        symbol=trade.symbol,
+                        status=delta.status,
+                        executed_quantity=float(delta.cumulative_quantity),
+                    )
+                    if trade_id in self._open_trades:
+                        if order_type == "STOP_MARKET" and trade.quantity > 0:
+                            # The old stop is terminal. A fresh stop is placed
+                            # make-before-break against the remaining position.
+                            await self._refresh_live_protection(trade)
+                        elif order_type == "TAKE_PROFIT_MARKET":
+                            tp_index = trade.tp_order_ids.index(algo_order_id)
+                            trade.tp_order_ids.pop(tp_index)
+                            if tp_index < len(trade.take_profit_levels):
+                                trade.take_profit_levels.pop(tp_index)
+                            while algo_order_id in pending:
+                                pending.remove(algo_order_id)
+                            trade.updated_at = utc_now_iso()
+                            await self._execution_state_writer(trade)
+                return {
+                    "trade_id": trade_id,
+                    "algo_order_id": algo_order_id,
+                    "child_order_id": child_id,
+                    "delta_quantity": str(delta.delta_quantity),
+                    "delta_quote": str(delta.delta_quote),
+                    "status": delta.status,
+                    "terminal": terminal,
+                    "safe_to_resume": False,
+                }
+            except BaseException:
+                # Any failure after a venue fill leaves the trade/order
+                # relationship ambiguous. Do not accept new exposure in-process.
+                self._execution_recovery_required = True
+                raise
 
     async def _partial_close(
         self,
@@ -2497,6 +3068,7 @@ class TradeLifecycle(AITOSModule):
         *,
         execution_result: OrderResult | None = None,
         consume_tp: bool = False,
+        refresh_protection: bool = True,
     ) -> None:
         if not _valid_market_price(price):
             raise ValueError(f"price must be a finite positive number, got {price!r}")
@@ -2557,7 +3129,11 @@ class TradeLifecycle(AITOSModule):
             ]
             if consumed_tp and trade.take_profit_levels:
                 trade.take_profit_levels.pop(0)
-            if self._use_exchange_side_stops and trade.quantity > 0:
+            if (
+                refresh_protection
+                and self._use_exchange_side_stops
+                and trade.quantity > 0
+            ):
                 await self._refresh_live_protection(trade)
             await self._commit_live_execution(trade)
         await self._event_bus.publish(
