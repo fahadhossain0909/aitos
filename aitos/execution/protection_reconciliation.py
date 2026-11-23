@@ -1306,7 +1306,17 @@ async def recover_triggered_protection_child_fills(
                 for value in tp_ids
                 if isinstance(value, str) and value.startswith("algo:")
             )
-        pending_ids = trade.agent_consensus.get("_pending_stop_cancellations", [])
+        agent_consensus = getattr(trade, "agent_consensus", {})
+        if not isinstance(agent_consensus, dict):
+            blocked.append(
+                {
+                    "trade_id": str(trade.trade_id),
+                    "order_id": "pending-protection",
+                    "reason": "trade protective metadata is malformed",
+                }
+            )
+            agent_consensus = {}
+        pending_ids = agent_consensus.get("_pending_stop_cancellations", [])
         if not isinstance(pending_ids, list):
             blocked.append(
                 {
