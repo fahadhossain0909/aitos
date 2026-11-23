@@ -65,17 +65,24 @@ def audit(path: Path) -> dict:
     if re.search(r"workflow_dispatch", source) and RISK_RE.search(source):
         findings.append("manual_trigger_for_high_impact_workflow")
     return {
-        "workflow": path.name, "triggers": triggers,
-        "permissions": permissions, "secrets": secrets, "actions": uses,
-        "unpinned_actions": unpinned, "findings": findings,
+        "workflow": path.name,
+        "triggers": triggers,
+        "permissions": permissions,
+        "secrets": secrets,
+        "actions": uses,
+        "unpinned_actions": unpinned,
+        "findings": findings,
     }
 
 
 def render_markdown(reports: list[dict]) -> str:
     lines = [
-        "# GitHub Actions Static Governance Audit", "",
+        "# GitHub Actions Static Governance Audit",
+        "",
         "Static flags require human adjudication; absence of a flag is not proof of safety.",
-        "", f"Workflows scanned: **{len(reports)}**", "",
+        "",
+        f"Workflows scanned: **{len(reports)}**",
+        "",
         "| Workflow | Findings | Permissions | Secrets |",
         "|---|---|---|---|",
     ]
