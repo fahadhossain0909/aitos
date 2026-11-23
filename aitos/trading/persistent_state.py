@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS exchange_income_sync_retry (
     retry_id String,
     event_time_ms UInt64,
     state LowCardinality(String),
-    updated_at DateTime64(3, 'UTC')
+    updated_at DateTime64(6, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (account, retry_id)
 """
@@ -225,7 +225,7 @@ class DurableTradingStateStore:
         client = self._client()
         result = await client.query(
             """
-            SELECT max(cursor_time_ms)
+            SELECT maxOrNull(cursor_time_ms)
             FROM exchange_income_sync_cursor
             WHERE account = {account:String}
             """,
