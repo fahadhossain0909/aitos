@@ -183,7 +183,9 @@ jobs:
           pip install --upgrade "setuptools>=83.0.0"
           pip install bandit safety==3.7.0
       - name: Run Bandit security scan
-        run: bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -l -f json -o bandit-report.json
+        run: |
+          bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -ll -f json -o bandit-report.json
+          bandit -r aitos/trading/reconciliation.py aitos/exchange/cost_adjustments.py aitos/trading/persistent_state.py scripts/validate_compose_policy.py -l -f json -o bandit-critical-report.json
       - name: Check project dependencies for vulnerabilities
         run: safety check --file requirements.txt --json
       - name: Upload security reports
@@ -191,7 +193,9 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: security-reports
-          path: bandit-report.json
+          path: |
+            bandit-report.json
+            bandit-critical-report.json
 
   docker-validate:
     needs: format
