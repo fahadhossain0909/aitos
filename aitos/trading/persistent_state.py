@@ -247,7 +247,9 @@ class DurableTradingStateStore:
             column_names=["account", "cursor_time_ms", "updated_at"],
         )
 
-    async def load_income_retry_floor(self, account: str = "binance_usdm") -> int | None:
+    async def load_income_retry_floor(
+        self, account: str = "binance_usdm"
+    ) -> int | None:
         client = self._client()
         result = await client.query(
             """
