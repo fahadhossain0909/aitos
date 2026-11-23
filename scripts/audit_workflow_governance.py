@@ -21,7 +21,8 @@ UNTRUSTED_RE = re.compile(
 RISK_RE = re.compile(
     r"\b(?:rm\s+-rf|docker\s+compose\s+down\s+-v|"
     r"DROP\s+(?:DATABASE|TABLE)|TRUNCATE\s+TABLE|terraform\s+destroy|"
-    r"git\s+push\s+origin\s+main)\b", re.IGNORECASE
+    r"git\s+push\s+origin\s+main)\b",
+    re.IGNORECASE,
 )
 WRITE_RE = re.compile(
     r"^\s*(contents|actions|packages|deployments):\s*write\s*$", re.MULTILINE
@@ -34,7 +35,11 @@ def audit(path: Path) -> dict:
         r"^permissions:\s*\n((?:^[ \t]+[^\n]+\n)+)", source, re.MULTILINE
     )
     permissions = (
-        [line.strip() for line in permission_match.group(1).splitlines() if line.strip()]
+        [
+            line.strip()
+            for line in permission_match.group(1).splitlines()
+            if line.strip()
+        ]
         if permission_match
         else ["implicit/default — verify repository/org policy"]
     )
@@ -44,8 +49,11 @@ def audit(path: Path) -> dict:
         r"^on:\s*\n((?:^[ \t].*\n|^[ \t]*\n)+)", source, re.MULTILINE
     )
     triggers = (
-        [line.strip() for line in trigger_match.group(1).splitlines()
-         if line.strip() and not line.lstrip().startswith("#")][:20]
+        [
+            line.strip()
+            for line in trigger_match.group(1).splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ][:20]
         if trigger_match else []
     )
     findings = []
