@@ -359,7 +359,8 @@ async def test_startup_reconciliation_blocks_when_income_is_unattributed():
 
     assert service._startup_reconciled is False
     assert service._startup_error is not None
-    assert store.cursor == row_time - 1
+    assert store.cursor >= row_time
+    assert await store.load_income_retry_floor("binance_usdm") == row_time
 
 
 @pytest.mark.asyncio
