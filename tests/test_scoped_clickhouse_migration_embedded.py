@@ -4,15 +4,13 @@ import json
 
 import pytest
 
-from scripts.migrate_scoped_clickhouse_state import (
-    _ddl,
-)
+from scripts.migrate_scoped_clickhouse_state import _ddl
 
 pytestmark = pytest.mark.integration
 
 
 def test_scope_keyed_v2_tables_preserve_same_trade_id_across_accounts(tmp_path):
-    chdb = pytest.importorskip("chdb")
+    pytest.importorskip("chdb")
     from chdb.session import Session
 
     session = Session(str(tmp_path / "scoped-v2-chdb"))
