@@ -240,13 +240,12 @@ class BinanceIncomeReconciliationService(AITOSModule):
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
-    @staticmethod
-    def _income_retry_id(row: dict[str, Any]) -> str:
+    def _income_retry_id(self, row: dict[str, Any]) -> str:
         transaction_id = str(row.get("tranId", "")).strip()
         if not transaction_id:
             raise ValueError("income retry requires an exchange transaction ID")
         identity = {
-            "account": "binance_usdm",
+            "account": self._account,
             "income_type": str(row.get("incomeType", "")).upper(),
             "symbol": str(row.get("symbol", "")).upper(),
             "transaction_id": transaction_id,
