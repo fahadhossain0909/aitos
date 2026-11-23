@@ -57,6 +57,9 @@ class ReconciliationScheduler(AITOSModule):
         self._last_run_trades_closed = 0
         self._total_runs = 0
         self._errors = 0
+        self._consecutive_failures = 0
+        self._last_failure_at: str | None = None
+        self._max_backoff_seconds = 300.0
         self._run_lock = asyncio.Lock()
         self._last_child_fills_applied = 0
         self._last_child_fills_blocked = 0
@@ -96,6 +99,9 @@ class ReconciliationScheduler(AITOSModule):
             details={
                 "total_runs": self._total_runs,
                 "errors": self._errors,
+                "consecutive_failures": self._consecutive_failures,
+                "last_failure_at": self._last_failure_at,
+                "backoff_max_seconds": self._max_backoff_seconds,
                 "last_run_trades_checked": self._last_run_trades_checked,
                 "last_run_trades_closed": self._last_run_trades_closed,
                 "last_child_fills_applied": self._last_child_fills_applied,
@@ -280,10 +286,16 @@ class ReconciliationScheduler(AITOSModule):
                     )
             except Exception as exc:  # noqa: BLE001
                 self._errors += 1
-                logger.error(
-                    "reconciliation failed for trade",
+                self._lifecycle._account_reconciliation_error = True
+                self._last_failure_at = datetime.now(timezone.utc).isoformat()
+                logger.critical(
+                    "reconciliation failed for trade; new exposure is blocked",
                     extra={
-                        "aitos_extra": {"trade_id": trade.trade_id, "error": str(exc)}
+                        "aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "new_entries_allowed": False,
+                        }
                     },
                 )
 
@@ -312,14 +324,46 @@ class ReconciliationScheduler(AITOSModule):
     # -- Internals --------------------------------------------------------------
 
     async def _run_loop(self) -> None:
+        delay = self._interval_seconds
         try:
             while True:
-                await asyncio.sleep(self._interval_seconds)
+                await asyncio.sleep(delay)
+                errors_before = self._errors
                 try:
                     await self.run_once()
                 except Exception as exc:  # noqa: BLE001
                     self._errors += 1
-                    logger.error("reconciliation loop iteration failed: %s", exc)
+                    self._lifecycle._account_reconciliation_error = True
+                    self._last_failure_at = datetime.now(timezone.utc).isoformat()
+                    logger.critical(
+                        "reconciliation loop failed; new exposure is blocked",
+                        extra={
+                            "aitos_extra": {
+                                "error": f"{type(exc).__name__}: {exc}",
+                                "new_entries_allowed": False,
+                            }
+                        },
+                    )
+
+                if self._errors > errors_before:
+                    self._consecutive_failures += 1
+                    delay = min(
+                        self._interval_seconds * (2 ** min(self._consecutive_failures, 8)),
+                        self._max_backoff_seconds,
+                    )
+                    logger.critical(
+                        "reconciliation remains degraded; applying bounded backoff",
+                        extra={
+                            "aitos_extra": {
+                                "consecutive_failed_passes": self._consecutive_failures,
+                                "next_delay_seconds": delay,
+                                "new_entries_allowed": False,
+                            }
+                        },
+                    )
+                else:
+                    self._consecutive_failures = 0
+                    delay = self._interval_seconds
         except asyncio.CancelledError:
             return
 
