@@ -174,7 +174,7 @@ async def test_counterexample_table_key_cannot_separate_reused_ids_across_accoun
     assert len(restored) == 1 and restored[0].symbol == "ETHUSDT"
 
 
-async def test_counterexample_unscoped_closed_id_suppresses_other_scope_open(engine):
+async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engine):
     stamp = "2026-11-02 12:00:00.001"
     closed = payload(stamp, state="position_closed")
     closed["account_scope"] = "synthetic-paper-a"
@@ -182,11 +182,13 @@ async def test_counterexample_unscoped_closed_id_suppresses_other_scope_open(eng
     opened["account_scope"] = "synthetic-paper-b"
     insert(engine, "paper_closed_trade_ledger", closed, stamp)
     insert(engine, "trade_runtime_state", opened, stamp)
-    assert await store(engine).load_open_trades() == []
+    restored = await store(engine).load_open_trades()
+    assert len(restored) == 1
+    assert restored[0].symbol == "ETHUSDT"
     assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
 
 
-async def test_counterexample_income_cursor_latest_time_is_not_a_high_water_mark(
+async def test_income_cursor_is_monotonic_high_water_mark(
     engine,
 ):
     for cursor, stamp in [
@@ -202,4 +204,4 @@ async def test_counterexample_income_cursor_latest_time_is_not_a_high_water_mark
             "INSERT INTO exchange_income_sync_cursor FORMAT JSONEachRow\n"
             + json.dumps(record)
         )
-    assert await store(engine).load_income_cursor("synthetic-account") == 100
+    assert await store(engine).load_income_cursor("synthetic-account") == 200
