@@ -107,7 +107,9 @@ def main() -> int:
             print(f"COMPOSE POLICY FAIL: {error}", file=sys.stderr)
         return 1
 
-    print("Compose security policy passed (Redis, storage threshold, paper/live parity).")
+    print(
+        "Compose security policy passed (Redis, storage threshold, paper/live parity)."
+    )
     return 0
 
 
