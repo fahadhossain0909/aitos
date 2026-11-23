@@ -1,13 +1,7 @@
 services:
-  redis:
-    command:
-      - redis-server
-      - --appendonly
-      - yes
-      - --auto-aof-rewrite-percentage
-      - "50"
-      - --auto-aof-rewrite-min-size
-      - 64mb
+  # Do not override Redis command here. Compose replaces (rather than merges)
+  # command arrays, which would silently remove requirepass, maxmemory,
+  # maxmemory-policy and appendfsync from docker-compose.yml.
 
   neo4j:
     environment:
@@ -16,7 +10,7 @@ services:
   aitos-storage-maintenance:
     environment:
       DATA_DISK_DIR: /data-disk
-      DATA_DISK_MIN_FREE_GB: "20"
+      # Inherit DATA_DISK_MIN_FREE_GB from the base compose file (2.5 GB).
       DATA_DISK_TARGET_FREE_GB: "25"
       STORAGE_AUTO_DELETE_PERCENT: "2.5"
       STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300"
