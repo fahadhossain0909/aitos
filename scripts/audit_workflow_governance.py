@@ -148,6 +148,7 @@ def audit(path: Path) -> dict:
         "findings": findings,
     }
 
+
 def render_markdown(reports: list[dict]) -> str:
     lines = [
         "# GitHub Actions Static Governance Audit",
