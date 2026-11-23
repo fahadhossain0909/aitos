@@ -477,4 +477,4 @@ async def test_reconciliation_loop_backoff_and_fail_closed_gate(monkeypatch):
     assert scheduler._last_failure_at is not None
     health = await scheduler.health_check()
     assert health.details["consecutive_failures"] == 3
-    assert health.status.value == "degraded"
+    assert health.status.value == "unhealthy"
