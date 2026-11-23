@@ -296,7 +296,13 @@ class DurableTradingStateStore:
         await self._client().insert(
             "exchange_income_sync_retry",
             [[account, retry_id, 0, "resolved", datetime.now(timezone.utc)]],
-            column_names=["account", "retry_id", "event_time_ms", "state", "updated_at"],
+            column_names=[
+                "account",
+                "retry_id",
+                "event_time_ms",
+                "state",
+                "updated_at",
+            ],
         )
 
     async def save_order_intent(
