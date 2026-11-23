@@ -251,7 +251,7 @@ class DurableTradingStateStore:
         client = self._client()
         result = await client.query(
             """
-            SELECT min(event_time_ms)
+            SELECT minOrNull(event_time_ms)
             FROM exchange_income_sync_retry FINAL
             WHERE account = {account:String} AND state = 'pending'
             """,
