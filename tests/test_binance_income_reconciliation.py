@@ -42,7 +42,8 @@ class FakeStateStore:
 
     async def load_income_retry_floor(self, account):
         pending = [
-            event_time for event_time, state in self.retries.values()
+            event_time
+            for event_time, state in self.retries.values()
             if state == "pending"
         ]
         return min(pending) if pending else None
