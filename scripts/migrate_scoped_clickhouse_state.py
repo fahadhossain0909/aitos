@@ -229,26 +229,31 @@ def _insert_table(client: Any, source: str, target: str, rows: list[tuple[Any, .
         client.insert(target, pending[start:start + CHUNK_SIZE], column_names=columns)
 
     expected = sum(occurrences.values())
-    verified = client.query(
-        f"SELECT count() FROM {target} "
-        "WHERE source_fingerprint IN {fps:Array(String)}",
-        parameters={"fps": fingerprints},
-    ).result_rows[0][0]
-    if fingerprints
-    else 0
+    verified = (
+        client.query(
+            f"SELECT count() FROM {target} "
+            "WHERE source_fingerprint IN {fps:Array(String)}",
+            parameters={"fps": fingerprints},
+        ).result_rows[0][0]
+        if fingerprints
+        else 0
+    )
     if int(verified) != expected:
         raise RuntimeError(
             f"{target} verification incomplete: expected {expected}, "
             f"observed {verified}"
         )
-    conflicts = client.query(
-        f"SELECT count() FROM (SELECT source_fingerprint, source_occurrence "
-        f"FROM {target} WHERE source_fingerprint IN {{fps:Array(String)}} "
-        "GROUP BY source_fingerprint, source_occurrence HAVING count() != 1 OR uniqExact(payload_sha256) != 1)",
-        parameters={"fps": fingerprints},
-    ).result_rows[0][0]
-    if fingerprints
-    else 0
+    conflicts = (
+        client.query(
+            f"SELECT count() FROM (SELECT source_fingerprint, source_occurrence "
+            f"FROM {target} WHERE source_fingerprint IN {{fps:Array(String)}} "
+            "GROUP BY source_fingerprint, source_occurrence "
+            "HAVING count() != 1 OR uniqExact(payload_sha256) != 1)",
+            parameters={"fps": fingerprints},
+        ).result_rows[0][0]
+        if fingerprints
+        else 0
+    )
     if int(conflicts):
         raise RuntimeError(f"{target} contains conflicting imported evidence")
     return expected
