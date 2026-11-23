@@ -44,7 +44,7 @@ async def test_mixed_or_unexpected_account_scope_blocks_recovery():
 
 
 async def test_valid_latest_open_record_is_restored():
-    value, _ = store([("t", json.dumps(dict(trade_id="t")), 1)])
+    value, _ = store([("", "t", json.dumps(dict(trade_id="t")), 1)])
     trade = SimpleNamespace(state=TradeLifecycleState.POSITION_OPENED)
     with patch("aitos.trading.persistent_state._trade_from_dict", return_value=trade):
         assert await value.load_open_trades() == [trade]
