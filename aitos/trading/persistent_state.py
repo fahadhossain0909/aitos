@@ -556,18 +556,36 @@ class DurableTradingStateStore:
     async def load_open_trades(self) -> list[Trade]:
         client = self._client()
         try:
+            # Trade IDs are not globally unique across accounts/runs. Scope the
+            # latest-state and terminal-ledger anti-join by the immutable
+            # account_scope carried in each payload. Missing legacy scope maps
+            # to the empty scope and can only match other missing-scope rows.
             result = await client.query(
                 """
                 SELECT trade_id, any(payload_json) AS latest_payload,
                        uniqExact(payload_json) AS latest_payload_versions
                 FROM trade_runtime_state
-                WHERE (trade_id, updated_at) IN (
-                    SELECT trade_id, max(updated_at)
-                    FROM trade_runtime_state GROUP BY trade_id
-                ) AND trade_id NOT IN (
-                    SELECT trade_id FROM paper_closed_trade_ledger
+                WHERE (
+                    JSONExtractString(payload_json, 'account_scope'),
+                    trade_id,
+                    updated_at
+                ) IN (
+                    SELECT JSONExtractString(payload_json, 'account_scope'),
+                           trade_id, max(updated_at)
+                    FROM trade_runtime_state
+                    GROUP BY JSONExtractString(payload_json, 'account_scope'),
+                             trade_id
                 )
-                GROUP BY trade_id
+                AND (
+                    JSONExtractString(payload_json, 'account_scope'),
+                    trade_id
+                ) NOT IN (
+                    SELECT JSONExtractString(payload_json, 'account_scope'),
+                           trade_id
+                    FROM paper_closed_trade_ledger
+                )
+                GROUP BY JSONExtractString(payload_json, 'account_scope'),
+                         trade_id
                 """
             )
         except Exception:
