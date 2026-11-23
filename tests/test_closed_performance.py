@@ -136,7 +136,12 @@ async def test_performance_is_one_bounded_query_with_truncation_evidence():
         ("", "t", "{}", 2),
         ("", "t", "{}", 0),
         ("", "t", "bad", 1),
-        ("", "t", json.dumps(dict(trade_id="wrong", state="position_closed", pnl=1)), 1),
+        (
+            "",
+            "t",
+            json.dumps(dict(trade_id="wrong", state="position_closed", pnl=1)),
+            1,
+        ),
         ("", "t", json.dumps(dict(trade_id="t", state="position_closed", pnl=None)), 1),
     ],
 )
