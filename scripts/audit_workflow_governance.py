@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 SECRET_RE = re.compile(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
-USES_RE = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
+USES_RE = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.MULTILINE)
 UNTRUSTED_RE = re.compile(
     r"\$\{\{\s*github\.event\.(?:head_commit\.message|issue\.title|"
     r"issue\.body|pull_request\.(?:title|body|head\.ref)|comment\.body)"
