@@ -50,7 +50,6 @@ jobs:
     assert "secrets_without_detected_environment_protection" in report["findings"]
 
 
-
 def test_audit_detects_job_level_permission_overrides_and_inheritance(tmp_path):
     workflow = tmp_path / "job-permissions.yml"
     workflow.write_text(
