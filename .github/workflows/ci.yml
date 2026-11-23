@@ -136,7 +136,7 @@ jobs:
           CLICKHOUSE_USER=$CLICKHOUSE_USER
           CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
           CLICKHOUSE_DATABASE=$CLICKHOUSE_DATABASE
-          REDIS_PASSWORD=ci-only-not-used
+          printf '\\nREDIS_PASSWORD=ci-only-not-used\\nAITOS_RUNTIME_IMAGE=ghcr.io/fahadhossain0909/aitos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' >> .env
           EOF
       - name: Run unit and integration tests with coverage
         env:
@@ -198,7 +198,7 @@ jobs:
       - name: Validate Docker Compose configuration
         run: |
           docker compose config --format json > /tmp/aitos-compose.json
-          python scripts/validate_compose_policy.py /tmp/aitos-compose.json
+          AITOS_REQUIRE_DIGEST_IMAGES=true python scripts/validate_compose_policy.py /tmp/aitos-compose.json
       - name: Lowercase repository name
         id: repo
         run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
