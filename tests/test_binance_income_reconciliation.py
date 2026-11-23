@@ -446,7 +446,9 @@ async def test_old_unattributed_row_retries_without_rewinding_high_water_cursor(
             make_trade("position-2", entry_time=entry + timedelta(minutes=1)),
         ]
     )
-    row_time = 100_000
+    row_time = int(
+        (datetime.now(timezone.utc) - timedelta(minutes=30)).timestamp() * 1000
+    )
     row = {
         "incomeType": "FUNDING_FEE",
         "income": "-0.03",
