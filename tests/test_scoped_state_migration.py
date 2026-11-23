@@ -144,7 +144,6 @@ def test_scope_mapping_is_bound_to_exact_source_fingerprint():
         )
 
 
-
 class FakeClickHouse:
     def __init__(self):
         self.rows = {}
