@@ -1,8 +1,9 @@
 """Fail-closed cumulative-fill reconciliation for triggered protective algos.
 
-This module validates authenticated venue algo/child snapshots and calculates
-unapplied quantity and quote deltas. The lifecycle persists those deltas with
-the trade snapshot before the SQLite mirror watermark is advanced.
+This module deliberately does not mutate trades or submit/cancel orders. It
+validates authenticated venue algo/child snapshots and calculates the unapplied
+quantity and quote deltas. A caller must persist both deltas with its trade
+snapshot before acknowledging the corresponding durable journal evidence.
 """
 
 from __future__ import annotations
@@ -60,13 +61,12 @@ def calculate_protection_child_fill_delta(
     previously_applied_quantity: Any,
     previously_applied_quote: Any = "0",
     expected_position_side: str | None = None,
-    expected_reduce_only: bool | None = None,
-    expected_original_quantity: Any | None = None,
 ) -> ProtectionChildFillDelta:
     """Validate one authenticated triggered-algo child and calculate new fills.
 
-    Venue executedQty/cumQuote are cumulative. Incremental average fill price is
-    delta cumQuote / delta executedQty, not the venue's lifetime avgPrice.
+    Venue executedQty/cumQuote are cumulative. The incremental average fill
+    price is therefore delta cumQuote / delta executedQty, never the venue's
+    lifetime avgPrice applied to only the latest quantity delta.
     """
     if not isinstance(algo, dict) or not isinstance(child, dict):
         raise ProtectionChildReconciliationError(
@@ -101,15 +101,6 @@ def calculate_protection_child_fill_delta(
             raise ProtectionChildReconciliationError("algo position-side mismatch")
         if child.get("positionSide") != expected_position_side:
             raise ProtectionChildReconciliationError("child position-side mismatch")
-    if expected_reduce_only is not None:
-        allowed_flags = (expected_reduce_only, str(expected_reduce_only).lower())
-        if algo.get("reduceOnly") not in allowed_flags:
-            raise ProtectionChildReconciliationError("algo reduce-only mismatch")
-        if (
-            child.get("reduceOnly") is not None
-            and child.get("reduceOnly") not in allowed_flags
-        ):
-            raise ProtectionChildReconciliationError("child reduce-only mismatch")
 
     status = str(child.get("status", "")).upper()
     allowed_statuses = {
@@ -132,14 +123,6 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "executed child quantity exceeds original quantity"
         )
-    if expected_original_quantity is not None:
-        expected_original = _decimal_value(
-            expected_original_quantity, "expected_original_quantity"
-        )
-        if original != expected_original:
-            raise ProtectionChildReconciliationError(
-                "child original quantity does not match durable protective intent"
-            )
     applied = _decimal_value(
         previously_applied_quantity,
         "previously_applied_quantity",
@@ -176,7 +159,7 @@ def calculate_protection_child_fill_delta(
         raise ProtectionChildReconciliationError(
             "new fill has no positive incremental quote value"
         )
-    average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal("0")
+    average = delta_quote / delta_quantity if delta_quantity > 0 else Decimal(0)
     return ProtectionChildFillDelta(
         algo_id=algo_id,
         child_order_id=child_id,
