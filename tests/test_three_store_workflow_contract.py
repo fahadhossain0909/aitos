@@ -49,7 +49,6 @@ def test_write_capable_recovery_workflow_excludes_pull_request_code():
     assert "\npermissions:\n  contents: write\n  actions: write" in source
 
 
-
 def test_pull_request_three_store_workflow_is_read_only_and_runs_real_clickhouse():
     workflow = (
         Path(__file__).resolve().parents[1]
