@@ -112,7 +112,7 @@ services:
     restart: unless-stopped
 
   aitos-paper:
-    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
+    image: "${AITOS_RUNTIME_IMAGE:-${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}}"
     container_name: aitos-paper
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "/app/run_paper_trading.py"]
@@ -242,7 +242,7 @@ services:
     restart: unless-stopped
 
   aitos-live:
-    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
+    image: "${AITOS_RUNTIME_IMAGE:-${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}}"
     container_name: aitos-live
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_live_trading.py"]
