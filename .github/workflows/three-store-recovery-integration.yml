@@ -4,26 +4,7 @@ on:
   push:
     branches:
       - "audit/system-audit-and-docs-2026-11"
-  pull_request:
-    paths:
-      - "aitos/execution/**"
-      - "aitos/strategy/**"
-      - "aitos/intelligence/capital_protection.py"
-      - "aitos/trading/lifecycle.py"
-      - "aitos/trading/reconciliation.py"
-      - "aitos/trading/persistent_state.py"
-      - "tests/integration/test_execution_recovery_three_store.py"
-      - "tests/test_protection_child_*.py"
-      - "tests/test_strategy_opportunity_bridge.py"
-      - "tests/test_reconciliation_scheduler.py"
-      - "scripts/render_postgres_smoke.py"
-      - "aitos/storage/postgres_migrations.py"
-      - "aitos/data/postgres_repository.py"
-      - "aitos/journal/postgres_repository.py"
-      - "tests/test_render_postgres_smoke.py"
-      - "tests/storage/test_postgres_migrations.py"
-      - "tests/test_three_store_workflow_contract.py"
-      - ".github/workflows/three-store-recovery-integration.yml"
+  # PR-controlled code is not run with the write-capable token below.
   workflow_dispatch:
 
 permissions:
