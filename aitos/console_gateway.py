@@ -918,6 +918,81 @@ def create_gateway(
         logger.info("operator MFA sign-in accepted")
         return issue_operator_session(response, request, user_id)
 
+    async def list_operator_credentials(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        return web.json_response(
+            {"credentials": webauthn_rp.list_credentials(user_id=user_id)}
+        )
+
+    async def begin_add_authenticator(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="Authenticator enrollment rate limit reached"
+            )
+        options = webauthn_rp.authentication_options(
+            user_id=user_id, now=int(time.time())
+        )
+        return web.json_response({"options": options})
+
+    async def verify_add_authenticator_step_up(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="Authenticator step-up rate limit reached"
+            )
+        body = await read_json_body(request, max_bytes=96 * 1024)
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"challenge", "assertion"}
+            or not isinstance(body["challenge"], str)
+            or not isinstance(body["assertion"], dict)
+        ):
+            raise web.HTTPBadRequest(text="Invalid WebAuthn step-up")
+        try:
+            claims = webauthn_rp.verify_assertion(
+                assertion=json.dumps(body["assertion"], separators=(",", ":")).encode(),
+                challenge=body["challenge"],
+                expected_origin=webauthn_rp.origins,
+                expected_rp_id=webauthn_rp.rp_id,
+                require_user_verification=True,
+            )
+            if claims.get("verified") is not True or claims.get("user_id") != user_id:
+                raise PermissionError("WebAuthn identity mismatch")
+            options = webauthn_rp.registration_options(
+                user_id=user_id, now=int(time.time())
+            )
+        except Exception as exc:
+            logger.info("authenticator enrollment step-up rejected: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="WebAuthn step-up rejected") from None
+        return web.json_response({"options": options})
+
+    async def finish_add_authenticator(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        body = await read_json_body(request, max_bytes=96 * 1024)
+        if not isinstance(body, dict) or set(body) != {"credential"}:
+            raise web.HTTPBadRequest(text="Invalid WebAuthn registration")
+        try:
+            credential_id = webauthn_rp.verify_registration(
+                user_id=user_id,
+                credential=body["credential"],
+                now=int(time.time()),
+            )
+        except Exception as exc:
+            logger.info("additional authenticator registration rejected: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="Authenticator registration rejected") from None
+        return web.json_response(
+            {"registered": True, "credential_id": credential_id}
+        )
+
     async def approval_capabilities(request):
         require_operator_session(request)
         enabled = approval_control_plane is not None and webauthn_rp is not None
@@ -1117,6 +1192,10 @@ def create_gateway(
     app.router.add_post("/operator/v1/login", login)
     app.router.add_post("/operator/v1/mfa/register", finish_mfa_enrollment)
     app.router.add_post("/operator/v1/mfa/verify", finish_mfa_login)
+    app.router.add_get("/operator/v1/mfa/credentials", list_operator_credentials)
+    app.router.add_post("/operator/v1/mfa/add/options", begin_add_authenticator)
+    app.router.add_post("/operator/v1/mfa/add/verify", verify_add_authenticator_step_up)
+    app.router.add_post("/operator/v1/mfa/add/finish", finish_add_authenticator)
     app.router.add_get("/operator/v1/approval/capabilities", approval_capabilities)
     app.router.add_post("/operator/v1/approval/challenge", create_approval_challenge)
     app.router.add_post("/operator/v1/approval/approve", approve_action)
