@@ -123,21 +123,29 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             tp_price=110.0,
             state=TradeLifecycleState.POSITION_OPENED,
             entry_time="2026-11-24T00:00:00+00:00",
-            account_scope="paper:integration",
+            account_scope="paper:recovery",
         )
-        await writer(restored_trade)
+        recovery_fence = await oms.acquire_writer(
+            "paper:recovery",
+            "worker-c",
+            expected_generation=0,
+        )
+        recovery_writer = PostgresLifecycleStateWriter(
+            oms, recovery_fence, projection_writer
+        )
+        await recovery_writer(restored_trade)
 
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
             _closed_trades = []
 
-        recovery = await writer.restore_lifecycle(LifecycleState())
+        recovery = await recovery_writer.restore_lifecycle(LifecycleState())
         assert recovery == {"open": 1, "closed": 0}
         assert list(LifecycleState._open_trades) == ["trade-restore"]
         assert LifecycleState._open_trades["trade-restore"].symbol == "BTCUSDT"
         assert (
             LifecycleState._open_trades["trade-restore"].account_scope
-            == "paper:integration"
+            == "paper:recovery"
         )
         assert [
             item.revision
