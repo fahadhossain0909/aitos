@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -59,7 +60,14 @@ class LiveApprovalControlPlane:
             raise ValueError("approval signing key must contain at least 256 bits")
         if not allowed_origins or not rp_id or not 1 <= ttl_seconds <= 300:
             raise ValueError("explicit WebAuthn origin, RP ID and short TTL required")
-        self.path = Path(path)
+        self.path = Path(path).expanduser()
+        if self.path.is_symlink():
+            raise ValueError("approval database symlinks are forbidden")
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.path.parent.is_symlink():
+            raise ValueError("approval database directory symlinks are forbidden")
+        if os.name != "nt":
+            os.chmod(self.path.parent, 0o700)
         self.key = bytes(signing_key)
         self.origins = frozenset(allowed_origins)
         self.rp_id = rp_id
@@ -95,6 +103,8 @@ class LiveApprovalControlPlane:
               END;
             """
             )
+        if self.path.exists() and os.name != "nt":
+            os.chmod(self.path, 0o600)
 
     @contextmanager
     def _connection(self):
