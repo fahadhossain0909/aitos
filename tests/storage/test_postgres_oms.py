@@ -288,6 +288,12 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
             )
         with pytest.raises(asyncpg.PostgresError, match="append-only"):
             await admin.execute("DELETE FROM aitos_oms_legacy_imports")
+        with pytest.raises(asyncpg.PostgresError, match="append-only"):
+            await admin.execute(
+                "UPDATE aitos_oms_events SET event_id='tampered'"
+            )
+        with pytest.raises(asyncpg.PostgresError, match="append-only"):
+            await admin.execute("DELETE FROM aitos_oms_events")
 
         pool = await asyncpg.create_pool(
             dsn=dsn,
