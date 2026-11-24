@@ -4,6 +4,7 @@ import uuid
 import pytest
 
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
+from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
 from aitos.storage.postgres_migrations import apply_postgres_migrations
 
 
@@ -75,6 +76,33 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             payload={"state": "CLOSED"},
         )
         assert closed.revision == 2
+
+        projected = []
+
+        async def projection_writer(trade):
+            projected.append(trade.to_dict())
+
+        writer = PostgresLifecycleStateWriter(oms, second_fence, projection_writer)
+
+        class TradeSnapshot:
+            trade_id = "trade-1"
+
+            @staticmethod
+            def to_dict():
+                return {"trade_id": "trade-1", "state": "POSITION_OPENED"}
+
+        await writer(TradeSnapshot())
+        assert projected == [{"trade_id": "trade-1", "state": "POSITION_OPENED"}]
+        assert (await writer.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
+
+        async def broken_projection(_trade):
+            raise RuntimeError("projection unavailable")
+
+        broken = PostgresLifecycleStateWriter(oms, second_fence, broken_projection)
+        with pytest.raises(RuntimeError, match="projection unavailable"):
+            await broken(TradeSnapshot())
+        # Canonical event is committed before the projection callback fails.
+        assert (await broken.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
         assert [
             item.revision
             for item in await oms.read_events("paper:integration", "trade-1")
