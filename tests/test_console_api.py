@@ -247,3 +247,50 @@ async def test_research_plan_is_read_only_computation_not_job_launch():
 async def test_research_plan_rejects_invalid_or_duplicate_inputs(query):
     async with await client_for() as client:
         assert (await client.get("/console/v1/research/plan?" + query)).status == 400
+
+
+def frames(body: str):
+    return [f for f in body.split("\n\n") if f]
+
+
+@pytest.mark.asyncio
+async def test_stream_is_authenticated_deduplicated_bounded_and_read_only(monkeypatch):
+    monkeypatch.setattr("aitos.console_api.STREAM_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr("aitos.console_api.STREAM_MAX_SECONDS", 0.25)
+    store = SimpleNamespace(query_closed_history=AsyncMock(return_value=[]))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    async with await client_for(state_store=store, token=TOKEN) as client:
+        assert (await client.get("/console/v1/stream")).status == 401
+        assert (await client.get("/console/v1/stream?x=1", headers=auth)).status == 400
+        assert (await client.post("/console/v1/stream", headers=auth)).status == 405
+        response = await client.get("/console/v1/stream", headers=auth)
+        assert response.headers["Content-Type"].startswith("text/event-stream")
+        assert response.headers["Cache-Control"] == "no-store"
+        sent = frames(await response.text())
+        # An unchanged runtime produces exactly one snapshot even though it is sampled repeatedly.
+        assert len(sent) == 1 and sent[0].startswith("event: snapshot\ndata: ")
+        body = json.loads(sent[0].split("data: ", 1)[1])
+        assert body["controls"] == "read_only" and body["schema_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_client_limit_and_slot_release(monkeypatch):
+    monkeypatch.setattr("aitos.console_api.STREAM_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr("aitos.console_api.STREAM_MAX_SECONDS", 5)
+    store = SimpleNamespace(query_closed_history=AsyncMock(return_value=[]))
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    async with await client_for(state_store=store, token=TOKEN) as client:
+        first = await client.get("/console/v1/stream", headers=auth)
+        second = await client.get("/console/v1/stream", headers=auth)
+        assert (await client.get("/console/v1/stream", headers=auth)).status == 429
+        first.close()
+        second.close()
+        import asyncio
+
+        for _ in range(100):  # the server notices disconnects asynchronously
+            await asyncio.sleep(0.02)
+            retry = await client.get("/console/v1/stream", headers=auth)
+            if retry.status == 200:
+                retry.close()
+                break
+        assert retry.status == 200

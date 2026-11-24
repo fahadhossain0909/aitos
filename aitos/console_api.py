@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import hmac
+import json
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -47,6 +50,26 @@ TRADE_FIELDS = (
 def public_trade(trade: Any) -> dict:
     source = trade.to_dict() if hasattr(trade, "to_dict") else trade
     return {key: source.get(key) for key in TRADE_FIELDS}
+
+
+# Server-sent snapshot stream: bounded in lifetime, clients and rate.
+STREAM_INTERVAL_SECONDS = 2.0
+STREAM_HEARTBEAT_SECONDS = 15.0
+STREAM_MAX_SECONDS = 60.0
+STREAM_MAX_CLIENTS = 2
+
+
+def without_clock(value: Any) -> Any:
+    """Drop self-refreshing timestamps so an unchanged runtime emits no new frame."""
+    if isinstance(value, dict):
+        return {
+            key: without_clock(item)
+            for key, item in value.items()
+            if key != "generated_at"
+        }
+    if isinstance(value, list):
+        return [without_clock(item) for item in value]
+    return value
 
 
 def finite_json(value: Any) -> Any:
@@ -93,9 +116,7 @@ def register_console_routes(
         ):
             raise web.HTTPUnauthorized(text="Console authorization required")
 
-    async def snapshot(request):
-        authorize(request)
-
+    async def build_snapshot() -> dict:
         async def health(module):
             try:
                 result = await asyncio.wait_for(module.health_check(), timeout=2)
@@ -143,9 +164,62 @@ def register_console_routes(
                 )
         payload["projection"] = projection
         payload["readiness"] = assess_readiness(payload)
+        return finite_json(payload)
+
+    async def snapshot(request):
+        authorize(request)
         return web.json_response(
-            finite_json(payload), headers={"Cache-Control": "no-store"}
+            await build_snapshot(), headers={"Cache-Control": "no-store"}
         )
+
+    streams = {"active": 0}
+
+    async def stream(request):
+        authorize(request)
+        if request.query:
+            raise web.HTTPBadRequest(text="Stream query parameters are not supported")
+        if streams["active"] >= STREAM_MAX_CLIENTS:
+            raise web.HTTPTooManyRequests(text="Too many console streams")
+        streams["active"] += 1
+        try:
+            response = web.StreamResponse(
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-store",
+                    "X-Accel-Buffering": "no",
+                }
+            )
+            await response.prepare(request)
+            started = last_sent = time.monotonic()
+            digest = None
+            while time.monotonic() - started < STREAM_MAX_SECONDS:
+                payload = await build_snapshot()
+                current = hashlib.sha256(
+                    json.dumps(
+                        without_clock(payload), sort_keys=True, allow_nan=False
+                    ).encode()
+                ).hexdigest()
+                now = time.monotonic()
+                frame = None
+                if current != digest:
+                    digest, last_sent = current, now
+                    frame = (
+                        "event: snapshot\ndata: "
+                        + json.dumps(payload, allow_nan=False, separators=(",", ":"))
+                        + "\n\n"
+                    )
+                elif now - last_sent >= STREAM_HEARTBEAT_SECONDS:
+                    last_sent = now
+                    frame = ": keepalive\n\n"
+                if frame:
+                    await response.write(frame.encode())
+                await asyncio.sleep(STREAM_INTERVAL_SECONDS)
+            await response.write_eof()
+            return response
+        except ConnectionResetError:
+            return response
+        finally:
+            streams["active"] -= 1
 
     async def history(request):
         authorize(request)
@@ -399,6 +473,7 @@ def register_console_routes(
     app.router.add_get("/console/v1/research/plan", research_plan)
     app.router.add_get("/console/v1/performance", performance)
     app.router.add_get("/console/v1/snapshot", snapshot)
+    app.router.add_route("GET", "/console/v1/stream", stream)
     app.router.add_get("/console/v1/history", history)
 
 
