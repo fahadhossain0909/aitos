@@ -184,7 +184,12 @@ class LiveApprovalControlPlane:
                 "FROM live_approval_challenges WHERE challenge_id=?",
                 (challenge_id,),
             ).fetchone()
-        if row is None or row[1] != user_id or row[4] or int(row[3]) <= int(time.time()):
+        if (
+            row is None
+            or row[1] != user_id
+            or row[4]
+            or int(row[3]) <= int(time.time())
+        ):
             raise ApprovalDenied("approval challenge is unavailable")
         return ApprovalChallenge(challenge_id, row[0], row[1], row[2], int(row[3]))
 
