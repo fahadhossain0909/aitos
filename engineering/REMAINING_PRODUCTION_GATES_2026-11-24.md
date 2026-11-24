@@ -31,24 +31,26 @@ authorizes a database cutover, deployment, testnet order or mainnet execution.
   implementation, migration of existing financial state, atomic lifecycle
   integration, and restart/HA acceptance remain required.
 
-### Live approval boundary
-- `aitos/security/live_approval.py` adds challenge/action binding, role checks,
-  short-lived HMAC-signed approval tokens, one-time durable consumption and an
-  append-only audit table.
-- Mainnet `BinanceFuturesOrderExecutor` construction now requires an injected
-  approval consumer; each mainnet order consumes an approval bound to the
-  exact environment, scope, client ID, symbol, side, quantity, price, order
-  type, reduce-only flag and owner trade.
-- The module deliberately delegates WebAuthn cryptographic assertion
-  verification to a relying-party adapter. A real adapter with credential
-  registration/storage, clientDataJSON, challenge, origin, RP-ID hash,
-  authenticator flags, signature/counter verification, MFA policy and
-  authenticated RBAC identity is NOT yet supplied or integrated with the
-  desktop control plane. The HMAC key must be held by a protected service,
-  not the desktop client.
-- Therefore these primitives do not establish production WebAuthn readiness.
-  Mainnet must remain disabled unless the deployment injects a trusted,
-  independently verified RP/identity adapter and protected approval service.
+### Live approval and desktop identity boundary
+- `aitos/security/live_approval.py` implements action-digest binding, server-side
+  role checks, short-lived HMAC-signed approval receipts, one-time durable
+  consumption and append-only audit. PostgreSQL OMS events and imported source
+  evidence are append-only at the database level.
+- `aitos/security/webauthn_rp.py` now supplies a py_webauthn RP with user-bound
+  registration and assertion challenges, exact RP/origin binding, UV-required
+  cryptographic verification, credential counters, one-time challenge
+  consumption, credential inventory and append-only credential audit.
+- `aitos/console_gateway.py` now binds sessions and pending MFA state to
+  configured operator identities, requires WebAuthn for non-loopback login,
+  supports guarded first-device enrollment, step-up enrollment of backup
+  authenticators, session revocation and server-owned RBAC approval routes.
+  Multi-operator password directories and role maps are server-side config.
+- The desktop now contains the WebAuthn login ceremony, authenticator manager
+  and Approval Desk. The desk signs an action digest only; it does not submit
+  orders or execute trading mutations. The signed receipt consumer still needs
+  a trusted service-to-service integration with the executor before it can
+  authorize any production action. Physical hardware enrollment and external
+  origin acceptance remain untested.
 
 ### Protective order and three-store recovery
 - The branch already contains durable intent preclaims, protection handover
@@ -69,7 +71,7 @@ authorizes a database cutover, deployment, testnet order or mainnet execution.
 | Canonical OMS / CAS / fencing | Standalone primitive + tests | Not wired to active lifecycle; PG/HA outstanding |
 | Protective POST-to-ID and algo child fill recovery | Durable recovery path + tests | Isolated fixture acceptance pending/current-head CI |
 | Venue + SQLite + ClickHouse restarts | Fault-injection workflow + tests | CI results and authenticated venue proof required |
-| WebAuthn / hardware approval | Token/RBAC/replay primitive + mainnet hook | Real RP adapter, identity/RBAC, desktop integration outstanding |
+| WebAuthn / desktop approval | RP adapter, identity-bound MFA, backup-key management, RBAC and approval UI implemented | Hardware authenticator, external origin and trusted executor receipt-consumer acceptance outstanding |
 
 ## Safety decision
 
@@ -160,10 +162,10 @@ These are implementation components, not acceptance claims. In particular:
    credential registration and assertion must be completed in the configured
    production origin/RP environment; callback-based approval tests are not
    hardware credential acceptance.
-4. No authenticated desktop approval UI or MFA/session API has been enabled.
-   The existing desktop Operator Console remains read-only; do not add an
-   approval route to it until identity, CSRF/origin protection, session
-   revocation, RBAC and audit integration are complete.
+4. The authenticated desktop MFA and Approval Desk are now implemented.
+   Approval receipts are not connected to a live order-execution route; the
+   console remains read-only. A trusted server-side receipt consumer, physical
+   authenticator acceptance and external HTTPS/RP acceptance remain open.
 5. Protective POST-to-ID and triggered child-fill logic still needs the
    authenticated Binance Demo/Testnet write-side drill, including response
    loss after POST, client-ID lookup, triggered algo-to-child association,
@@ -183,34 +185,41 @@ cutover, or desktop identity integration. Keep Mainnet fail-closed.
 
 ## Additional implementation — ClickHouse to PostgreSQL canonical import
 
-- `scripts/import_clickhouse_state_to_postgres_oms.py` now provides an
-  explicit offline importer for both legacy trade tables. It creates a
-  PostgreSQL import-evidence ledger, preserves each original JSON payload as
-  exact text plus SHA-256, requires explicit per-row account-scope attribution,
-  and appends deterministic, idempotent `TRADE_SNAPSHOT` events through the
-  canonical PostgreSQL OMS API. Per-trade snapshots are ordered by source
-  timestamp; import can be resumed after interruption.
-- The importer has dry-run and `--apply` modes. Apply requires explicit
-  writer-stop and restorable-backup acknowledgements. It does not rename,
-  delete, or mutate ClickHouse tables. Source/target count and occurrence
-  identity parity are checked after import.
-- Unit tests cover source identity, terminal ledger validation, and exact raw
-  payload preservation. The import has not yet been run against the user's
-  ClickHouse/PostgreSQL databases. Oversized OMS events, missing scope
-  attribution, payload/schema incompatibility, or any parity discrepancy fail
-  closed. A production cutover still requires a separately reviewed writer
-  freeze, backup, full per-record hash reconciliation, reader/writer routing
-  switch, and restart verification.
+- `scripts/import_clickhouse_state_to_postgres_oms.py` now streams both
+  legacy or already scope-keyed ClickHouse source layouts into a bounded local
+  SQLite staging spool. It selects the active v2/cutover table when present,
+  checks companion retained-table counts, verifies source fingerprints and
+  canonical payload hashes, and emits a JSONL manifest without loading the
+  entire source dataset into memory.
+- The PostgreSQL migration v3 creates an immutable import-evidence ledger.
+  Each exact legacy JSON payload is stored as text plus SHA-256; canonical OMS
+  events reference that immutable evidence by source table/fingerprint/
+  occurrence, keeping event payloads bounded. Lifecycle hydration resolves the
+  reference, verifies source trade ID, timestamp and raw SHA-256, then rebuilds
+  the Trade snapshot with its explicit account scope.
+- Apply is resumable and idempotent, requires writer-stop and restorable-backup
+  acknowledgements, refuses ambiguous same-timestamp conflicting snapshots,
+  refuses to append legacy history over an existing non-legacy canonical
+  aggregate, and verifies every canonical source-event reference. It never
+  mutates ClickHouse tables. No production data has been imported or cut over.
+- Tests now cover read-only dry-run, legacy and scope-keyed sources, ambiguity
+  rejection, PostgreSQL evidence immutability, and canonical Trade hydration.
+  The actual database import, source/target per-record reconciliation and
+  application reader/writer cutover remain operational acceptance gates.
 
 ## Additional implementation — WebAuthn login challenge lifecycle
 
-- The relying party now issues short-lived, user-bound authentication options,
-  limits credentials to that identity, persists a one-time assertion challenge,
-  checks that the credential belongs to the challenge owner, and consumes the
-  challenge in the same SQLite transaction as the authenticator counter update.
-- This closes the gap where an assertion verifier accepted a caller-supplied
-  challenge without proving that the server had issued it. The verifier is
-  still not integrated with an authenticated desktop session provider, MFA
-  policy, CSRF/origin-protected API routes, RBAC/session revocation, or an
-  approval UI. Hardware authenticator and desktop end-to-end acceptance remain
-  open.
+- The relying party now issues short-lived, user-bound registration and
+  authentication options, persists one-time challenges, checks credential/
+  challenge ownership, enforces user verification and consumes challenges in
+  the same transaction as authenticator counter updates.
+- The desktop gateway binds pre-authentication and authenticated sessions to
+  operator identity, supports multiple configured identities, requires WebAuthn
+  MFA on non-loopback origins, supports out-of-band first-device bootstrap,
+  backup-authenticator step-up enrollment, and role-gated approval challenge/
+  assertion routes. Credential listing/revocation is scoped to an identity;
+  revocation is intentionally offline-admin only and audited.
+- The Approval Desk creates a signed action-digest receipt after a fresh
+  WebAuthn assertion. It does not submit or execute orders. The executor's
+  server-side receipt consumer still needs a secure service integration, and
+  hardware/external-origin acceptance remains open.
