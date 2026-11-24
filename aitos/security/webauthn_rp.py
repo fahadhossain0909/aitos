@@ -97,9 +97,14 @@ class WebAuthnRelyingParty:
                     expires_at INTEGER NOT NULL,
                     consumed_at INTEGER
                 );
+                CREATE TABLE IF NOT EXISTS webauthn_enrollment_bootstrap (
+                    user_id TEXT PRIMARY KEY,
+                    token_hash TEXT NOT NULL,
+                    consumed_at INTEGER
+                );
                 CREATE TABLE IF NOT EXISTS webauthn_credential_audit (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event TEXT NOT NULL CHECK(event IN ('CREDENTIAL_REGISTERED','CREDENTIAL_REVOKED')),
+                    event TEXT NOT NULL CHECK(event IN ('CREDENTIAL_REGISTERED','CREDENTIAL_REVOKED','BOOTSTRAP_TOKEN_CONSUMED','BOOTSTRAP_TOKEN_RESET')),
                     user_id TEXT NOT NULL,
                     credential_id TEXT NOT NULL,
                     recorded_at INTEGER NOT NULL
@@ -261,6 +266,110 @@ class WebAuthnRelyingParty:
         finally:
             db.close()
         return serialized
+
+    def consume_enrollment_bootstrap_token(
+        self,
+        *,
+        user_id: str,
+        configured_token: str,
+        supplied_token: str,
+        now: int,
+    ) -> bool:
+        """Consume one out-of-band first-device token once per operator identity."""
+        user = self._user_id(user_id)
+        if (
+            not isinstance(configured_token, str)
+            or len(configured_token) < 32
+            or not isinstance(supplied_token, str)
+            or len(supplied_token) < 32
+        ):
+            return False
+        configured_hash = hashlib.sha256(configured_token.encode("utf-8")).hexdigest()
+        supplied_hash = hashlib.sha256(supplied_token.encode("utf-8")).hexdigest()
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT OR IGNORE INTO webauthn_enrollment_bootstrap"
+                "(user_id,token_hash,consumed_at) VALUES(?,?,NULL)",
+                (user, configured_hash),
+            )
+            row = db.execute(
+                "SELECT token_hash,consumed_at FROM webauthn_enrollment_bootstrap "
+                "WHERE user_id=?",
+                (user,),
+            ).fetchone()
+            if (
+                row is None
+                or row[1] is not None
+                or not hmac.compare_digest(row[0], configured_hash)
+                or not hmac.compare_digest(row[0], supplied_hash)
+            ):
+                db.commit()
+                return False
+            changed = db.execute(
+                "UPDATE webauthn_enrollment_bootstrap SET consumed_at=? "
+                "WHERE user_id=? AND consumed_at IS NULL",
+                (int(now), user),
+            ).rowcount
+            if changed != 1:
+                db.rollback()
+                return False
+            db.execute(
+                "INSERT INTO webauthn_credential_audit"
+                "(event,user_id,credential_id,recorded_at) "
+                "VALUES('BOOTSTRAP_TOKEN_CONSUMED',?,?,?)",
+                (user, "first-device-bootstrap", int(now)),
+            )
+            db.commit()
+            return True
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def reset_enrollment_bootstrap_token(
+        self, *, user_id: str, new_token: str, now: int
+    ) -> None:
+        """Offline-admin recovery after every credential for this user was revoked."""
+        user = self._user_id(user_id)
+        if not isinstance(new_token, str) or len(new_token) < 32:
+            raise ValueError("new bootstrap token must contain at least 256 bits")
+        if self.credential_count(user_id=user) != 0:
+            raise WebAuthnCredentialError(
+                "bootstrap reset is allowed only after all user credentials are revoked"
+            )
+        token_hash = hashlib.sha256(new_token.encode("utf-8")).hexdigest()
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM webauthn_credentials WHERE user_id=? LIMIT 1",
+                (user,),
+            ).fetchone():
+                raise WebAuthnCredentialError(
+                    "a credential was registered during bootstrap reset"
+                )
+            db.execute(
+                "INSERT INTO webauthn_enrollment_bootstrap"
+                "(user_id,token_hash,consumed_at) VALUES(?,?,NULL) "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "token_hash=excluded.token_hash,consumed_at=NULL",
+                (user, token_hash),
+            )
+            db.execute(
+                "INSERT INTO webauthn_credential_audit"
+                "(event,user_id,credential_id,recorded_at) "
+                "VALUES('BOOTSTRAP_TOKEN_RESET',?,?,?)",
+                (user, "first-device-bootstrap", int(now)),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def list_credentials(self, *, user_id: str) -> list[dict[str, Any]]:
         """Return non-secret authenticator metadata for one authenticated subject."""
