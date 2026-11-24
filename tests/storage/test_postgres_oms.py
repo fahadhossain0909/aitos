@@ -288,6 +288,30 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
             )
         with pytest.raises(asyncpg.PostgresError, match="append-only"):
             await admin.execute("DELETE FROM aitos_oms_legacy_imports")
+
+        pool = await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=1,
+            max_size=3,
+            server_settings={"search_path": schema},
+        )
+        oms = PostgresCanonicalOMS(pool)
+        recovery_fence = await oms.acquire_writer(
+            "paper:import",
+            "recovery-reader",
+            expected_generation=1,
+        )
+
+        async def projection_writer(_trade):
+            return None
+
+        recovery_writer = PostgresLifecycleStateWriter(
+            oms, recovery_fence, projection_writer
+        )
+        restored = await recovery_writer.latest_snapshot("import-open")
+        assert restored["trade_id"] == "import-open"
+        assert restored["quantity"] == "0.125"
+        assert restored["account_scope"] == "paper:import"
     finally:
         if not pool.is_closing():
             await pool.close()
