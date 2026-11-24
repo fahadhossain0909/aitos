@@ -2,8 +2,8 @@ import json
 import os
 import sys
 import uuid
-from decimal import Decimal
 from contextlib import contextmanager
+from decimal import Decimal
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -100,10 +100,20 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             expected_revision=0,
             payload={"state": "OPEN", "quantity": "1"},
             ledger_entries=[
-                {"account_code": "POSITION_ASSET", "currency": "USDT",
-                 "debit": "100.25", "credit": "0", "reference": "entry-notional"},
-                {"account_code": "CASH_CLEARING", "currency": "USDT",
-                 "debit": "0", "credit": "100.25", "reference": "entry-notional"},
+                {
+                    "account_code": "POSITION_ASSET",
+                    "currency": "USDT",
+                    "debit": "100.25",
+                    "credit": "0",
+                    "reference": "entry-notional",
+                },
+                {
+                    "account_code": "CASH_CLEARING",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "100.25",
+                    "reference": "entry-notional",
+                },
             ],
             causation_id="signal:abc",
             correlation_id="trade-1",
