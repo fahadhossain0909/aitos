@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import uuid
+from decimal import Decimal
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
@@ -19,20 +20,51 @@ from scripts.import_clickhouse_state_to_postgres_oms import (
 def test_postgres_oms_financial_journal_requires_balanced_finite_lines():
     from aitos.execution.postgres_oms import PostgresCanonicalOMS
 
-    balanced = PostgresCanonicalOMS._validate_ledger_entries([
-        {"account_code": "EXPENSE_FEES", "currency": "USDT", "debit": "0.1", "credit": "0"},
-        {"account_code": "CASH", "currency": "USDT", "debit": "0", "credit": "0.1"},
-    ])
+    balanced = PostgresCanonicalOMS._validate_ledger_entries(
+        [
+            {
+                "account_code": "EXPENSE_FEES",
+                "currency": "USDT",
+                "debit": "0.1",
+                "credit": "0",
+            },
+            {
+                "account_code": "CASH",
+                "currency": "USDT",
+                "debit": "0",
+                "credit": "0.1",
+            },
+        ]
+    )
     assert len(balanced) == 2
     with pytest.raises(ValueError, match="balance"):
-        PostgresCanonicalOMS._validate_ledger_entries([
-            {"account_code": "EXPENSE_FEES", "currency": "USDT", "debit": "0.1", "credit": "0"},
-            {"account_code": "CASH", "currency": "USDT", "debit": "0", "credit": "0.09"},
-        ])
+        PostgresCanonicalOMS._validate_ledger_entries(
+            [
+                {
+                    "account_code": "EXPENSE_FEES",
+                    "currency": "USDT",
+                    "debit": "0.1",
+                    "credit": "0",
+                },
+                {
+                    "account_code": "CASH",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "0.09",
+                },
+            ]
+        )
     with pytest.raises(ValueError, match="exactly one"):
-        PostgresCanonicalOMS._validate_ledger_entries([
-            {"account_code": "CASH", "currency": "USDT", "debit": "1", "credit": "1"},
-        ])
+        PostgresCanonicalOMS._validate_ledger_entries(
+            [
+                {
+                    "account_code": "CASH",
+                    "currency": "USDT",
+                    "debit": "1",
+                    "credit": "1",
+                }
+            ]
+        )
 
 
 @pytest.mark.asyncio
@@ -76,8 +108,12 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         )
         balances = await oms.financial_balances("paper:integration")
         assert len(balances) == 2
-        assert sum((row["debit"] for row in balances), start=__import__("decimal").Decimal("0")) == __import__("decimal").Decimal("100.25")
-        assert sum((row["credit"] for row in balances), start=__import__("decimal").Decimal("0")) == __import__("decimal").Decimal("100.25")
+        assert sum((row["debit"] for row in balances), start=Decimal("0")) == Decimal(
+            "100.25"
+        )
+        assert sum((row["credit"] for row in balances), start=Decimal("0")) == Decimal(
+            "100.25"
+        )
         trade_ledger = await oms.financial_trade_ledger("paper:integration", "trade-1")
         assert len(trade_ledger) == 2
         duplicate = await oms.append(
