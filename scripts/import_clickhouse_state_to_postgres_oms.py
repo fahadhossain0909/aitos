@@ -171,7 +171,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError("install asyncpg for --apply") from exc
         asyncpg = asyncpg_module
     dsn = os.getenv("DATABASE_URL")
-    if not dsn:
+    if args.apply and not dsn:
         raise RuntimeError("DATABASE_URL must target the PostgreSQL primary")
     ch = clickhouse_connect.get_client(
         host=os.getenv("CLICKHOUSE_HOST", "localhost"),
