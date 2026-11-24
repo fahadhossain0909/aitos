@@ -425,6 +425,17 @@ def create_gateway(
         raise ValueError("bounded operator identity is required")
     if webauthn_rp is None and not _loopback(config.public_origin):
         raise ValueError("WebAuthn MFA is mandatory for non-loopback operator gateways")
+    if webauthn_rp is not None:
+        host = urlsplit(config.public_origin).hostname or ""
+        rp_id = getattr(webauthn_rp, "rp_id", "")
+        origins = frozenset(getattr(webauthn_rp, "origins", ()))
+        if (
+            not isinstance(rp_id, str)
+            or not rp_id
+            or not (host == rp_id or host.endswith("." + rp_id))
+            or origins != frozenset({config.public_origin})
+        ):
+            raise ValueError("WebAuthn RP ID and origin must match the gateway origin")
     if webauthn_enrollment_token is not None and len(webauthn_enrollment_token) < 32:
         raise ValueError("WebAuthn enrollment token must contain at least 256 bits")
     state = OperatorSessions(config, password, clock=clock)
