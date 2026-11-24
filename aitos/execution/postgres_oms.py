@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from typing import Any
 
@@ -150,6 +151,7 @@ class PostgresCanonicalOMS:
         event_id: str,
         expected_revision: int,
         payload: dict[str, Any],
+        ledger_entries: list[dict[str, Any]] | None = None,
     ) -> OMSEvent:
         if type(fence) is not WriterFence:
             raise OMSConflict("a server-issued writer fence is required")
@@ -159,6 +161,7 @@ class PostgresCanonicalOMS:
         if type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("expected_revision must be a non-negative integer")
         encoded = _canonical_payload(payload)
+        normalized_entries = self._validate_ledger_entries(ledger_entries or [])
         async with self._pool.acquire() as conn, conn.transaction():
             owner = await conn.fetchrow(
                 """SELECT writer_id,generation FROM aitos_oms_writer_fences
@@ -256,6 +259,16 @@ class PostgresCanonicalOMS:
                 aggregate,
                 revision,
             )
+            for line_no, entry in enumerate(normalized_entries):
+                await conn.execute(
+                    """INSERT INTO aitos_oms_financial_ledger
+                       (account_scope,event_id,line_no,trade_id,account_code,
+                        currency,debit,credit,reference)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+                    scope, event, line_no, aggregate, entry["account_code"],
+                    entry["currency"], entry["debit"], entry["credit"],
+                    entry["reference"],
+                )
         return OMSEvent(
             scope,
             aggregate,
@@ -267,6 +280,84 @@ class PostgresCanonicalOMS:
             previous_hash,
             digest,
         )
+
+    @staticmethod
+    def _validate_ledger_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate balanced double-entry lines before opening the write transaction."""
+        if not isinstance(entries, list):
+            raise TypeError("ledger_entries must be a list")
+        if not entries:
+            return []
+        totals: dict[str, list[Decimal]] = {}
+        normalized = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("each financial ledger line must be an object")
+            account = _identifier(entry.get("account_code"), "ledger account_code")
+            currency = entry.get("currency")
+            if not isinstance(currency, str) or not re.fullmatch(r"[A-Z0-9]{2,12}", currency):
+                raise ValueError("ledger currency must be an uppercase currency code")
+            try:
+                debit = Decimal(str(entry.get("debit", "0")))
+                credit = Decimal(str(entry.get("credit", "0")))
+            except (InvalidOperation, ValueError):
+                raise ValueError("ledger debit/credit must be finite decimals") from None
+            if not debit.is_finite() or not credit.is_finite() or debit < 0 or credit < 0:
+                raise ValueError("ledger amounts must be finite and non-negative")
+            if (debit > 0) == (credit > 0):
+                raise ValueError("each ledger line must contain exactly one positive side")
+            if max(-debit.as_tuple().exponent, -credit.as_tuple().exponent) > 18:
+                raise ValueError("ledger precision exceeds NUMERIC(38,18)")
+            totals.setdefault(currency, [Decimal(0), Decimal(0)])
+            totals[currency][0] += debit
+            totals[currency][1] += credit
+            reference = entry.get("reference")
+            if reference is not None and (not isinstance(reference, str) or len(reference) > 256):
+                raise ValueError("ledger reference must be at most 256 characters")
+            normalized.append({
+                "account_code": account, "currency": currency,
+                "debit": debit, "credit": credit, "reference": reference,
+            })
+        if any(debit != credit for debit, credit in totals.values()):
+            raise ValueError("financial ledger journal must balance per currency")
+        return normalized
+
+    async def financial_balances(self, account_scope: str) -> list[dict[str, Any]]:
+        """Return canonical debit/credit/net balances reconstructed from immutable lines."""
+        scope = _identifier(account_scope, "account_scope")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT account_code,currency,
+                          SUM(debit) AS debit,SUM(credit) AS credit
+                   FROM aitos_oms_financial_ledger
+                   WHERE account_scope=$1
+                   GROUP BY account_code,currency
+                   ORDER BY currency,account_code""",
+                scope,
+            )
+        return [
+            {"account_code": row["account_code"], "currency": row["currency"],
+             "debit": row["debit"], "credit": row["credit"],
+             "net_debit": row["debit"] - row["credit"]}
+            for row in rows
+        ]
+
+    async def financial_trade_ledger(
+        self, account_scope: str, trade_id: str
+    ) -> list[dict[str, Any]]:
+        """Read immutable accounting lines for one scoped trade."""
+        scope = _identifier(account_scope, "account_scope")
+        trade = _identifier(trade_id, "trade_id")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT event_id,line_no,account_code,currency,debit,credit,
+                          reference,recorded_at
+                   FROM aitos_oms_financial_ledger
+                   WHERE account_scope=$1 AND trade_id=$2
+                   ORDER BY recorded_at,event_id,line_no""",
+                scope, trade,
+            )
+        return [dict(row) for row in rows]
 
     async def writer_generation(self, account_scope: str) -> int:
         """Return the current primary-store fencing generation (zero if new)."""
