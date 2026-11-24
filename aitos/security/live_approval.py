@@ -66,8 +66,8 @@ class LiveApprovalControlPlane:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.path.parent.is_symlink():
             raise ValueError("approval database directory symlinks are forbidden")
-        if os.name != "nt":
-            os.chmod(self.path.parent, 0o700)
+        if os.name != "nt" and stat.S_IMODE(self.path.parent.stat().st_mode) & 0o077:
+            raise ValueError("approval database directory must have mode 0700")
         self.key = bytes(signing_key)
         self.origins = frozenset(allowed_origins)
         self.rp_id = rp_id
