@@ -52,7 +52,20 @@ async def harness(tmp_path, monkeypatch):
     release = asyncio.Event()
     entered = asyncio.Event()
 
+    stream_frames = [
+        b'event: snapshot\ndata: {"schema_version":1,"controls":"read_only"}\n\n'
+    ]
+
     async def backend(request):
+        if request.path == "/console/v1/stream":
+            seen.append(
+                dict(path=request.path, headers=dict(request.headers), query=[])
+            )
+            streamed = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+            await streamed.prepare(request)
+            for frame in stream_frames:
+                await streamed.write(frame)
+            return streamed
         seen.append(
             dict(
                 method=request.method,
@@ -124,6 +137,7 @@ async def harness(tmp_path, monkeypatch):
         root=root,
         release=release,
         entered=entered,
+        stream_frames=stream_frames,
     )
     await client.close()
     await upstream.close()
@@ -641,3 +655,104 @@ async def test_built_source_maps_and_nonpublic_assets_are_not_served(harness):
             response.status == 404
             and "not-public-test-data" not in await response.text()
         )
+
+
+async def test_stream_requires_session_forwards_validated_frames_with_security_headers(
+    harness,
+):
+    h = harness
+    assert (await h.client.get("/console/v1/stream")).status == 401
+    await login(h)
+    h.seen.clear()
+    h.stream_frames[:] = [
+        b": keepalive\n\n",
+        b'event: snapshot\ndata: {"schema_version":1,"controls":"read_only"}\n\n',
+    ]
+    response = await h.client.get("/console/v1/stream")
+    assert response.status == 200
+    assert response.headers["Content-Type"].startswith("text/event-stream")
+    for header in (
+        "Content-Security-Policy",
+        "X-Content-Type-Options",
+        "Cache-Control",
+    ):
+        assert response.headers[header]
+    body = await response.text()
+    assert 'data: {"schema_version":1,"controls":"read_only"}' in body
+    assert h.seen[0]["headers"]["Authorization"] == f"Bearer {TOKEN}"
+    assert h.seen[0]["headers"]["Accept"] == "text/event-stream"
+    assert "Cookie" not in h.seen[0]["headers"]
+
+
+async def test_stream_rejects_queries_and_non_get(harness):
+    h = harness
+    await login(h)
+    assert (await h.client.get("/console/v1/stream?x=1")).status == 400
+    response = await h.client.post("/console/v1/stream", headers={"Origin": ORIGIN})
+    assert response.status in {404, 405}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        b'event: snapshot\ndata: {"value":1,"value":2}\n\n',
+        b'event: snapshot\ndata: {"value":NaN}\n\n',
+        b"event: snapshot\ndata: [1]\n\n",
+        b'event: order\ndata: {"schema_version":1}\n\n',
+        b'data: {"schema_version":1}\n\n',
+        b'event: snapshot\ndata: {"a":1}\nretry: 1\n\n',
+    ],
+)
+async def test_stream_drops_connection_on_invalid_upstream_frames(harness, bad):
+    h = harness
+    await login(h)
+    h.stream_frames[:] = [bad]
+    response = await h.client.get("/console/v1/stream")
+    body = await response.text() if response.status == 200 else ""
+    assert "snapshot" not in body and "order" not in body and "NaN" not in body
+
+
+async def test_real_console_stream_is_relayed_end_to_end(
+    harness, monkeypatch, tmp_path
+):
+    """Real console_api upstream -> gateway -> operator client, no stubs in the middle."""
+    from unittest.mock import AsyncMock
+
+    from aitos.console_api import register_console_routes
+
+    monkeypatch.setattr("aitos.console_api.STREAM_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr("aitos.console_api.STREAM_MAX_SECONDS", 0.2)
+    store = SimpleNamespace(query_closed_history=AsyncMock(return_value=[]))
+    api = web.Application()
+    register_console_routes(api, state_store=store, token=TOKEN)
+    real_upstream = TestServer(api)
+    await real_upstream.start_server()
+    try:
+        h = harness
+        config = GatewayConfig(
+            ORIGIN,
+            str(real_upstream.make_url("")).rstrip("/"),
+            h.root,
+            TOKEN,
+            session_seconds=120,
+            workspace_file=tmp_path / "config" / "workspace-layout.json",
+        )
+        gateway = create_gateway(config, password=PASSWORD, clock=lambda: 1000.0)
+        client = TestClient(TestServer(gateway), headers={"Host": "127.0.0.1:8780"})
+        await client.start_server()
+        try:
+            login_response = await client.post(
+                "/operator/v1/login",
+                json={"password": PASSWORD},
+                headers={"Origin": ORIGIN},
+            )
+            assert login_response.status in {200, 204}
+            response = await client.get("/console/v1/stream")
+            assert response.status == 200
+            body = await response.text()
+            assert body.count("event: snapshot") == 1
+            assert '"controls":"read_only"' in body
+        finally:
+            await client.close()
+    finally:
+        await real_upstream.close()
