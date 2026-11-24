@@ -116,7 +116,14 @@ The following code-level increments are now present on this draft branch:
 - `aitos/execution/postgres_lifecycle_writer.py` adds a PostgreSQL-first
   TradeLifecycle state-writer adapter. It commits a scope-fenced aggregate
   revision before calling the existing SQLite/ClickHouse projection writer,
-  and exposes `latest_snapshot()` for canonical snapshot recovery.
+  exposes canonical aggregate inventory/snapshot recovery, and hydrates the
+  live lifecycle from verified PostgreSQL snapshots.
+- `run_live_trading.py` now requires `DATABASE_URL`, validates/applies the
+  PostgreSQL migrations, acquires a fresh account-scope writer fence, binds
+  the canonical writer, and replaces projected open/closed lifecycle state
+  with canonical snapshots before startup reconciliation. Legacy projected
+  open trades without a matching canonical aggregate cause startup to fail
+  closed pending controlled import.
   PostgreSQL integration coverage verifies that projection failure does not
   roll back the canonical event.
 - `scripts/migrate_scoped_clickhouse_state.py` now has an explicit
@@ -133,12 +140,16 @@ The following code-level increments are now present on this draft branch:
 
 These are implementation components, not acceptance claims. In particular:
 
-1. The PostgreSQL writer adapter has **not yet been installed by the production
-   application composition root**. The runtime must acquire a fresh writer
-   fence on startup, bind this adapter after configuring the durable projection
-   callback, hydrate open trades from canonical snapshots before enabling
-   submissions, and prove repeated process restart/fencing recovery. Until
-   those steps are integrated, active lifecycle authority remains OPEN.
+1. The live entrypoint now requires `DATABASE_URL`, applies and verifies
+   the PostgreSQL schema, acquires a new scope-specific fencing generation,
+   binds the PostgreSQL-first lifecycle writer after the durable projection
+   callback is configured, and hydrates lifecycle state from verified canonical
+   snapshots before module initialization and account reconciliation. The
+   hydration path refuses to start if a projected open trade has no canonical
+   aggregate or if a canonical aggregate is in an unresolved intermediate
+   state. This is runtime code integration, but the PostgreSQL production
+   authority gate remains OPEN until current-head CI, deployment configuration,
+   multi-process fencing, and repeated restart acceptance pass.
 2. The ClickHouse cutover has **not been run against the user's actual
    production ClickHouse database**. The operator must quiesce all writers,
    produce and verify a restorable backup, review every manifest scope mapping,
