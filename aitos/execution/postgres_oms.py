@@ -267,6 +267,27 @@ class PostgresCanonicalOMS:
             digest,
         )
 
+    async def writer_generation(self, account_scope: str) -> int:
+        """Return the current primary-store fencing generation (zero if new)."""
+        scope = _identifier(account_scope, "account_scope")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT generation FROM aitos_oms_writer_fences WHERE account_scope=$1",
+                scope,
+            )
+        return int(row["generation"]) if row else 0
+
+    async def list_aggregate_ids(self, account_scope: str) -> list[str]:
+        """List aggregate identities with committed canonical history for one scope."""
+        scope = _identifier(account_scope, "account_scope")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT aggregate_id FROM aitos_oms_aggregate_heads
+                   WHERE account_scope=$1 ORDER BY aggregate_id""",
+                scope,
+            )
+        return [str(row["aggregate_id"]) for row in rows]
+
     async def read_events(
         self, account_scope: str, aggregate_id: str
     ) -> list[OMSEvent]:
