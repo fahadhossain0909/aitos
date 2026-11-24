@@ -119,6 +119,13 @@ async def _import_one(
     }
     events = await oms.read_events(scope, trade_id)
     existing = next((event for event in events if event.event_id == event_id), None)
+    if existing is None and any(
+        not event.event_id.startswith("legacy:") for event in events
+    ):
+        raise RuntimeError(
+            "legacy import conflicts with an existing canonical trade aggregate; "
+            "manual reconciliation is required before merging histories"
+        )
     if existing is not None:
         if (
             existing.payload.get("trade_id") != trade_id
