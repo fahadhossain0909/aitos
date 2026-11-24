@@ -163,3 +163,15 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
     ) is True
     assert rp.credential_count(user_id="operator-1") == 0
     assert rp.credential_count(user_id="operator-2") == 1
+    db = rp._connect()
+    try:
+        audit = db.execute(
+            "SELECT event,user_id,credential_id FROM webauthn_credential_audit"
+        ).fetchall()
+        assert audit == [
+            ("CREDENTIAL_REVOKED", "operator-1", "Y3JlZGVudGlhbC1h")
+        ]
+        with pytest.raises(Exception, match="append-only"):
+            db.execute("DELETE FROM webauthn_credential_audit")
+    finally:
+        db.close()
