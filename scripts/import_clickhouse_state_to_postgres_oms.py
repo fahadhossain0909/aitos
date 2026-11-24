@@ -317,7 +317,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             "result_overflow_mode='throw',read_overflow_mode='throw'"
                         )
                     queries[source] = (query, scoped)
-                with partial_manifest.open("w", encoding="utf-8", newline="\\n") as manifest:
+                with partial_manifest.open("w", encoding="utf-8", newline="\n") as manifest:
                     for table, (query, scoped) in queries.items():
                         occurrences: Counter[str] = Counter()
                         with ch.query_row_block_stream(query) as blocks:
@@ -435,7 +435,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                             ensure_ascii=False,
                                             allow_nan=False,
                                         )
-                                        + "\\n"
+                                        + "\n"
                                     )
                                     counts[table] += 1
                                     scope_counts[scope] += 1
