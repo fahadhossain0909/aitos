@@ -107,7 +107,7 @@ async def _import_one(
             item["source_fingerprint"],
             item["source_occurrence"],
             trade_id,
-            item["updated_at"],
+            _timestamp(item["updated_at"]),
             item["raw_payload"],
             item["raw_payload_sha256"],
         )
