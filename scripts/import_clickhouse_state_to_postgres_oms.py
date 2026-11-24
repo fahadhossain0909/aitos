@@ -322,9 +322,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             "SETTINGS max_result_rows=0,max_result_bytes=0,"
                             "result_overflow_mode='throw',read_overflow_mode='throw'"
                         )
-                    queries[source] = (query, scoped, table_name)
+                    queries[source] = (query, scoped)
                 with partial_manifest.open("w", encoding="utf-8", newline="\\n") as manifest:
-                    for table, (query, scoped, selected_table) in queries.items():
+                    for table, (query, scoped) in queries.items():
                         occurrences: Counter[str] = Counter()
                         with ch.query_row_block_stream(query) as blocks:
                             for block in blocks:
@@ -582,14 +582,18 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-writers-stopped", action="store_true")
     parser.add_argument("--confirm-backup-retained", action="store_true")
-    parser.add_argument("--scope-map", type=Path, required=True)
+    parser.add_argument("--scope-map", type=Path)
     parser.add_argument(
         "--manifest-out",
         type=Path,
         default=Path("clickhouse-to-postgres-oms-manifest.jsonl"),
     )
     args = parser.parse_args()
-    mapping = json.loads(args.scope_map.read_text(encoding="utf-8"))
+    mapping = (
+        json.loads(args.scope_map.read_text(encoding="utf-8"))
+        if args.scope_map is not None
+        else {}
+    )
     if not isinstance(mapping, dict):
         parser.error("--scope-map must be a JSON object")
     args.scope_map = mapping
