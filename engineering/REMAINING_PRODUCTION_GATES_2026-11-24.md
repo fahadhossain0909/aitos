@@ -179,3 +179,38 @@ All seven requested gates remain OPEN until their own acceptance evidence is
 attached. Never treat successful static tests or a passing simulated venue
 fixture as proof of a live exchange, hardware WebAuthn, production database
 cutover, or desktop identity integration. Keep Mainnet fail-closed.
+
+
+## Additional implementation — ClickHouse to PostgreSQL canonical import
+
+- `scripts/import_clickhouse_state_to_postgres_oms.py` now provides an
+  explicit offline importer for both legacy trade tables. It creates a
+  PostgreSQL import-evidence ledger, preserves each original JSON payload as
+  exact text plus SHA-256, requires explicit per-row account-scope attribution,
+  and appends deterministic, idempotent `TRADE_SNAPSHOT` events through the
+  canonical PostgreSQL OMS API. Per-trade snapshots are ordered by source
+  timestamp; import can be resumed after interruption.
+- The importer has dry-run and `--apply` modes. Apply requires explicit
+  writer-stop and restorable-backup acknowledgements. It does not rename,
+  delete, or mutate ClickHouse tables. Source/target count and occurrence
+  identity parity are checked after import.
+- Unit tests cover source identity, terminal ledger validation, and exact raw
+  payload preservation. The import has not yet been run against the user's
+  ClickHouse/PostgreSQL databases. Oversized OMS events, missing scope
+  attribution, payload/schema incompatibility, or any parity discrepancy fail
+  closed. A production cutover still requires a separately reviewed writer
+  freeze, backup, full per-record hash reconciliation, reader/writer routing
+  switch, and restart verification.
+
+## Additional implementation — WebAuthn login challenge lifecycle
+
+- The relying party now issues short-lived, user-bound authentication options,
+  limits credentials to that identity, persists a one-time assertion challenge,
+  checks that the credential belongs to the challenge owner, and consumes the
+  challenge in the same SQLite transaction as the authenticator counter update.
+- This closes the gap where an assertion verifier accepted a caller-supplied
+  challenge without proving that the server had issued it. The verifier is
+  still not integrated with an authenticated desktop session provider, MFA
+  policy, CSRF/origin-protected API routes, RBAC/session revocation, or an
+  approval UI. Hardware authenticator and desktop end-to-end acceptance remain
+  open.
