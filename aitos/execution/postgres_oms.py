@@ -93,6 +93,7 @@ class PostgresCanonicalOMS:
         if type(expected_generation) is not int or expected_generation < 0:
             raise ValueError("expected_generation must be a non-negative integer")
         async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", scope)
             row = await conn.fetchrow(
                 """SELECT writer_id,generation FROM aitos_oms_writer_fences
                    WHERE account_scope=$1 FOR UPDATE""", scope,
@@ -211,7 +212,7 @@ class PostgresCanonicalOMS:
         previous = "0" * 64
         expected_revision = 1
         for row in rows:
-            payload_json = row["payload_json"]
+            payload_json = _canonical_payload(json.loads(row["payload_json"]))
             digest = _event_hash(
                 scope, aggregate, expected_revision, row["event_id"],
                 row["writer_id"], int(row["generation"]), previous, payload_json,
@@ -242,7 +243,7 @@ class PostgresCanonicalOMS:
                      USING(account_scope,aggregate_id,revision)
                    WHERE o.projected_at IS NULL
                    ORDER BY o.created_at,o.account_scope,o.aggregate_id,o.revision
-                   FOR UPDATE OF o SKIP LOCKED LIMIT $1""", limit,
+                   LIMIT $1 FOR UPDATE OF o SKIP LOCKED""", limit,
             )
             return [dict(row) for row in rows]
 
