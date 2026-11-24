@@ -384,6 +384,8 @@ def run(
     scope_map: dict[str, str],
     manifest_out: Path | None,
     cutover: bool = False,
+    writers_quiesced: bool = False,
+    backup_confirmed: bool = False,
 ) -> dict[str, Any]:
     try:
         import clickhouse_connect
@@ -424,10 +426,9 @@ def run(
             }
         if cutover and not apply:
             raise ValueError("--cutover requires --apply")
-        if cutover and os.getenv("AITOS_CLICKHOUSE_MIGRATION_FREEZE_ACK") != "WRITERS_QUIESCED":
+        if cutover and not (writers_quiesced and backup_confirmed):
             raise RuntimeError(
-                "cutover requires AITOS_CLICKHOUSE_MIGRATION_FREEZE_ACK=WRITERS_QUIESCED "
-                "after all writers are stopped"
+                "cutover requires explicit writer-stop and restorable-backup confirmations"
             )
         if not apply:
             return {
@@ -516,7 +517,14 @@ def main() -> int:
     )
     if not isinstance(mapping, dict):
         parser.error("--scope-map must contain a JSON object")
-    result = run(apply=args.apply, scope_map=mapping, manifest_out=args.manifest_out)
+    result = run(
+        apply=args.apply,
+        scope_map=mapping,
+        manifest_out=args.manifest_out,
+        cutover=args.cutover,
+        writers_quiesced=args.confirm_writers_stopped,
+        backup_confirmed=args.confirm_backup_retained,
+    )
     print(json.dumps(result, indent=2))
     return 0 if result.get("mode") != "manifest-only" else 2
 
