@@ -2379,11 +2379,29 @@ class TradeLifecycle(AITOSModule):
                 "prior reduction/application requires reconciliation",
             )
 
+    def bind_postgres_canonical_oms(self, oms: Any, fence: Any) -> Any:
+        """Bind the PostgreSQL journal ahead of the configured durable projection.
+
+        Call only after the runtime has acquired a fresh account-scope writer
+        fence and configured the existing execution-state projection callback.
+        """
+        from aitos.execution.postgres_lifecycle_writer import (
+            bind_postgres_canonical_oms,
+        )
+
+        writer = bind_postgres_canonical_oms(self, oms=oms, fence=fence)
+        self._postgres_canonical_oms_required = True
+        return writer
+
     def _require_execution_writer(self) -> None:
         if not callable(getattr(self, "_execution_state_writer", None)):
             raise RuntimeError(
                 "live execution requires synchronous durable state persistence"
             )
+        if getattr(self, "_postgres_canonical_oms_required", False) and not callable(
+            getattr(self, "_postgres_canonical_oms_writer", None)
+        ):
+            raise RuntimeError("live execution requires the bound PostgreSQL canonical OMS")
         if not callable(getattr(self, "_execution_position_verifier", None)):
             raise RuntimeError(
                 "live execution requires authoritative position verification"
