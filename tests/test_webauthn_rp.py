@@ -201,12 +201,18 @@ def test_remote_enrollment_bootstrap_is_single_use_and_persistent(tmp_path):
         supplied_token=token,
         now=102,
     )
-    with pytest.raises(WebAuthnCredentialError, match="only after all user credentials"):
-        restarted.reset_enrollment_bootstrap_token(
-            user_id="operator-1",
-            new_token="replacement-bootstrap-token-with-over-32-bytes",
-            now=103,
-        )
+    replacement = "replacement-bootstrap-token-with-over-32-bytes"
+    restarted.reset_enrollment_bootstrap_token(
+        user_id="operator-1",
+        new_token=replacement,
+        now=103,
+    )
+    assert restarted.consume_enrollment_bootstrap_token(
+        user_id="operator-1",
+        configured_token=replacement,
+        supplied_token=replacement,
+        now=104,
+    )
 
     db = restarted._connect()
     try:
@@ -215,4 +221,8 @@ def test_remote_enrollment_bootstrap_is_single_use_and_persistent(tmp_path):
         ).fetchall()
     finally:
         db.close()
-    assert events == [("BOOTSTRAP_TOKEN_CONSUMED",)]
+    assert events == [
+        ("BOOTSTRAP_TOKEN_CONSUMED",),
+        ("BOOTSTRAP_TOKEN_RESET",),
+        ("BOOTSTRAP_TOKEN_CONSUMED",),
+    ]
