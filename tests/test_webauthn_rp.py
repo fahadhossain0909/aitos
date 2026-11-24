@@ -176,3 +176,43 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
             db.execute("DELETE FROM webauthn_credential_audit")
     finally:
         db.close()
+
+
+def test_remote_enrollment_bootstrap_is_single_use_and_persistent(tmp_path):
+    rp = make_rp(tmp_path)
+    token = "high-entropy-bootstrap-token-with-more-than-32-bytes"
+    assert rp.consume_enrollment_bootstrap_token(
+        user_id="operator-1",
+        configured_token=token,
+        supplied_token=token,
+        now=100,
+    )
+    assert not rp.consume_enrollment_bootstrap_token(
+        user_id="operator-1",
+        configured_token=token,
+        supplied_token=token,
+        now=101,
+    )
+
+    restarted = make_rp(tmp_path)
+    assert not restarted.consume_enrollment_bootstrap_token(
+        user_id="operator-1",
+        configured_token=token,
+        supplied_token=token,
+        now=102,
+    )
+    with pytest.raises(WebAuthnCredentialError, match="only after all user credentials"):
+        restarted.reset_enrollment_bootstrap_token(
+            user_id="operator-1",
+            new_token="replacement-bootstrap-token-with-over-32-bytes",
+            now=103,
+        )
+
+    db = restarted._connect()
+    try:
+        events = db.execute(
+            "SELECT event FROM webauthn_credential_audit ORDER BY sequence"
+        ).fetchall()
+    finally:
+        db.close()
+    assert events == [("BOOTSTRAP_TOKEN_CONSUMED",)]
