@@ -12,8 +12,8 @@ import hashlib
 import hmac
 import json
 import re
-from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,191}\Z")
@@ -163,26 +163,35 @@ class PostgresCanonicalOMS:
         event = _identifier(event_id, "event_id")
         if type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("expected_revision must be a non-negative integer")
-        normalized_entries = self._validate_ledger_entries(\n            [] if ledger_entries is None else ledger_entries\n        )
+        normalized_entries = self._validate_ledger_entries(
+            [] if ledger_entries is None else ledger_entries
+        )
         canonical_payload = dict(payload)
         if "financial_ledger" in canonical_payload:
             raise ValueError("financial_ledger payload is reserved by the canonical OMS")
-        if any(value is not None for value in (causation_id, correlation_id, parent_event_id)):
+        if any(
+            value is not None
+            for value in (causation_id, correlation_id, parent_event_id)
+        ):
             if "causality" in canonical_payload:
                 raise ValueError("causality metadata is reserved by the canonical OMS")
             canonical_payload["causality"] = {
                 "causation_id": _identifier(causation_id, "causation_id")
-                if causation_id is not None else None,
+                if causation_id is not None\n                else None,
                 "correlation_id": _identifier(correlation_id, "correlation_id")
-                if correlation_id is not None else None,
+                if correlation_id is not None\n                else None,
                 "parent_event_id": _identifier(parent_event_id, "parent_event_id")
-                if parent_event_id is not None else None,
+                if parent_event_id is not None\n                else None,
             }
         if normalized_entries:
             canonical_payload["financial_ledger"] = [
-                {"account_code": item["account_code"], "currency": item["currency"],
-                 "debit": format(item["debit"], "f"), "credit": format(item["credit"], "f"),
-                 "reference": item["reference"]}
+                {
+                    "account_code": item["account_code"],
+                    "currency": item["currency"],
+                    "debit": format(item["debit"], "f"),
+                    "credit": format(item["credit"], "f"),
+                    "reference": item["reference"],
+                }
                 for item in normalized_entries
             ]
         encoded = _canonical_payload(canonical_payload)
@@ -319,14 +328,21 @@ class PostgresCanonicalOMS:
                 raise ValueError("each financial ledger line must be an object")
             account = _identifier(entry.get("account_code"), "ledger account_code")
             currency = entry.get("currency")
-            if not isinstance(currency, str) or not re.fullmatch(r"[A-Z0-9]{2,12}", currency):
+            if not isinstance(currency, str) or not re.fullmatch(
+                r"[A-Z0-9]{2,12}", currency
+            ):
                 raise ValueError("ledger currency must be an uppercase currency code")
             try:
                 debit = Decimal(str(entry.get("debit", "0")))
                 credit = Decimal(str(entry.get("credit", "0")))
             except (InvalidOperation, ValueError):
                 raise ValueError("ledger debit/credit must be finite decimals") from None
-            if not debit.is_finite() or not credit.is_finite() or debit < 0 or credit < 0:
+            if (
+                not debit.is_finite()
+                or not credit.is_finite()
+                or debit < 0
+                or credit < 0
+            ):
                 raise ValueError("ledger amounts must be finite and non-negative")
             if (debit > 0) == (credit > 0):
                 raise ValueError("each ledger line must contain exactly one positive side")
@@ -339,12 +355,19 @@ class PostgresCanonicalOMS:
             totals[currency][0] += debit
             totals[currency][1] += credit
             reference = entry.get("reference")
-            if reference is not None and (not isinstance(reference, str) or len(reference) > 256):
+            if reference is not None and (
+                not isinstance(reference, str) or len(reference) > 256
+            ):
                 raise ValueError("ledger reference must be at most 256 characters")
-            normalized.append({
-                "account_code": account, "currency": currency,
-                "debit": debit, "credit": credit, "reference": reference,
-            })
+            normalized.append(
+                {
+                    "account_code": account,
+                    "currency": currency,
+                    "debit": debit,
+                    "credit": credit,
+                    "reference": reference,
+                }
+            )
         if any(debit != credit for debit, credit in totals.values()):
             raise ValueError("financial ledger journal must balance per currency")
         return normalized
@@ -363,9 +386,13 @@ class PostgresCanonicalOMS:
                 scope,
             )
         return [
-            {"account_code": row["account_code"], "currency": row["currency"],
-             "debit": row["debit"], "credit": row["credit"],
-             "net_debit": row["debit"] - row["credit"]}
+            {
+                "account_code": row["account_code"],
+                "currency": row["currency"],
+                "debit": row["debit"],
+                "credit": row["credit"],
+                "net_debit": row["debit"] - row["credit"],
+            }
             for row in rows
         ]
 
@@ -382,7 +409,8 @@ class PostgresCanonicalOMS:
                    FROM aitos_oms_financial_ledger
                    WHERE account_scope=$1 AND trade_id=$2
                    ORDER BY recorded_at,event_id,line_no""",
-                scope, trade,
+                scope,
+                trade,
             )
         return [dict(row) for row in rows]
 
