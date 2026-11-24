@@ -303,3 +303,45 @@ def test_remote_gateway_cannot_disable_webauthn(tmp_path):
     )
     with pytest.raises(ValueError, match="WebAuthn MFA is mandatory"):
         create_gateway(config, password=PASSWORD)
+
+
+async def test_gateway_authenticates_distinct_operator_identities(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+    identities = {
+        "operator-a": "operator-a-password-with-sufficient-entropy",
+        "operator-b": "operator-b-password-with-sufficient-entropy",
+    }
+    config = GatewayConfig(
+        ORIGIN,
+        "http://127.0.0.1:8765",
+        dist,
+        workspace_file=tmp_path / "workspace.json",
+    )
+    app = create_gateway(
+        config,
+        password=None,
+        identities=identities,
+        operator_id="operator-a",
+    )
+    client = TestClient(TestServer(app), headers={"Host": "127.0.0.1:8780"})
+    await client.start_server()
+    try:
+        denied = await client.post(
+            "/operator/v1/login",
+            json={"user_id": "operator-b", "password": identities["operator-a"]},
+            headers={"Origin": ORIGIN},
+        )
+        assert denied.status == 401
+        accepted = await client.post(
+            "/operator/v1/login",
+            json={"user_id": "operator-b", "password": identities["operator-b"]},
+            headers={"Origin": ORIGIN},
+        )
+        assert accepted.status == 200
+        session = await (await client.get("/operator/v1/session")).json()
+        assert session["identity"] == "operator-b"
+        assert session["default_identity"] == "operator-a"
+    finally:
+        await client.close()
