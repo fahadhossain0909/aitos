@@ -57,6 +57,16 @@ def _fake_clickhouse_module(runtime_rows, closed_rows):
     class FakeClient:
         closed = False
 
+        def query(self, query):
+            if "system.columns" in query:
+                return SimpleNamespace(
+                    result_rows=[
+                        ("trade_runtime_state", "trade_id"),
+                        ("paper_closed_trade_ledger", "trade_id"),
+                    ]
+                )
+            raise AssertionError(f"unexpected ClickHouse query: {query}")
+
         @contextmanager
         def query_row_block_stream(self, query):
             if "FROM trade_runtime_state" in query:
