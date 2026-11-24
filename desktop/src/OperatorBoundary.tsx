@@ -22,6 +22,7 @@ export default function OperatorBoundary({
     [clock, setClock] = useState(Date.now()),
     [password, setPassword] = useState(""),
     [operatorId, setOperatorId] = useState("local-operator"),
+    [authenticatedIdentity, setAuthenticatedIdentity] = useState(""),
     [enrollmentToken, setEnrollmentToken] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -54,6 +55,7 @@ export default function OperatorBoundary({
       if (mounted.current && id === requestId.current) {
         setClock(Date.now());
         if (s.default_identity) setOperatorId(s.default_identity);
+        setAuthenticatedIdentity(s.identity ?? "");
         setExpires(Date.now() + s.expires_in_seconds * 1000);
         setMode(s.authenticated ? "authenticated" : "signed_out");
         setError("");
@@ -185,6 +187,7 @@ export default function OperatorBoundary({
       if (r.status !== 204) throw Error();
       if (mounted.current) {
         setMode("signed_out");
+        setAuthenticatedIdentity("");
         setError("");
         setLogoutFailed(false);
       }
@@ -209,7 +212,7 @@ export default function OperatorBoundary({
         <div className="operator-session-bar">
           <span>
             <ShieldCheck size={12} />
-            Authenticated · read-only
+            Authenticated · {authenticatedIdentity || "operator"} · read-only
           </span>
           <span className="mono">
             Session {Math.floor(seconds / 60)}:
