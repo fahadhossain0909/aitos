@@ -180,10 +180,10 @@ def _select_clickhouse_source(client: Any, source: str) -> tuple[str, bool]:
 
     if companion is not None:
         selected_count = int(
-            client.query(f"SELECT count() FROM {selected}").result_rows[0][0]
+            client.query(f"SELECT count() FROM {selected} FINAL").result_rows[0][0]
         )
         companion_count = int(
-            client.query(f"SELECT count() FROM {companion}").result_rows[0][0]
+            client.query(f"SELECT count() FROM {companion} FINAL").result_rows[0][0]
         )
         if selected_count != companion_count:
             raise RuntimeError(
@@ -294,7 +294,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             "SELECT account_scope,trade_id,symbol,state,"
                             "legacy_payload_json,updated_at,source_fingerprint,"
                             "source_occurrence,payload_sha256 "
-                            f"FROM {table_name} ORDER BY trade_id,updated_at,"
+                            f"FROM {table_name} FINAL ORDER BY trade_id,updated_at,"
                             "source_fingerprint,source_occurrence "
                             "SETTINGS max_result_rows=0,max_result_bytes=0,"
                             "result_overflow_mode='throw',read_overflow_mode='throw'"
