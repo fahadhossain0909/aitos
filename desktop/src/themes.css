@@ -1,0 +1,54 @@
+/* Appearance extras. Colours come from generated palette tokens (tokens.css), so every
+   theme styles the whole console; the rules here only add semantics a palette
+   transform cannot infer. */
+:root {
+  --text: var(--c-e7eae1); --text-dim: var(--c-a1aa98); --surface: var(--c-1c2218);
+  --accent: var(--c-c6ec9e); --sans: "Manrope Variable", sans-serif;
+  --bg-2: var(--c-151912); --raise: var(--c-22291d); --raise-2: var(--c-293421);
+  --field: var(--c-141a10); --line-2: var(--c-3a4232); --on-accent: var(--c-243019);
+  --pos: var(--c-c0e99c); --neg: var(--c-e5a599); --warn: var(--c-d9bd80);
+  --grid: var(--c-30342c); --hero: var(--c-1c2417); --dialog: var(--c-1b2415);
+  --scrim: var(--c-060a04bc);
+}
+/* Terminal reserves green/red for P&L and health; the lime family became the blue accent. */
+html[data-theme="terminal"] {
+  --pos: #2ebd85; --neg: #ef5350; --coral: #ef5350; --warn: #e0a83c;
+}
+html[data-theme="terminal"] .positive { color: var(--pos) !important; }
+html[data-theme="terminal"] .negative { color: var(--neg) !important; }
+html[data-theme="terminal"] .status-dot:not(.amber):not(.off) { background: var(--pos); }
+html[data-theme="terminal"] .pill.green { color: var(--pos); border-color: color-mix(in srgb, var(--pos) 35%, transparent); background: color-mix(in srgb, var(--pos) 14%, transparent); }
+html[data-theme="ivory"] { --pos: #2c6e12; --neg: #b03a2a; }
+
+/* ---- text size (opt-in; the console uses very small type by default) ---- */
+html[data-text="115"] body { zoom: 1.15; }
+html[data-text="130"] body { zoom: 1.3; }
+
+/* ---- live runtime ribbon (rendered by App when the attached runtime declares live mode) ---- */
+.live-ribbon { position: fixed; inset: 0 0 auto 0; height: 26px; z-index: 200; display: flex; align-items: center; justify-content: center; gap: 8px; background: #b3261e; color: #fff; font: 600 10px var(--mono); letter-spacing: 1.4px; }
+.live-ribbon .status-dot { background: #fff !important; }
+html[data-live] body { padding-top: 26px; }
+html[data-live] .sidebar { top: 26px; }
+html[data-live] .authenticated-shell .sidebar { top: 60px; }
+
+/* ---- appearance switcher ---- */
+.appearance { position: fixed; right: 16px; bottom: 16px; z-index: 90; font: 12px var(--sans); }
+.appearance-trigger { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--panel); color: var(--text); box-shadow: 0 6px 24px #0005; }
+.appearance-trigger:hover:not(:disabled) { border-color: var(--accent); }
+.appearance-panel { position: absolute; right: 0; bottom: calc(100% + 10px); width: 276px; padding: 16px; display: grid; gap: 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--dialog); color: var(--text); box-shadow: 0 20px 60px #0008; }
+.appearance-options { display: grid; gap: 6px; }
+.appearance-option { display: flex; align-items: center; gap: 11px; padding: 9px 10px; text-align: left; border: 1px solid var(--line); border-radius: 6px; }
+.appearance-option:hover:not(:disabled) { background: var(--raise); color: var(--text); }
+.appearance-option.active { border-color: var(--accent); background: var(--raise-2); }
+.appearance-option strong { display: block; font-size: 12px; font-weight: 600; }
+.appearance-option small { display: block; margin-top: 3px; font-size: 10px; color: var(--muted); }
+.appearance-swatch { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line-2); }
+.appearance-swatch[data-swatch="olive"] { background: linear-gradient(135deg, #111410 55%, #c6ec9e 55%); }
+.appearance-swatch[data-swatch="terminal"] { background: linear-gradient(135deg, #0d0f12 55%, #5b9dff 55%); }
+.appearance-swatch[data-swatch="ivory"] { background: linear-gradient(135deg, #f3f0e6 55%, #3d6a1e 55%); }
+.appearance-swatch[data-swatch="system"] { background: linear-gradient(90deg, #111410 50%, #f3f0e6 50%); }
+.appearance-sizes { display: flex; gap: 6px; }
+.appearance-sizes button { flex: 1; padding: 8px 0; border: 1px solid var(--line); border-radius: 6px; font: 11px var(--mono); }
+.appearance-sizes button:hover:not(:disabled) { background: var(--raise); color: var(--text); }
+.appearance-sizes button.active { border-color: var(--accent); background: var(--raise-2); }
+@media (max-width: 760px) { .appearance { right: 12px; bottom: 76px; } }
