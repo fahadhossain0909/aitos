@@ -168,7 +168,7 @@ class LiveApprovalControlPlane:
             or not user_id
         ):
             raise ApprovalDenied("invalid approval challenge identity")
-        with sqlite3.connect(self.path, timeout=5) as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT challenge,user_id,action_digest,expires_at,consumed "
                 "FROM live_approval_challenges WHERE challenge_id=?",
@@ -221,7 +221,7 @@ class LiveApprovalControlPlane:
             token_id, challenge.user_id, challenge.action_digest, now, expiry
         )
         signature = hmac.new(self.key, message, hashlib.sha256).hexdigest()
-        with sqlite3.connect(self.path, timeout=5) as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT challenge,user_id,action_digest,expires_at,consumed "
@@ -296,7 +296,7 @@ class LiveApprovalControlPlane:
             or now >= token.expires_at
         ):
             raise ApprovalDenied("invalid, mismatched or expired approval token")
-        with sqlite3.connect(self.path, timeout=5) as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT user_id,action_digest,issued_at,expires_at,signature,consumed_at "
