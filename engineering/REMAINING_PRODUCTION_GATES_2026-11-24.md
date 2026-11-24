@@ -79,3 +79,31 @@ manifest and pre/post count/hash reconciliation are reviewed. Do not claim
 WebAuthn acceptance until a real relying-party verifier is deployed and
 hardware-authenticator tests pass. Do not switch the active OMS authority until
 the live lifecycle writes and reads through the same transactional store.
+
+
+## Follow-on implementation update — PostgreSQL OMS
+
+A PostgreSQL-native canonical OMS journal is now present in
+`aitos/execution/postgres_oms.py`, with schema migration v2 in
+`aitos/storage/postgres_migrations.py`. It implements scope-level writer
+generation CAS/fencing, aggregate revision CAS, idempotent event IDs,
+canonical-payload hash chaining, and a transactional projection outbox.
+The PostgreSQL storage integration workflow now invokes
+`tests/storage/test_postgres_oms.py` against its disposable PostgreSQL service.
+
+This is a database-backed OMS primitive, not yet the active lifecycle authority.
+TradeLifecycle, ExecutionIntentStore, fee/funding accounting, position/equity
+state and startup hydration have not all been converted into one PostgreSQL
+transaction boundary. Do not switch runtime authority or claim canonical OMS
+acceptance until that integration and multi-process/restart tests pass.
+
+## Workflow adjudication count correction
+
+The checked-out PR head contains **49** workflow YAML files under
+`.github/workflows/`, not 48. The existing registry is the 49-file inventory.
+Static findings are triage signals, not human security approval. No workflow
+has been deleted or disabled in this increment: safe consolidation requires
+per-file review of event trust, permissions, secrets/environments, pinned
+actions, external side effects, destructive commands, required-check names,
+and dispatch/call dependencies. The reset and hard-reset workflows remain
+separate and must not be folded into routine CI.
