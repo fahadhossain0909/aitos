@@ -64,6 +64,63 @@ MIGRATIONS = (
             """,
         ),
     ),
+
+    Migration(
+        version=2,
+        name="canonical_scope_keyed_oms",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_writer_fences (
+                account_scope TEXT PRIMARY KEY,
+                writer_id TEXT NOT NULL,
+                generation BIGINT NOT NULL CHECK (generation > 0),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_aggregate_heads (
+                account_scope TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                revision BIGINT NOT NULL CHECK (revision >= 0),
+                event_hash CHAR(64) NOT NULL,
+                PRIMARY KEY (account_scope, aggregate_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_events (
+                account_scope TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                revision BIGINT NOT NULL CHECK (revision > 0),
+                event_id TEXT NOT NULL,
+                writer_id TEXT NOT NULL,
+                generation BIGINT NOT NULL CHECK (generation > 0),
+                payload JSONB NOT NULL,
+                previous_hash CHAR(64) NOT NULL,
+                event_hash CHAR(64) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, aggregate_id, revision),
+                UNIQUE (account_scope, event_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_outbox (
+                account_scope TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                revision BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                projected_at TIMESTAMPTZ,
+                PRIMARY KEY (account_scope, aggregate_id, revision),
+                FOREIGN KEY (account_scope, aggregate_id, revision)
+                  REFERENCES aitos_oms_events(account_scope, aggregate_id, revision)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_outbox_pending
+            ON aitos_oms_outbox (created_at, account_scope, aggregate_id, revision)
+            WHERE projected_at IS NULL
+            """,
+        ),
+    ),
 )
 
 
@@ -137,6 +194,10 @@ _REQUIRED_COLUMNS = {
         "recorded_at",
         "payload",
     },
+    "aitos_oms_writer_fences": {"account_scope", "writer_id", "generation"},
+    "aitos_oms_aggregate_heads": {"account_scope", "aggregate_id", "revision", "event_hash"},
+    "aitos_oms_events": {"account_scope", "aggregate_id", "revision", "event_id", "writer_id", "generation", "payload", "previous_hash", "event_hash"},
+    "aitos_oms_outbox": {"account_scope", "aggregate_id", "revision", "projected_at"},
 }
 
 
