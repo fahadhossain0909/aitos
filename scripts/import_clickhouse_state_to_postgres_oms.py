@@ -132,7 +132,9 @@ async def _import_one(
             or existing.payload.get("legacy_source") != legacy_source
             or existing.payload.get("event_type") != "TRADE_SNAPSHOT"
         ):
-            raise RuntimeError("canonical event ID exists with different source evidence")
+            raise RuntimeError(
+                "canonical event ID exists with different source evidence"
+            )
         return
     await oms.append(
         fence,
@@ -159,9 +161,7 @@ def _select_clickhouse_source(client: Any, source: str) -> tuple[str, bool]:
     columns: dict[str, set[str]] = defaultdict(set)
     for table_name, column_name in rows:
         columns[str(table_name)].add(str(column_name))
-    candidates = [
-        name for name in (source, target, backup) if name in columns
-    ]
+    candidates = [name for name in (source, target, backup) if name in columns]
     if not candidates:
         raise RuntimeError(f"ClickHouse source table {source} is missing")
 
@@ -215,8 +215,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         args.confirm_writers_stopped and args.confirm_backup_retained
     ):
         raise RuntimeError(
-            "apply requires --confirm-writers-stopped and "
-            "--confirm-backup-retained"
+            "apply requires --confirm-writers-stopped and " "--confirm-backup-retained"
         )
     try:
         import clickhouse_connect
@@ -235,9 +234,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
     manifest_path = Path(args.manifest_out)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    partial_manifest = manifest_path.with_suffix(
-        manifest_path.suffix + ".partial"
-    )
+    partial_manifest = manifest_path.with_suffix(manifest_path.suffix + ".partial")
     if (
         manifest_path.exists()
         or manifest_path.is_symlink()
@@ -353,7 +350,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                             stored_payload_hash,
                                         ) = row
                                         legacy_row = (
-                                            trade_id, symbol, state, raw, stamp
+                                            trade_id,
+                                            symbol,
+                                            state,
+                                            raw,
+                                            stamp,
                                         )
                                     elif scoped:
                                         (
