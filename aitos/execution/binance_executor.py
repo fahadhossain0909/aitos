@@ -46,6 +46,10 @@ from urllib.parse import urlencode
 import aiohttp
 
 from aitos.exchange.symbol_filters import SymbolFilters
+from aitos.security.live_approval import (
+    LiveApprovalControlPlane,
+    SignedApproval,
+)
 from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
@@ -78,7 +82,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         hedge_mode: bool = False,
         intent_store: ExecutionIntentStore | None = None,
         conditional_orders_api: str = "algo",
-        live_approval_consumer: Callable[[dict[str, Any]], str] | None = None,
+        live_approval_authority: LiveApprovalControlPlane | None = None,
+        live_approval_token_provider: Callable[[dict[str, Any]], SignedApproval] | None = None,
     ) -> None:
         if not api_key or not api_secret:
             raise ValueError(
@@ -96,10 +101,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise ValueError("conditional_orders_api must be algo or legacy")
         self._conditional_orders_api = conditional_orders_api
         self._intent_store = intent_store
-        self._live_approval_consumer = live_approval_consumer
-        if not testnet and not callable(live_approval_consumer):
+        self._live_approval_authority = live_approval_authority
+        self._live_approval_token_provider = live_approval_token_provider
+        if not testnet and (
+            not isinstance(live_approval_authority, LiveApprovalControlPlane)
+            or not callable(live_approval_token_provider)
+        ):
             raise PermissionError(
-                "mainnet executor requires an authenticated single-use approval consumer"
+                "mainnet executor requires a trusted approval authority and signed-token provider"
             )
         self._pending_execution: dict[str, str] = {}
         if not testnet:
@@ -405,7 +414,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         client_id = request.client_order_id or f"aitos-{uuid.uuid4().hex[:20]}"
         request = replace(request, client_order_id=client_id)
         if not self._base_url == TESTNET_URL:
-            if self._live_approval_consumer is None:
+            if (
+                self._live_approval_authority is None
+                or self._live_approval_token_provider is None
+            ):
                 raise PermissionError("mainnet execution approval is unavailable")
             action = {
                 "environment": "binance-usdm-mainnet",
