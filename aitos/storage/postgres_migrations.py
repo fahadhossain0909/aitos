@@ -348,7 +348,17 @@ _REQUIRED_COLUMNS = {
         "revision",
         "projected_at",
     },
-    "aitos_oms_financial_ledger": {\n        "account_scope", "event_id", "line_no", "trade_id", "account_code",\n        "currency", "debit", "credit", "recorded_at",\n    },\n    "aitos_oms_legacy_imports": {
+    "aitos_oms_financial_ledger": {
+        "account_scope",
+        "event_id",
+        "line_no",
+        "trade_id",
+        "account_code",
+        "currency",
+        "debit",
+        "credit",
+        "recorded_at",
+    },\n    "aitos_oms_legacy_imports": {
         "account_scope",
         "source_table",
         "source_fingerprint",
