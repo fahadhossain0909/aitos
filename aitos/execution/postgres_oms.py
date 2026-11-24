@@ -5,6 +5,7 @@ This store is the multi-process authority for order/trade aggregate revisions.
 SQLite execution-intent records and ClickHouse tables are recovery evidence and
 projections; neither may supersede a committed PostgreSQL OMS event.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -115,7 +116,9 @@ class PostgresCanonicalOMS:
         if type(expected_generation) is not int or expected_generation < 0:
             raise ValueError("expected_generation must be a non-negative integer")
         async with self._pool.acquire() as conn, conn.transaction():
-            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", scope)
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", scope
+            )
             row = await conn.fetchrow(
                 """SELECT writer_id,generation FROM aitos_oms_writer_fences
                    WHERE account_scope=$1 FOR UPDATE""",
@@ -132,7 +135,9 @@ class PostgresCanonicalOMS:
                    (account_scope,writer_id,generation) VALUES($1,$2,$3)
                    ON CONFLICT(account_scope) DO UPDATE SET
                      writer_id=EXCLUDED.writer_id,generation=EXCLUDED.generation""",
-                scope, writer, generation,
+                scope,
+                writer,
+                generation,
             )
         return WriterFence(scope, writer, generation)
 
@@ -156,17 +161,21 @@ class PostgresCanonicalOMS:
         async with self._pool.acquire() as conn, conn.transaction():
             owner = await conn.fetchrow(
                 """SELECT writer_id,generation FROM aitos_oms_writer_fences
-                   WHERE account_scope=$1 FOR UPDATE""", scope,
+                   WHERE account_scope=$1 FOR UPDATE""",
+                scope,
             )
-            if owner is None or (
-                owner["writer_id"], int(owner["generation"])
-            ) != (fence.writer_id, fence.generation):
+            if owner is None or (owner["writer_id"], int(owner["generation"])) != (
+                fence.writer_id,
+                fence.generation,
+            ):
                 raise OMSConflict("stale writer fencing token")
             duplicate = await conn.fetchrow(
                 """SELECT aggregate_id,revision,payload::text AS payload_json,
                           writer_id,generation,previous_hash,event_hash
                    FROM aitos_oms_events
-                   WHERE account_scope=$1 AND event_id=$2""", scope, event,
+                   WHERE account_scope=$1 AND event_id=$2""",
+                scope,
+                event,
             )
             if duplicate is not None:
                 if duplicate["aggregate_id"] != aggregate or json.loads(
@@ -188,7 +197,9 @@ class PostgresCanonicalOMS:
                 """INSERT INTO aitos_oms_aggregate_heads
                    (account_scope,aggregate_id,revision,event_hash)
                    VALUES($1,$2,0,$3) ON CONFLICT DO NOTHING""",
-                scope, aggregate, "0" * 64,
+                scope,
+                aggregate,
+                "0" * 64,
             )
             head = await conn.fetchrow(
                 """SELECT revision,event_hash FROM aitos_oms_aggregate_heads
@@ -226,12 +237,17 @@ class PostgresCanonicalOMS:
                 """UPDATE aitos_oms_aggregate_heads
                    SET revision=$3,event_hash=$4
                    WHERE account_scope=$1 AND aggregate_id=$2""",
-                scope, aggregate, revision, digest,
+                scope,
+                aggregate,
+                revision,
+                digest,
             )
             await conn.execute(
                 """INSERT INTO aitos_oms_outbox
                    (account_scope,aggregate_id,revision) VALUES($1,$2,$3)""",
-                scope, aggregate, revision,
+                scope,
+                aggregate,
+                revision,
             )
         return OMSEvent(
             scope,
