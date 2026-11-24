@@ -140,6 +140,25 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             event_id="event-1",
             expected_revision=0,
             payload={"state": "OPEN", "quantity": "1"},
+            ledger_entries=[
+                {
+                    "account_code": "POSITION_ASSET",
+                    "currency": "USDT",
+                    "debit": "100.25",
+                    "credit": "0",
+                    "reference": "entry-notional",
+                },
+                {
+                    "account_code": "CASH_CLEARING",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "100.25",
+                    "reference": "entry-notional",
+                },
+            ],
+            causation_id="signal:abc",
+            correlation_id="trade-1",
+            parent_event_id="signal-event-1",
         )
         assert duplicate.event_hash == first.event_hash
         assert await oms.list_aggregate_ids("paper:integration") == ["trade-1"]
@@ -172,6 +191,18 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             payload={"state": "CLOSED"},
         )
         assert closed.revision == 2
+        with pytest.raises(asyncpg.PostgresError, match="not balanced"):
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        """INSERT INTO aitos_oms_financial_ledger
+                           (account_scope,event_id,line_no,trade_id,account_code,
+                            currency,debit,credit)
+                           VALUES($1,$2,0,$3,'INVALID_POSTING','USDT',1,0)""",
+                        "paper:integration",
+                        "event-4",
+                        "trade-1",
+                    )
 
         projected = []
 
