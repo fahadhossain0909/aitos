@@ -4,6 +4,7 @@ export type OperatorSession = {
   authenticated: boolean;
   expires_in_seconds: number;
   controls: "read_only";
+  default_identity?: string;
 };
 export function parseOperatorSession(value: unknown): OperatorSession {
   const s = value as Partial<OperatorSession> | null;
@@ -12,6 +13,7 @@ export function parseOperatorSession(value: unknown): OperatorSession {
     s.schema_version !== 1 ||
     s.gateway !== true ||
     s.controls !== "read_only" ||
+    (s.default_identity !== undefined && typeof s.default_identity !== "string") ||
     typeof s.authenticated !== "boolean" ||
     typeof s.expires_in_seconds !== "number" ||
     !Number.isInteger(s.expires_in_seconds) ||
