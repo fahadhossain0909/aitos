@@ -11,6 +11,7 @@ import PerformancePanel from "./PerformancePanel";
 import { parseSnapshot, parseHistory } from "./consoleClient";
 import ReadinessPanel from "./ReadinessPanel";
 import ApprovalPanel from "./ApprovalPanel";
+import SecurityPanel from "./SecurityPanel";
 import { useState, useEffect, useRef } from "react";
 import {
   Activity,
@@ -998,6 +999,7 @@ export default function App() {
           {page === "readiness" && (
             <>
               <ReadinessPanel snapshot={apiError ? null : snapshot} />
+              <SecurityPanel />
               <ApprovalPanel />
             </>
           )}
