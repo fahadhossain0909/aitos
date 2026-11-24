@@ -813,12 +813,16 @@ def create_gateway(
             try:
                 credentials = webauthn_rp.credential_count(user_id=user_id)
                 if not credentials and not _loopback(config.public_origin):
-                    supplied = body.get("enrollment_token", "")
-                    if not webauthn_enrollment_token or not hmac.compare_digest(
-                        supplied, webauthn_enrollment_token
+                    if not webauthn_enrollment_token or not (
+                        webauthn_rp.consume_enrollment_bootstrap_token(
+                            user_id=user_id,
+                            configured_token=webauthn_enrollment_token,
+                            supplied_token=body.get("enrollment_token", ""),
+                            now=int(time.time()),
+                        )
                     ):
                         raise web.HTTPForbidden(
-                            text="First WebAuthn enrollment requires the out-of-band bootstrap token"
+                            text="First WebAuthn enrollment requires an unused out-of-band bootstrap token"
                         )
                 pending = secrets.token_urlsafe(32)
                 state.issue_pending(pending, user_id)
