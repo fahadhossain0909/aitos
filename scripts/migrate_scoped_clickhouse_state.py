@@ -19,6 +19,8 @@ RUNTIME_SOURCE = "trade_runtime_state"
 CLOSED_SOURCE = "paper_closed_trade_ledger"
 RUNTIME_TARGET = "trade_runtime_state_v2"
 CLOSED_TARGET = "paper_closed_trade_ledger_v2"
+RUNTIME_BACKUP = "trade_runtime_state_legacy_pre_scope_v1"
+CLOSED_BACKUP = "paper_closed_trade_ledger_legacy_pre_scope_v1"
 CHUNK_SIZE = 500
 
 
@@ -327,8 +329,61 @@ def _insert_table(
     return expected
 
 
+def _verified_cutover(client: Any) -> None:
+    """Atomically replace legacy table names after import/parity verification.
+
+    The database must be Atomic and writers must be externally quiesced. The
+    old tables are retained under explicit backup names; this function never
+    drops or truncates data.
+    """
+    engine = client.query(
+        "SELECT engine FROM system.databases WHERE name=currentDatabase()"
+    ).result_rows
+    if not engine or str(engine[0][0]).lower() != "atomic":
+        raise RuntimeError("verified cutover requires an Atomic ClickHouse database")
+    existing = {
+        str(row[0])
+        for row in client.query(
+            "SELECT name FROM system.tables WHERE database=currentDatabase()"
+        ).result_rows
+    }
+    for name in (RUNTIME_BACKUP, CLOSED_BACKUP):
+        if name in existing:
+            raise RuntimeError(f"refusing cutover: retained backup already exists: {name}")
+    for source, target in (
+        (RUNTIME_SOURCE, RUNTIME_TARGET),
+        (CLOSED_SOURCE, CLOSED_TARGET),
+    ):
+        source_count = int(client.query(f"SELECT count() FROM {source}").result_rows[0][0])
+        target_count = int(client.query(f"SELECT count() FROM {target}").result_rows[0][0])
+        if source_count != target_count:
+            raise RuntimeError(
+                f"refusing cutover: {source}={source_count}, {target}={target_count}"
+            )
+    client.command(
+        f"RENAME TABLE {RUNTIME_SOURCE} TO {RUNTIME_BACKUP}, "
+        f"{RUNTIME_TARGET} TO {RUNTIME_SOURCE}, "
+        f"{CLOSED_SOURCE} TO {CLOSED_BACKUP}, "
+        f"{CLOSED_TARGET} TO {CLOSED_SOURCE}"
+    )
+    for active, backup in (
+        (RUNTIME_SOURCE, RUNTIME_BACKUP),
+        (CLOSED_SOURCE, CLOSED_BACKUP),
+    ):
+        active_count = int(client.query(f"SELECT count() FROM {active}").result_rows[0][0])
+        backup_count = int(client.query(f"SELECT count() FROM {backup}").result_rows[0][0])
+        if active_count != backup_count:
+            raise RuntimeError(
+                f"post-cutover row-count mismatch: {active}={active_count}, {backup}={backup_count}"
+            )
+
+
 def run(
-    *, apply: bool, scope_map: dict[str, str], manifest_out: Path | None
+    *,
+    apply: bool,
+    scope_map: dict[str, str],
+    manifest_out: Path | None,
+    cutover: bool = False,
 ) -> dict[str, Any]:
     try:
         import clickhouse_connect
@@ -367,6 +422,13 @@ def run(
                     "account scope, then rerun with --apply."
                 ),
             }
+        if cutover and not apply:
+            raise ValueError("--cutover requires --apply")
+        if cutover and os.getenv("AITOS_CLICKHOUSE_MIGRATION_FREEZE_ACK") != "WRITERS_QUIESCED":
+            raise RuntimeError(
+                "cutover requires AITOS_CLICKHOUSE_MIGRATION_FREEZE_ACK=WRITERS_QUIESCED "
+                "after all writers are stopped"
+            )
         if not apply:
             return {
                 "mode": "dry-run",
@@ -394,12 +456,15 @@ def run(
             scope_map,
             runtime=False,
         )
+        if cutover:
+            _verified_cutover(client)
         return {
-            "mode": "staged-and-verified",
+            "mode": "cutover-and-verified" if cutover else "staged-and-verified",
             "runtime_rows": runtime_count,
             "closed_rows": closed_count,
-            "legacy_tables_mutated": False,
-            "runtime_cutover": False,
+            "legacy_tables_mutated": cutover,
+            "legacy_backups": [RUNTIME_BACKUP, CLOSED_BACKUP] if cutover else [],
+            "runtime_cutover": cutover,
         }
     finally:
         client.close()
@@ -410,7 +475,12 @@ def main() -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="create/import into v2 tables; never alters legacy tables",
+        help="create/import into v2 tables; legacy tables are retained",
+    )
+    parser.add_argument(
+        "--cutover",
+        action="store_true",
+        help="after verified import, atomically rename v2 tables into runtime names; requires frozen writers and explicit acknowledgement",
     )
     parser.add_argument(
         "--scope-map",
