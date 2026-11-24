@@ -44,7 +44,9 @@ class PostgresLifecycleStateWriter:
         trade_id = str(getattr(trade, "trade_id", "")).strip()
         to_dict = getattr(trade, "to_dict", None)
         if not trade_id or not callable(to_dict):
-            raise ValueError("TradeLifecycle writer requires a persisted Trade aggregate")
+            raise ValueError(
+                "TradeLifecycle writer requires a persisted Trade aggregate"
+            )
         lock = self._locks.setdefault(trade_id, asyncio.Lock())
         async with lock:
             revision = await self._revision(trade_id)
@@ -62,7 +64,9 @@ class PostgresLifecycleStateWriter:
                 },
             )
             if event.revision != next_revision:
-                raise RuntimeError("canonical OMS returned an unexpected aggregate revision")
+                raise RuntimeError(
+                    "canonical OMS returned an unexpected aggregate revision"
+                )
             self._revisions[trade_id] = next_revision
             # This is a projection only. If it fails, the committed canonical
             # event remains available for startup replay/reconciliation.
