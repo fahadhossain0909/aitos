@@ -145,6 +145,30 @@ MIGRATIONS = (
             ON aitos_oms_legacy_imports (account_scope, trade_id, source_updated_at)
             """,
             """
+            CREATE OR REPLACE FUNCTION aitos_reject_oms_event_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $
+            BEGIN
+                RAISE EXCEPTION 'canonical OMS event journal is append-only';
+            END;
+            $
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_events_no_update ON aitos_oms_events
+            """,
+            """
+            CREATE TRIGGER aitos_oms_events_no_update
+            BEFORE UPDATE ON aitos_oms_events
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_event_mutation()
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_events_no_delete ON aitos_oms_events
+            """,
+            """
+            CREATE TRIGGER aitos_oms_events_no_delete
+            BEFORE DELETE ON aitos_oms_events
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_event_mutation()
+            """,
+            """
             CREATE OR REPLACE FUNCTION aitos_reject_legacy_import_mutation()
             RETURNS trigger LANGUAGE plpgsql AS $
             BEGIN
