@@ -165,6 +165,8 @@ class PostgresCanonicalOMS:
             raise ValueError("expected_revision must be a non-negative integer")
         normalized_entries = self._validate_ledger_entries(\n            [] if ledger_entries is None else ledger_entries\n        )
         canonical_payload = dict(payload)
+        if "financial_ledger" in canonical_payload:
+            raise ValueError("financial_ledger payload is reserved by the canonical OMS")
         if any(value is not None for value in (causation_id, correlation_id, parent_event_id)):
             if "causality" in canonical_payload:
                 raise ValueError("causality metadata is reserved by the canonical OMS")
@@ -328,8 +330,11 @@ class PostgresCanonicalOMS:
                 raise ValueError("ledger amounts must be finite and non-negative")
             if (debit > 0) == (credit > 0):
                 raise ValueError("each ledger line must contain exactly one positive side")
-            if max(-debit.as_tuple().exponent, -credit.as_tuple().exponent) > 18:
-                raise ValueError("ledger precision exceeds NUMERIC(38,18)")
+            for amount in (debit, credit):
+                if amount and (
+                    -amount.as_tuple().exponent > 18 or amount.adjusted() > 19
+                ):
+                    raise ValueError("ledger precision exceeds NUMERIC(38,18)")
             totals.setdefault(currency, [Decimal(0), Decimal(0)])
             totals[currency][0] += debit
             totals[currency][1] += credit
