@@ -7,7 +7,9 @@ endpoint.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import time
 from pathlib import Path
 
 from aitos.security.webauthn_rp import WebAuthnRelyingParty
@@ -24,6 +26,11 @@ def main() -> int:
     revoke = commands.add_parser("revoke", help="revoke one credential by ID")
     revoke.add_argument("--credential-id", required=True)
     revoke.add_argument("--confirm", action="store_true")
+    reset = commands.add_parser(
+        "reset-bootstrap",
+        help="replace the one-time first-device token after all keys are revoked",
+    )
+    reset.add_argument("--confirm", action="store_true")
     args = parser.parse_args()
 
     rp = WebAuthnRelyingParty(
@@ -34,6 +41,15 @@ def main() -> int:
     )
     if args.command == "list":
         print(json.dumps(rp.list_credentials(user_id=args.user_id), indent=2))
+        return 0
+    if args.command == "reset-bootstrap":
+        if not args.confirm:
+            parser.error("bootstrap reset requires --confirm")
+        token = getpass.getpass("New first-device enrollment token: ")
+        rp.reset_enrollment_bootstrap_token(
+            user_id=args.user_id, new_token=token, now=int(time.time())
+        )
+        print(json.dumps({"bootstrap_reset": True, "user_id": args.user_id}))
         return 0
     if not args.confirm:
         parser.error("credential revocation requires --confirm")
