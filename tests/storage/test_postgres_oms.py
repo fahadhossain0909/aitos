@@ -1,5 +1,8 @@
 import os
+import sys
 import uuid
+from contextlib import contextmanager
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -7,6 +10,7 @@ from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWrit
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.storage.postgres_migrations import apply_postgres_migrations
+from scripts.import_clickhouse_state_to_postgres_oms import run as run_clickhouse_oms_import
 
 
 @pytest.mark.asyncio
@@ -161,5 +165,115 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         )
     finally:
         await pool.close()
+        await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
+    monkeypatch, tmp_path
+):
+    dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
+    if not dsn:
+        pytest.skip("AITOS_POSTGRES_OMS_TEST_DSN is not configured")
+    import asyncpg
+
+    schema = "aitos_import_" + uuid.uuid4().hex
+    admin = await asyncpg.connect(dsn)
+    await admin.execute(f'CREATE SCHEMA "{schema}"')
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=1,
+        max_size=5,
+        server_settings={"search_path": schema},
+    )
+
+    runtime_payload = (
+        '{"trade_id":"import-open","symbol":"BTCUSDT",'
+        '"state":"position_opened","account_scope":"paper:import",'
+        '"quantity":"0.125"}'
+    )
+    closed_payload = (
+        '{"trade_id":"import-closed","state":"position_closed",'
+        '"account_scope":"paper:import","pnl":"1.25"}'
+    )
+
+    class FakeClickHouse:
+        closed = False
+
+        @contextmanager
+        def query_row_block_stream(self, query):
+            if "FROM trade_runtime_state" in query:
+                yield iter(
+                    [[
+                        (
+                            "import-open",
+                            "BTCUSDT",
+                            "position_opened",
+                            runtime_payload,
+                            "2026-11-24T10:00:00Z",
+                        )
+                    ]]
+                )
+            else:
+                yield iter(
+                    [[
+                        (
+                            "import-closed",
+                            closed_payload,
+                            "2026-11-24T11:00:00Z",
+                        )
+                    ]]
+                )
+
+        def close(self):
+            self.closed = True
+
+    clickhouse_client = FakeClickHouse()
+    clickhouse_module = ModuleType("clickhouse_connect")
+    clickhouse_module.get_client = lambda **kwargs: clickhouse_client
+    asyncpg_module = ModuleType("asyncpg")
+
+    async def use_existing_pool(*args, **kwargs):
+        return pool
+
+    asyncpg_module.create_pool = use_existing_pool
+    monkeypatch.setitem(sys.modules, "clickhouse_connect", clickhouse_module)
+    monkeypatch.setitem(sys.modules, "asyncpg", asyncpg_module)
+    monkeypatch.setenv("DATABASE_URL", dsn)
+
+    try:
+        result = await run_clickhouse_oms_import(
+            SimpleNamespace(
+                apply=True,
+                confirm_writers_stopped=True,
+                confirm_backup_retained=True,
+                scope_map={},
+                manifest_out=tmp_path / "import-manifest.jsonl",
+            )
+        )
+        assert result["mode"] == "imported-and-verified"
+        assert result["imported_rows"] == 2
+        assert result["canonical_events_verified"] == 2
+        assert clickhouse_client.closed is True
+
+        await admin.execute(f'SET search_path TO "{schema}"')
+        evidence = await admin.fetch(
+            "SELECT trade_id,raw_payload,raw_payload_sha256 "
+            "FROM aitos_oms_legacy_imports ORDER BY trade_id"
+        )
+        assert [(row["trade_id"], row["raw_payload"]) for row in evidence] == [
+            ("import-closed", closed_payload),
+            ("import-open", runtime_payload),
+        ]
+        events = await admin.fetch(
+            "SELECT aggregate_id,event_id,payload::text AS payload "
+            "FROM aitos_oms_events ORDER BY aggregate_id"
+        )
+        assert len(events) == 2
+        assert all(row["event_id"].startswith("legacy:") for row in events)
+    finally:
+        if not pool.is_closing():
+            await pool.close()
         await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
         await admin.close()
