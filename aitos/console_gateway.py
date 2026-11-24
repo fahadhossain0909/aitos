@@ -758,6 +758,8 @@ def create_gateway(
                         }
                     )
                 return set_pending_cookie(response, pending)
+            except web.HTTPException:
+                raise
             except Exception as exc:
                 logger.warning("operator MFA challenge could not be created: %s", type(exc).__name__)
                 raise web.HTTPServiceUnavailable(text="WebAuthn MFA unavailable") from None
