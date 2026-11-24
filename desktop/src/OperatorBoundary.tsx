@@ -21,6 +21,7 @@ export default function OperatorBoundary({
     [expires, setExpires] = useState(0),
     [clock, setClock] = useState(Date.now()),
     [password, setPassword] = useState(""),
+    [operatorId, setOperatorId] = useState("local-operator"),
     [enrollmentToken, setEnrollmentToken] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -119,8 +120,8 @@ export default function OperatorBoundary({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           enrollmentToken
-            ? { password, enrollment_token: enrollmentToken }
-            : { password },
+            ? { user_id: operatorId, password, enrollment_token: enrollmentToken }
+            : { user_id: operatorId, password },
         ),
         signal: c.signal,
         cache: "no-store",
@@ -254,6 +255,22 @@ export default function OperatorBoundary({
         )}
         {mode === "signed_out" ? (
           <form onSubmit={signIn}>
+            <label htmlFor="operator-identity">Operator identity</label>
+            <div className="operator-password-field">
+              <KeyRound size={16} />
+              <input
+                id="operator-identity"
+                name="operator-identity"
+                type="text"
+                autoComplete="username"
+                value={operatorId}
+                maxLength={256}
+                onChange={(e) => setOperatorId(e.target.value)}
+                placeholder="Configured operator identity"
+                required
+                disabled={busy}
+              />
+            </div>
             <label htmlFor="operator-password">Operator password</label>
             <div className="operator-password-field">
               <KeyRound size={16} />
