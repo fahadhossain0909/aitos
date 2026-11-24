@@ -2401,7 +2401,9 @@ class TradeLifecycle(AITOSModule):
         if getattr(self, "_postgres_canonical_oms_required", False) and not callable(
             getattr(self, "_postgres_canonical_oms_writer", None)
         ):
-            raise RuntimeError("live execution requires the bound PostgreSQL canonical OMS")
+            raise RuntimeError(
+                "live execution requires the bound PostgreSQL canonical OMS"
+            )
         if not callable(getattr(self, "_execution_position_verifier", None)):
             raise RuntimeError(
                 "live execution requires authoritative position verification"
