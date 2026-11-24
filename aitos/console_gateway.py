@@ -415,6 +415,7 @@ def create_gateway(
     webauthn_rp=None,
     approval_control_plane=None,
     operator_id: str = "local-operator",
+    webauthn_enrollment_token: str | None = None,
 ) -> web.Application:
     if (
         not isinstance(operator_id, str)
@@ -424,6 +425,8 @@ def create_gateway(
         raise ValueError("bounded operator identity is required")
     if webauthn_rp is None and not _loopback(config.public_origin):
         raise ValueError("WebAuthn MFA is mandatory for non-loopback operator gateways")
+    if webauthn_enrollment_token is not None and len(webauthn_enrollment_token) < 32:
+        raise ValueError("WebAuthn enrollment token must contain at least 256 bits")
     state = OperatorSessions(config, password, clock=clock)
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
@@ -708,9 +711,13 @@ def create_gateway(
             body = await read_json_body(request, max_bytes=4096)
             if (
                 not isinstance(body, dict)
-                or set(body) != {"password"}
+                or set(body) not in ({"password"}, {"password", "enrollment_token"})
                 or not isinstance(body["password"], str)
                 or not 1 <= len(body["password"].encode("utf-8")) <= 1024
+                or (
+                    "enrollment_token" in body
+                    and not isinstance(body["enrollment_token"], str)
+                )
             ):
                 raise ValueError()
         except (ValueError, UnicodeError):
@@ -722,6 +729,14 @@ def create_gateway(
         if webauthn_rp is not None:
             try:
                 credentials = webauthn_rp.credential_count(user_id=operator_id)
+                if not credentials and not _loopback(config.public_origin):
+                    supplied = body.get("enrollment_token", "")
+                    if not webauthn_enrollment_token or not hmac.compare_digest(
+                        supplied, webauthn_enrollment_token
+                    ):
+                        raise web.HTTPForbidden(
+                            text="First WebAuthn enrollment requires the out-of-band bootstrap token"
+                        )
                 pending = secrets.token_urlsafe(32)
                 state.issue_pending(pending)
                 if credentials:
@@ -1084,6 +1099,9 @@ def main():
             webauthn_rp=webauthn_rp,
             approval_control_plane=approval_control_plane,
             operator_id=args.operator_id,
+            webauthn_enrollment_token=os.environ.get(
+                "AITOS_WEBAUTHN_ENROLLMENT_TOKEN"
+            ),
         )
     except (ValueError, OSError):
         parser.exit(
