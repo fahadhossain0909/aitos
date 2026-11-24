@@ -23,6 +23,7 @@ def setup(tmp_path):
         allowed_origins={"https://console.example"},
         rp_id="console.example",
         ttl_seconds=60,
+        role_authorizer=lambda user, role: user == "alice" and role == "live_trader",
     )
 
 
@@ -35,12 +36,12 @@ def test_webauthn_approval_is_bound_to_action_and_single_use(tmp_path):
         "environment": "testnet",
     }
     challenge = cp.issue_challenge(
-        user_id="alice", action=action, roles={"live_trader"}, now=100
+        user_id="alice", action=action, now=100
     )
     token = cp.approve(
         challenge, assertion=b"authenticator-assertion", verifier=verifier, now=101
     )
-    assert cp.consume(token, action=action, roles={"live_trader"}, now=102) == "alice"
+    assert cp.consume(token, action=action, now=102) == "alice"
     with pytest.raises(ApprovalDenied, match="consumed"):
         cp.consume(token, action=action, roles={"live_trader"}, now=103)
 
@@ -49,7 +50,7 @@ def test_rbac_and_action_mutation_are_denied(tmp_path):
     cp = setup(tmp_path)
     action = {"symbol": "BTCUSDT", "side": "BUY"}
     with pytest.raises(ApprovalDenied):
-        cp.issue_challenge(user_id="alice", action=action, roles={"viewer"})
+        cp.issue_challenge(user_id="alice", action=action)
     challenge = cp.issue_challenge(
         user_id="alice", action=action, roles={"live_trader"}, now=100
     )
@@ -58,7 +59,6 @@ def test_rbac_and_action_mutation_are_denied(tmp_path):
         cp.consume(
             token,
             action={"symbol": "ETHUSDT", "side": "BUY"},
-            roles={"live_trader"},
             now=102,
         )
 
