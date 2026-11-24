@@ -336,6 +336,7 @@ class PostgresCanonicalOMS:
                 aggregate,
                 revision,
                 event_hash,
+            )
             if result != "UPDATE 1":
                 raise OMSConflict(
                     "projection acknowledgement missing, stale, or duplicated"
