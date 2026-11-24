@@ -134,6 +134,8 @@ class PostgresLifecycleStateWriter:
                         str(legacy.get("table", "")),
                         str(legacy.get("fingerprint", "")),
                         legacy.get("occurrence"),
+                        expected_trade_id=trade_id,
+                        expected_updated_at=str(legacy.get("updated_at", "")),
                     )
                     import json
 
