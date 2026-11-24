@@ -349,13 +349,19 @@ def _verified_cutover(client: Any) -> None:
     }
     for name in (RUNTIME_BACKUP, CLOSED_BACKUP):
         if name in existing:
-            raise RuntimeError(f"refusing cutover: retained backup already exists: {name}")
+            raise RuntimeError(
+                f"refusing cutover: retained backup already exists: {name}"
+            )
     for source, target in (
         (RUNTIME_SOURCE, RUNTIME_TARGET),
         (CLOSED_SOURCE, CLOSED_TARGET),
     ):
-        source_count = int(client.query(f"SELECT count() FROM {source}").result_rows[0][0])
-        target_count = int(client.query(f"SELECT count() FROM {target}").result_rows[0][0])
+        source_count = int(
+            client.query(f"SELECT count() FROM {source}").result_rows[0][0]
+        )
+        target_count = int(
+            client.query(f"SELECT count() FROM {target}").result_rows[0][0]
+        )
         if source_count != target_count:
             raise RuntimeError(
                 f"refusing cutover: {source}={source_count}, {target}={target_count}"
@@ -370,8 +376,12 @@ def _verified_cutover(client: Any) -> None:
         (RUNTIME_SOURCE, RUNTIME_BACKUP),
         (CLOSED_SOURCE, CLOSED_BACKUP),
     ):
-        active_count = int(client.query(f"SELECT count() FROM {active}").result_rows[0][0])
-        backup_count = int(client.query(f"SELECT count() FROM {backup}").result_rows[0][0])
+        active_count = int(
+            client.query(f"SELECT count() FROM {active}").result_rows[0][0]
+        )
+        backup_count = int(
+            client.query(f"SELECT count() FROM {backup}").result_rows[0][0]
+        )
         if active_count != backup_count:
             raise RuntimeError(
                 f"post-cutover row-count mismatch: {active}={active_count}, {backup}={backup_count}"
