@@ -6,8 +6,16 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from scripts.import_clickhouse_state_to_postgres_oms import _manifest_row, run
-from scripts.migrate_scoped_clickhouse_state import CLOSED_SOURCE, RUNTIME_SOURCE
+from scripts.import_clickhouse_state_to_postgres_oms import (
+    _manifest_row,
+    _scoped_payload_hash,
+    run,
+)
+from scripts.migrate_scoped_clickhouse_state import (
+    CLOSED_SOURCE,
+    RUNTIME_SOURCE,
+    source_fingerprint,
+)
 
 
 def test_runtime_manifest_preserves_raw_payload_and_identity():
@@ -178,3 +186,120 @@ def test_streaming_import_refuses_ambiguous_same_timestamp_snapshots(
             )
         )
     assert output.with_suffix(".jsonl.partial").is_file()
+
+
+def test_streaming_dry_run_reads_already_scope_keyed_cutover_tables(
+    tmp_path, monkeypatch
+):
+    runtime = json.dumps(
+        {
+            "trade_id": "scoped-open",
+            "symbol": "BTCUSDT",
+            "state": "position_opened",
+            "quantity": "0.02",
+        },
+        separators=(",", ":"),
+    )
+    closed = json.dumps(
+        {"trade_id": "scoped-closed", "state": "position_closed", "pnl": "2"},
+        separators=(",", ":"),
+    )
+    runtime_stamp = "2026-11-24T10:00:00Z"
+    closed_stamp = "2026-11-24T11:00:00Z"
+    runtime_item = _manifest_row(
+        RUNTIME_SOURCE,
+        ("scoped-open", "BTCUSDT", "position_opened", runtime, runtime_stamp),
+        0,
+    )
+    closed_item = _manifest_row(
+        CLOSED_SOURCE,
+        ("scoped-closed", closed, closed_stamp),
+        0,
+    )
+    runtime_fp = source_fingerprint(
+        RUNTIME_SOURCE, "scoped-open", runtime, runtime_stamp
+    )
+    closed_fp = source_fingerprint(
+        CLOSED_SOURCE, "scoped-closed", closed, closed_stamp
+    )
+    scope = "paper:cutover"
+
+    class ScopedClient:
+        closed = False
+
+        def query(self, query):
+            if "system.columns" in query:
+                return SimpleNamespace(
+                    result_rows=[
+                        (RUNTIME_SOURCE, "account_scope"),
+                        (RUNTIME_SOURCE, "trade_id"),
+                        (RUNTIME_SOURCE + "_legacy_pre_scope_v1", "trade_id"),
+                        (CLOSED_SOURCE, "account_scope"),
+                        (CLOSED_SOURCE, "trade_id"),
+                        (CLOSED_SOURCE + "_legacy_pre_scope_v1", "trade_id"),
+                    ]
+                )
+            if "SELECT count()" in query:
+                return SimpleNamespace(result_rows=[(1,)])
+            raise AssertionError(f"unexpected ClickHouse query: {query}")
+
+        @contextmanager
+        def query_row_block_stream(self, query):
+            if f"FROM {RUNTIME_SOURCE}" in query:
+                yield iter(
+                    [[
+                        (
+                            scope,
+                            "scoped-open",
+                            "BTCUSDT",
+                            "position_opened",
+                            runtime,
+                            runtime_stamp,
+                            runtime_fp,
+                            0,
+                            _scoped_payload_hash(runtime_item["payload"], scope),
+                        )
+                    ]]
+                )
+            else:
+                yield iter(
+                    [[
+                        (
+                            scope,
+                            "scoped-closed",
+                            closed,
+                            closed_stamp,
+                            closed_fp,
+                            0,
+                            _scoped_payload_hash(closed_item["payload"], scope),
+                        )
+                    ]]
+                )
+
+        def close(self):
+            self.closed = True
+
+    client = ScopedClient()
+    module = ModuleType("clickhouse_connect")
+    module.get_client = lambda **kwargs: client
+    monkeypatch.setitem(sys.modules, "clickhouse_connect", module)
+    output = tmp_path / "scoped-manifest.jsonl"
+    result = asyncio.run(
+        run(
+            SimpleNamespace(
+                apply=False,
+                confirm_writers_stopped=False,
+                confirm_backup_retained=False,
+                scope_map={},
+                manifest_out=output,
+            )
+        )
+    )
+    assert result["runtime_rows"] == 1
+    assert result["closed_rows"] == 1
+    manifest = [json.loads(line) for line in output.read_text().splitlines()]
+    assert {row["account_scope"] for row in manifest} == {scope}
+    assert {row["source_fingerprint"] for row in manifest} == {
+        runtime_fp,
+        closed_fp,
+    }
