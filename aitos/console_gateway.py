@@ -18,7 +18,7 @@ import re
 import secrets
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -1085,7 +1085,14 @@ def create_gateway(
         except Exception as exc:
             logger.warning("approval verification failed: %s", type(exc).__name__)
             raise web.HTTPUnauthorized(text="Approval verification rejected") from None
-        return web.json_response(asdict(token))
+        return web.json_response(
+            {
+                "token_id": token.token_id,
+                "user_id": token.user_id,
+                "action_digest": token.action_digest,
+                "expires_at": token.expires_at,
+            }
+        )
 
     async def logout(request):
         state.revoke(request.cookies.get(cookie_name))
