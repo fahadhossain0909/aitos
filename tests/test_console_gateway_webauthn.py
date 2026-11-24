@@ -2,6 +2,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from aitos.console_gateway import GatewayConfig, create_gateway
+from aitos.security.live_approval import LiveApprovalControlPlane
 
 ORIGIN = "http://127.0.0.1:8780"
 PASSWORD = "a-very-long-test-password-with-enough-entropy"
@@ -160,3 +161,86 @@ async def test_mfa_enrollment_requires_live_password_preauthentication(gateway):
         headers={"Origin": ORIGIN},
     )
     assert response.status == 401
+
+
+async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+    rp = FakeWebAuthn(credentials=1)
+    approval = LiveApprovalControlPlane(
+        tmp_path / "approvals.sqlite",
+        signing_key=b"test-signing-key-material-at-least-32-bytes",
+        allowed_origins={ORIGIN},
+        rp_id=rp.rp_id,
+        role_authorizer=lambda user, role: user == "operator-1" and role == "live_trader",
+    )
+    config = GatewayConfig(
+        ORIGIN,
+        "http://127.0.0.1:8765",
+        dist,
+        workspace_file=tmp_path / "workspace.json",
+    )
+    app = create_gateway(
+        config,
+        password=PASSWORD,
+        webauthn_rp=rp,
+        approval_control_plane=approval,
+        operator_id="operator-1",
+    )
+    client = TestClient(TestServer(app), headers={"Host": "127.0.0.1:8780"})
+    await client.start_server()
+    try:
+        login = await client.post(
+            "/operator/v1/login",
+            json={"password": PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        assert (await login.json())["mfa_required"] is True
+        verified = await client.post(
+            "/operator/v1/mfa/verify",
+            json={
+                "challenge": "assertion-challenge",
+                "assertion": {"id": "credential"},
+            },
+            headers={"Origin": ORIGIN},
+        )
+        assert verified.status == 200
+        capabilities = await client.get("/operator/v1/approval/capabilities")
+        assert (await capabilities.json())["enabled"] is True
+
+        requested = await client.post(
+            "/operator/v1/approval/challenge",
+            json={"action": {"kind": "risk-limit-change", "limit": "0.25"}},
+            headers={"Origin": ORIGIN},
+        )
+        assert requested.status == 200
+        challenge = await requested.json()
+        assert len(challenge["action_digest"]) == 64
+        assert challenge["options"]["challenge"] == "assertion-challenge"
+
+        issued = await client.post(
+            "/operator/v1/approval/approve",
+            json={
+                "challenge_id": challenge["challenge_id"],
+                "assertion": {"id": "credential"},
+            },
+            headers={"Origin": ORIGIN},
+        )
+        assert issued.status == 200
+        token = await issued.json()
+        assert token["user_id"] == "operator-1"
+        assert token["action_digest"] == challenge["action_digest"]
+        assert token["signature"]
+
+        replay = await client.post(
+            "/operator/v1/approval/approve",
+            json={
+                "challenge_id": challenge["challenge_id"],
+                "assertion": {"id": "credential"},
+            },
+            headers={"Origin": ORIGIN},
+        )
+        assert replay.status == 403
+    finally:
+        await client.close()
