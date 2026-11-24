@@ -1,0 +1,21 @@
+/* Risk page: derived exposure and limit usage. Colours come from theme tokens only. */
+.risk-notice { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 12px; }
+.risk-notice svg { flex: none; color: var(--accent); }
+.risk-layout { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 14px; margin-top: 14px; align-items: start; }
+.risk-limits { list-style: none; margin: 0; padding: 4px 20px 16px; display: grid; }
+.risk-limit { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.risk-limit:last-child { border-bottom: 0; }
+.risk-limit-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text); }
+.risk-limit-value { display: flex; align-items: baseline; gap: 10px; }
+.risk-limit-value strong { font: 600 18px var(--mono); color: var(--text); }
+.risk-limit-value small { font-size: 11px; color: var(--muted); }
+.risk-limit p { margin: 0; font-size: 11px; color: var(--muted); }
+.risk-limit.unmeasured .risk-limit-value strong { color: var(--muted); }
+.risk-track.watch > span { background: var(--warn); }
+.risk-track.breach > span { background: var(--coral); }
+.risk-track.unmeasured > span { background: var(--muted); }
+.pill.red { color: var(--coral); border-color: color-mix(in srgb, var(--coral) 40%, transparent); background: color-mix(in srgb, var(--coral) 12%, transparent); }
+.risk-table-wrap { overflow-x: auto; }
+.risk-share { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+.risk-share .risk-track { flex: 1; }
+@media (max-width: 1100px) { .risk-layout { grid-template-columns: minmax(0, 1fr); } }
