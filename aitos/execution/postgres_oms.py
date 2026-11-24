@@ -284,11 +284,16 @@ class PostgresCanonicalOMS:
         source_table: str,
         source_fingerprint: str,
         source_occurrence: int,
+        expected_trade_id: str,
+        expected_updated_at: str,
     ) -> str:
         """Read exact legacy JSON only after validating its durable SHA-256 evidence."""
         scope = _identifier(account_scope, "account scope")
         table = _identifier(source_table, "legacy source table")
         fingerprint = _identifier(source_fingerprint, "source fingerprint")
+        trade_id = _identifier(expected_trade_id, "legacy trade ID")
+        if not isinstance(expected_updated_at, str) or not expected_updated_at:
+            raise ValueError("legacy source timestamp is required")
         if (
             len(fingerprint) != 64
             or any(char not in "0123456789abcdef" for char in fingerprint)
@@ -299,7 +304,7 @@ class PostgresCanonicalOMS:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT raw_payload,raw_payload_sha256
+                SELECT trade_id,source_updated_at,raw_payload,raw_payload_sha256
                 FROM aitos_oms_legacy_imports
                 WHERE account_scope=$1 AND source_table=$2
                   AND source_fingerprint=$3 AND source_occurrence=$4
@@ -312,6 +317,11 @@ class PostgresCanonicalOMS:
         if row is None:
             raise RuntimeError("canonical legacy import evidence is missing")
         raw_payload = row["raw_payload"]
+        if (
+            row["trade_id"] != trade_id
+            or row["source_updated_at"].isoformat() != expected_updated_at
+        ):
+            raise RuntimeError("canonical legacy import evidence identity mismatch")
         expected_hash = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
         if not hmac.compare_digest(expected_hash, row["raw_payload_sha256"]):
             raise RuntimeError("canonical legacy import evidence SHA-256 mismatch")
