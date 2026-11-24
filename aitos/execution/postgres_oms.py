@@ -9,6 +9,7 @@ projections; neither may supersede a committed PostgreSQL OMS event.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from dataclasses import dataclass
