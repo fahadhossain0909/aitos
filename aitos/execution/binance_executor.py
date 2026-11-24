@@ -83,7 +83,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         intent_store: ExecutionIntentStore | None = None,
         conditional_orders_api: str = "algo",
         live_approval_authority: LiveApprovalControlPlane | None = None,
-        live_approval_token_provider: Callable[[dict[str, Any]], SignedApproval] | None = None,
+        live_approval_token_provider: (
+            Callable[[dict[str, Any]], SignedApproval] | None
+        ) = None,
     ) -> None:
         if not api_key or not api_secret:
             raise ValueError(
