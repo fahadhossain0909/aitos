@@ -194,24 +194,50 @@ class GatewayConfig:
 
 
 class OperatorSessions:
-    """Hash-only, bounded, absolute-expiry sessions; restart revokes everything."""
+    """Hash-only, bounded sessions and MFA pre-authentication with stable subjects."""
 
-    def __init__(self, config: GatewayConfig, password: str, *, clock=time.monotonic):
-        if not is_valid_operator_password(password):
-            raise ValueError("operator password must be 24–1024 UTF-8 bytes")
+    def __init__(
+        self,
+        config: GatewayConfig,
+        password: str | None,
+        *,
+        default_user: str,
+        identities: dict[str, str] | None = None,
+        clock=time.monotonic,
+    ):
         self.config = config
         self.clock = clock
-        self.salt = secrets.token_bytes(16)
-        self.digest = self._derive(password)
-        self.sessions: dict[bytes, float] = {}
-        self.pending: dict[bytes, float] = {}
+        self.default_user = default_user
+        source = identities or {default_user: password}
+        if (
+            not isinstance(source, dict)
+            or not source
+            or len(source) > 32
+            or default_user not in source
+        ):
+            raise ValueError("bounded operator identity directory is required")
+        self.credentials: dict[str, tuple[bytes, bytes]] = {}
+        for user_id, secret in source.items():
+            if (
+                not isinstance(user_id, str)
+                or not user_id.strip()
+                or user_id != user_id.strip()
+                or len(user_id) > 256
+                or not is_valid_operator_password(secret)
+            ):
+                raise ValueError("each operator requires a bounded identity and password")
+            salt = secrets.token_bytes(16)
+            self.credentials[user_id] = (salt, self._derive(secret, salt))
+        self.sessions: dict[bytes, tuple[float, str]] = {}
+        self.pending: dict[bytes, tuple[float, str]] = {}
         self.attempts: deque[float] = deque()
         self.hash_lock = asyncio.Lock()
 
-    def _derive(self, password):
+    @staticmethod
+    def _derive(password: str, salt: bytes) -> bytes:
         return hashlib.scrypt(
             password.encode("utf-8"),
-            salt=self.salt,
+            salt=salt,
             n=16384,
             r=8,
             p=1,
@@ -226,38 +252,55 @@ class OperatorSessions:
 
     def prune(self):
         now = self.clock()
-        self.sessions = {key: end for key, end in self.sessions.items() if end > now}
-        self.pending = {key: end for key, end in self.pending.items() if end > now}
+        self.sessions = {
+            key: record for key, record in self.sessions.items() if record[0] > now
+        }
+        self.pending = {
+            key: record for key, record in self.pending.items() if record[0] > now
+        }
         while self.attempts and self.attempts[0] <= now - 60:
             self.attempts.popleft()
 
     def remaining(self, cookie):
         self.prune()
-        return max(0, int(self.sessions.get(self._key(cookie), 0) - self.clock()))
+        record = self.sessions.get(self._key(cookie))
+        return max(0, int(record[0] - self.clock())) if record else 0
+
+    def identity(self, cookie):
+        self.prune()
+        record = self.sessions.get(self._key(cookie))
+        return record[1] if record else None
 
     def revoke(self, cookie):
         self.sessions.pop(self._key(cookie), None)
 
-    def issue_pending(self, token: str) -> None:
+    def issue_pending(self, token: str, user_id: str) -> None:
         self.prune()
         if len(self.pending) >= self.config.max_sessions:
-            del self.pending[min(self.pending, key=self.pending.get)]
-        self.pending[self._key(token)] = self.clock() + 180
+            del self.pending[min(self.pending, key=lambda key: self.pending[key][0])]
+        self.pending[self._key(token)] = (self.clock() + 180, user_id)
 
-    def has_pending(self, token: str | None) -> bool:
+    def pending_identity(self, token: str | None) -> str | None:
         self.prune()
         key = self._key(token)
-        return bool(key and self.pending.get(key, 0) > self.clock())
+        record = self.pending.get(key) if key else None
+        return record[1] if record else None
+
+    def has_pending(self, token: str | None) -> bool:
+        return self.pending_identity(token) is not None
 
     def revoke_pending(self, token: str | None) -> None:
         self.pending.pop(self._key(token), None)
 
-    def issue(self):
+    def issue(self, user_id: str | None = None):
+        user = user_id or self.default_user
+        if user not in self.credentials:
+            raise ValueError("unknown operator identity")
         self.prune()
         if len(self.sessions) >= self.config.max_sessions:
-            del self.sessions[min(self.sessions, key=self.sessions.get)]
+            del self.sessions[min(self.sessions, key=lambda key: self.sessions[key][0])]
         token = secrets.token_urlsafe(32)
-        self.sessions[self._key(token)] = self.clock() + self.config.session_seconds
+        self.sessions[self._key(token)] = (self.clock() + self.config.session_seconds, user)
         return token
 
     def admit_attempt(self):
@@ -267,10 +310,16 @@ class OperatorSessions:
         self.attempts.append(self.clock())
         return True
 
-    async def verify(self, password):
+    async def verify(self, password: str, user_id: str) -> bool:
+        record = self.credentials.get(user_id)
+        if record is None:
+            # Perform a dummy KDF for unknown identities to reduce timing leakage.
+            salt, expected = next(iter(self.credentials.values()))
+        else:
+            salt, expected = record
         async with self.hash_lock:
-            derived = await asyncio.to_thread(self._derive, password)
-            return hmac.compare_digest(derived, self.digest)
+            derived = await asyncio.to_thread(self._derive, password, salt)
+            return bool(record) and hmac.compare_digest(derived, expected)
 
 
 WORKSPACE_IDS = frozenset({"trading", "ai", "quant", "developer", "data", "risk"})
@@ -415,6 +464,7 @@ def create_gateway(
     webauthn_rp=None,
     approval_control_plane=None,
     operator_id: str = "local-operator",
+    identities: dict[str, str] | None = None,
     webauthn_enrollment_token: str | None = None,
 ) -> web.Application:
     if (
@@ -438,7 +488,9 @@ def create_gateway(
             raise ValueError("WebAuthn RP ID and origin must match the gateway origin")
     if webauthn_enrollment_token is not None and len(webauthn_enrollment_token) < 32:
         raise ValueError("WebAuthn enrollment token must contain at least 256 bits")
-    state = OperatorSessions(config, password, clock=clock)
+    state = OperatorSessions(
+        config, password, default_user=operator_id, identities=identities, clock=clock
+    )
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
     pending_cookie = "__Host-aitos_operator_pending" if secure else "aitos_local_operator_pending"
@@ -536,14 +588,15 @@ def create_gateway(
 
     def require_pending(request):
         token = request.cookies.get(pending_cookie)
-        if not state.has_pending(token):
+        user_id = state.pending_identity(token)
+        if user_id is None:
             raise web.HTTPUnauthorized(text="MFA pre-authentication expired")
-        return token
+        return user_id
 
-    def issue_operator_session(response, request):
+    def issue_operator_session(response, request, user_id):
         state.revoke(request.cookies.get(cookie_name))
         state.revoke_pending(request.cookies.get(pending_cookie))
-        token = state.issue()
+        token = state.issue(user_id)
         response.set_cookie(
             cookie_name,
             token,
@@ -572,8 +625,10 @@ def create_gateway(
         return response
 
     def require_operator_session(request):
-        if not state.remaining(request.cookies.get(cookie_name)):
+        user_id = state.identity(request.cookies.get(cookie_name))
+        if user_id is None:
             raise web.HTTPUnauthorized(text="Operator session required")
+        return user_id
 
     async def read_json_body(request, *, max_bytes: int):
         if request.content_type != "application/json":
@@ -701,7 +756,7 @@ def create_gateway(
                 "authenticated": remaining > 0,
                 "expires_in_seconds": remaining,
                 "controls": "read_only",
-                "identity": operator_id if remaining else None,
+                "identity": state.identity(request.cookies.get(cookie_name)),
                 "mfa": bool(webauthn_rp) if remaining else False,
             }
         )
@@ -733,13 +788,14 @@ def create_gateway(
                 raise ValueError()
         except (ValueError, UnicodeError):
             raise web.HTTPBadRequest(text="Invalid operator sign-in") from None
-        if not await state.verify(body["password"]):
+        user_id = body.get("user_id", operator_id)
+        if not await state.verify(body["password"], user_id):
             logger.info("operator sign-in rejected")
             raise web.HTTPUnauthorized(text="Operator sign-in rejected")
         state.revoke(request.cookies.get(cookie_name))
         if webauthn_rp is not None:
             try:
-                credentials = webauthn_rp.credential_count(user_id=operator_id)
+                credentials = webauthn_rp.credential_count(user_id=user_id)
                 if not credentials and not _loopback(config.public_origin):
                     supplied = body.get("enrollment_token", "")
                     if not webauthn_enrollment_token or not hmac.compare_digest(
@@ -749,17 +805,17 @@ def create_gateway(
                             text="First WebAuthn enrollment requires the out-of-band bootstrap token"
                         )
                 pending = secrets.token_urlsafe(32)
-                state.issue_pending(pending)
+                state.issue_pending(pending, user_id)
                 if credentials:
                     options = webauthn_rp.authentication_options(
-                        user_id=operator_id, now=int(time.time())
+                        user_id=user_id, now=int(time.time())
                     )
                     response = web.json_response(
                         {"authenticated": False, "mfa_required": True, "options": options}
                     )
                 else:
                     options = webauthn_rp.registration_options(
-                        user_id=operator_id, now=int(time.time())
+                        user_id=user_id, now=int(time.time())
                     )
                     response = web.json_response(
                         {
@@ -778,18 +834,18 @@ def create_gateway(
             {"authenticated": True, "expires_in_seconds": config.session_seconds}
         )
         logger.warning("password-only operator session issued; WebAuthn MFA is disabled")
-        return issue_operator_session(response, request)
+        return issue_operator_session(response, request, user_id)
 
     async def finish_mfa_enrollment(request):
         if webauthn_rp is None:
             raise web.HTTPNotFound()
-        require_pending(request)
+        user_id = require_pending(request)
         body = await read_json_body(request, max_bytes=96 * 1024)
         if not isinstance(body, dict) or set(body) != {"credential"}:
             raise web.HTTPBadRequest(text="Invalid WebAuthn enrollment")
         try:
             webauthn_rp.verify_registration(
-                user_id=operator_id, credential=body["credential"], now=int(time.time())
+                user_id=user_id, credential=body["credential"], now=int(time.time())
             )
             options = webauthn_rp.authentication_options(
                 user_id=operator_id, now=int(time.time())
@@ -804,7 +860,7 @@ def create_gateway(
     async def finish_mfa_login(request):
         if webauthn_rp is None:
             raise web.HTTPNotFound()
-        require_pending(request)
+        user_id = require_pending(request)
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
                 headers={"Retry-After": "60"}, text="MFA verification rate limit reached"
@@ -825,7 +881,7 @@ def create_gateway(
                 expected_rp_id=webauthn_rp.rp_id,
                 require_user_verification=True,
             )
-            if claims.get("verified") is not True or claims.get("user_id") != operator_id:
+            if claims.get("verified") is not True or claims.get("user_id") != user_id:
                 raise PermissionError("WebAuthn identity mismatch")
         except Exception as exc:
             logger.info("operator WebAuthn assertion rejected: %s", type(exc).__name__)
@@ -834,13 +890,13 @@ def create_gateway(
             {
                 "authenticated": True,
                 "expires_in_seconds": config.session_seconds,
-                "identity": operator_id,
+                "identity": user_id,
                 "mfa": True,
                 "controls": "read_only",
             }
         )
         logger.info("operator MFA sign-in accepted")
-        return issue_operator_session(response, request)
+        return issue_operator_session(response, request, user_id)
 
     async def approval_capabilities(request):
         require_operator_session(request)
@@ -854,7 +910,7 @@ def create_gateway(
         )
 
     async def create_approval_challenge(request):
-        require_operator_session(request)
+        user_id = require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
             raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
         try:
@@ -868,7 +924,7 @@ def create_gateway(
                 user_id=operator_id, now=int(time.time())
             )
             challenge = approval_control_plane.issue_challenge(
-                user_id=operator_id,
+                user_id=user_id,
                 action=action,
                 webauthn_challenge=options["challenge"],
             )
@@ -889,7 +945,7 @@ def create_gateway(
         )
 
     async def approve_action(request):
-        require_operator_session(request)
+        user_id = require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
             raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
         if not state.admit_attempt():
@@ -906,7 +962,7 @@ def create_gateway(
             ):
                 raise ValueError()
             challenge = approval_control_plane.load_challenge(
-                body["challenge_id"], user_id=operator_id
+                body["challenge_id"], user_id=user_id
             )
             token = approval_control_plane.approve(
                 challenge,
