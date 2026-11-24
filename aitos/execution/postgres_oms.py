@@ -215,8 +215,14 @@ class PostgresCanonicalOMS:
             revision = actual_revision + 1
             previous_hash = head["event_hash"]
             digest = _event_hash(
-                scope, aggregate, revision, event, fence.writer_id,
-                fence.generation, previous_hash, encoded,
+                scope,
+                aggregate,
+                revision,
+                event,
+                fence.writer_id,
+                fence.generation,
+                previous_hash,
+                encoded,
             )
             await conn.execute(
                 """INSERT INTO aitos_oms_events
@@ -272,7 +278,8 @@ class PostgresCanonicalOMS:
                           generation,payload::text AS payload_json,previous_hash,event_hash
                    FROM aitos_oms_events
                    WHERE account_scope=$1 AND aggregate_id=$2 ORDER BY revision""",
-                scope, aggregate,
+                scope,
+                aggregate,
             )
         result = []
         previous = "0" * 64
