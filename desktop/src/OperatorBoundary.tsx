@@ -53,6 +53,7 @@ export default function OperatorBoundary({
       const s = parseOperatorSession(await r.json());
       if (mounted.current && id === requestId.current) {
         setClock(Date.now());
+        if (s.default_identity) setOperatorId(s.default_identity);
         setExpires(Date.now() + s.expires_in_seconds * 1000);
         setMode(s.authenticated ? "authenticated" : "signed_out");
         setError("");
