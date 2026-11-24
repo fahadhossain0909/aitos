@@ -130,3 +130,15 @@ export async function performWebAuthnAssertion(
     throw Error("No WebAuthn assertion was received");
   return credentialPayload(assertion);
 }
+
+export async function performWebAuthnRegistration(
+  optionsValue: JsonRecord,
+): Promise<JsonRecord> {
+  if (!navigator.credentials || !window.PublicKeyCredential)
+    throw Error("This browser does not support WebAuthn security keys");
+  const options = creationOptions(optionsValue);
+  const credential = await navigator.credentials.create({ publicKey: options });
+  if (!(credential instanceof PublicKeyCredential))
+    throw Error("No WebAuthn registration response was received");
+  return credentialPayload(credential);
+}
