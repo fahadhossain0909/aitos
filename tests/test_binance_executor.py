@@ -14,6 +14,7 @@ from aitos.execution.binance_executor import (
     round_step,
 )
 from aitos.models.trade import TradeSide
+from aitos.security.live_approval import ApprovalDenied, LiveApprovalControlPlane
 
 
 @pytest.mark.asyncio
@@ -767,3 +768,53 @@ async def test_partially_filled_market_order_cancels_remainder_and_preserves_fil
     assert result.filled_quantity == pytest.approx(0.4)
     assert result.fill_price == pytest.approx(100.1)
     await executor.close()
+
+
+def test_mainnet_executor_consumes_exact_action_receipt_before_order_submission(
+    tmp_path,
+):
+    authority = LiveApprovalControlPlane(
+        tmp_path / "approvals.sqlite",
+        signing_key=b"mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: user == "operator-1" and role == "live_trader",
+    )
+    action = {
+        "environment": "binance-usdm-mainnet",
+        "scope": "live:account-1",
+        "client_order_id": "aitos-approved-order-1",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": "0.01",
+        "reference_price": "90000",
+        "order_type": "MARKET",
+        "reduce_only": False,
+        "owner_trade_id": "trade-1",
+    }
+    challenge = authority.issue_challenge(
+        user_id="operator-1",
+        action=action,
+        webauthn_challenge="server-issued-webauthn-challenge",
+    )
+    authority.approve(
+        challenge,
+        assertion=b"verified-webauthn-assertion",
+        verifier=lambda **kwargs: {
+            "verified": True,
+            "user_id": "operator-1",
+            "user_verified": True,
+            "origin": "https://console.example",
+            "rp_id": "console.example",
+        },
+    )
+    executor = BinanceFuturesOrderExecutor(
+        api_key="mainnet-key",
+        api_secret="mainnet-secret",
+        testnet=False,
+        live_approval_authority=authority,
+        live_approval_token_provider=authority.get_unconsumed_token,
+    )
+    assert executor._live_approval_consumer(action) == "operator-1"
+    with pytest.raises(ApprovalDenied, match="no unconsumed approval"):
+        executor._live_approval_consumer(action)
