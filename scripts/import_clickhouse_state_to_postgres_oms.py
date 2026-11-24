@@ -222,12 +222,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 queries = {
                     RUNTIME_SOURCE: (
                         "SELECT trade_id,symbol,state,payload_json,updated_at "
-                        "FROM trade_runtime_state ORDER BY trade_id,updated_at\n                        SETTINGS max_result_rows=0,max_result_bytes=0,\n                        result_overflow_mode='throw',read_overflow_mode='throw'"
+                        "FROM trade_runtime_state ORDER BY trade_id,updated_at "
+                        "SETTINGS max_result_rows=0,max_result_bytes=0,"
+                        "result_overflow_mode='throw',read_overflow_mode='throw'"
                     ),
                     CLOSED_SOURCE: (
                         "SELECT trade_id,payload_json,updated_at "
-                        "FROM paper_closed_trade_ledger "
-                        "ORDER BY trade_id,updated_at,payload_json"
+                        "FROM paper_closed_trade_ledger ORDER BY trade_id,updated_at "
+                        "SETTINGS max_result_rows=0,max_result_bytes=0,"
+                        "result_overflow_mode='throw',read_overflow_mode='throw'"
                     ),
                 }
                 with partial_manifest.open("w", encoding="utf-8", newline="\\n") as manifest:
