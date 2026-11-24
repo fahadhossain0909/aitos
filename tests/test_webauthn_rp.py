@@ -112,3 +112,54 @@ def test_authentication_options_issue_user_bound_persisted_challenge(tmp_path):
     finally:
         db.close()
     assert row == ("operator-1", 280, None)
+
+
+def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
+    rp = make_rp(tmp_path)
+    db = rp._connect()
+    try:
+        db.execute(
+            "INSERT INTO webauthn_credentials "
+            "(credential_id,user_id,public_key,sign_count,transports_json,"
+            "device_type,backed_up,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "Y3JlZGVudGlhbC1h",
+                "operator-1",
+                b"public-key-a",
+                0,
+                '["usb"]',
+                "single_device",
+                0,
+                100,
+            ),
+        )
+        db.execute(
+            "INSERT INTO webauthn_credentials "
+            "(credential_id,user_id,public_key,sign_count,transports_json,"
+            "device_type,backed_up,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "Y3JlZGVudGlhbC1i",
+                "operator-2",
+                b"public-key-b",
+                0,
+                "[]",
+                "multi_device",
+                1,
+                101,
+            ),
+        )
+    finally:
+        db.close()
+
+    inventory = rp.list_credentials(user_id="operator-1")
+    assert len(inventory) == 1
+    assert inventory[0]["credential_id"] == "Y3JlZGVudGlhbC1h"
+    assert inventory[0]["transports"] == ["usb"]
+    assert rp.revoke_credential(
+        user_id="operator-1", credential_id="Y3JlZGVudGlhbC1b"
+    ) is False
+    assert rp.revoke_credential(
+        user_id="operator-1", credential_id="Y3JlZGVudGlhbC1h"
+    ) is True
+    assert rp.credential_count(user_id="operator-1") == 0
+    assert rp.credential_count(user_id="operator-2") == 1
