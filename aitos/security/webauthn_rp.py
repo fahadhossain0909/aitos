@@ -89,6 +89,21 @@ class WebAuthnRelyingParty:
                     expires_at INTEGER NOT NULL,
                     consumed_at INTEGER
                 );
+                CREATE TABLE IF NOT EXISTS webauthn_credential_audit (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event TEXT NOT NULL CHECK(event IN ('CREDENTIAL_REGISTERED','CREDENTIAL_REVOKED')),
+                    user_id TEXT NOT NULL,
+                    credential_id TEXT NOT NULL,
+                    recorded_at INTEGER NOT NULL
+                );
+                CREATE TRIGGER IF NOT EXISTS webauthn_credential_audit_no_update
+                    BEFORE UPDATE ON webauthn_credential_audit BEGIN
+                        SELECT RAISE(ABORT,'WebAuthn credential audit is append-only');
+                    END;
+                CREATE TRIGGER IF NOT EXISTS webauthn_credential_audit_no_delete
+                    BEFORE DELETE ON webauthn_credential_audit BEGIN
+                        SELECT RAISE(ABORT,'WebAuthn credential audit is append-only');
+                    END;
                 """
             )
         finally:
@@ -273,12 +288,27 @@ class WebAuthnRelyingParty:
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT 1 FROM webauthn_credentials WHERE user_id=? AND credential_id=?",
+                (user, credential_id),
+            ).fetchone()
+            if existing is None:
+                db.commit()
+                return False
+            db.execute(
+                "INSERT INTO webauthn_credential_audit"
+                "(event,user_id,credential_id,recorded_at) "
+                "VALUES('CREDENTIAL_REVOKED',?,?,?)",
+                (user, credential_id, int(time.time())),
+            )
             changed = db.execute(
                 "DELETE FROM webauthn_credentials WHERE user_id=? AND credential_id=?",
                 (user, credential_id),
             ).rowcount
+            if changed != 1:
+                raise WebAuthnCredentialError("credential revocation raced")
             db.commit()
-            return changed == 1
+            return True
         except Exception:
             db.rollback()
             raise
@@ -354,10 +384,18 @@ class WebAuthnRelyingParty:
                     int(now),
                 ),
             )
-            db.execute(
+            consumed = db.execute(
                 "UPDATE webauthn_registration_challenges SET consumed_at=? "
                 "WHERE challenge=? AND consumed_at IS NULL",
                 (int(now), challenge),
+            ).rowcount
+            if consumed != 1:
+                raise WebAuthnCredentialError("registration challenge replay")
+            db.execute(
+                "INSERT INTO webauthn_credential_audit"
+                "(event,user_id,credential_id,recorded_at) "
+                "VALUES('CREDENTIAL_REGISTERED',?,?,?)",
+                (user, credential_key, int(now)),
             )
             db.commit()
         except Exception:
