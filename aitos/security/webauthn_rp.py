@@ -407,10 +407,7 @@ class WebAuthnRelyingParty:
     def revoke_credential(self, *, user_id: str, credential_id: str) -> bool:
         """Offline-admin primitive; never exposed as a browser mutation route."""
         user = self._user_id(user_id)
-        if (
-            not isinstance(credential_id, str)
-            or not 16 <= len(credential_id) <= 1024
-        ):
+        if not isinstance(credential_id, str) or not 16 <= len(credential_id) <= 1024:
             raise ValueError("valid credential identifier required")
         db = self._connect()
         try:
