@@ -27,7 +27,9 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         await apply_postgres_migrations(pool)
         oms = PostgresCanonicalOMS(pool)
         fence = await oms.acquire_writer(
-            "paper:integration", "worker-a", expected_generation=0
+            "paper:integration",
+            "worker-a",
+            expected_generation=0,
         )
         first = await oms.append(
             fence,
@@ -37,8 +39,11 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             payload={"state": "OPEN", "quantity": "1"},
         )
         duplicate = await oms.append(
-            fence, aggregate_id="trade-1", event_id="event-1",
-            expected_revision=0, payload={"state": "OPEN", "quantity": "1"},
+            fence,
+            aggregate_id="trade-1",
+            event_id="event-1",
+            expected_revision=0,
+            payload={"state": "OPEN", "quantity": "1"},
         )
         assert duplicate.event_hash == first.event_hash
         second_fence = await oms.acquire_writer(

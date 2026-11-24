@@ -174,10 +174,15 @@ class PostgresCanonicalOMS:
                 ) != json.loads(encoded):
                     raise OMSConflict("event id reused with different content")
                 return OMSEvent(
-                    scope, aggregate, int(duplicate["revision"]), event,
-                    duplicate["writer_id"], int(duplicate["generation"]),
+                    scope,
+                    aggregate,
+                    int(duplicate["revision"]),
+                    event,
+                    duplicate["writer_id"],
+                    int(duplicate["generation"]),
                     json.loads(duplicate["payload_json"]),
-                    duplicate["previous_hash"], duplicate["event_hash"],
+                    duplicate["previous_hash"],
+                    duplicate["event_hash"],
                 )
             await conn.execute(
                 """INSERT INTO aitos_oms_aggregate_heads
@@ -188,7 +193,8 @@ class PostgresCanonicalOMS:
             head = await conn.fetchrow(
                 """SELECT revision,event_hash FROM aitos_oms_aggregate_heads
                    WHERE account_scope=$1 AND aggregate_id=$2 FOR UPDATE""",
-                scope, aggregate,
+                scope,
+                aggregate,
             )
             actual_revision = int(head["revision"])
             if actual_revision != expected_revision:
@@ -206,8 +212,15 @@ class PostgresCanonicalOMS:
                    (account_scope,aggregate_id,revision,event_id,writer_id,
                     generation,payload,previous_hash,event_hash)
                    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)""",
-                scope, aggregate, revision, event, fence.writer_id,
-                fence.generation, encoded, previous_hash, digest,
+                scope,
+                aggregate,
+                revision,
+                event,
+                fence.writer_id,
+                fence.generation,
+                encoded,
+                previous_hash,
+                digest,
             )
             await conn.execute(
                 """UPDATE aitos_oms_aggregate_heads
@@ -221,8 +234,15 @@ class PostgresCanonicalOMS:
                 scope, aggregate, revision,
             )
         return OMSEvent(
-            scope, aggregate, revision, event, fence.writer_id,
-            fence.generation, json.loads(encoded), previous_hash, digest,
+            scope,
+            aggregate,
+            revision,
+            event,
+            fence.writer_id,
+            fence.generation,
+            json.loads(encoded),
+            previous_hash,
+            digest,
         )
 
     async def read_events(
@@ -244,8 +264,14 @@ class PostgresCanonicalOMS:
         for row in rows:
             payload_json = _canonical_payload(json.loads(row["payload_json"]))
             digest = _event_hash(
-                scope, aggregate, expected_revision, row["event_id"],
-                row["writer_id"], int(row["generation"]), previous, payload_json,
+                scope,
+                aggregate,
+                expected_revision,
+                row["event_id"],
+                row["writer_id"],
+                int(row["generation"]),
+                previous,
+                payload_json,
             )
             if (
                 int(row["revision"]) != expected_revision
@@ -253,11 +279,19 @@ class PostgresCanonicalOMS:
                 or row["event_hash"] != digest
             ):
                 raise OMSIntegrityError("PostgreSQL OMS hash-chain verification failed")
-            result.append(OMSEvent(
-                scope, aggregate, expected_revision, row["event_id"],
-                row["writer_id"], int(row["generation"]),
-                json.loads(payload_json), previous, digest,
-            ))
+            result.append(
+                OMSEvent(
+                    scope,
+                    aggregate,
+                    expected_revision,
+                    row["event_id"],
+                    row["writer_id"],
+                    int(row["generation"]),
+                    json.loads(payload_json),
+                    previous,
+                    digest,
+                )
+            )
             previous = digest
             expected_revision += 1
         return result
@@ -273,7 +307,8 @@ class PostgresCanonicalOMS:
                      USING(account_scope,aggregate_id,revision)
                    WHERE o.projected_at IS NULL
                    ORDER BY o.created_at,o.account_scope,o.aggregate_id,o.revision
-                   LIMIT $1 FOR UPDATE OF o SKIP LOCKED""", limit,
+                   LIMIT $1 FOR UPDATE OF o SKIP LOCKED""",
+                limit,
             )
             return [dict(row) for row in rows]
 
@@ -297,7 +332,11 @@ class PostgresCanonicalOMS:
                        WHERE e.account_scope=$1 AND e.aggregate_id=$2
                          AND e.revision=$3 AND e.event_hash=$4)
                      AND projected_at IS NULL""",
-                scope, aggregate, revision, event_hash,
-            )
+                scope,
+                aggregate,
+                revision,
+                event_hash,
             if result != "UPDATE 1":
-                raise OMSConflict("projection acknowledgement missing, stale, or duplicated")
+                raise OMSConflict(
+                    "projection acknowledgement missing, stale, or duplicated"
+                )
