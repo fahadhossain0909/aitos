@@ -118,3 +118,15 @@ export async function completeOperatorMfa(
     assertion: credentialPayload(assertion),
   });
 }
+
+export async function performWebAuthnAssertion(
+  optionsValue: JsonRecord,
+): Promise<JsonRecord> {
+  if (!navigator.credentials || !window.PublicKeyCredential)
+    throw Error("This browser does not support WebAuthn security keys");
+  const options = requestOptions(optionsValue);
+  const assertion = await navigator.credentials.get({ publicKey: options });
+  if (!(assertion instanceof PublicKeyCredential))
+    throw Error("No WebAuthn assertion was received");
+  return credentialPayload(assertion);
+}
