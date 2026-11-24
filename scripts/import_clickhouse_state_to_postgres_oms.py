@@ -261,10 +261,24 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 key=lambda item: (
                     item["trade_id"],
                     item["updated_at"],
-                    item["source_table"],
+                    item["source_table"] == CLOSED_SOURCE,
+                    item["source_fingerprint"],
                     item["source_occurrence"],
                 )
             )
+            by_trade: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for item in records:
+                by_trade[item["trade_id"]].append(item)
+            for trade_records in by_trade.values():
+                for previous, current in zip(trade_records, trade_records[1:]):
+                    if (
+                        previous["updated_at"] == current["updated_at"]
+                        and previous["raw_payload_sha256"] != current["raw_payload_sha256"]
+                    ):
+                        raise RuntimeError(
+                            "ambiguous same-timestamp legacy snapshots; refusing "
+                            "to invent canonical event ordering"
+                        )
             for item in records:
                 await _import_one(pool, oms, fence, item)
                 imported += 1
@@ -273,12 +287,56 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError(
                 f"PostgreSQL import incomplete: expected {expected_rows}, imported {imported}"
             )
+
+        # Verify every manifest occurrence against the durable PostgreSQL
+        # evidence ledger and every deterministic event against canonical OMS.
+        for scope, records in by_scope.items():
+            async with pool.acquire() as conn:
+                evidence = await conn.fetch(
+                    "SELECT source_table,source_fingerprint,source_occurrence,"
+                    "raw_payload_sha256 FROM aitos_oms_legacy_imports "
+                    "WHERE account_scope=$1",
+                    scope,
+                )
+            actual_evidence = {
+                (
+                    row["source_table"],
+                    row["source_fingerprint"],
+                    int(row["source_occurrence"]),
+                ): row["raw_payload_sha256"]
+                for row in evidence
+            }
+            for item in records:
+                identity = (
+                    item["source_table"],
+                    item["source_fingerprint"],
+                    item["source_occurrence"],
+                )
+                if actual_evidence.get(identity) != item["raw_payload_sha256"]:
+                    raise RuntimeError(
+                        "source manifest SHA-256 does not match PostgreSQL evidence"
+                    )
+                events = await oms.read_events(scope, item["trade_id"])
+                event_id = (
+                    f"legacy:{item['source_fingerprint']}:{item['source_occurrence']}"
+                )
+                event = next(
+                    (candidate for candidate in events if candidate.event_id == event_id),
+                    None,
+                )
+                expected_trade = dict(item["payload"])
+                expected_trade["account_scope"] = scope
+                if event is None or event.payload.get("trade") != expected_trade:
+                    raise RuntimeError(
+                        "canonical OMS event parity failed for imported source row"
+                    )
         return {
             "mode": "imported-and-verified",
             "runtime_rows": counts[RUNTIME_SOURCE],
             "closed_rows": counts[CLOSED_SOURCE],
             "imported_rows": imported,
             "postgres_import_rows_verified": imported,
+            "canonical_events_verified": imported,
             "manifest": str(args.manifest_out),
             "clickhouse_tables_mutated": False,
         }
