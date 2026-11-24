@@ -168,13 +168,17 @@ class PostgresCanonicalOMS:
         )
         canonical_payload = dict(payload)
         if "financial_ledger" in canonical_payload:
-            raise ValueError("financial_ledger payload is reserved by the canonical OMS")
+            raise ValueError(
+                "financial_ledger payload is reserved by the canonical OMS"
+            )
         if any(
             value is not None
             for value in (causation_id, correlation_id, parent_event_id)
         ):
             if "causality" in canonical_payload:
-                raise ValueError("causality metadata is reserved by the canonical OMS")
+                raise ValueError(
+                    "causality metadata is reserved by the canonical OMS"
+                )
             canonical_payload["causality"] = {
                 "causation_id": _identifier(causation_id, "causation_id")
                 if causation_id is not None\n                else None,
@@ -315,8 +319,10 @@ class PostgresCanonicalOMS:
         )
 
     @staticmethod
-    def _validate_ledger_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Validate balanced double-entry lines before opening the write transaction."""
+    def _validate_ledger_entries(
+        entries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Validate balanced lines before opening the write transaction."""
         if not isinstance(entries, list):
             raise TypeError("ledger_entries must be a list")
         if not entries:
@@ -345,7 +351,9 @@ class PostgresCanonicalOMS:
             ):
                 raise ValueError("ledger amounts must be finite and non-negative")
             if (debit > 0) == (credit > 0):
-                raise ValueError("each ledger line must contain exactly one positive side")
+                raise ValueError(
+                    "each ledger line must contain exactly one positive side"
+                )
             for amount in (debit, credit):
                 if amount and (
                     -amount.as_tuple().exponent > 18 or amount.adjusted() > 19
