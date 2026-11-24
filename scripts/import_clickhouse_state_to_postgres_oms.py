@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from aitos.execution.postgres_oms import PostgresCanonicalOMS
+from aitos.storage.postgres_migrations import apply_postgres_migrations
 from scripts.migrate_scoped_clickhouse_state import (
     CLOSED_SOURCE,
     RUNTIME_SOURCE,
@@ -176,6 +177,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
     try:
+        await apply_postgres_migrations(pool)
         sources = {
             RUNTIME_SOURCE: list(
                 ch.query(
