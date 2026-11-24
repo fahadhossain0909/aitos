@@ -181,11 +181,14 @@ class PostgresCanonicalOMS:
                 )
             canonical_payload["causality"] = {
                 "causation_id": _identifier(causation_id, "causation_id")
-                if causation_id is not None\n                else None,
+                if causation_id is not None
+                else None,
                 "correlation_id": _identifier(correlation_id, "correlation_id")
-                if correlation_id is not None\n                else None,
+                if correlation_id is not None
+                else None,
                 "parent_event_id": _identifier(parent_event_id, "parent_event_id")
-                if parent_event_id is not None\n                else None,
+                if parent_event_id is not None
+                else None,
             }
         if normalized_entries:
             canonical_payload["financial_ledger"] = [
