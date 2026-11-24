@@ -3,8 +3,8 @@ import uuid
 
 import pytest
 
-from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
+from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.storage.postgres_migrations import apply_postgres_migrations
 
 
