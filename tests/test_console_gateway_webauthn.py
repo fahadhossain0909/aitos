@@ -64,8 +64,13 @@ class FakeWebAuthn:
         return {"challenge": "assertion-challenge", "rpId": self.rp_id}
 
     def verify_assertion(
-        self, *, assertion, challenge, expected_origin, expected_rp_id,
-        require_user_verification
+        self,
+        *,
+        assertion,
+        challenge,
+        expected_origin,
+        expected_rp_id,
+        require_user_verification,
     ):
         assert assertion == b'{"id":"credential"}'
         assert challenge == "assertion-challenge"
@@ -114,9 +119,9 @@ async def test_password_login_requires_enrollment_then_webauthn_assertion(gatewa
     assert login.status == 200
     assert (await login.json())["mfa_enrollment_required"] is True
     assert "aitos_local_operator_pending" in login.cookies
-    assert (
-        await (await client.get("/operator/v1/session")).json()
-    )["authenticated"] is False
+    assert (await (await client.get("/operator/v1/session")).json())[
+        "authenticated"
+    ] is False
 
     enrolled = await client.post(
         "/operator/v1/mfa/register",
@@ -172,9 +177,9 @@ async def test_existing_credential_login_never_issues_session_before_assertion(
             headers={"Origin": ORIGIN},
         )
         assert (await response.json())["mfa_required"] is True
-        assert (
-            await (await client.get("/operator/v1/session")).json()
-        )["authenticated"] is False
+        assert (await (await client.get("/operator/v1/session")).json())[
+            "authenticated"
+        ] is False
         assert "aitos_local_operator" not in response.cookies
     finally:
         await client.close()
@@ -200,7 +205,8 @@ async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path):
         signing_key=b"test-signing-key-material-at-least-32-bytes",
         allowed_origins={ORIGIN},
         rp_id=rp.rp_id,
-        role_authorizer=lambda user, role: user == "operator-1" and role == "live_trader",
+        role_authorizer=lambda user, role: user == "operator-1"
+        and role == "live_trader",
     )
     config = GatewayConfig(
         ORIGIN,
