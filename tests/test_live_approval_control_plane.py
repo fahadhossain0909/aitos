@@ -1,19 +1,25 @@
 import pytest
 
 from aitos.security.live_approval import (
-    ApprovalDenied, LiveApprovalControlPlane,
+    ApprovalDenied,
+    LiveApprovalControlPlane,
 )
 
 
 def verifier(**kwargs):
-    return {"verified":True,"user_id":"alice","user_verified":True,
-            "origin":"https://console.example","rp_id":"console.example"}
+    return {
+        "verified": True,
+        "user_id": "alice",
+        "user_verified": True,
+        "origin": "https://console.example",
+        "rp_id": "console.example",
+    }
 
 
 def setup(tmp_path):
-    return LiveApprovalControlPlane(tmp_path/"approval.sqlite",
-        signing_key=b"x"*32, allowed_origins={"https://console.example"},
-        rp_id="console.example", ttl_seconds=60)
+    return LiveApprovalControlPlane(
+        tmp_path / "approval.sqlite",
+        signing_key=b"x" * 32,
 
 
 def test_webauthn_approval_is_bound_to_action_and_single_use(tmp_path):
