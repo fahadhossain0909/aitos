@@ -87,9 +87,12 @@ authorization source; a browser-provided role or MFA flag is never trusted.
 The approval interface signs a canonical action digest after a fresh
 WebAuthn assertion. It does **not** submit orders, execute trading mutations,
 or claim execution confirmation; the gateway intentionally exposes no trading
-mutation route. Signed receipts still need a separately governed server-side
-consumer before they can authorize any live execution. This is not an OS vault,
-distributed identity provider, security certification or production release.
+mutation route. The exact-action signed-receipt provider and one-time consumer are implemented
+in the server-side approval control plane and mainnet executor. The live
+runtime remains deliberately fail-closed until the gateway and executor share
+a protected approval store and pass independent acceptance. This is not an OS
+vault, distributed identity provider, security certification or production
+release.
 TLS termination, recovery policy, hardening and independent security review
 remain required before nonlocal activation.
 
