@@ -5,6 +5,7 @@ tables. Run only after all legacy writers are stopped and a restorable backup
 has been verified. Each source occurrence is retained verbatim in PostgreSQL
 and represented by an idempotent canonical TRADE_SNAPSHOT event.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -87,13 +88,9 @@ async def _import_one(
         raise ValueError("source payload scope conflicts with explicit attribution")
     payload["account_scope"] = scope
     trade_id = item["trade_id"]
-    event_id = (
-        f"legacy:{item['source_fingerprint']}:{item['source_occurrence']}"
-    )
+    event_id = f"legacy:{item['source_fingerprint']}:{item['source_occurrence']}"
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute(
-            IMPORT_DDL
-        )
+        await conn.execute(IMPORT_DDL)
         await conn.execute(
             """
             INSERT INTO aitos_oms_legacy_imports
@@ -179,18 +176,22 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
     try:
         sources = {
-            RUNTIME_SOURCE: list(ch.query(
-                "SELECT trade_id,symbol,state,payload_json,updated_at "
-                "FROM trade_runtime_state SETTINGS max_result_rows=250000, "
-                "max_result_bytes=536870912, result_overflow_mode='throw', "
-                "read_overflow_mode='throw'"
-            ).result_rows),
-            CLOSED_SOURCE: list(ch.query(
-                "SELECT trade_id,payload_json,updated_at "
-                "FROM paper_closed_trade_ledger SETTINGS max_result_rows=250000, "
-                "max_result_bytes=536870912, result_overflow_mode='throw', "
-                "read_overflow_mode='throw'"
-            ).result_rows),
+            RUNTIME_SOURCE: list(
+                ch.query(
+                    "SELECT trade_id,symbol,state,payload_json,updated_at "
+                    "FROM trade_runtime_state SETTINGS max_result_rows=250000, "
+                    "max_result_bytes=536870912, result_overflow_mode='throw', "
+                    "read_overflow_mode='throw'"
+                ).result_rows
+            ),
+            CLOSED_SOURCE: list(
+                ch.query(
+                    "SELECT trade_id,payload_json,updated_at "
+                    "FROM paper_closed_trade_ledger SETTINGS max_result_rows=250000, "
+                    "max_result_bytes=536870912, result_overflow_mode='throw', "
+                    "read_overflow_mode='throw'"
+                ).result_rows
+            ),
         }
         counts: Counter[str] = Counter()
         items: list[dict[str, Any]] = []
@@ -236,7 +237,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         for scope, records in sorted(by_scope.items()):
             generation = await oms.writer_generation(scope)
             fence = await oms.acquire_writer(
-                scope, f"clickhouse-import:{os.getpid()}",
+                scope,
+                f"clickhouse-import:{os.getpid()}",
                 expected_generation=generation,
             )
             records.sort(
@@ -276,7 +278,8 @@ def main() -> int:
     parser.add_argument("--confirm-backup-retained", action="store_true")
     parser.add_argument("--scope-map", type=Path, required=True)
     parser.add_argument(
-        "--manifest-out", type=Path,
+        "--manifest-out",
+        type=Path,
         default=Path("clickhouse-to-postgres-oms-manifest.json"),
     )
     args = parser.parse_args()
