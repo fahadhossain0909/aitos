@@ -91,8 +91,9 @@ sandbox. Server-side financial authorization remains mandatory regardless of UI.
 - Password verification creates only a 180-second hash-only pending cookie.
   Session issuance occurs only after the user-bound WebAuthn assertion verifies;
   the pending cookie is consumed on success and process restart revokes all state.
-- First authenticator enrollment on a non-loopback origin requires an out-of-band
-  bootstrap token. Additional authenticators require a fresh assertion from an
+- First authenticator enrollment on a non-loopback origin requires a
+  per-identity, persistent one-time out-of-band bootstrap token. Additional
+  authenticators require a fresh assertion from an
   already-registered authenticator. Credential inventory is user-scoped.
 - Lost-key recovery is an offline host-administrator operation through
   `scripts/manage_webauthn_credentials.py`; no browser credential-delete route
