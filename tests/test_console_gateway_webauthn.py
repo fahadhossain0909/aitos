@@ -20,6 +20,20 @@ class FakeWebAuthn:
         assert user_id == "operator-1"
         return self.credentials
 
+    def list_credentials(self, *, user_id):
+        assert user_id == "operator-1"
+        return [
+            {
+                "credential_id": f"credential-{index}",
+                "transports": ["usb"],
+                "device_type": "single_device",
+                "backed_up": False,
+                "created_at": 100 + index,
+                "last_used_at": None,
+            }
+            for index in range(self.credentials)
+        ]
+
     def registration_options(self, *, user_id, now):
         assert user_id == "operator-1"
         return {"challenge": "registration-challenge", "rp": {"id": self.rp_id}}
@@ -345,3 +359,54 @@ async def test_gateway_authenticates_distinct_operator_identities(tmp_path):
         assert session["default_identity"] == "operator-a"
     finally:
         await client.close()
+
+
+async def test_additional_authenticator_requires_existing_webauthn_step_up(gateway):
+    client, rp = gateway
+    login = await client.post(
+        "/operator/v1/login",
+        json={"password": PASSWORD},
+        headers={"Origin": ORIGIN},
+    )
+    assert (await login.json())["mfa_enrollment_required"] is True
+    registered = await client.post(
+        "/operator/v1/mfa/register",
+        json={"credential": {"id": "credential"}},
+        headers={"Origin": ORIGIN},
+    )
+    assert registered.status == 200
+    verified = await client.post(
+        "/operator/v1/mfa/verify",
+        json={
+            "challenge": "assertion-challenge",
+            "assertion": {"id": "credential"},
+        },
+        headers={"Origin": ORIGIN},
+    )
+    assert verified.status == 200
+
+    options = await client.post(
+        "/operator/v1/mfa/add/options", headers={"Origin": ORIGIN}
+    )
+    assert options.status == 200
+    auth_options = await options.json()
+    step_up = await client.post(
+        "/operator/v1/mfa/add/verify",
+        json={
+            "challenge": auth_options["options"]["challenge"],
+            "assertion": {"id": "credential"},
+        },
+        headers={"Origin": ORIGIN},
+    )
+    assert step_up.status == 200
+    registration_options = await step_up.json()
+    assert registration_options["options"]["challenge"] == "registration-challenge"
+
+    finish = await client.post(
+        "/operator/v1/mfa/add/finish",
+        json={"credential": {"id": "credential"}},
+        headers={"Origin": ORIGIN},
+    )
+    assert finish.status == 200
+    inventory = await client.get("/operator/v1/mfa/credentials")
+    assert (await inventory.json())["credentials"]
