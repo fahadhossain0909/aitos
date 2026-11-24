@@ -757,6 +757,7 @@ def create_gateway(
                 "expires_in_seconds": remaining,
                 "controls": "read_only",
                 "identity": state.identity(request.cookies.get(cookie_name)),
+                "default_identity": operator_id,
                 "mfa": bool(webauthn_rp) if remaining else False,
             }
         )
