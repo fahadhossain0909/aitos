@@ -421,7 +421,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             }
             approver = self._live_approval_consumer(action)
             if not isinstance(approver, str) or not approver:
-                raise PermissionError("approval consumer did not identify an authenticated approver")
+                raise PermissionError(
+                    "approval consumer did not identify an authenticated approver"
+                )
         params = {
             "symbol": request.symbol,
             "type": request.order_type,
