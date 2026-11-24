@@ -386,7 +386,8 @@ _REQUIRED_COLUMNS = {
         "debit",
         "credit",
         "recorded_at",
-    },\n    "aitos_oms_legacy_imports": {
+    },
+    "aitos_oms_legacy_imports": {
         "account_scope",
         "source_table",
         "source_fingerprint",
