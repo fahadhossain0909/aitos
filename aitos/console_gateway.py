@@ -1185,9 +1185,16 @@ def main():
                 rp_id=rp_id,
                 role_authorizer=lambda user, role: role in role_map.get(user, []),
             )
+        identities_raw = os.environ.get("AITOS_OPERATOR_IDENTITIES")
+        identities = json.loads(identities_raw) if identities_raw else None
         app = create_gateway(
             config,
-            password=os.environ.get("AITOS_OPERATOR_PASSWORD", ""),
+            password=(
+                None
+                if identities is not None
+                else os.environ.get("AITOS_OPERATOR_PASSWORD", "")
+            ),
+            identities=identities,
             webauthn_rp=webauthn_rp,
             approval_control_plane=approval_control_plane,
             operator_id=args.operator_id,
