@@ -84,7 +84,15 @@ class PostgresLifecycleStateWriter:
 
         open_trades = {}
         closed_trades = []
+        projected_ids = set(getattr(lifecycle, "_open_trades", {}))
         aggregate_ids = await self.oms.list_aggregate_ids(self.fence.account_scope)
+        missing_canonical = projected_ids - set(aggregate_ids)
+        if missing_canonical:
+            raise RuntimeError(
+                "canonical OMS is missing projected open trades; controlled import "
+                "is required before live execution: "
+                + ", ".join(sorted(missing_canonical))
+            )
         for trade_id in aggregate_ids:
             snapshot = await self.latest_snapshot(trade_id)
             if snapshot is None:
