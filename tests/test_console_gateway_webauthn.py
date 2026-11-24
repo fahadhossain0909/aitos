@@ -258,7 +258,8 @@ async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path):
         token = await issued.json()
         assert token["user_id"] == "operator-1"
         assert token["action_digest"] == challenge["action_digest"]
-        assert token["signature"]
+        assert "signature" not in token
+        assert token["expires_at"] > 0
 
         replay = await client.post(
             "/operator/v1/approval/approve",
