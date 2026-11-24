@@ -48,8 +48,8 @@ function PnlChart({ report }: { report: PerformanceReport }) {
         >
           <defs>
             <linearGradient id="pnlFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#c6ec9e" stopOpacity=".18" />
-              <stop offset="1" stopColor="#c6ec9e" stopOpacity="0" />
+              <stop offset="0" stopColor="var(--c-c6ec9e)" stopOpacity=".18" />
+              <stop offset="1" stopColor="var(--c-c6ec9e)" stopOpacity="0" />
             </linearGradient>
           </defs>
           {[30, 94, 157, 220].map((y) => (
@@ -59,7 +59,7 @@ function PnlChart({ report }: { report: PerformanceReport }) {
               x2="860"
               y1={y}
               y2={y}
-              stroke="#36432d"
+              stroke="var(--c-36432d)"
               strokeDasharray="3 6"
             />
           ))}
@@ -68,26 +68,26 @@ function PnlChart({ report }: { report: PerformanceReport }) {
             x2="860"
             y1={base}
             y2={base}
-            stroke="#91a57f"
+            stroke="var(--c-91a57f)"
             strokeOpacity=".6"
           />
           <path
             d={`${path} L${coords[coords.length - 1][0]},${base} L20,${base} Z`}
             fill="url(#pnlFill)"
           />
-          <path d={path} fill="none" stroke="#c6ec9e" strokeWidth="2.3" />
+          <path d={path} fill="none" stroke="var(--c-c6ec9e)" strokeWidth="2.3" />
           <circle
             cx={coords[index][0]}
             cy={coords[index][1]}
             r="4"
-            fill="#e2f5c8"
+            fill="var(--c-e2f5c8)"
           />
-          <text x="20" y="250" fill="#8ca07b" fontSize="10">
+          <text x="20" y="250" fill="var(--c-8ca07b)" fontSize="10">
             {new Date(rows[0].at).toLocaleDateString("en-GB", {
               timeZone: "UTC",
             })}
           </text>
-          <text x="860" y="250" fill="#8ca07b" textAnchor="end" fontSize="10">
+          <text x="860" y="250" fill="var(--c-8ca07b)" textAnchor="end" fontSize="10">
             {new Date(rows[rows.length - 1].at).toLocaleDateString("en-GB", {
               timeZone: "UTC",
             })}
