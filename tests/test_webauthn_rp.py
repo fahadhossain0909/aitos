@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import time
 
 import pytest
@@ -171,7 +172,7 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
         assert audit == [
             ("CREDENTIAL_REVOKED", "operator-1", "Y3JlZGVudGlhbC1h")
         ]
-        with pytest.raises(Exception, match="append-only"):
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             db.execute("DELETE FROM webauthn_credential_audit")
     finally:
         db.close()
