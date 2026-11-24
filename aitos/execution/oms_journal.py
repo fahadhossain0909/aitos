@@ -1,8 +1,8 @@
 """Transactional, scope-keyed OMS journal with CAS revisions and writer fencing.
 
-SQLite WAL is supported for single-host paper/test deployments only. Production
-multi-host deployments must use the same schema/transactions on PostgreSQL.
-This journal is append-only; ClickHouse is a projection, never authority.
+SQLite WAL is supported only as a single-host paper/test primitive. This module
+is not yet wired as the canonical OMS for the live lifecycle and is not a
+multi-host production store. ClickHouse remains a projection, never authority.
 """
 
 from __future__ import annotations
