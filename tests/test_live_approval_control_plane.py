@@ -53,9 +53,7 @@ def test_rbac_and_action_mutation_are_denied(tmp_path):
     challenge = cp.issue_challenge(
         user_id="alice", action=action, roles={"live_trader"}, now=100
     )
-    token = cp.approve(
-        challenge, assertion=b"assertion", verifier=verifier, now=101
-    )
+    token = cp.approve(challenge, assertion=b"assertion", verifier=verifier, now=101)
     with pytest.raises(ApprovalDenied, match="mismatched"):
         cp.consume(
             token,
