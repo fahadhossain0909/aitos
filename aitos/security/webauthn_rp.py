@@ -291,6 +291,12 @@ class WebAuthnRelyingParty:
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM webauthn_credentials WHERE user_id=? LIMIT 1",
+                (user,),
+            ).fetchone():
+                db.commit()
+                return False
             db.execute(
                 "INSERT OR IGNORE INTO webauthn_enrollment_bootstrap"
                 "(user_id,token_hash,consumed_at) VALUES(?,?,NULL)",
