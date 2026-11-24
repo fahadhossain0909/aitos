@@ -559,15 +559,24 @@ async def test_https_cookie_is_secure_host_only_and_hsts_is_set(harness):
         def registration_options(self, *, user_id, now):
             return {"challenge": "server-issued-registration-challenge"}
 
+        def consume_enrollment_bootstrap_token(
+            self, *, user_id, configured_token, supplied_token, now
+        ):
+            return configured_token == supplied_token and len(supplied_token) >= 32
+
+    bootstrap = "https-bootstrap-token-with-at-least-256-bits"
     app = create_gateway(
-        config, password=PASSWORD, webauthn_rp=FakeWebAuthn()
+        config,
+        password=PASSWORD,
+        webauthn_rp=FakeWebAuthn(),
+        webauthn_enrollment_token=bootstrap,
     )
     async with TestClient(
         TestServer(app), headers={"Host": "operator.example"}
     ) as client:
         response = await client.post(
             "/operator/v1/login",
-            json={"password": PASSWORD},
+            json={"password": PASSWORD, "enrollment_token": bootstrap},
             headers={"Origin": "https://operator.example"},
         )
         assert response.status == 200
