@@ -817,5 +817,5 @@ def test_mainnet_executor_consumes_exact_action_receipt_before_order_submission(
         live_approval_token_provider=authority.get_unconsumed_token,
     )
     assert executor._live_approval_consumer(action) == "operator-1"
-    with pytest.raises(ApprovalDenied, match="no unconsumed approval"):
+    with pytest.raises(ApprovalDenied, match="no authorized unconsumed approval"):
         executor._live_approval_consumer(action)
