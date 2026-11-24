@@ -1076,9 +1076,7 @@ def create_gateway(
         except PermissionError:
             raise web.HTTPForbidden(text="Approval role is not authorized") from None
         except Exception as exc:
-            logger.warning(
-                "approval challenge creation failed: %s", type(exc).__name__
-            )
+            logger.warning("approval challenge creation failed: %s", type(exc).__name__)
             raise web.HTTPServiceUnavailable(
                 text="Approval challenge unavailable"
             ) from None
@@ -1094,7 +1092,9 @@ def create_gateway(
     async def approve_action(request):
         user_id = require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
-            raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
+            raise web.HTTPServiceUnavailable(
+                text="Approval control plane is not configured"
+            )
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
                 headers={"Retry-After": "60"},
@@ -1339,9 +1339,7 @@ def main():
             webauthn_rp=webauthn_rp,
             approval_control_plane=approval_control_plane,
             operator_id=args.operator_id,
-            webauthn_enrollment_token=os.environ.get(
-                "AITOS_WEBAUTHN_ENROLLMENT_TOKEN"
-            ),
+            webauthn_enrollment_token=os.environ.get("AITOS_WEBAUTHN_ENROLLMENT_TOKEN"),
         )
     except (ValueError, OSError):
         parser.exit(
