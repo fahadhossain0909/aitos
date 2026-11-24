@@ -120,6 +120,32 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=3,
+        name="clickhouse_legacy_import_evidence",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_legacy_imports (
+                account_scope TEXT NOT NULL,
+                source_table TEXT NOT NULL,
+                source_fingerprint CHAR(64) NOT NULL,
+                source_occurrence BIGINT NOT NULL CHECK (source_occurrence >= 0),
+                trade_id TEXT NOT NULL,
+                source_updated_at TIMESTAMPTZ NOT NULL,
+                raw_payload TEXT NOT NULL,
+                raw_payload_sha256 CHAR(64) NOT NULL,
+                imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (
+                    account_scope, source_table, source_fingerprint, source_occurrence
+                )
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_legacy_trade
+            ON aitos_oms_legacy_imports (account_scope, trade_id, source_updated_at)
+            """,
+        ),
+    ),
 )
 
 
@@ -216,6 +242,17 @@ _REQUIRED_COLUMNS = {
         "aggregate_id",
         "revision",
         "projected_at",
+    },
+    "aitos_oms_legacy_imports": {
+        "account_scope",
+        "source_table",
+        "source_fingerprint",
+        "source_occurrence",
+        "trade_id",
+        "source_updated_at",
+        "raw_payload",
+        "raw_payload_sha256",
+        "imported_at",
     },
 }
 
