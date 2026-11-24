@@ -35,6 +35,50 @@ from aitos.config.paths import get_config_dir
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.console_gateway")
+MAX_UPSTREAM_BYTES = 2 * 1024 * 1024
+STREAM_MAX_SECONDS = 70.0  # upstream ends streams at 60 s; clients reconnect
+STREAM_MAX_CLIENTS = 2
+
+
+def parse_strict_json(body: bytes) -> dict:
+    """Parse upstream JSON, rejecting duplicate fields, non-finite numbers and non-objects."""
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate upstream JSON field")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError("nonfinite upstream JSON")
+
+    payload = json.loads(
+        body, object_pairs_hook=unique_object, parse_constant=reject_constant
+    )
+    if not isinstance(payload, dict):
+        raise ValueError("upstream JSON is not an object")
+    return payload
+
+
+def validate_stream_frame(frame: bytes) -> bytes:
+    """Return a re-framed, validated SSE frame; raise ValueError for anything else."""
+    text = frame.decode("utf-8")
+    if text == ": keepalive":
+        return b": keepalive\n\n"
+    lines = text.split("\n")
+    if (
+        len(lines) != 2
+        or lines[0] != "event: snapshot"
+        or not lines[1].startswith("data: ")
+    ):
+        raise ValueError("unexpected stream frame")
+    data = lines[1][6:].encode("utf-8")
+    parse_strict_json(data)
+    return b"event: snapshot\ndata: " + data + b"\n\n"
+
+
 READ_QUERIES = {
     "/console/v1/history/cursor": frozenset({"limit", "cursor"}),
     "/console/v1/protection": frozenset(),
@@ -42,6 +86,7 @@ READ_QUERIES = {
     "/console/v1/account/timeline": frozenset({"limit", "cursor"}),
     "/console/v1/capabilities": frozenset(),
     "/console/v1/snapshot": frozenset(),
+    "/console/v1/stream": frozenset(),
     "/console/v1/performance": frozenset(),
     "/console/v1/history": frozenset({"limit", "offset", "symbol"}),
     "/console/v1/research/plan": frozenset(
@@ -398,7 +443,24 @@ def create_gateway(
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
     upstream: ClientSession | None = None
+    stream_upstream: ClientSession | None = None
+    stream_clients = {"active": 0}
     upstream_slots = asyncio.Semaphore(4)
+
+    def apply_security_headers(response):
+        response.headers.update(
+            {
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "X-Frame-Options": "DENY",
+                "Content-Security-Policy": CSP,
+                "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+                "Vary": "Cookie, Origin",
+            }
+        )
+        if secure:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
 
     @web.middleware
     async def boundary(request, handler):
@@ -431,34 +493,32 @@ def create_gateway(
             response = web.json_response(
                 {"error": "Operator gateway unavailable"}, status=503
             )
-        response.headers.update(
-            {
-                "Cache-Control": "no-store",
-                "X-Content-Type-Options": "nosniff",
-                "Referrer-Policy": "no-referrer",
-                "X-Frame-Options": "DENY",
-                "Content-Security-Policy": CSP,
-                "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-                "Vary": "Cookie, Origin",
-            }
-        )
-        if secure:
-            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        apply_security_headers(response)
         return response
 
     app = web.Application(middlewares=[boundary], client_max_size=4096)
     app[GATEWAY_STATE] = state
 
     async def transport(app):
-        nonlocal upstream
-        async with ClientSession(
-            timeout=ClientTimeout(total=6, connect=2, sock_read=5),
-            connector=TCPConnector(limit=4),
-            trust_env=False,
-            cookie_jar=DummyCookieJar(),
-            auto_decompress=False,
-        ) as session:
+        nonlocal upstream, stream_upstream
+        async with (
+            ClientSession(
+                timeout=ClientTimeout(total=6, connect=2, sock_read=5),
+                connector=TCPConnector(limit=4),
+                trust_env=False,
+                cookie_jar=DummyCookieJar(),
+                auto_decompress=False,
+            ) as session,
+            ClientSession(
+                timeout=ClientTimeout(total=None, connect=2, sock_read=20),
+                connector=TCPConnector(limit=STREAM_MAX_CLIENTS),
+                trust_env=False,
+                cookie_jar=DummyCookieJar(),
+                auto_decompress=False,
+            ) as streaming,
+        ):
             upstream = session
+            stream_upstream = streaming
             yield
         state.sessions.clear()
 
@@ -669,9 +729,10 @@ def create_gateway(
         if config.upstream_token:
             headers["Authorization"] = f"Bearer {config.upstream_token}"
         try:
-            async with upstream_slots, upstream.get(
-                url, headers=headers, allow_redirects=False
-            ) as result:
+            async with (
+                upstream_slots,
+                upstream.get(url, headers=headers, allow_redirects=False) as result,
+            ):
                 if result.status != 200:
                     status = result.status if result.status in {400, 429, 503} else 502
                     return web.json_response(
@@ -690,30 +751,71 @@ def create_gateway(
                     if len(body) > 2 * 1024 * 1024:
                         raise ValueError()
 
-                def unique_object(pairs):
-                    result = {}
-                    for key, value in pairs:
-                        if key in result:
-                            raise ValueError("duplicate upstream JSON field")
-                        result[key] = value
-                    return result
-
-                def reject_constant(value):
-                    raise ValueError("nonfinite upstream JSON")
-
-                payload = json.loads(
-                    body,
-                    object_pairs_hook=unique_object,
-                    parse_constant=reject_constant,
-                )
-                if not isinstance(payload, dict):
-                    raise ValueError()
-                return web.json_response(payload)
+                return web.json_response(parse_strict_json(bytes(body)))
         except Exception:
             logger.warning("operator runtime evidence request failed")
             return web.json_response(
                 {"error": "Runtime evidence unavailable"}, status=502
             )
+
+    async def stream_proxy(request):
+        if not state.remaining(request.cookies.get(cookie_name)):
+            raise web.HTTPUnauthorized(text="Operator session required")
+        if request.query_string:
+            raise web.HTTPBadRequest()
+        if stream_clients["active"] >= STREAM_MAX_CLIENTS:
+            raise web.HTTPTooManyRequests()
+        stream_clients["active"] += 1
+        url = URL(config.upstream_origin).with_path("/console/v1/stream")
+        headers = {"Accept": "text/event-stream", "Accept-Encoding": "identity"}
+        if config.upstream_token:
+            headers["Authorization"] = f"Bearer {config.upstream_token}"
+        response = None
+        try:
+            async with stream_upstream.get(
+                url, headers=headers, allow_redirects=False
+            ) as result:
+                if (
+                    result.status != 200
+                    or result.content_type != "text/event-stream"
+                    or result.headers.get("Content-Encoding", "identity") != "identity"
+                ):
+                    status = result.status if result.status in {429, 503} else 502
+                    return web.json_response(
+                        {"error": "Runtime evidence unavailable"}, status=status
+                    )
+                response = web.StreamResponse(
+                    headers={
+                        "Content-Type": "text/event-stream",
+                        "X-Accel-Buffering": "no",
+                    }
+                )
+                apply_security_headers(response)  # headers are final once prepared
+                await response.prepare(request)
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + STREAM_MAX_SECONDS
+                buffer = bytearray()
+                async for chunk in result.content.iter_chunked(65536):
+                    buffer.extend(chunk)
+                    if len(buffer) > MAX_UPSTREAM_BYTES:
+                        raise ValueError("stream frame too large")
+                    while (end := buffer.find(b"\n\n")) != -1:
+                        frame = bytes(buffer[:end])
+                        del buffer[: end + 2]
+                        await response.write(validate_stream_frame(frame))
+                    if loop.time() > deadline:
+                        break
+                await response.write_eof()
+                return response
+        except Exception:
+            logger.warning("operator runtime stream failed")
+            if response is None:
+                return web.json_response(
+                    {"error": "Runtime evidence unavailable"}, status=502
+                )
+            return response  # already streaming: end it; the client reconnects or polls
+        finally:
+            stream_clients["active"] -= 1
 
     async def static_file(request):
         path = request.match_info.get("path", "") or "index.html"
@@ -751,6 +853,7 @@ def create_gateway(
     app.router.add_put("/operator/v1/workspace-layout", put_workspace_layout)
     app.router.add_post("/operator/v1/login", login)
     app.router.add_post("/operator/v1/logout", logout)
+    app.router.add_route("GET", "/console/v1/stream", stream_proxy)
     app.router.add_route("*", "/console/{path:.*}", proxy)
     app.router.add_get("/{path:.*}", static_file)
     return app
