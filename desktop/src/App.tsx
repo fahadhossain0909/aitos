@@ -10,6 +10,7 @@ import PersistencePanel from "./PersistencePanel";
 import PerformancePanel from "./PerformancePanel";
 import { parseSnapshot, parseHistory } from "./consoleClient";
 import ReadinessPanel from "./ReadinessPanel";
+import ApprovalPanel from "./ApprovalPanel";
 import { useState, useEffect, useRef } from "react";
 import {
   Activity,
@@ -995,7 +996,10 @@ export default function App() {
           )}
           {page === "workspaces" && <WorkspaceStudio onOpenPanel={openWorkspacePanel} /> }
           {page === "readiness" && (
-            <ReadinessPanel snapshot={apiError ? null : snapshot} />
+            <>
+              <ReadinessPanel snapshot={apiError ? null : snapshot} />
+              <ApprovalPanel />
+            </>
           )}
           {page === "overview" && (
             <>
