@@ -32,12 +32,15 @@ class PostgresLifecycleStateWriter:
         self.fence = fence
         self.projection_writer = projection_writer
         self._revisions: dict[str, int] = {}
+        self._last_event_ids: dict[str, str] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def _revision(self, trade_id: str) -> int:
         if trade_id not in self._revisions:
             events = await self.oms.read_events(self.fence.account_scope, trade_id)
             self._revisions[trade_id] = events[-1].revision if events else 0
+            if events:
+                self._last_event_ids[trade_id] = events[-1].event_id
         return self._revisions[trade_id]
 
     async def __call__(self, trade: Any) -> None:
@@ -62,12 +65,18 @@ class PostgresLifecycleStateWriter:
                     "trade_id": trade_id,
                     "trade": to_dict(),
                 },
+                causation_id=str(
+                    getattr(trade, "causation_id", f"lifecycle:{trade_id}")
+                ),
+                correlation_id=trade_id,
+                parent_event_id=self._last_event_ids.get(trade_id),
             )
             if event.revision != next_revision:
                 raise RuntimeError(
                     "canonical OMS returned an unexpected aggregate revision"
                 )
             self._revisions[trade_id] = next_revision
+            self._last_event_ids[trade_id] = event.event_id
             # This is a projection only. If it fails, the committed canonical
             # event remains available for startup replay/reconciliation.
             await self.projection_writer(trade)
