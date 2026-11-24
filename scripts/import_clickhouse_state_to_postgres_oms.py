@@ -173,8 +173,14 @@ def _select_clickhouse_source(client: Any, source: str) -> tuple[str, bool]:
         selected, scoped = source, True
         companion = backup
     elif "account_scope" in columns.get(target, set()):
+        companion = (
+            source if source in columns else backup if backup in columns else None
+        )
+        if companion is None:
+            raise RuntimeError(
+                f"scope-keyed table {target} has no retained legacy source or backup"
+            )
         selected, scoped = target, True
-        companion = source if source in columns else None
     elif source in columns:
         selected, scoped, companion = source, False, None
     elif "account_scope" in columns.get(backup, set()):
