@@ -981,6 +981,10 @@ def create_gateway(
         user_id = require_operator_session(request)
         if webauthn_rp is None:
             raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="Authenticator registration rate limit reached"
+            )
         body = await read_json_body(request, max_bytes=96 * 1024)
         if not isinstance(body, dict) or set(body) != {"credential"}:
             raise web.HTTPBadRequest(text="Invalid WebAuthn registration")
