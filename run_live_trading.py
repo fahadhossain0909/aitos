@@ -45,11 +45,11 @@ from aitos.runtime_connections import (
     try_connect_neo4j,
 )
 from aitos.runtime_ownership import RuntimeOwnership
+from aitos.runtime_signals import install_signal_handlers
 from aitos.storage.postgres_migrations import (
     apply_postgres_migrations,
     verify_postgres_schema,
 )
-from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     IdempotentOrderExecutor,
@@ -203,8 +203,10 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     components.trade_lifecycle.bind_postgres_canonical_oms(
         postgres_oms, writer_fence
     )
-    canonical_restore = await components.trade_lifecycle._postgres_canonical_oms_writer.restore_lifecycle(
-        components.trade_lifecycle
+    canonical_restore = await (
+        components.trade_lifecycle._postgres_canonical_oms_writer.restore_lifecycle(
+            components.trade_lifecycle
+        )
     )
     restored_count = canonical_restore["open"]
     logger.warning(
