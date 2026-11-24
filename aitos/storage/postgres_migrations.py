@@ -224,6 +224,34 @@ MIGRATIONS = (
               (account_scope, trade_id, currency, recorded_at)
             """,
             """
+            CREATE OR REPLACE FUNCTION aitos_validate_oms_financial_balance()
+            RETURNS trigger LANGUAGE plpgsql AS $aitos$
+            BEGIN
+                IF EXISTS (
+                    SELECT currency
+                    FROM aitos_oms_financial_ledger
+                    WHERE account_scope = NEW.account_scope
+                      AND event_id = NEW.event_id
+                    GROUP BY currency
+                    HAVING SUM(debit) <> SUM(credit)
+                ) THEN
+                    RAISE EXCEPTION 'canonical OMS financial event is not balanced';
+                END IF;
+                RETURN NULL;
+            END;
+            $aitos$
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_financial_balanced
+            ON aitos_oms_financial_ledger
+            """,
+            """
+            CREATE CONSTRAINT TRIGGER aitos_oms_financial_balanced
+            AFTER INSERT ON aitos_oms_financial_ledger
+            DEFERRABLE INITIALLY DEFERRED
+            FOR EACH ROW EXECUTE FUNCTION aitos_validate_oms_financial_balance()
+            """,
+            """
             CREATE OR REPLACE FUNCTION aitos_reject_oms_financial_mutation()
             RETURNS trigger LANGUAGE plpgsql AS $aitos$
             BEGIN
