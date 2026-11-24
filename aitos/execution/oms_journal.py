@@ -4,6 +4,7 @@ SQLite WAL is supported for single-host paper/test deployments only. Production
 multi-host deployments must use the same schema/transactions on PostgreSQL.
 This journal is append-only; ClickHouse is a projection, never authority.
 """
+
 from __future__ import annotations
 
 import hashlib
