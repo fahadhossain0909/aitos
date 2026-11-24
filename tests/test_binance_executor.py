@@ -778,7 +778,8 @@ def test_mainnet_executor_consumes_exact_action_receipt_before_order_submission(
         signing_key=b"mainnet-approval-signing-key-at-least-32-bytes",
         allowed_origins={"https://console.example"},
         rp_id="console.example",
-        role_authorizer=lambda user, role: user == "operator-1" and role == "live_trader",
+        role_authorizer=lambda user, role: user == "operator-1"
+        and role == "live_trader",
     )
     action = {
         "environment": "binance-usdm-mainnet",
