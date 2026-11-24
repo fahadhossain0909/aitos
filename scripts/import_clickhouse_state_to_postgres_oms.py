@@ -247,6 +247,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     partial_manifest = manifest_path.with_suffix(
         manifest_path.suffix + ".partial"
     )
+    if (
+        manifest_path.exists()
+        or manifest_path.is_symlink()
+        or partial_manifest.exists()
+        or partial_manifest.is_symlink()
+    ):
+        raise FileExistsError(
+            "manifest or partial manifest already exists; choose a new path "
+            "to preserve previous migration evidence"
+        )
     try:
         with tempfile.TemporaryDirectory(prefix="aitos-oms-import-") as workdir:
             stage = sqlite3.connect(Path(workdir) / "source-stage.sqlite")
@@ -317,7 +327,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             "result_overflow_mode='throw',read_overflow_mode='throw'"
                         )
                     queries[source] = (query, scoped)
-                with partial_manifest.open("w", encoding="utf-8", newline="\n") as manifest:
+                manifest_fd = os.open(
+                    partial_manifest,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+                with os.fdopen(
+                    manifest_fd, "w", encoding="utf-8", newline="\n"
+                ) as manifest:
                     for table, (query, scoped) in queries.items():
                         occurrences: Counter[str] = Counter()
                         with ch.query_row_block_stream(query) as blocks:
