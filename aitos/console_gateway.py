@@ -204,6 +204,7 @@ class OperatorSessions:
         self.salt = secrets.token_bytes(16)
         self.digest = self._derive(password)
         self.sessions: dict[bytes, float] = {}
+        self.pending: dict[bytes, float] = {}
         self.attempts: deque[float] = deque()
         self.hash_lock = asyncio.Lock()
 
@@ -226,6 +227,7 @@ class OperatorSessions:
     def prune(self):
         now = self.clock()
         self.sessions = {key: end for key, end in self.sessions.items() if end > now}
+        self.pending = {key: end for key, end in self.pending.items() if end > now}
         while self.attempts and self.attempts[0] <= now - 60:
             self.attempts.popleft()
 
@@ -235,6 +237,20 @@ class OperatorSessions:
 
     def revoke(self, cookie):
         self.sessions.pop(self._key(cookie), None)
+
+    def issue_pending(self, token: str) -> None:
+        self.prune()
+        if len(self.pending) >= self.config.max_sessions:
+            del self.pending[min(self.pending, key=self.pending.get)]
+        self.pending[self._key(token)] = self.clock() + 180
+
+    def has_pending(self, token: str | None) -> bool:
+        self.prune()
+        key = self._key(token)
+        return bool(key and self.pending.get(key, 0) > self.clock())
+
+    def revoke_pending(self, token: str | None) -> None:
+        self.pending.pop(self._key(token), None)
 
     def issue(self):
         self.prune()
@@ -392,11 +408,17 @@ GATEWAY_STATE = web.AppKey("operator_sessions", OperatorSessions)
 
 
 def create_gateway(
-    config: GatewayConfig, *, password: str, clock=time.monotonic
+    config: GatewayConfig,
+    *,
+    password: str,
+    clock=time.monotonic,
+    webauthn_rp=None,
+    operator_id: str = "local-operator",
 ) -> web.Application:
     state = OperatorSessions(config, password, clock=clock)
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
+    pending_cookie = "__Host-aitos_operator_pending" if secure else "aitos_local_operator_pending"
     upstream: ClientSession | None = None
     upstream_slots = asyncio.Semaphore(4)
 
@@ -463,6 +485,53 @@ def create_gateway(
         state.sessions.clear()
 
     app.cleanup_ctx.append(transport)
+
+    def set_pending_cookie(response, token):
+        response.set_cookie(
+            pending_cookie,
+            token,
+            path="/",
+            httponly=True,
+            secure=secure,
+            samesite="Strict",
+            max_age=180,
+        )
+        return response
+
+    def clear_pending_cookie(response):
+        response.set_cookie(
+            pending_cookie,
+            "",
+            max_age=0,
+            expires="Thu, 01 Jan 1970 00:00:00 GMT",
+            path="/",
+            secure=secure,
+            httponly=True,
+            samesite="Strict",
+        )
+        return response
+
+    def require_pending(request):
+        token = request.cookies.get(pending_cookie)
+        if not state.has_pending(token):
+            raise web.HTTPUnauthorized(text="MFA pre-authentication expired")
+        return token
+
+    def issue_operator_session(response, request):
+        state.revoke(request.cookies.get(cookie_name))
+        state.revoke_pending(request.cookies.get(pending_cookie))
+        token = state.issue()
+        response.set_cookie(
+            cookie_name,
+            token,
+            path="/",
+            httponly=True,
+            secure=secure,
+            samesite="Strict",
+            max_age=config.session_seconds,
+        )
+        clear_pending_cookie(response)
+        return response
 
     def clear_cookie(response):
         # set_cookie supports these flags across the project's aiohttp>=3.10
@@ -592,6 +661,8 @@ def create_gateway(
                 "authenticated": remaining > 0,
                 "expires_in_seconds": remaining,
                 "controls": "read_only",
+                "identity": operator_id if remaining else None,
+                "mfa": bool(webauthn_rp) if remaining else False,
             }
         )
         return (
@@ -624,26 +695,106 @@ def create_gateway(
             logger.info("operator sign-in rejected")
             raise web.HTTPUnauthorized(text="Operator sign-in rejected")
         state.revoke(request.cookies.get(cookie_name))
-        token = state.issue()
+        if webauthn_rp is not None:
+            try:
+                credentials = webauthn_rp.credential_count(user_id=operator_id)
+                pending = secrets.token_urlsafe(32)
+                state.issue_pending(pending)
+                if credentials:
+                    options = webauthn_rp.authentication_options(
+                        user_id=operator_id, now=int(time.time())
+                    )
+                    response = web.json_response(
+                        {"authenticated": False, "mfa_required": True, "options": options}
+                    )
+                else:
+                    options = webauthn_rp.registration_options(
+                        user_id=operator_id, now=int(time.time())
+                    )
+                    response = web.json_response(
+                        {
+                            "authenticated": False,
+                            "mfa_enrollment_required": True,
+                            "options": options,
+                        }
+                    )
+                return set_pending_cookie(response, pending)
+            except Exception as exc:
+                logger.warning("operator MFA challenge could not be created: %s", type(exc).__name__)
+                raise web.HTTPServiceUnavailable(text="WebAuthn MFA unavailable") from None
         response = web.json_response(
             {"authenticated": True, "expires_in_seconds": config.session_seconds}
         )
-        response.set_cookie(
-            cookie_name,
-            token,
-            path="/",
-            httponly=True,
-            secure=secure,
-            samesite="Strict",
-            max_age=config.session_seconds,
+        logger.warning("password-only operator session issued; WebAuthn MFA is disabled")
+        return issue_operator_session(response, request)
+
+    async def finish_mfa_enrollment(request):
+        if webauthn_rp is None:
+            raise web.HTTPNotFound()
+        require_pending(request)
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        body = await request.json()
+        if not isinstance(body, dict) or set(body) != {"credential"}:
+            raise web.HTTPBadRequest(text="Invalid WebAuthn enrollment")
+        try:
+            webauthn_rp.verify_registration(
+                user_id=operator_id, credential=body["credential"], now=int(time.time())
+            )
+            options = webauthn_rp.authentication_options(
+                user_id=operator_id, now=int(time.time())
+            )
+            return web.json_response(
+                {"authenticated": False, "mfa_required": True, "options": options}
+            )
+        except Exception as exc:
+            logger.info("operator WebAuthn enrollment rejected: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="WebAuthn enrollment rejected") from None
+
+    async def finish_mfa_login(request):
+        if webauthn_rp is None:
+            raise web.HTTPNotFound()
+        require_pending(request)
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        body = await request.json()
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"challenge", "assertion"}
+            or not isinstance(body["challenge"], str)
+            or not isinstance(body["assertion"], dict)
+        ):
+            raise web.HTTPBadRequest(text="Invalid WebAuthn assertion")
+        try:
+            claims = webauthn_rp.verify_assertion(
+                assertion=json.dumps(body["assertion"], separators=(",", ":")).encode(),
+                challenge=body["challenge"],
+                expected_origin=webauthn_rp.origins,
+                expected_rp_id=webauthn_rp.rp_id,
+                require_user_verification=True,
+            )
+            if claims.get("verified") is not True or claims.get("user_id") != operator_id:
+                raise PermissionError("WebAuthn identity mismatch")
+        except Exception as exc:
+            logger.info("operator WebAuthn assertion rejected: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="WebAuthn assertion rejected") from None
+        response = web.json_response(
+            {
+                "authenticated": True,
+                "expires_in_seconds": config.session_seconds,
+                "identity": operator_id,
+                "mfa": True,
+                "controls": "read_only",
+            }
         )
-        logger.info("operator sign-in accepted")
-        return response
+        logger.info("operator MFA sign-in accepted")
+        return issue_operator_session(response, request)
 
     async def logout(request):
         state.revoke(request.cookies.get(cookie_name))
+        state.revoke_pending(request.cookies.get(pending_cookie))
         logger.info("operator session revoked")
-        return clear_cookie(web.Response(status=204))
+        return clear_pending_cookie(clear_cookie(web.Response(status=204)))
 
     async def proxy(request):
         if request.path not in READ_ROUTES:
@@ -750,6 +901,8 @@ def create_gateway(
     app.router.add_get("/operator/v1/workspace-layout", get_workspace_layout)
     app.router.add_put("/operator/v1/workspace-layout", put_workspace_layout)
     app.router.add_post("/operator/v1/login", login)
+    app.router.add_post("/operator/v1/mfa/register", finish_mfa_enrollment)
+    app.router.add_post("/operator/v1/mfa/verify", finish_mfa_login)
     app.router.add_post("/operator/v1/logout", logout)
     app.router.add_route("*", "/console/{path:.*}", proxy)
     app.router.add_get("/{path:.*}", static_file)
