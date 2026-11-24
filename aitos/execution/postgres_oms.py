@@ -152,6 +152,9 @@ class PostgresCanonicalOMS:
         expected_revision: int,
         payload: dict[str, Any],
         ledger_entries: list[dict[str, Any]] | None = None,
+        causation_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_event_id: str | None = None,
     ) -> OMSEvent:
         if type(fence) is not WriterFence:
             raise OMSConflict("a server-issued writer fence is required")
@@ -162,6 +165,17 @@ class PostgresCanonicalOMS:
             raise ValueError("expected_revision must be a non-negative integer")
         normalized_entries = self._validate_ledger_entries(\n            [] if ledger_entries is None else ledger_entries\n        )
         canonical_payload = dict(payload)
+        if any(value is not None for value in (causation_id, correlation_id, parent_event_id)):
+            if "causality" in canonical_payload:
+                raise ValueError("causality metadata is reserved by the canonical OMS")
+            canonical_payload["causality"] = {
+                "causation_id": _identifier(causation_id, "causation_id")
+                if causation_id is not None else None,
+                "correlation_id": _identifier(correlation_id, "correlation_id")
+                if correlation_id is not None else None,
+                "parent_event_id": _identifier(parent_event_id, "parent_event_id")
+                if parent_event_id is not None else None,
+            }
         if normalized_entries:
             canonical_payload["financial_ledger"] = [
                 {"account_code": item["account_code"], "currency": item["currency"],
