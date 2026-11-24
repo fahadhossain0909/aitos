@@ -38,7 +38,7 @@ def test_registration_options_create_user_bound_one_time_challenge(tmp_path):
 
 def test_registration_requires_valid_cryptographic_attestation(tmp_path):
     rp = make_rp(tmp_path)
-    with pytest.raises(WebAuthnCredentialError, match="clientDataJSON"):
+    with pytest.raises(WebAuthnCredentialError, match="registration response missing"):
         rp.verify_registration(user_id="operator-1", credential={}, now=101)
 
 
