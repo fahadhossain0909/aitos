@@ -98,11 +98,14 @@ class WebAuthnRelyingParty:
         user = self._user_id(user_id)
         if not 30 <= ttl_seconds <= 600:
             raise ValueError("registration challenge TTL must be 30..600 seconds")
-        with self._connect() as db:
+        db = self._connect()
+        try:
             existing = db.execute(
                 "SELECT credential_id FROM webauthn_credentials WHERE user_id=?",
                 (user,),
             ).fetchall()
+        finally:
+            db.close()
         options = generate_registration_options(
             rp_id=self.rp_id,
             rp_name=self.rp_name,
@@ -120,7 +123,8 @@ class WebAuthnRelyingParty:
         )
         serialized = json.loads(options_to_json(options))
         challenge = serialized["challenge"]
-        with self._connect() as db:
+        db = self._connect()
+        try:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO webauthn_registration_challenges"
@@ -128,6 +132,8 @@ class WebAuthnRelyingParty:
                 (challenge, user, int(now) + ttl_seconds),
             )
             db.commit()
+        finally:
+            db.close()
         return serialized
 
     def verify_registration(
@@ -164,7 +170,8 @@ class WebAuthnRelyingParty:
             not isinstance(item, str) for item in transports
         ):
             raise WebAuthnCredentialError("invalid authenticator transport metadata")
-        with self._connect() as db:
+        db = self._connect()
+        try:
             db.execute("BEGIN IMMEDIATE")
             challenge_row = db.execute(
                 "SELECT user_id,expires_at,consumed_at "
@@ -202,6 +209,11 @@ class WebAuthnRelyingParty:
                 (int(now), challenge),
             )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
         return credential_key
 
     def verify_assertion(
