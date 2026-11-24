@@ -16,6 +16,7 @@ from typing import Any
 
 from webauthn import (
     base64url_to_bytes,
+    generate_authentication_options,
     generate_registration_options,
     options_to_json,
     verify_authentication_response,
@@ -23,6 +24,7 @@ from webauthn import (
 )
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
+    UserVerificationRequirement,
     PublicKeyCredentialDescriptor,
     UserVerificationRequirement,
 )
@@ -74,6 +76,12 @@ class WebAuthnRelyingParty:
                 CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user
                     ON webauthn_credentials(user_id);
                 CREATE TABLE IF NOT EXISTS webauthn_registration_challenges (
+                    challenge TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    consumed_at INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS webauthn_authentication_challenges (
                     challenge TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     expires_at INTEGER NOT NULL,
@@ -134,6 +142,62 @@ class WebAuthnRelyingParty:
                 (challenge, user, int(now) + ttl_seconds),
             )
             db.commit()
+        finally:
+            db.close()
+        return serialized
+
+    def authentication_options(
+        self, *, user_id: str, now: int, ttl_seconds: int = 180
+    ) -> dict[str, Any]:
+        """Issue a short-lived, user-bound, one-time assertion challenge."""
+        user = self._user_id(user_id)
+        if not 30 <= ttl_seconds <= 600:
+            raise ValueError("authentication challenge TTL must be 30..600 seconds")
+        db = self._connect()
+        try:
+            credentials = db.execute(
+                "SELECT credential_id,transports_json FROM webauthn_credentials "
+                "WHERE user_id=? ORDER BY created_at",
+                (user,),
+            ).fetchall()
+        finally:
+            db.close()
+        if not credentials:
+            raise WebAuthnCredentialError("user has no registered WebAuthn credential")
+        descriptors = []
+        for credential_id, transports_json in credentials:
+            from webauthn.helpers.structs import AuthenticatorTransport
+
+            transports = [
+                AuthenticatorTransport(item)
+                for item in json.loads(transports_json)
+                if item in {transport.value for transport in AuthenticatorTransport}
+            ]
+            descriptors.append(
+                PublicKeyCredentialDescriptor(
+                    id=base64url_to_bytes(credential_id),
+                    transports=transports or None,
+                )
+            )
+        options = generate_authentication_options(
+            rp_id=self.rp_id,
+            timeout=self.timeout_ms,
+            allow_credentials=descriptors,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+        serialized = json.loads(options_to_json(options))
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT INTO webauthn_authentication_challenges"
+                "(challenge,user_id,expires_at) VALUES(?,?,?)",
+                (serialized["challenge"], user, int(now) + ttl_seconds),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
         return serialized
@@ -250,6 +314,19 @@ class WebAuthnRelyingParty:
             db = self._connect()
             try:
                 db.execute("BEGIN IMMEDIATE")
+                challenge_row = db.execute(
+                    "SELECT user_id,expires_at,consumed_at "
+                    "FROM webauthn_authentication_challenges WHERE challenge=?",
+                    (challenge,),
+                ).fetchone()
+                if (
+                    challenge_row is None
+                    or challenge_row[1] <= int(__import__("time").time())
+                    or challenge_row[2] is not None
+                ):
+                    raise WebAuthnCredentialError(
+                        "authentication challenge missing, expired or already consumed"
+                    )
                 row = db.execute(
                     "SELECT user_id,public_key,sign_count FROM webauthn_credentials "
                     "WHERE credential_id=?",
@@ -258,6 +335,10 @@ class WebAuthnRelyingParty:
                 if row is None:
                     raise WebAuthnCredentialError("unknown WebAuthn credential")
                 user_id, public_key, current_count = row
+                if user_id != challenge_row[0]:
+                    raise WebAuthnCredentialError(
+                        "authentication challenge user does not own credential"
+                    )
                 verified = verify_authentication_response(
                     credential=credential,
                     expected_challenge=base64url_to_bytes(challenge),
@@ -284,6 +365,13 @@ class WebAuthnRelyingParty:
                     raise WebAuthnCredentialError(
                         "credential counter changed concurrently"
                     )
+                consumed = db.execute(
+                    "UPDATE webauthn_authentication_challenges SET consumed_at=? "
+                    "WHERE challenge=? AND consumed_at IS NULL",
+                    (int(__import__("time").time()), challenge),
+                ).rowcount
+                if consumed != 1:
+                    raise WebAuthnCredentialError("authentication challenge replay")
                 db.commit()
                 return {
                     "verified": True,
