@@ -176,19 +176,23 @@ class PostgresCanonicalOMS:
             for value in (causation_id, correlation_id, parent_event_id)
         ):
             if "causality" in canonical_payload:
-                raise ValueError(
-                    "causality metadata is reserved by the canonical OMS"
-                )
+                raise ValueError("causality metadata is reserved by the canonical OMS")
             canonical_payload["causality"] = {
-                "causation_id": _identifier(causation_id, "causation_id")
-                if causation_id is not None
-                else None,
-                "correlation_id": _identifier(correlation_id, "correlation_id")
-                if correlation_id is not None
-                else None,
-                "parent_event_id": _identifier(parent_event_id, "parent_event_id")
-                if parent_event_id is not None
-                else None,
+                "causation_id": (
+                    _identifier(causation_id, "causation_id")
+                    if causation_id is not None
+                    else None
+                ),
+                "correlation_id": (
+                    _identifier(correlation_id, "correlation_id")
+                    if correlation_id is not None
+                    else None
+                ),
+                "parent_event_id": (
+                    _identifier(parent_event_id, "parent_event_id")
+                    if parent_event_id is not None
+                    else None
+                ),
             }
         if normalized_entries:
             canonical_payload["financial_ledger"] = [
@@ -305,8 +309,14 @@ class PostgresCanonicalOMS:
                        (account_scope,event_id,line_no,trade_id,account_code,
                         currency,debit,credit,reference)
                        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
-                    scope, event, line_no, aggregate, entry["account_code"],
-                    entry["currency"], entry["debit"], entry["credit"],
+                    scope,
+                    event,
+                    line_no,
+                    aggregate,
+                    entry["account_code"],
+                    entry["currency"],
+                    entry["debit"],
+                    entry["credit"],
                     entry["reference"],
                 )
         return OMSEvent(
@@ -345,7 +355,9 @@ class PostgresCanonicalOMS:
                 debit = Decimal(str(entry.get("debit", "0")))
                 credit = Decimal(str(entry.get("credit", "0")))
             except (InvalidOperation, ValueError):
-                raise ValueError("ledger debit/credit must be finite decimals") from None
+                raise ValueError(
+                    "ledger debit/credit must be finite decimals"
+                ) from None
             if (
                 not debit.is_finite()
                 or not credit.is_finite()
