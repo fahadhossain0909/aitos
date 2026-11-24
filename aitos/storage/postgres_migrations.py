@@ -195,8 +195,7 @@ MIGRATIONS = (
             FOR EACH ROW EXECUTE FUNCTION aitos_reject_legacy_import_mutation()
             """,
         ),
-    ),,
-
+    ),
     Migration(
         version=4,
         name="canonical_oms_financial_ledger",
@@ -226,11 +225,11 @@ MIGRATIONS = (
             """,
             """
             CREATE OR REPLACE FUNCTION aitos_reject_oms_financial_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $
+            RETURNS trigger LANGUAGE plpgsql AS $aitos$
             BEGIN
                 RAISE EXCEPTION 'canonical OMS financial ledger is append-only';
             END;
-            $
+            $aitos$
             """,
             """
             DROP TRIGGER IF EXISTS aitos_oms_financial_no_update
