@@ -146,6 +146,19 @@ class WebAuthnRelyingParty:
             db.close()
         return serialized
 
+    def credential_count(self, *, user_id: str) -> int:
+        """Return only the credential count for a validated local operator ID."""
+        user = self._user_id(user_id)
+        db = self._connect()
+        try:
+            row = db.execute(
+                "SELECT count(*) FROM webauthn_credentials WHERE user_id=?",
+                (user,),
+            ).fetchone()
+            return int(row[0])
+        finally:
+            db.close()
+
     def authentication_options(
         self, *, user_id: str, now: int, ttl_seconds: int = 180
     ) -> dict[str, Any]:
@@ -368,7 +381,7 @@ class WebAuthnRelyingParty:
                 consumed = db.execute(
                     "UPDATE webauthn_authentication_challenges SET consumed_at=? "
                     "WHERE challenge=? AND consumed_at IS NULL",
-                    (int(__import__("time").time()), challenge),
+                    (int(time.time()), challenge),
                 ).rowcount
                 if consumed != 1:
                     raise WebAuthnCredentialError("authentication challenge replay")
