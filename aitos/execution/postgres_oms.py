@@ -160,7 +160,7 @@ class PostgresCanonicalOMS:
         event = _identifier(event_id, "event_id")
         if type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("expected_revision must be a non-negative integer")
-        normalized_entries = self._validate_ledger_entries(ledger_entries or [])
+        normalized_entries = self._validate_ledger_entries(\n            [] if ledger_entries is None else ledger_entries\n        )
         canonical_payload = dict(payload)
         if normalized_entries:
             canonical_payload["financial_ledger"] = [
