@@ -225,7 +225,9 @@ class OperatorSessions:
                 or len(user_id) > 256
                 or not is_valid_operator_password(secret)
             ):
-                raise ValueError("each operator requires a bounded identity and password")
+                raise ValueError(
+                    "each operator requires a bounded identity and password"
+                )
             salt = secrets.token_bytes(16)
             self.credentials[user_id] = (salt, self._derive(secret, salt))
         self.sessions: dict[bytes, tuple[float, str]] = {}
@@ -300,7 +302,10 @@ class OperatorSessions:
         if len(self.sessions) >= self.config.max_sessions:
             del self.sessions[min(self.sessions, key=lambda key: self.sessions[key][0])]
         token = secrets.token_urlsafe(32)
-        self.sessions[self._key(token)] = (self.clock() + self.config.session_seconds, user)
+        self.sessions[self._key(token)] = (
+            self.clock() + self.config.session_seconds,
+            user,
+        )
         return token
 
     def admit_attempt(self):
@@ -493,7 +498,9 @@ def create_gateway(
     )
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
-    pending_cookie = "__Host-aitos_operator_pending" if secure else "aitos_local_operator_pending"
+    pending_cookie = (
+        "__Host-aitos_operator_pending" if secure else "aitos_local_operator_pending"
+    )
     upstream: ClientSession | None = None
     upstream_slots = asyncio.Semaphore(4)
 
@@ -831,7 +838,11 @@ def create_gateway(
                         user_id=user_id, now=int(time.time())
                     )
                     response = web.json_response(
-                        {"authenticated": False, "mfa_required": True, "options": options}
+                        {
+                            "authenticated": False,
+                            "mfa_required": True,
+                            "options": options,
+                        }
                     )
                 else:
                     options = webauthn_rp.registration_options(
@@ -848,12 +859,19 @@ def create_gateway(
             except web.HTTPException:
                 raise
             except Exception as exc:
-                logger.warning("operator MFA challenge could not be created: %s", type(exc).__name__)
-                raise web.HTTPServiceUnavailable(text="WebAuthn MFA unavailable") from None
+                logger.warning(
+                    "operator MFA challenge could not be created: %s",
+                    type(exc).__name__,
+                )
+                raise web.HTTPServiceUnavailable(
+                    text="WebAuthn MFA unavailable"
+                ) from None
         response = web.json_response(
             {"authenticated": True, "expires_in_seconds": config.session_seconds}
         )
-        logger.warning("password-only operator session issued; WebAuthn MFA is disabled")
+        logger.warning(
+            "password-only operator session issued; WebAuthn MFA is disabled"
+        )
         return issue_operator_session(response, request, user_id)
 
     async def finish_mfa_enrollment(request):
@@ -887,7 +905,8 @@ def create_gateway(
         user_id = require_pending(request)
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
-                headers={"Retry-After": "60"}, text="MFA verification rate limit reached"
+                headers={"Retry-After": "60"},
+                text="MFA verification rate limit reached",
             )
         body = await read_json_body(request, max_bytes=96 * 1024)
         if (
@@ -936,7 +955,8 @@ def create_gateway(
             raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
-                headers={"Retry-After": "60"}, text="Authenticator enrollment rate limit reached"
+                headers={"Retry-After": "60"},
+                text="Authenticator enrollment rate limit reached",
             )
         options = webauthn_rp.authentication_options(
             user_id=user_id, now=int(time.time())
@@ -949,7 +969,8 @@ def create_gateway(
             raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
-                headers={"Retry-After": "60"}, text="Authenticator step-up rate limit reached"
+                headers={"Retry-After": "60"},
+                text="Authenticator step-up rate limit reached",
             )
         body = await read_json_body(request, max_bytes=96 * 1024)
         if (
@@ -973,7 +994,9 @@ def create_gateway(
                 user_id=user_id, now=int(time.time())
             )
         except Exception as exc:
-            logger.info("authenticator enrollment step-up rejected: %s", type(exc).__name__)
+            logger.info(
+                "authenticator enrollment step-up rejected: %s", type(exc).__name__
+            )
             raise web.HTTPUnauthorized(text="WebAuthn step-up rejected") from None
         return web.json_response({"options": options})
 
@@ -983,7 +1006,8 @@ def create_gateway(
             raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
-                headers={"Retry-After": "60"}, text="Authenticator registration rate limit reached"
+                headers={"Retry-After": "60"},
+                text="Authenticator registration rate limit reached",
             )
         body = await read_json_body(request, max_bytes=96 * 1024)
         if not isinstance(body, dict) or set(body) != {"credential"}:
@@ -995,11 +1019,13 @@ def create_gateway(
                 now=int(time.time()),
             )
         except Exception as exc:
-            logger.info("additional authenticator registration rejected: %s", type(exc).__name__)
-            raise web.HTTPUnauthorized(text="Authenticator registration rejected") from None
-        return web.json_response(
-            {"registered": True, "credential_id": credential_id}
-        )
+            logger.info(
+                "additional authenticator registration rejected: %s", type(exc).__name__
+            )
+            raise web.HTTPUnauthorized(
+                text="Authenticator registration rejected"
+            ) from None
+        return web.json_response({"registered": True, "credential_id": credential_id})
 
     async def approval_capabilities(request):
         user_id = require_operator_session(request)
@@ -1019,10 +1045,13 @@ def create_gateway(
     async def create_approval_challenge(request):
         user_id = require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
-            raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
+            raise web.HTTPServiceUnavailable(
+                text="Approval control plane is not configured"
+            )
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
-                headers={"Retry-After": "60"}, text="Approval request rate limit reached"
+                headers={"Retry-After": "60"},
+                text="Approval request rate limit reached",
             )
         try:
             body = await read_json_body(request, max_bytes=4096)
@@ -1044,8 +1073,12 @@ def create_gateway(
         except PermissionError:
             raise web.HTTPForbidden(text="Approval role is not authorized") from None
         except Exception as exc:
-            logger.warning("approval challenge creation failed: %s", type(exc).__name__)
-            raise web.HTTPServiceUnavailable(text="Approval challenge unavailable") from None
+            logger.warning(
+                "approval challenge creation failed: %s", type(exc).__name__
+            )
+            raise web.HTTPServiceUnavailable(
+                text="Approval challenge unavailable"
+            ) from None
         return web.json_response(
             {
                 "challenge_id": challenge.challenge_id,
@@ -1061,7 +1094,8 @@ def create_gateway(
             raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
         if not state.admit_attempt():
             raise web.HTTPTooManyRequests(
-                headers={"Retry-After": "60"}, text="Approval verification rate limit reached"
+                headers={"Retry-After": "60"},
+                text="Approval verification rate limit reached",
             )
         try:
             body = await read_json_body(request, max_bytes=96 * 1024)
@@ -1077,9 +1111,7 @@ def create_gateway(
             )
             token = approval_control_plane.approve(
                 challenge,
-                assertion=json.dumps(
-                    body["assertion"], separators=(",", ":")
-                ).encode(),
+                assertion=json.dumps(body["assertion"], separators=(",", ":")).encode(),
                 verifier=webauthn_rp.verify_assertion,
             )
         except (ValueError, TypeError):
@@ -1235,8 +1267,12 @@ def main():
     parser.add_argument("--dist", type=Path, default=Path("desktop/dist"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8780)
-    parser.add_argument("--webauthn-db", type=Path, default=os.environ.get("AITOS_WEBAUTHN_DB"))
-    parser.add_argument("--operator-id", default=os.environ.get("AITOS_OPERATOR_ID", "local-operator"))
+    parser.add_argument(
+        "--webauthn-db", type=Path, default=os.environ.get("AITOS_WEBAUTHN_DB")
+    )
+    parser.add_argument(
+        "--operator-id", default=os.environ.get("AITOS_OPERATOR_ID", "local-operator")
+    )
     args = parser.parse_args()
     try:
         config = GatewayConfig(
@@ -1249,9 +1285,10 @@ def main():
             )
         from aitos.security.webauthn_rp import WebAuthnRelyingParty
 
-        rp_id = os.environ.get("AITOS_WEBAUTHN_RP_ID") or urlsplit(
-            config.public_origin
-        ).hostname
+        rp_id = (
+            os.environ.get("AITOS_WEBAUTHN_RP_ID")
+            or urlsplit(config.public_origin).hostname
+        )
         webauthn_rp = WebAuthnRelyingParty(
             args.webauthn_db,
             rp_id=rp_id,
@@ -1274,7 +1311,9 @@ def main():
                 or any(not isinstance(role, str) for role in roles)
                 for user, roles in role_map.items()
             ):
-                parser.exit(2, "AITOS_OPERATOR_ROLE_MAP must map identities to role arrays.\\n")
+                parser.exit(
+                    2, "AITOS_OPERATOR_ROLE_MAP must map identities to role arrays.\\n"
+                )
             from aitos.security.live_approval import LiveApprovalControlPlane
 
             approval_control_plane = LiveApprovalControlPlane(
