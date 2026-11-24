@@ -128,11 +128,21 @@ async def _import_one(
         ):
             raise RuntimeError("PostgreSQL import ledger payload parity mismatch")
 
+    legacy_source = {
+        "table": item["source_table"],
+        "fingerprint": item["source_fingerprint"],
+        "occurrence": item["source_occurrence"],
+        "updated_at": item["updated_at"],
+    }
     events = await oms.read_events(scope, trade_id)
     existing = next((event for event in events if event.event_id == event_id), None)
     if existing is not None:
-        if existing.payload.get("trade") != payload:
-            raise RuntimeError("canonical event ID exists with different payload")
+        if (
+            existing.payload.get("trade_id") != trade_id
+            or existing.payload.get("legacy_source") != legacy_source
+            or existing.payload.get("event_type") != "TRADE_SNAPSHOT"
+        ):
+            raise RuntimeError("canonical event ID exists with different source evidence")
         return
     await oms.append(
         fence,
@@ -142,13 +152,7 @@ async def _import_one(
         payload={
             "event_type": "TRADE_SNAPSHOT",
             "trade_id": trade_id,
-            "trade": payload,
-            "legacy_source": {
-                "table": item["source_table"],
-                "fingerprint": item["source_fingerprint"],
-                "occurrence": item["source_occurrence"],
-                "updated_at": item["updated_at"],
-            },
+            "legacy_source": legacy_source,
         },
     )
 
@@ -537,18 +541,21 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                 f"legacy:{item['source_fingerprint']}:"
                                 f"{item['source_occurrence']}"
                             )
-                            expected_trade = dict(item["payload"])
-                            expected_trade["account_scope"] = scope
-                            expected_events[event_id] = expected_trade
+                            expected_events[event_id] = {
+                                "table": item["source_table"],
+                                "fingerprint": item["source_fingerprint"],
+                                "occurrence": item["source_occurrence"],
+                                "updated_at": item["updated_at"],
+                            }
                         events = await oms.read_events(scope, trade_id)
                         actual_events = {
-                            event.event_id: event.payload.get("trade")
+                            event.event_id: event.payload.get("legacy_source")
                             for event in events
                         }
-                        for event_id, expected_trade in expected_events.items():
-                            if actual_events.get(event_id) != expected_trade:
+                        for event_id, expected_source in expected_events.items():
+                            if actual_events.get(event_id) != expected_source:
                                 raise RuntimeError(
-                                    "canonical OMS event parity failed for "
+                                    "canonical OMS source-event parity failed for "
                                     f"scope={scope} trade={trade_id} event={event_id}"
                                 )
                             canonical_verified += 1
