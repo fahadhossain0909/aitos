@@ -59,7 +59,9 @@ class WebAuthnRelyingParty:
         self.origins = frozenset(allowed_origins)
         self.timeout_ms = timeout_ms
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
+        db = self._connect()
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS webauthn_credentials (
@@ -89,6 +91,8 @@ class WebAuthnRelyingParty:
                 );
                 """
             )
+        finally:
+            db.close()
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
