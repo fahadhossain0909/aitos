@@ -64,7 +64,6 @@ MIGRATIONS = (
             """,
         ),
     ),
-
     Migration(
         version=2,
         name="canonical_scope_keyed_oms",
@@ -195,9 +194,29 @@ _REQUIRED_COLUMNS = {
         "payload",
     },
     "aitos_oms_writer_fences": {"account_scope", "writer_id", "generation"},
-    "aitos_oms_aggregate_heads": {"account_scope", "aggregate_id", "revision", "event_hash"},
-    "aitos_oms_events": {"account_scope", "aggregate_id", "revision", "event_id", "writer_id", "generation", "payload", "previous_hash", "event_hash"},
-    "aitos_oms_outbox": {"account_scope", "aggregate_id", "revision", "projected_at"},
+    "aitos_oms_aggregate_heads": {
+        "account_scope",
+        "aggregate_id",
+        "revision",
+        "event_hash",
+    },
+    "aitos_oms_events": {
+        "account_scope",
+        "aggregate_id",
+        "revision",
+        "event_id",
+        "writer_id",
+        "generation",
+        "payload",
+        "previous_hash",
+        "event_hash",
+    },
+    "aitos_oms_outbox": {
+        "account_scope",
+        "aggregate_id",
+        "revision",
+        "projected_at",
+    },
 }
 
 

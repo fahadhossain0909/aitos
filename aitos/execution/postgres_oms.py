@@ -1,6 +1,7 @@
 """PostgreSQL-backed canonical OMS journal.
 
 This store is the multi-process authority for order/trade aggregate revisions.
+
 SQLite execution-intent records and ClickHouse tables are recovery evidence and
 projections; neither may supersede a committed PostgreSQL OMS event.
 """
@@ -53,8 +54,11 @@ def _canonical_payload(payload: dict[str, Any]) -> str:
     if type(payload) is not dict or not payload:
         raise ValueError("non-empty OMS event object is required")
     encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"),
-        ensure_ascii=False, allow_nan=False,
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
     )
     if len(encoded.encode("utf-8")) > 65536:
         raise ValueError("OMS event payload exceeds 64 KiB")
@@ -62,13 +66,27 @@ def _canonical_payload(payload: dict[str, Any]) -> str:
 
 
 def _event_hash(
-    scope: str, aggregate: str, revision: int, event_id: str,
-    writer_id: str, generation: int, previous_hash: str, payload_json: str,
+    scope: str,
+    aggregate: str,
+    revision: int,
+    event_id: str,
+    writer_id: str,
+    generation: int,
+    previous_hash: str,
+    payload_json: str,
 ) -> str:
-    material = "\\0".join((
-        scope, aggregate, str(revision), event_id, writer_id,
-        str(generation), previous_hash, payload_json,
-    ))
+    material = "\\0".join(
+        (
+            scope,
+            aggregate,
+            str(revision),
+            event_id,
+            writer_id,
+            str(generation),
+            previous_hash,
+            payload_json,
+        )
+    )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -86,7 +104,11 @@ class PostgresCanonicalOMS:
         self._pool = pool
 
     async def acquire_writer(
-        self, account_scope: str, writer_id: str, *, expected_generation: int,
+        self,
+        account_scope: str,
+        writer_id: str,
+        *,
+        expected_generation: int,
     ) -> WriterFence:
         scope = _identifier(account_scope, "account_scope")
         writer = _identifier(writer_id, "writer_id")
@@ -96,7 +118,8 @@ class PostgresCanonicalOMS:
             await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", scope)
             row = await conn.fetchrow(
                 """SELECT writer_id,generation FROM aitos_oms_writer_fences
-                   WHERE account_scope=$1 FOR UPDATE""", scope,
+                   WHERE account_scope=$1 FOR UPDATE""",
+                scope,
             )
             actual = int(row["generation"]) if row else 0
             if actual != expected_generation:
@@ -114,8 +137,13 @@ class PostgresCanonicalOMS:
         return WriterFence(scope, writer, generation)
 
     async def append(
-        self, fence: WriterFence, *, aggregate_id: str, event_id: str,
-        expected_revision: int, payload: dict[str, Any],
+        self,
+        fence: WriterFence,
+        *,
+        aggregate_id: str,
+        event_id: str,
+        expected_revision: int,
+        payload: dict[str, Any],
     ) -> OMSEvent:
         if type(fence) is not WriterFence:
             raise OMSConflict("a server-issued writer fence is required")
@@ -197,7 +225,9 @@ class PostgresCanonicalOMS:
             fence.generation, json.loads(encoded), previous_hash, digest,
         )
 
-    async def read_events(self, account_scope: str, aggregate_id: str) -> list[OMSEvent]:
+    async def read_events(
+        self, account_scope: str, aggregate_id: str
+    ) -> list[OMSEvent]:
         scope = _identifier(account_scope, "account_scope")
         aggregate = _identifier(aggregate_id, "aggregate_id")
         async with self._pool.acquire() as conn:
@@ -248,8 +278,12 @@ class PostgresCanonicalOMS:
             return [dict(row) for row in rows]
 
     async def mark_projected(
-        self, account_scope: str, aggregate_id: str, revision: int,
-        *, event_hash: str,
+        self,
+        account_scope: str,
+        aggregate_id: str,
+        revision: int,
+        *,
+        event_hash: str,
     ) -> None:
         scope = _identifier(account_scope, "account_scope")
         aggregate = _identifier(aggregate_id, "aggregate_id")
