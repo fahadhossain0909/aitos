@@ -48,7 +48,9 @@ class WebAuthnRelyingParty:
             or not allowed_origins
             or not 5_000 <= timeout_ms <= 120_000
         ):
-            raise ValueError("explicit RP identity, origins and bounded timeout required")
+            raise ValueError(
+                "explicit RP identity, origins and bounded timeout required"
+            )
         self.path = Path(path)
         self.rp_id = rp_id
         self.rp_name = rp_name
@@ -159,7 +161,9 @@ class WebAuthnRelyingParty:
                 require_user_verification=True,
             )
         except Exception as exc:
-            raise WebAuthnCredentialError("cryptographic WebAuthn registration failed") from exc
+            raise WebAuthnCredentialError(
+                "cryptographic WebAuthn registration failed"
+            ) from exc
 
         credential_id = verification.credential_id
         from webauthn.helpers import bytes_to_base64url
@@ -264,7 +268,9 @@ class WebAuthnRelyingParty:
                     require_user_verification=True,
                 )
                 if not verified.user_verified:
-                    raise WebAuthnCredentialError("authenticator did not verify the user")
+                    raise WebAuthnCredentialError(
+                        "authenticator did not verify the user"
+                    )
                 changed = db.execute(
                     "UPDATE webauthn_credentials SET sign_count=?,last_used_at=strftime('%s','now') "
                     "WHERE credential_id=? AND sign_count=?",
@@ -275,7 +281,9 @@ class WebAuthnRelyingParty:
                     ),
                 ).rowcount
                 if changed != 1:
-                    raise WebAuthnCredentialError("credential counter changed concurrently")
+                    raise WebAuthnCredentialError(
+                        "credential counter changed concurrently"
+                    )
                 db.commit()
                 return {
                     "verified": True,
@@ -296,4 +304,6 @@ class WebAuthnRelyingParty:
         except WebAuthnCredentialError:
             raise
         except Exception as exc:
-            raise WebAuthnCredentialError("cryptographic WebAuthn assertion failed") from exc
+            raise WebAuthnCredentialError(
+                "cryptographic WebAuthn assertion failed"
+            ) from exc
