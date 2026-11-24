@@ -491,7 +491,10 @@ def create_gateway(
             or origins != frozenset({config.public_origin})
         ):
             raise ValueError("WebAuthn RP ID and origin must match the gateway origin")
-    if webauthn_enrollment_token is not None and len(webauthn_enrollment_token) < 32:
+    if webauthn_enrollment_token is not None and (
+        not isinstance(webauthn_enrollment_token, str)
+        or len(webauthn_enrollment_token) < 32
+    ):
         raise ValueError("WebAuthn enrollment token must contain at least 256 bits")
     state = OperatorSessions(
         config, password, default_user=operator_id, identities=identities, clock=clock
