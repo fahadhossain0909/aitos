@@ -108,7 +108,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             for item in await oms.read_events("paper:integration", "trade-1")
         ] == [1, 2]
         pending = await oms.claim_outbox()
-        assert len(pending) == 2
+        assert len(pending) == 4
         await oms.mark_projected(
             "paper:integration",
             "trade-1",
