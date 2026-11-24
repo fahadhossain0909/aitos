@@ -78,6 +78,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         hedge_mode: bool = False,
         intent_store: ExecutionIntentStore | None = None,
         conditional_orders_api: str = "algo",
+        live_approval_consumer: Callable[[dict[str, Any]], str] | None = None,
     ) -> None:
         if not api_key or not api_secret:
             raise ValueError(
@@ -95,6 +96,11 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise ValueError("conditional_orders_api must be algo or legacy")
         self._conditional_orders_api = conditional_orders_api
         self._intent_store = intent_store
+        self._live_approval_consumer = live_approval_consumer
+        if not testnet and not callable(live_approval_consumer):
+            raise PermissionError(
+                "mainnet executor requires an authenticated single-use approval consumer"
+            )
         self._pending_execution: dict[str, str] = {}
         if not testnet:
             logger.warning(
@@ -398,6 +404,24 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             )
         client_id = request.client_order_id or f"aitos-{uuid.uuid4().hex[:20]}"
         request = replace(request, client_order_id=client_id)
+        if not self._base_url == TESTNET_URL:
+            if self._live_approval_consumer is None:
+                raise PermissionError("mainnet execution approval is unavailable")
+            action = {
+                "environment": "binance-usdm-mainnet",
+                "scope": self._intent_store.scope if self._intent_store else None,
+                "client_order_id": client_id,
+                "symbol": request.symbol,
+                "side": str(getattr(request.side, "value", request.side)),
+                "quantity": format(Decimal(str(quantity)), "f"),
+                "reference_price": format(Decimal(str(request.reference_price)), "f"),
+                "order_type": request.order_type,
+                "reduce_only": bool(request.reduce_only),
+                "owner_trade_id": request.owner_trade_id,
+            }
+            approver = self._live_approval_consumer(action)
+            if not isinstance(approver, str) or not approver:
+                raise PermissionError("approval consumer did not identify an authenticated approver")
         params = {
             "symbol": request.symbol,
             "type": request.order_type,
