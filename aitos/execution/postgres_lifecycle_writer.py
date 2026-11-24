@@ -100,7 +100,10 @@ class PostgresLifecycleStateWriter:
                     f"canonical OMS aggregate {trade_id} has no trade snapshot"
                 )
             trade = _trade_from_dict(snapshot)
-            if trade.trade_id != trade_id or trade.account_scope != self.fence.account_scope:
+            if (
+                trade.trade_id != trade_id
+                or trade.account_scope != self.fence.account_scope
+            ):
                 raise RuntimeError("canonical OMS trade identity/scope mismatch")
             if trade.state == TradeLifecycleState.POSITION_OPENED:
                 open_trades[trade.trade_id] = trade
@@ -108,7 +111,8 @@ class PostgresLifecycleStateWriter:
                 closed_trades.append(trade)
             else:
                 raise RuntimeError(
-                    f"canonical OMS trade {trade_id} is in unresolved state {trade.state.value}"
+                    "canonical OMS trade "
+                    f"{trade_id} is in unresolved state {trade.state.value}"
                 )
         lifecycle._open_trades.clear()
         lifecycle._open_trades.update(open_trades)
