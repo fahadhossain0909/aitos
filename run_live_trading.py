@@ -200,11 +200,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         writer_id,
         expected_generation=current_generation,
     )
-    components.trade_lifecycle.bind_postgres_canonical_oms(
-        postgres_oms, writer_fence
-    )
-    canonical_restore = await (
-        components.trade_lifecycle._postgres_canonical_oms_writer.restore_lifecycle(
+    components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
+    canonical_restore = (
+        await components.trade_lifecycle._postgres_canonical_oms_writer.restore_lifecycle(
             components.trade_lifecycle
         )
     )
