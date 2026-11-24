@@ -244,3 +244,62 @@ async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path):
         assert replay.status == 403
     finally:
         await client.close()
+
+
+async def test_remote_first_enrollment_requires_out_of_band_bootstrap_token(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+    origin = "https://console.example"
+    rp = FakeWebAuthn(credentials=0)
+    rp.rp_id = "console.example"
+    rp.origins = frozenset({origin})
+    config = GatewayConfig(
+        origin,
+        "http://127.0.0.1:8765",
+        dist,
+        workspace_file=tmp_path / "workspace.json",
+    )
+    app = create_gateway(
+        config,
+        password=PASSWORD,
+        webauthn_rp=rp,
+        operator_id="operator-1",
+        webauthn_enrollment_token="one-time-bootstrap-token-with-256-bit-minimum",
+    )
+    client = TestClient(TestServer(app), headers={"Host": "console.example"})
+    await client.start_server()
+    try:
+        denied = await client.post(
+            "/operator/v1/login",
+            json={"password": PASSWORD},
+            headers={"Origin": origin},
+        )
+        assert denied.status == 403
+        assert "aitos_local_operator_pending" not in denied.cookies
+
+        allowed = await client.post(
+            "/operator/v1/login",
+            json={
+                "password": PASSWORD,
+                "enrollment_token": "one-time-bootstrap-token-with-256-bit-minimum",
+            },
+            headers={"Origin": origin},
+        )
+        assert allowed.status == 200
+        assert (await allowed.json())["mfa_enrollment_required"] is True
+    finally:
+        await client.close()
+
+
+def test_remote_gateway_cannot_disable_webauthn(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+    config = GatewayConfig(
+        "https://console.example",
+        "http://127.0.0.1:8765",
+        dist,
+    )
+    with pytest.raises(ValueError, match="WebAuthn MFA is mandatory"):
+        create_gateway(config, password=PASSWORD)
