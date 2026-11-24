@@ -160,10 +160,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "--confirm-backup-retained"
         )
     try:
-        import asyncpg
         import clickhouse_connect
     except ImportError as exc:
-        raise RuntimeError("install asyncpg and clickhouse-connect") from exc
+        raise RuntimeError("install clickhouse-connect") from exc
+    asyncpg = None
+    if args.apply:
+        try:
+            import asyncpg as asyncpg_module
+        except ImportError as exc:
+            raise RuntimeError("install asyncpg for --apply") from exc
+        asyncpg = asyncpg_module
     dsn = os.getenv("DATABASE_URL")
     if not dsn:
         raise RuntimeError("DATABASE_URL must target the PostgreSQL primary")
@@ -175,9 +181,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
         secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
     )
-    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+    pool = (
+        await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+        if args.apply
+        else None
+    )
     try:
-        await apply_postgres_migrations(pool)
+        if pool is not None:
+            await apply_postgres_migrations(pool)
         sources = {
             RUNTIME_SOURCE: list(
                 ch.query(
@@ -234,6 +245,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "manifest": str(args.manifest_out),
                 "writes": 0,
             }
+        if pool is None:
+            raise RuntimeError("PostgreSQL pool unavailable in apply mode")
         await pool.execute(IMPORT_DDL)
         oms = PostgresCanonicalOMS(pool)
         imported = 0
@@ -270,7 +283,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "clickhouse_tables_mutated": False,
         }
     finally:
-        await pool.close()
+        if pool is not None:
+            await pool.close()
         ch.close()
 
 
