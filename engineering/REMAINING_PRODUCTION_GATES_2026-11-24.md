@@ -6,30 +6,40 @@ authorizes a database cutover, deployment, testnet order or mainnet execution.
 
 ## New code on this branch
 
-### Scope-keyed ClickHouse migration
-- `scripts/migrate_scoped_clickhouse_state.py` stages exact legacy payloads in
-  additive MergeTree v2 tables with account-scope ordering, source fingerprints,
-  occurrence numbers and payload hashes.
-- Legacy rows without embedded scope require an explicit fingerprint-to-scope
-  attribution manifest. Conflicts and ambiguous attribution fail closed.
-- The importer requires explicit writer-freeze and backup acknowledgements.
-- It has not been run against production data. Runtime readers/writers still
-  use the legacy tables. Historical versions already collapsed by
-  ReplacingMergeTree cannot be reconstructed from the current source table.
-- Therefore schema creation, import, source/target reconciliation, and reader/
-  writer cutover remain an operational acceptance gate, not a completed migration.
+### ClickHouse → PostgreSQL canonical OMS migration
+- `scripts/migrate_scoped_clickhouse_state.py` creates additive scope-keyed
+  ClickHouse tables with source fingerprints, occurrence numbers and canonical
+  payload hashes.
+- `scripts/import_clickhouse_state_to_postgres_oms.py` now streams legacy or
+  scope-keyed ClickHouse rows, verifies fingerprints/hashes, writes exact raw
+  payloads into the immutable PostgreSQL v3 evidence ledger, and appends
+  deterministic canonical OMS events that reference that evidence.
+- The importer is resumable, refuses conflicting source identities and refuses
+  to append legacy history over an existing non-legacy aggregate. The runbook
+  is `docs/CLICKHOUSE_TO_POSTGRES_OMS_IMPORT.md`.
+- It has not been run against production data. Historical versions already
+  collapsed by ReplacingMergeTree cannot be reconstructed from the current
+  source tables. Source/target per-record reconciliation and application
+  reader/writer routing cutover remain operational acceptance gates.
 
-### Transactional OMS primitive
-- `aitos/execution/oms_journal.py` adds a scope-keyed append-only SQLite WAL
-  event journal with writer-generation fencing, aggregate revision CAS,
-  idempotent event IDs, hash chaining and a projection outbox.
-- Unit tests cover stale writer rejection, revision conflicts, scope isolation,
-  idempotency and append-only constraints.
-- This is explicitly a single-host paper/test primitive. It is NOT yet wired
-  into the live `ExecutionIntentStore` / TradeLifecycle transaction boundary
-  and is NOT the canonical financial authority. A PostgreSQL transactional
-  implementation, migration of existing financial state, atomic lifecycle
-  integration, and restart/HA acceptance remain required.
+### PostgreSQL canonical OMS / lifecycle
+- `aitos/execution/postgres_oms.py` and
+  `aitos/execution/postgres_lifecycle_writer.py` provide scope-keyed event
+  append, writer-generation fencing, revision CAS, deterministic idempotency,
+  hash chaining, outbox projection and startup Trade hydration.
+- `run_live_trading.py` applies/verifies PostgreSQL migrations, acquires a
+  fresh writer fence, binds the PostgreSQL canonical lifecycle writer and
+  restores open/closed trades before component initialization. Missing
+  canonical aggregates fail closed.
+- Migration v3 makes canonical OMS events and imported raw-payload evidence
+  append-only. Legacy imported snapshots are resolved through their immutable
+  evidence reference and re-verified during lifecycle hydration.
+- The broader execution-intent journal, protection handovers, fee/funding
+  accounting and account equity/peak/drawdown ledger are not yet unified into
+  the same PostgreSQL transaction boundary. The SQLite execution-intent store
+  remains a local durable side-effect journal. This is still code-level work,
+  not merely a production acceptance test.
+
 
 ### Live approval and desktop identity boundary
 - `aitos/security/live_approval.py` implements action-digest binding, server-side
@@ -47,10 +57,11 @@ authorizes a database cutover, deployment, testnet order or mainnet execution.
   Multi-operator password directories and role maps are server-side config.
 - The desktop now contains the WebAuthn login ceremony, authenticator manager
   and Approval Desk. The desk signs an action digest only; it does not submit
-  orders or execute trading mutations. The signed receipt consumer still needs
-  a trusted service-to-service integration with the executor before it can
-  authorize any production action. Physical hardware enrollment and external
-  origin acceptance remain untested.
+  orders or execute trading mutations. A server-side exact-action token provider
+  and one-time consumer are implemented in `LiveApprovalControlPlane` and
+  `BinanceFuturesOrderExecutor`. The live runtime remains fail-closed until
+  gateway/executor shared-store deployment wiring is configured and accepted.
+  Physical hardware enrollment and external origin acceptance remain untested.
 
 ### Protective order and three-store recovery
 - The branch already contains durable intent preclaims, protection handover
@@ -67,8 +78,8 @@ authorizes a database cutover, deployment, testnet order or mainnet execution.
 
 | Workstream | Code status | Production acceptance |
 |---|---|---|
-| ClickHouse scope-keyed migration | Additive importer + tests | Not run; import/cutover outstanding |
-| Canonical OMS / CAS / fencing | Standalone primitive + tests | Not wired to active lifecycle; PG/HA outstanding |
+| ClickHouse → PostgreSQL import | Streaming, resumable evidence-ledger importer + tests | Not run; per-record production parity and routing cutover outstanding |
+| PostgreSQL canonical Trade OMS | CAS/fencing/hash-chain, startup hydration and append-only evidence | Execution-intent/financial-accounting transaction unification and HA acceptance outstanding |
 | Protective POST-to-ID and algo child fill recovery | Durable recovery path + tests | Isolated fixture acceptance pending/current-head CI |
 | Venue + SQLite + ClickHouse restarts | Fault-injection workflow + tests | CI results and authenticated venue proof required |
 | WebAuthn / desktop approval | RP adapter, identity-bound MFA, backup-key management, RBAC and approval UI implemented | Hardware authenticator, external origin and trusted executor receipt-consumer acceptance outstanding |
