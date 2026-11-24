@@ -152,9 +152,11 @@ async def _import_one(
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
-    if not (args.confirm_writers_stopped and args.confirm_backup_retained):
+    if args.apply and not (
+        args.confirm_writers_stopped and args.confirm_backup_retained
+    ):
         raise RuntimeError(
-            "offline import requires --confirm-writers-stopped and "
+            "apply requires --confirm-writers-stopped and "
             "--confirm-backup-retained"
         )
     try:
