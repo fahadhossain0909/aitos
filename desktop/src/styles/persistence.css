@@ -1,0 +1,200 @@
+/* Persistence evidence, isolated from illustrative financial workspaces. */
+.persistence-workspace {
+  display: grid;
+  gap: 20px;
+}
+.persistence-hero {
+  padding: 34px;
+  background:
+    radial-gradient(ellipse at 90% 0%, var(--c-283a243b), transparent 60%), var(--panel);
+}
+.persistence-hero h2 {
+  font-size: clamp(25px, 3vw, 39px);
+  line-height: 1.2;
+  letter-spacing: -1.4px;
+  margin: 20px 0 16px;
+  font-weight: 500;
+}
+.persistence-hero h2 span {
+  color: var(--muted);
+}
+.persistence-hero > p {
+  max-width: 760px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.persistence-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.persistence-toolbar button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.persistence-notice {
+  display: flex;
+  gap: 14px;
+  padding: 19px 22px;
+  border: 1px solid var(--c-a98a4540);
+  background: var(--c-a98a450a);
+  border-radius: 10px;
+  color: var(--c-c5af7c);
+}
+.persistence-notice > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.persistence-notice h3,
+.persistence-notice strong {
+  font-size: 11px;
+  margin: 0;
+  font-weight: 600;
+}
+.persistence-notice p {
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 5px 0 0;
+  max-width: 850px;
+  color: var(--muted);
+}
+.persistence-notice.observed {
+  border-color: var(--c-9ab58042);
+  color: var(--c-b4c99d);
+  background: var(--c-9ab58009);
+}
+.persistence-notice.synthetic {
+  border-style: dashed;
+}
+.persistence-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.persistence-metric {
+  padding: 23px;
+  display: grid;
+  gap: 18px;
+}
+.persistence-metric > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.persistence-metric strong {
+  font-size: 34px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+.persistence-metric small {
+  font-size: 9px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.persistence-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
+  margin-top: 28px;
+}
+.persistence-step {
+  position: relative;
+  min-width: 0;
+}
+.persistence-step-id {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2px;
+}
+.persistence-step h4 {
+  font-size: 12px;
+  font-weight: 500;
+  margin: 16px 0 10px;
+}
+.persistence-step p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  min-height: 60px;
+}
+.persistence-step > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  padding-top: 17px;
+}
+.persistence-step strong {
+  color: var(--c-e7eae1);
+  font-size: 15px;
+  font-weight: 500;
+}
+.persistence-flow-arrow {
+  position: absolute;
+  right: -23px;
+  top: 34px;
+  color: var(--muted);
+}
+.persistence-limits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.persistence-limits h3 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 20px 0 10px;
+}
+.persistence-limits p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.9;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .persistence-hero {
+    padding: 23px;
+  }
+  .persistence-hero h2 {
+    letter-spacing: -0.8px;
+  }
+  .persistence-metrics,
+  .persistence-flow,
+  .persistence-limits {
+    grid-template-columns: 1fr;
+  }
+  .persistence-metric {
+    gap: 12px;
+  }
+  .persistence-step p {
+    min-height: 0;
+  }
+  .persistence-flow-arrow {
+    display: none;
+  }
+  .persistence-toolbar {
+    gap: 10px;
+  }
+  .persistence-notice {
+    padding: 16px;
+  }
+  .persistence-notice strong {
+    line-height: 1.8;
+    display: block;
+  }
+}
+.persistence-workspace .section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.native-app-label{display:inline-flex;align-items:center;gap:7px;color:var(--c-9eae91);font:9px var(--mono);letter-spacing:.4px}
