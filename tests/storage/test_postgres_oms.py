@@ -201,6 +201,16 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
     class FakeClickHouse:
         closed = False
 
+        def query(self, query):
+            if "system.columns" in query:
+                return SimpleNamespace(
+                    result_rows=[
+                        ("trade_runtime_state", "trade_id"),
+                        ("paper_closed_trade_ledger", "trade_id"),
+                    ]
+                )
+            raise AssertionError(f"unexpected ClickHouse query: {query}")
+
         @contextmanager
         def query_row_block_stream(self, query):
             if "FROM trade_runtime_state" in query:
