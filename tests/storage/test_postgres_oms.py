@@ -135,13 +135,16 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         assert recovery == {"open": 1, "closed": 0}
         assert list(LifecycleState._open_trades) == ["trade-restore"]
         assert LifecycleState._open_trades["trade-restore"].symbol == "BTCUSDT"
-        assert LifecycleState._open_trades["trade-restore"].account_scope == "paper:integration"
+        assert (
+            LifecycleState._open_trades["trade-restore"].account_scope
+            == "paper:integration"
+        )
         assert [
             item.revision
             for item in await oms.read_events("paper:integration", "trade-1")
         ] == [1, 2, 3, 4]
         pending = await oms.claim_outbox()
-        assert len(pending) == 4
+        assert len(pending) == 5
         await oms.mark_projected(
             "paper:integration",
             "trade-1",
