@@ -233,15 +233,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.apply and not dsn:
         raise RuntimeError("DATABASE_URL must target the PostgreSQL primary")
 
-    ch = clickhouse_connect.get_client(
-        host=os.getenv("CLICKHOUSE_HOST", "localhost"),
-        port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
-        username=os.getenv("CLICKHOUSE_USER", "default"),
-        password=os.getenv("CLICKHOUSE_PASSWORD", ""),
-        database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
-        secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
-    )
-    pool = None
     manifest_path = Path(args.manifest_out)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     partial_manifest = manifest_path.with_suffix(
@@ -257,6 +248,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "manifest or partial manifest already exists; choose a new path "
             "to preserve previous migration evidence"
         )
+    ch = clickhouse_connect.get_client(
+        host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+        port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+        username=os.getenv("CLICKHOUSE_USER", "default"),
+        password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
+        secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
+    )
+    pool = None
     try:
         with tempfile.TemporaryDirectory(prefix="aitos-oms-import-") as workdir:
             stage = sqlite3.connect(Path(workdir) / "source-stage.sqlite")
