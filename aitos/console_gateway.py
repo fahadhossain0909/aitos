@@ -416,6 +416,14 @@ def create_gateway(
     approval_control_plane=None,
     operator_id: str = "local-operator",
 ) -> web.Application:
+    if (
+        not isinstance(operator_id, str)
+        or not operator_id.strip()
+        or len(operator_id) > 256
+    ):
+        raise ValueError("bounded operator identity is required")
+    if webauthn_rp is None and not _loopback(config.public_origin):
+        raise ValueError("WebAuthn MFA is mandatory for non-loopback operator gateways")
     state = OperatorSessions(config, password, clock=clock)
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
@@ -469,7 +477,7 @@ def create_gateway(
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
 
-    app = web.Application(middlewares=[boundary], client_max_size=4096)
+    app = web.Application(middlewares=[boundary], client_max_size=96 * 1024)
     app[GATEWAY_STATE] = state
 
     async def transport(app):
@@ -552,6 +560,23 @@ def create_gateway(
     def require_operator_session(request):
         if not state.remaining(request.cookies.get(cookie_name)):
             raise web.HTTPUnauthorized(text="Operator session required")
+
+    async def read_json_body(request, *, max_bytes: int):
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        raw = await request.read()
+        if len(raw) > max_bytes:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=max_bytes, actual_size=len(raw)
+            )
+        try:
+            return json.loads(
+                raw,
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
+        except (ValueError, UnicodeError):
+            raise web.HTTPBadRequest(text="Invalid JSON request") from None
 
     def workspace_layout_path():
         return config.workspace_file
@@ -679,10 +704,8 @@ def create_gateway(
                 status=429,
                 headers={"Retry-After": "60"},
             )
-        if request.content_type != "application/json":
-            raise web.HTTPUnsupportedMediaType()
         try:
-            body = await request.json()
+            body = await read_json_body(request, max_bytes=4096)
             if (
                 not isinstance(body, dict)
                 or set(body) != {"password"}
@@ -733,9 +756,7 @@ def create_gateway(
         if webauthn_rp is None:
             raise web.HTTPNotFound()
         require_pending(request)
-        if request.content_type != "application/json":
-            raise web.HTTPUnsupportedMediaType()
-        body = await request.json()
+        body = await read_json_body(request, max_bytes=96 * 1024)
         if not isinstance(body, dict) or set(body) != {"credential"}:
             raise web.HTTPBadRequest(text="Invalid WebAuthn enrollment")
         try:
@@ -756,9 +777,11 @@ def create_gateway(
         if webauthn_rp is None:
             raise web.HTTPNotFound()
         require_pending(request)
-        if request.content_type != "application/json":
-            raise web.HTTPUnsupportedMediaType()
-        body = await request.json()
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="MFA verification rate limit reached"
+            )
+        body = await read_json_body(request, max_bytes=96 * 1024)
         if (
             not isinstance(body, dict)
             or set(body) != {"challenge", "assertion"}
@@ -806,10 +829,8 @@ def create_gateway(
         require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
             raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
-        if request.content_type != "application/json":
-            raise web.HTTPUnsupportedMediaType()
         try:
-            body = await request.json()
+            body = await read_json_body(request, max_bytes=4096)
             if not isinstance(body, dict) or set(body) != {"action"}:
                 raise ValueError()
             action = body["action"]
@@ -843,10 +864,12 @@ def create_gateway(
         require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
             raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
-        if request.content_type != "application/json":
-            raise web.HTTPUnsupportedMediaType()
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="Approval verification rate limit reached"
+            )
         try:
-            body = await request.json()
+            body = await read_json_body(request, max_bytes=96 * 1024)
             if (
                 not isinstance(body, dict)
                 or set(body) != {"challenge_id", "assertion"}
