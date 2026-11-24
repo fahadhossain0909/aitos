@@ -945,7 +945,7 @@ def create_gateway(
             if not isinstance(action, dict) or not action:
                 raise ValueError()
             options = webauthn_rp.authentication_options(
-                user_id=operator_id, now=int(time.time())
+                user_id=user_id, now=int(time.time())
             )
             challenge = approval_control_plane.issue_challenge(
                 user_id=user_id,
