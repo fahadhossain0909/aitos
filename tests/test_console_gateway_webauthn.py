@@ -149,7 +149,9 @@ async def test_password_login_requires_enrollment_then_webauthn_assertion(gatewa
     assert session["authenticated"] is True
     assert session["identity"] == "operator-1"
     assert session["mfa"] is True
-    assert "aitos_local_operator_pending" not in verified.cookies
+    cleared = verified.cookies["aitos_local_operator_pending"]
+    assert cleared.value == ""
+    assert cleared["max-age"] == "0"
 
 
 async def test_existing_credential_login_never_issues_session_before_assertion(
