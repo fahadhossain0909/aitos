@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,6 @@ from webauthn import (
 )
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
-    UserVerificationRequirement,
     PublicKeyCredentialDescriptor,
     UserVerificationRequirement,
 )
@@ -321,7 +321,7 @@ class WebAuthnRelyingParty:
                 ).fetchone()
                 if (
                     challenge_row is None
-                    or challenge_row[1] <= int(__import__("time").time())
+                    or challenge_row[1] <= int(time.time())
                     or challenge_row[2] is not None
                 ):
                     raise WebAuthnCredentialError(
