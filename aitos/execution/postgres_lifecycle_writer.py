@@ -78,8 +78,14 @@ class PostgresLifecycleStateWriter:
             self._revisions[trade_id] = next_revision
             self._last_event_ids[trade_id] = event.event_id
             # This is a projection only. If it fails, the committed canonical
-            # event remains available for startup replay/reconciliation.
+            # event remains pending in the transactional outbox for replay.
             await self.projection_writer(trade)
+            await self.oms.mark_projected(
+                self.fence.account_scope,
+                trade_id,
+                event.revision,
+                event_hash=event.event_hash,
+            )
 
     async def restore_lifecycle(self, lifecycle: Any) -> dict[str, int]:
         """Replace projected lifecycle state with verified canonical OMS snapshots.
