@@ -304,7 +304,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             "SELECT account_scope,trade_id,legacy_payload_json,"
                             "updated_at,source_fingerprint,source_occurrence,"
                             "payload_sha256 "
-                            f"FROM {table_name} ORDER BY trade_id,updated_at,"
+                            f"FROM {table_name} FINAL ORDER BY trade_id,updated_at,"
                             "source_fingerprint,source_occurrence "
                             "SETTINGS max_result_rows=0,max_result_bytes=0,"
                             "result_overflow_mode='throw',read_overflow_mode='throw'"
