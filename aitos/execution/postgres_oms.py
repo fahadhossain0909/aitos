@@ -160,8 +160,16 @@ class PostgresCanonicalOMS:
         event = _identifier(event_id, "event_id")
         if type(expected_revision) is not int or expected_revision < 0:
             raise ValueError("expected_revision must be a non-negative integer")
-        encoded = _canonical_payload(payload)
         normalized_entries = self._validate_ledger_entries(ledger_entries or [])
+        canonical_payload = dict(payload)
+        if normalized_entries:
+            canonical_payload["financial_ledger"] = [
+                {"account_code": item["account_code"], "currency": item["currency"],
+                 "debit": format(item["debit"], "f"), "credit": format(item["credit"], "f"),
+                 "reference": item["reference"]}
+                for item in normalized_entries
+            ]
+        encoded = _canonical_payload(canonical_payload)
         async with self._pool.acquire() as conn, conn.transaction():
             owner = await conn.fetchrow(
                 """SELECT writer_id,generation FROM aitos_oms_writer_fences
