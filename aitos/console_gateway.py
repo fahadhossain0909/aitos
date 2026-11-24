@@ -920,18 +920,39 @@ def main():
     parser.add_argument("--dist", type=Path, default=Path("desktop/dist"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8780)
+    parser.add_argument("--webauthn-db", type=Path, default=os.environ.get("AITOS_WEBAUTHN_DB"))
+    parser.add_argument("--operator-id", default=os.environ.get("AITOS_OPERATOR_ID", "local-operator"))
     args = parser.parse_args()
     try:
         config = GatewayConfig(
             args.origin, args.upstream, args.dist, os.environ.get("AITOS_CONSOLE_TOKEN")
         )
-        app = create_gateway(
-            config, password=os.environ.get("AITOS_OPERATOR_PASSWORD", "")
+        if args.webauthn_db is None:
+            parser.exit(
+                2,
+                "AITOS_WEBAUTHN_DB or --webauthn-db is required; production gateway refuses password-only startup.\n",
+            )
+        from aitos.security.webauthn_rp import WebAuthnRelyingParty
+
+        rp_id = os.environ.get("AITOS_WEBAUTHN_RP_ID") or urlsplit(
+            config.public_origin
+        ).hostname
+        webauthn_rp = WebAuthnRelyingParty(
+            args.webauthn_db,
+            rp_id=rp_id,
+            rp_name="AITOS Operator Console",
+            allowed_origins={config.public_origin},
         )
-    except ValueError:
+        app = create_gateway(
+            config,
+            password=os.environ.get("AITOS_OPERATOR_PASSWORD", ""),
+            webauthn_rp=webauthn_rp,
+            operator_id=args.operator_id,
+        )
+    except (ValueError, OSError):
         parser.exit(
             2,
-            "Gateway configuration rejected. Check origins, built bundle and operator credential settings.\n",
+            "Gateway configuration rejected. Check origins, built bundle, operator credential and WebAuthn settings.\n",
         )
     web.run_app(app, host=args.host, port=args.port, access_log=None)
 
