@@ -72,6 +72,41 @@ class PostgresLifecycleStateWriter:
             # event remains available for startup replay/reconciliation.
             await self.projection_writer(trade)
 
+    async def restore_lifecycle(self, lifecycle: Any) -> dict[str, int]:
+        """Replace projected lifecycle state with verified canonical OMS snapshots.
+
+        In-flight/nonterminal states other than POSITION_OPENED and
+        POSITION_CLOSED are deliberately rejected: they require execution
+        intent and venue reconciliation before the lifecycle can safely resume.
+        """
+        from aitos.models.trade import TradeLifecycleState
+        from aitos.trading.persistent_state import _trade_from_dict
+
+        open_trades = {}
+        closed_trades = []
+        aggregate_ids = await self.oms.list_aggregate_ids(self.fence.account_scope)
+        for trade_id in aggregate_ids:
+            snapshot = await self.latest_snapshot(trade_id)
+            if snapshot is None:
+                raise RuntimeError(
+                    f"canonical OMS aggregate {trade_id} has no trade snapshot"
+                )
+            trade = _trade_from_dict(snapshot)
+            if trade.trade_id != trade_id or trade.account_scope != self.fence.account_scope:
+                raise RuntimeError("canonical OMS trade identity/scope mismatch")
+            if trade.state == TradeLifecycleState.POSITION_OPENED:
+                open_trades[trade.trade_id] = trade
+            elif trade.state == TradeLifecycleState.POSITION_CLOSED:
+                closed_trades.append(trade)
+            else:
+                raise RuntimeError(
+                    f"canonical OMS trade {trade_id} is in unresolved state {trade.state.value}"
+                )
+        lifecycle._open_trades.clear()
+        lifecycle._open_trades.update(open_trades)
+        lifecycle._closed_trades = closed_trades
+        return {"open": len(open_trades), "closed": len(closed_trades)}
+
     async def latest_snapshot(self, trade_id: str) -> dict[str, Any] | None:
         events = await self.oms.read_events(self.fence.account_scope, trade_id)
         for event in reversed(events):
