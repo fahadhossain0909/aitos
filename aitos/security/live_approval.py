@@ -15,6 +15,7 @@ import json
 import os
 import secrets
 import sqlite3
+import stat
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
