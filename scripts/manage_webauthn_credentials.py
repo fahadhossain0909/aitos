@@ -4,6 +4,7 @@ Run only from a trusted host with filesystem access to the gateway credential DB
 This utility is intentionally not exposed as an HTTP or desktop credential-delete
 endpoint.
 """
+
 from __future__ import annotations
 
 import argparse
