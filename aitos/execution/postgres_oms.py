@@ -277,6 +277,45 @@ class PostgresCanonicalOMS:
             )
         return int(row["generation"]) if row else 0
 
+    async def get_legacy_import_payload(
+        self,
+        account_scope: str,
+        source_table: str,
+        source_fingerprint: str,
+        source_occurrence: int,
+    ) -> str:
+        """Read exact legacy JSON only after validating its durable SHA-256 evidence."""
+        scope = _identifier(account_scope, "account scope")
+        table = _identifier(source_table, "legacy source table")
+        fingerprint = _identifier(source_fingerprint, "source fingerprint")
+        if (
+            len(fingerprint) != 64
+            or any(char not in "0123456789abcdef" for char in fingerprint)
+            or type(source_occurrence) is not int
+            or source_occurrence < 0
+        ):
+            raise ValueError("invalid legacy import evidence identity")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT raw_payload,raw_payload_sha256
+                FROM aitos_oms_legacy_imports
+                WHERE account_scope=$1 AND source_table=$2
+                  AND source_fingerprint=$3 AND source_occurrence=$4
+                """,
+                scope,
+                table,
+                fingerprint,
+                source_occurrence,
+            )
+        if row is None:
+            raise RuntimeError("canonical legacy import evidence is missing")
+        raw_payload = row["raw_payload"]
+        expected_hash = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(expected_hash, row["raw_payload_sha256"]):
+            raise RuntimeError("canonical legacy import evidence SHA-256 mismatch")
+        return raw_payload
+
     async def list_aggregate_ids(self, account_scope: str) -> list[str]:
         """List aggregate identities with committed canonical history for one scope."""
         scope = _identifier(account_scope, "account_scope")
