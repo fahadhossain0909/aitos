@@ -64,10 +64,34 @@ and currently provisions testnet credentials only. Use it only on a trusted,
 user-controlled device. Do not start live trading to test the console. The public development preview remains an unattached/sample sandbox,
 not a route to real financial data.
 
-**Security boundary:** the new gateway implements single-process read-only
-operator authentication, not a production control plane, OS vault, multi-user
-identity system or security certification. TLS termination, hardening and
-independent review are still required before any nonlocal activation.
+**Security boundary:** the gateway now supports a bounded server-configured
+operator identity directory, per-identity password verification, user-bound
+WebAuthn MFA, absolute-expiry HttpOnly sessions, role-gated approval challenges,
+and short-lived single-use signed approval receipts. The default identity can
+still be configured with `AITOS_OPERATOR_ID` and
+`AITOS_OPERATOR_PASSWORD`; for multiple operators, use the server-only
+`AITOS_OPERATOR_IDENTITIES` JSON mapping (identity to password). The default
+identity must be present in that mapping. Each identity enrolls its own
+authenticator. For the first authenticator on a non-loopback gateway, supply
+an out-of-band `AITOS_WEBAUTHN_ENROLLMENT_TOKEN` of at least 32 characters.
+Never expose these variables to Vite or the browser.
+
+Production gateway startup requires `AITOS_WEBAUTHN_DB` (or
+`--webauthn-db`) and a matching `AITOS_WEBAUTHN_RP_ID`. The RP origin is
+bound to the exact configured browser origin. To enable the Approval Desk,
+configure both `AITOS_APPROVAL_SIGNING_KEY` (at least 32 bytes) and the
+server-owned `AITOS_OPERATOR_ROLE_MAP` JSON mapping identities to role arrays,
+for example `{"local-operator":["live_trader"]}`. The role map is the
+authorization source; a browser-provided role or MFA flag is never trusted.
+
+The approval interface signs a canonical action digest after a fresh
+WebAuthn assertion. It does **not** submit orders, execute trading mutations,
+or claim execution confirmation; the gateway intentionally exposes no trading
+mutation route. Signed receipts still need a separately governed server-side
+consumer before they can authorize any live execution. This is not an OS vault,
+distributed identity provider, security certification or production release.
+TLS termination, recovery policy, hardening and independent security review
+remain required before nonlocal activation.
 
 ## Implemented interactions
 
