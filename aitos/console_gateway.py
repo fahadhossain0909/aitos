@@ -18,7 +18,7 @@ import re
 import secrets
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -413,6 +413,7 @@ def create_gateway(
     password: str,
     clock=time.monotonic,
     webauthn_rp=None,
+    approval_control_plane=None,
     operator_id: str = "local-operator",
 ) -> web.Application:
     state = OperatorSessions(config, password, clock=clock)
@@ -790,6 +791,88 @@ def create_gateway(
         logger.info("operator MFA sign-in accepted")
         return issue_operator_session(response, request)
 
+    async def approval_capabilities(request):
+        require_operator_session(request)
+        enabled = approval_control_plane is not None and webauthn_rp is not None
+        return web.json_response(
+            {
+                "enabled": enabled,
+                "requires_webauthn_step_up": enabled,
+                "execution": "not_exposed_by_operator_gateway",
+            }
+        )
+
+    async def create_approval_challenge(request):
+        require_operator_session(request)
+        if approval_control_plane is None or webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {"action"}:
+                raise ValueError()
+            action = body["action"]
+            if not isinstance(action, dict) or not action:
+                raise ValueError()
+            options = webauthn_rp.authentication_options(
+                user_id=operator_id, now=int(time.time())
+            )
+            challenge = approval_control_plane.issue_challenge(
+                user_id=operator_id,
+                action=action,
+                webauthn_challenge=options["challenge"],
+            )
+        except (ValueError, TypeError):
+            raise web.HTTPBadRequest(text="Invalid approval action") from None
+        except PermissionError:
+            raise web.HTTPForbidden(text="Approval role is not authorized") from None
+        except Exception as exc:
+            logger.warning("approval challenge creation failed: %s", type(exc).__name__)
+            raise web.HTTPServiceUnavailable(text="Approval challenge unavailable") from None
+        return web.json_response(
+            {
+                "challenge_id": challenge.challenge_id,
+                "action_digest": challenge.action_digest,
+                "expires_at": challenge.expires_at,
+                "options": options,
+            }
+        )
+
+    async def approve_action(request):
+        require_operator_session(request)
+        if approval_control_plane is None or webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        try:
+            body = await request.json()
+            if (
+                not isinstance(body, dict)
+                or set(body) != {"challenge_id", "assertion"}
+                or not isinstance(body["challenge_id"], str)
+                or not isinstance(body["assertion"], dict)
+            ):
+                raise ValueError()
+            challenge = approval_control_plane.load_challenge(
+                body["challenge_id"], user_id=operator_id
+            )
+            token = approval_control_plane.approve(
+                challenge,
+                assertion=json.dumps(
+                    body["assertion"], separators=(",", ":")
+                ).encode(),
+                verifier=webauthn_rp.verify_assertion,
+            )
+        except (ValueError, TypeError):
+            raise web.HTTPBadRequest(text="Invalid approval response") from None
+        except PermissionError:
+            raise web.HTTPForbidden(text="Approval verification rejected") from None
+        except Exception as exc:
+            logger.warning("approval verification failed: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="Approval verification rejected") from None
+        return web.json_response(asdict(token))
+
     async def logout(request):
         state.revoke(request.cookies.get(cookie_name))
         state.revoke_pending(request.cookies.get(pending_cookie))
@@ -903,6 +986,9 @@ def create_gateway(
     app.router.add_post("/operator/v1/login", login)
     app.router.add_post("/operator/v1/mfa/register", finish_mfa_enrollment)
     app.router.add_post("/operator/v1/mfa/verify", finish_mfa_login)
+    app.router.add_get("/operator/v1/approval/capabilities", approval_capabilities)
+    app.router.add_post("/operator/v1/approval/challenge", create_approval_challenge)
+    app.router.add_post("/operator/v1/approval/approve", approve_action)
     app.router.add_post("/operator/v1/logout", logout)
     app.router.add_route("*", "/console/{path:.*}", proxy)
     app.router.add_get("/{path:.*}", static_file)
