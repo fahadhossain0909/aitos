@@ -117,6 +117,7 @@ class LiveApprovalControlPlane:
         action: dict,
         required_role: str = "live_trader",
         now: int | None = None,
+        webauthn_challenge: str | None = None,
     ):
         if (
             not isinstance(user_id, str)
@@ -125,7 +126,10 @@ class LiveApprovalControlPlane:
         ):
             raise ApprovalDenied("server-side RBAC denied live approval request")
         now = int(time.time()) if now is None else int(now)
-        challenge_id, challenge = secrets.token_urlsafe(24), secrets.token_urlsafe(32)
+        challenge_id = secrets.token_urlsafe(24)
+        challenge = webauthn_challenge or secrets.token_urlsafe(32)
+        if not isinstance(challenge, str) or not 16 <= len(challenge) <= 256:
+            raise ValueError("bounded server-issued WebAuthn challenge required")
         digest = self._digest(action)
         expiry = now + self.ttl
         with sqlite3.connect(self.path, timeout=5) as db:
@@ -140,6 +144,27 @@ class LiveApprovalControlPlane:
                 (user_id, digest, now),
             )
         return ApprovalChallenge(challenge_id, challenge, user_id, digest, expiry)
+
+    def load_challenge(self, challenge_id: str, *, user_id: str):
+        """Load an unconsumed challenge only for its authenticated owner."""
+        if (
+            not isinstance(challenge_id, str)
+            or not 16 <= len(challenge_id) <= 128
+            or not isinstance(user_id, str)
+            or not user_id
+        ):
+            raise ApprovalDenied("invalid approval challenge identity")
+        with sqlite3.connect(self.path, timeout=5) as db:
+            row = db.execute(
+                "SELECT challenge,user_id,action_digest,expires_at,consumed "
+                "FROM live_approval_challenges WHERE challenge_id=?",
+                (challenge_id,),
+            ).fetchone()
+        if row is None or row[1] != user_id or row[4]:
+            raise ApprovalDenied("approval challenge is unavailable")
+        return ApprovalChallenge(
+            challenge_id, row[0], row[1], row[2], int(row[3])
+        )
 
     def approve(
         self,
