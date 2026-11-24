@@ -166,8 +166,12 @@ def _select_clickhouse_source(client: Any, source: str) -> tuple[str, bool]:
         raise RuntimeError(f"ClickHouse source table {source} is missing")
 
     if "account_scope" in columns.get(source, set()):
+        if backup not in columns:
+            raise RuntimeError(
+                f"scope-keyed active table {source} has no retained pre-scope backup"
+            )
         selected, scoped = source, True
-        companion = backup if backup in columns else None
+        companion = backup
     elif "account_scope" in columns.get(target, set()):
         selected, scoped = target, True
         companion = source if source in columns else None
