@@ -994,8 +994,12 @@ def create_gateway(
         )
 
     async def approval_capabilities(request):
-        require_operator_session(request)
-        enabled = approval_control_plane is not None and webauthn_rp is not None
+        user_id = require_operator_session(request)
+        enabled = (
+            approval_control_plane is not None
+            and webauthn_rp is not None
+            and approval_control_plane.role_authorizer(user_id, "live_trader")
+        )
         return web.json_response(
             {
                 "enabled": enabled,
