@@ -13,6 +13,8 @@ import asyncio
 import hashlib
 import json
 import os
+import sqlite3
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -173,6 +175,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     dsn = os.getenv("DATABASE_URL")
     if args.apply and not dsn:
         raise RuntimeError("DATABASE_URL must target the PostgreSQL primary")
+
     ch = clickhouse_connect.get_client(
         host=os.getenv("CLICKHOUSE_HOST", "localhost"),
         port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
@@ -181,165 +184,239 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
         secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
     )
-    pool = (
-        await asyncpg.create_pool(dsn, min_size=1, max_size=5)
-        if args.apply
-        else None
+    pool = None
+    manifest_path = Path(args.manifest_out)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    partial_manifest = manifest_path.with_suffix(
+        manifest_path.suffix + ".partial"
     )
     try:
-        if pool is not None:
-            await apply_postgres_migrations(pool)
-        sources = {
-            RUNTIME_SOURCE: list(
-                ch.query(
-                    "SELECT trade_id,symbol,state,payload_json,updated_at "
-                    "FROM trade_runtime_state SETTINGS max_result_rows=250000, "
-                    "max_result_bytes=536870912, result_overflow_mode='throw', "
-                    "read_overflow_mode='throw'"
-                ).result_rows
-            ),
-            CLOSED_SOURCE: list(
-                ch.query(
-                    "SELECT trade_id,payload_json,updated_at "
-                    "FROM paper_closed_trade_ledger SETTINGS max_result_rows=250000, "
-                    "max_result_bytes=536870912, result_overflow_mode='throw', "
-                    "read_overflow_mode='throw'"
-                ).result_rows
-            ),
-        }
-        counts: Counter[str] = Counter()
-        items: list[dict[str, Any]] = []
-        for table, rows in sources.items():
-            occurrences: Counter[str] = Counter()
-            for row in rows:
-                trade_id = str(row[0])
-                raw = str(row[3] if table == RUNTIME_SOURCE else row[1])
-                stamp = row[4] if table == RUNTIME_SOURCE else row[2]
-                fp = source_fingerprint(table, trade_id, raw, stamp)
-                occurrence = occurrences[fp]
-                occurrences[fp] += 1
-                item = _manifest_row(table, row, occurrence)
-                mapped = args.scope_map.get(fp)
-                embedded = item["payload"].get("account_scope")
-                if embedded and mapped and embedded != mapped:
-                    raise ValueError(f"scope map conflicts for {fp}")
-                item["account_scope"] = _scope(embedded or mapped)
-                counts[table] += 1
-                items.append(item)
-        args.manifest_out.write_text(
-            json.dumps(
-                [{k: v for k, v in item.items() if k != "payload"} for item in items],
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        by_scope: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for item in items:
-            by_scope[item["account_scope"]].append(item)
-        if not args.apply:
-            return {
-                "mode": "dry-run",
-                "runtime_rows": counts[RUNTIME_SOURCE],
-                "closed_rows": counts[CLOSED_SOURCE],
-                "scopes": {scope: len(rows) for scope, rows in by_scope.items()},
-                "manifest": str(args.manifest_out),
-                "writes": 0,
-            }
-        if pool is None:
-            raise RuntimeError("PostgreSQL pool unavailable in apply mode")
-        await pool.execute(IMPORT_DDL)
-        oms = PostgresCanonicalOMS(pool)
-        imported = 0
-        for scope, records in sorted(by_scope.items()):
-            generation = await oms.writer_generation(scope)
-            fence = await oms.acquire_writer(
-                scope,
-                f"clickhouse-import:{os.getpid()}",
-                expected_generation=generation,
-            )
-            records.sort(
-                key=lambda item: (
-                    item["trade_id"],
-                    item["updated_at"],
-                    item["source_table"] == CLOSED_SOURCE,
-                    item["source_fingerprint"],
-                    item["source_occurrence"],
-                )
-            )
-            by_trade: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for item in records:
-                by_trade[item["trade_id"]].append(item)
-            for trade_records in by_trade.values():
-                for previous, current in zip(trade_records, trade_records[1:]):
-                    if (
-                        previous["updated_at"] == current["updated_at"]
-                        and previous["raw_payload_sha256"] != current["raw_payload_sha256"]
-                    ):
-                        raise RuntimeError(
-                            "ambiguous same-timestamp legacy snapshots; refusing "
-                            "to invent canonical event ordering"
+        with tempfile.TemporaryDirectory(prefix="aitos-oms-import-") as workdir:
+            stage = sqlite3.connect(Path(workdir) / "source-stage.sqlite")
+            try:
+                stage.execute(
+                    """
+                    CREATE TABLE staged_source (
+                        account_scope TEXT NOT NULL,
+                        source_table TEXT NOT NULL,
+                        source_fingerprint TEXT NOT NULL,
+                        source_occurrence INTEGER NOT NULL,
+                        trade_id TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        raw_payload TEXT NOT NULL,
+                        raw_payload_sha256 TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        PRIMARY KEY (
+                            account_scope, source_table,
+                            source_fingerprint, source_occurrence
                         )
-            for item in records:
-                await _import_one(pool, oms, fence, item)
-                imported += 1
-        expected_rows = counts[RUNTIME_SOURCE] + counts[CLOSED_SOURCE]
-        if imported != expected_rows:
-            raise RuntimeError(
-                f"PostgreSQL import incomplete: expected {expected_rows}, imported {imported}"
-            )
+                    )
+                    """
+                )
+                stage.execute(
+                    "CREATE INDEX staged_trade_order ON staged_source "
+                    "(account_scope,trade_id,updated_at,source_table)"
+                )
+                counts: Counter[str] = Counter()
+                scope_counts: Counter[str] = Counter()
+                queries = {
+                    RUNTIME_SOURCE: (
+                        "SELECT trade_id,symbol,state,payload_json,updated_at "
+                        "FROM trade_runtime_state ORDER BY trade_id,updated_at,payload_json"
+                    ),
+                    CLOSED_SOURCE: (
+                        "SELECT trade_id,payload_json,updated_at "
+                        "FROM paper_closed_trade_ledger "
+                        "ORDER BY trade_id,updated_at,payload_json"
+                    ),
+                }
+                with partial_manifest.open("w", encoding="utf-8", newline="\\n") as manifest:
+                    for table, query in queries.items():
+                        occurrences: Counter[str] = Counter()
+                        with ch.query_row_block_stream(query) as blocks:
+                            for block in blocks:
+                                for row in block:
+                                    trade_id = str(row[0])
+                                    raw = str(
+                                        row[3] if table == RUNTIME_SOURCE else row[1]
+                                    )
+                                    stamp = row[4] if table == RUNTIME_SOURCE else row[2]
+                                    fingerprint = source_fingerprint(
+                                        table, trade_id, raw, stamp
+                                    )
+                                    occurrence = occurrences[fingerprint]
+                                    occurrences[fingerprint] += 1
+                                    item = _manifest_row(table, row, occurrence)
+                                    mapped = args.scope_map.get(fingerprint)
+                                    embedded = item["payload"].get("account_scope")
+                                    if embedded and mapped and embedded != mapped:
+                                        raise ValueError(
+                                            f"scope map conflicts for {fingerprint}"
+                                        )
+                                    scope = _scope(embedded or mapped)
+                                    item["account_scope"] = scope
+                                    stage.execute(
+                                        """
+                                        INSERT INTO staged_source
+                                            (account_scope,source_table,source_fingerprint,
+                                             source_occurrence,trade_id,updated_at,
+                                             raw_payload,raw_payload_sha256,payload_json)
+                                        VALUES(?,?,?,?,?,?,?,?,?)
+                                        """,
+                                        (
+                                            scope,
+                                            table,
+                                            fingerprint,
+                                            occurrence,
+                                            trade_id,
+                                            item["updated_at"],
+                                            item["raw_payload"],
+                                            item["raw_payload_sha256"],
+                                            json.dumps(
+                                                item["payload"],
+                                                separators=(",", ":"),
+                                                ensure_ascii=False,
+                                                allow_nan=False,
+                                            ),
+                                        ),
+                                    )
+                                    manifest.write(
+                                        json.dumps(
+                                            item,
+                                            separators=(",", ":"),
+                                            ensure_ascii=False,
+                                            allow_nan=False,
+                                        )
+                                        + "\\n"
+                                    )
+                                    counts[table] += 1
+                                    scope_counts[scope] += 1
+                    manifest.flush()
+                    os.fsync(manifest.fileno())
+                stage.commit()
 
-        # Verify every manifest occurrence against the durable PostgreSQL
-        # evidence ledger and every deterministic event against canonical OMS.
-        for scope, records in by_scope.items():
-            async with pool.acquire() as conn:
-                evidence = await conn.fetch(
-                    "SELECT source_table,source_fingerprint,source_occurrence,"
-                    "raw_payload_sha256 FROM aitos_oms_legacy_imports "
-                    "WHERE account_scope=$1",
-                    scope,
-                )
-            actual_evidence = {
-                (
-                    row["source_table"],
-                    row["source_fingerprint"],
-                    int(row["source_occurrence"]),
-                ): row["raw_payload_sha256"]
-                for row in evidence
-            }
-            for item in records:
-                identity = (
-                    item["source_table"],
-                    item["source_fingerprint"],
-                    item["source_occurrence"],
-                )
-                if actual_evidence.get(identity) != item["raw_payload_sha256"]:
+                ambiguous = stage.execute(
+                    """
+                    SELECT account_scope,trade_id,updated_at
+                    FROM staged_source
+                    GROUP BY account_scope,trade_id,updated_at
+                    HAVING count(DISTINCT raw_payload_sha256) > 1
+                    LIMIT 1
+                    """
+                ).fetchone()
+                if ambiguous:
                     raise RuntimeError(
-                        "source manifest SHA-256 does not match PostgreSQL evidence"
+                        "ambiguous same-timestamp legacy snapshots for "
+                        f"scope={ambiguous[0]} trade={ambiguous[1]}; refusing "
+                        "to invent canonical event ordering"
                     )
-                events = await oms.read_events(scope, item["trade_id"])
-                event_id = (
-                    f"legacy:{item['source_fingerprint']}:{item['source_occurrence']}"
-                )
-                event = next(
-                    (candidate for candidate in events if candidate.event_id == event_id),
-                    None,
-                )
-                expected_trade = dict(item["payload"])
-                expected_trade["account_scope"] = scope
-                if event is None or event.payload.get("trade") != expected_trade:
+
+                expected_rows = counts[RUNTIME_SOURCE] + counts[CLOSED_SOURCE]
+                if not args.apply:
+                    os.replace(partial_manifest, manifest_path)
+                    return {
+                        "mode": "dry-run",
+                        "runtime_rows": counts[RUNTIME_SOURCE],
+                        "closed_rows": counts[CLOSED_SOURCE],
+                        "scopes": dict(scope_counts),
+                        "manifest": str(manifest_path),
+                        "writes": 0,
+                        "postgres_connected": False,
+                    }
+
+                pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+                await apply_postgres_migrations(pool)
+                await pool.execute(IMPORT_DDL)
+                oms = PostgresCanonicalOMS(pool)
+                imported = 0
+                canonical_verified = 0
+                scopes = [
+                    row[0]
+                    for row in stage.execute(
+                        "SELECT DISTINCT account_scope FROM staged_source "
+                        "ORDER BY account_scope"
+                    )
+                ]
+                for scope in scopes:
+                    generation = await oms.writer_generation(scope)
+                    fence = await oms.acquire_writer(
+                        scope,
+                        f"clickhouse-import:{os.getpid()}",
+                        expected_generation=generation,
+                    )
+                    trade_ids = [
+                        row[0]
+                        for row in stage.execute(
+                            "SELECT DISTINCT trade_id FROM staged_source "
+                            "WHERE account_scope=? ORDER BY trade_id",
+                            (scope,),
+                        )
+                    ]
+                    for trade_id in trade_ids:
+                        rows = stage.execute(
+                            """
+                            SELECT source_table,source_fingerprint,source_occurrence,
+                                   updated_at,raw_payload,raw_payload_sha256,payload_json
+                            FROM staged_source
+                            WHERE account_scope=? AND trade_id=?
+                            ORDER BY updated_at,
+                                CASE WHEN source_table=? THEN 1 ELSE 0 END,
+                                source_fingerprint,source_occurrence
+                            """,
+                            (scope, trade_id, CLOSED_SOURCE),
+                        ).fetchall()
+                        expected_events = {}
+                        for row in rows:
+                            item = {
+                                "source_table": row[0],
+                                "source_fingerprint": row[1],
+                                "source_occurrence": int(row[2]),
+                                "updated_at": row[3],
+                                "raw_payload": row[4],
+                                "raw_payload_sha256": row[5],
+                                "trade_id": trade_id,
+                                "payload": json.loads(row[6]),
+                            }
+                            await _import_one(pool, oms, fence, item)
+                            imported += 1
+                            event_id = (
+                                f"legacy:{item['source_fingerprint']}:"
+                                f"{item['source_occurrence']}"
+                            )
+                            expected_trade = dict(item["payload"])
+                            expected_trade["account_scope"] = scope
+                            expected_events[event_id] = expected_trade
+                        events = await oms.read_events(scope, trade_id)
+                        actual_events = {
+                            event.event_id: event.payload.get("trade")
+                            for event in events
+                        }
+                        for event_id, expected_trade in expected_events.items():
+                            if actual_events.get(event_id) != expected_trade:
+                                raise RuntimeError(
+                                    "canonical OMS event parity failed for "
+                                    f"scope={scope} trade={trade_id} event={event_id}"
+                                )
+                            canonical_verified += 1
+
+                if imported != expected_rows or canonical_verified != expected_rows:
                     raise RuntimeError(
-                        "canonical OMS event parity failed for imported source row"
+                        "PostgreSQL canonical import incomplete: "
+                        f"source={expected_rows}, imported={imported}, "
+                        f"verified={canonical_verified}"
                     )
-        return {
-            "mode": "imported-and-verified",
-            "runtime_rows": counts[RUNTIME_SOURCE],
-            "closed_rows": counts[CLOSED_SOURCE],
-            "imported_rows": imported,
-            "postgres_import_rows_verified": imported,
-            "canonical_events_verified": imported,
-            "manifest": str(args.manifest_out),
-            "clickhouse_tables_mutated": False,
-        }
+                os.replace(partial_manifest, manifest_path)
+                return {
+                    "mode": "imported-and-verified",
+                    "runtime_rows": counts[RUNTIME_SOURCE],
+                    "closed_rows": counts[CLOSED_SOURCE],
+                    "imported_rows": imported,
+                    "canonical_events_verified": canonical_verified,
+                    "manifest": str(manifest_path),
+                    "clickhouse_tables_mutated": False,
+                }
+            finally:
+                stage.close()
     finally:
         if pool is not None:
             await pool.close()
@@ -355,7 +432,7 @@ def main() -> int:
     parser.add_argument(
         "--manifest-out",
         type=Path,
-        default=Path("clickhouse-to-postgres-oms-manifest.json"),
+        default=Path("clickhouse-to-postgres-oms-manifest.jsonl"),
     )
     args = parser.parse_args()
     mapping = json.loads(args.scope_map.read_text(encoding="utf-8"))
