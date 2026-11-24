@@ -90,31 +90,6 @@ def test_mainnet_requires_authenticated_approval_consumer():
     assert consumed == []
 
 
-++ /home/runner/work/aitos/aitos/tests/test_live_approval_control_plane.py	2026-11-24 07:01:56.514357+00:00
-import pytest
-
-from aitos.security.live_approval import (
-    ApprovalDenied,
-    LiveApprovalControlPlane,
-)
-
-
-def verifier(**kwargs):
-    return {
-        "verified": True,
-        "user_id": "alice",
-        "user_verified": True,
-        "origin": "https://console.example",
-        "rp_id": "console.example",
-    }
-
-
-def setup(tmp_path):
-    return LiveApprovalControlPlane(
-        tmp_path / "approval.sqlite",
-        signing_key=b"x" * 32,
-
-
 @pytest.mark.asyncio
 async def test_account_equity_uses_total_margin_balance_not_available_margin():
     executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
