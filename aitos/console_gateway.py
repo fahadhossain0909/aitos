@@ -1029,10 +1029,37 @@ def main():
             rp_name="AITOS Operator Console",
             allowed_origins={config.public_origin},
         )
+        approval_key = os.environ.get("AITOS_APPROVAL_SIGNING_KEY")
+        role_map_raw = os.environ.get("AITOS_OPERATOR_ROLE_MAP")
+        approval_control_plane = None
+        if approval_key or role_map_raw:
+            if not approval_key or not role_map_raw:
+                parser.exit(
+                    2,
+                    "Approval requires both AITOS_APPROVAL_SIGNING_KEY and AITOS_OPERATOR_ROLE_MAP.\\n",
+                )
+            role_map = json.loads(role_map_raw)
+            if not isinstance(role_map, dict) or any(
+                not isinstance(user, str)
+                or not isinstance(roles, list)
+                or any(not isinstance(role, str) for role in roles)
+                for user, roles in role_map.items()
+            ):
+                parser.exit(2, "AITOS_OPERATOR_ROLE_MAP must map identities to role arrays.\\n")
+            from aitos.security.live_approval import LiveApprovalControlPlane
+
+            approval_control_plane = LiveApprovalControlPlane(
+                args.webauthn_db.with_name("live-approvals.sqlite"),
+                signing_key=approval_key.encode("utf-8"),
+                allowed_origins={config.public_origin},
+                rp_id=rp_id,
+                role_authorizer=lambda user, role: role in role_map.get(user, []),
+            )
         app = create_gateway(
             config,
             password=os.environ.get("AITOS_OPERATOR_PASSWORD", ""),
             webauthn_rp=webauthn_rp,
+            approval_control_plane=approval_control_plane,
             operator_id=args.operator_id,
         )
     except (ValueError, OSError):
