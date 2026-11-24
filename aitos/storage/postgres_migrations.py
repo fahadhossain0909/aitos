@@ -146,11 +146,11 @@ MIGRATIONS = (
             """,
             """
             CREATE OR REPLACE FUNCTION aitos_reject_oms_event_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $
+            RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 RAISE EXCEPTION 'canonical OMS event journal is append-only';
             END;
-            $
+            $$
             """,
             """
             DROP TRIGGER IF EXISTS aitos_oms_events_no_update ON aitos_oms_events
@@ -170,11 +170,11 @@ MIGRATIONS = (
             """,
             """
             CREATE OR REPLACE FUNCTION aitos_reject_legacy_import_mutation()
-            RETURNS trigger LANGUAGE plpgsql AS $
+            RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 RAISE EXCEPTION 'canonical legacy import evidence is append-only';
             END;
-            $
+            $$
             """,
             """
             DROP TRIGGER IF EXISTS aitos_oms_legacy_imports_no_update
