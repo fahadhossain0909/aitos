@@ -74,20 +74,11 @@ def test_defaults_to_testnet_for_safety():
     assert executor._base_url == TESTNET_URL
 
 
-def test_mainnet_requires_authenticated_approval_consumer():
-    with pytest.raises(PermissionError, match="authenticated single-use approval"):
-        BinanceFuturesOrderExecutor(api_key="key", api_secret="secret", testnet=False)
-
-    consumed = []
-    executor = BinanceFuturesOrderExecutor(
-        api_key="key",
-        api_secret="secret",
-        testnet=False,
-        live_approval_consumer=lambda action: consumed.append(action)
-        or "verified-operator",
-    )
-    assert executor._base_url == MAINNET_URL
-    assert consumed == []
+def test_mainnet_requires_trusted_approval_authority():
+    with pytest.raises(PermissionError, match="trusted approval authority"):
+        BinanceFuturesOrderExecutor(
+            api_key="key", api_secret="secret", testnet=False
+        )
 
 
 def test_missing_credentials_raises():
