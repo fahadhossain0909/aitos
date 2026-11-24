@@ -119,6 +119,18 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades"
             )
 
+    def _live_approval_consumer(self, action: dict[str, Any]) -> str:
+        """Consume one exact-action receipt before any mainnet venue side effect."""
+        if (
+            self._live_approval_authority is None
+            or self._live_approval_token_provider is None
+        ):
+            raise PermissionError("mainnet execution approval is unavailable")
+        token = self._live_approval_token_provider(action)
+        if not isinstance(token, SignedApproval):
+            raise PermissionError("approval provider returned no signed receipt")
+        return self._live_approval_authority.consume(token, action=action)
+
     @property
     def intent_store(self) -> ExecutionIntentStore | None:
         return self._intent_store
