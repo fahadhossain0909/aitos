@@ -105,7 +105,15 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
                 {"account_code": "CASH_CLEARING", "currency": "USDT",
                  "debit": "0", "credit": "100.25", "reference": "entry-notional"},
             ],
+            causation_id="signal:abc",
+            correlation_id="trade-1",
+            parent_event_id="signal-event-1",
         )
+        assert first.payload["causality"] == {
+            "causation_id": "signal:abc",
+            "correlation_id": "trade-1",
+            "parent_event_id": "signal-event-1",
+        }
         balances = await oms.financial_balances("paper:integration")
         assert len(balances) == 2
         assert sum((row["debit"] for row in balances), start=Decimal("0")) == Decimal(
