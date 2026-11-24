@@ -76,10 +76,7 @@ def test_defaults_to_testnet_for_safety():
 
 def test_mainnet_requires_trusted_approval_authority():
     with pytest.raises(PermissionError, match="trusted approval authority"):
-        BinanceFuturesOrderExecutor(
-            api_key="key", api_secret="secret", testnet=False
-        )
-
+        BinanceFuturesOrderExecutor(api_key="key", api_secret="secret", testnet=False)
 
 def test_missing_credentials_raises():
     with pytest.raises(ValueError):
