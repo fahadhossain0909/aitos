@@ -239,6 +239,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 scope, f"clickhouse-import:{os.getpid()}",
                 expected_generation=generation,
             )
+            records.sort(
+                key=lambda item: (
+                    item["trade_id"],
+                    item["updated_at"],
+                    item["source_table"],
+                    item["source_occurrence"],
+                )
+            )
             for item in records:
                 await _import_one(pool, oms, fence, item)
                 imported += 1
