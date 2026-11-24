@@ -127,6 +127,32 @@ class PostgresLifecycleStateWriter:
                 if isinstance(snapshot, dict):
                     self._revisions[trade_id] = event.revision
                     return snapshot
+                legacy = event.payload.get("legacy_source")
+                if isinstance(legacy, dict):
+                    raw_payload = await self.oms.get_legacy_import_payload(
+                        self.fence.account_scope,
+                        str(legacy.get("table", "")),
+                        str(legacy.get("fingerprint", "")),
+                        legacy.get("occurrence"),
+                    )
+                    import json
+
+                    restored = json.loads(raw_payload)
+                    if (
+                        not isinstance(restored, dict)
+                        or restored.get("trade_id") != trade_id
+                    ):
+                        raise RuntimeError(
+                            "legacy OMS snapshot identity does not match its aggregate"
+                        )
+                    embedded_scope = restored.get("account_scope")
+                    if embedded_scope and embedded_scope != self.fence.account_scope:
+                        raise RuntimeError(
+                            "legacy OMS snapshot account scope does not match its aggregate"
+                        )
+                    restored["account_scope"] = self.fence.account_scope
+                    self._revisions[trade_id] = event.revision
+                    return restored
         self._revisions[trade_id] = events[-1].revision if events else 0
         return None
 
