@@ -144,6 +144,32 @@ MIGRATIONS = (
             CREATE INDEX IF NOT EXISTS idx_aitos_oms_legacy_trade
             ON aitos_oms_legacy_imports (account_scope, trade_id, source_updated_at)
             """,
+            """
+            CREATE OR REPLACE FUNCTION aitos_reject_legacy_import_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $
+            BEGIN
+                RAISE EXCEPTION 'canonical legacy import evidence is append-only';
+            END;
+            $
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_legacy_imports_no_update
+            ON aitos_oms_legacy_imports
+            """,
+            """
+            CREATE TRIGGER aitos_oms_legacy_imports_no_update
+            BEFORE UPDATE ON aitos_oms_legacy_imports
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_legacy_import_mutation()
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_legacy_imports_no_delete
+            ON aitos_oms_legacy_imports
+            """,
+            """
+            CREATE TRIGGER aitos_oms_legacy_imports_no_delete
+            BEFORE DELETE ON aitos_oms_legacy_imports
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_legacy_import_mutation()
+            """,
         ),
     ),
 )
