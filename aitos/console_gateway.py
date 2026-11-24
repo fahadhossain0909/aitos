@@ -311,7 +311,7 @@ class OperatorSessions:
         return True
 
     async def verify(self, password: str, user_id: str) -> bool:
-        record = self.credentials.get(user_id)
+        record = self.credentials.get(user_id) if isinstance(user_id, str) else None
         if record is None:
             # Perform a dummy KDF for unknown identities to reduce timing leakage.
             salt, expected = next(iter(self.credentials.values()))
@@ -459,7 +459,7 @@ GATEWAY_STATE = web.AppKey("operator_sessions", OperatorSessions)
 def create_gateway(
     config: GatewayConfig,
     *,
-    password: str,
+    password: str | None,
     clock=time.monotonic,
     webauthn_rp=None,
     approval_control_plane=None,
@@ -777,12 +777,27 @@ def create_gateway(
             body = await read_json_body(request, max_bytes=4096)
             if (
                 not isinstance(body, dict)
-                or set(body) not in ({"password"}, {"password", "enrollment_token"})
+                or "password" not in body
+                or set(body)
+                not in (
+                    {"password"},
+                    {"password", "enrollment_token"},
+                    {"password", "user_id"},
+                    {"password", "user_id", "enrollment_token"},
+                )
                 or not isinstance(body["password"], str)
                 or not 1 <= len(body["password"].encode("utf-8")) <= 1024
                 or (
                     "enrollment_token" in body
                     and not isinstance(body["enrollment_token"], str)
+                )
+                or (
+                    "user_id" in body
+                    and (
+                        not isinstance(body["user_id"], str)
+                        or not body["user_id"].strip()
+                        or len(body["user_id"]) > 256
+                    )
                 )
             ):
                 raise ValueError()
@@ -843,12 +858,16 @@ def create_gateway(
         body = await read_json_body(request, max_bytes=96 * 1024)
         if not isinstance(body, dict) or set(body) != {"credential"}:
             raise web.HTTPBadRequest(text="Invalid WebAuthn enrollment")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="MFA enrollment rate limit reached"
+            )
         try:
             webauthn_rp.verify_registration(
                 user_id=user_id, credential=body["credential"], now=int(time.time())
             )
             options = webauthn_rp.authentication_options(
-                user_id=operator_id, now=int(time.time())
+                user_id=user_id, now=int(time.time())
             )
             return web.json_response(
                 {"authenticated": False, "mfa_required": True, "options": options}
@@ -913,6 +932,10 @@ def create_gateway(
         user_id = require_operator_session(request)
         if approval_control_plane is None or webauthn_rp is None:
             raise web.HTTPServiceUnavailable(text="Approval control plane is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="Approval request rate limit reached"
+            )
         try:
             body = await read_json_body(request, max_bytes=4096)
             if not isinstance(body, dict) or set(body) != {"action"}:
