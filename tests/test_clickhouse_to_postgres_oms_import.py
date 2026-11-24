@@ -166,8 +166,20 @@ def test_streaming_import_refuses_ambiguous_same_timestamp_snapshots(
     )
     module, _ = _fake_clickhouse_module(
         [
-            ("trade-ambiguous", "BTCUSDT", "position_opened", first, "2026-11-24T10:00:00Z"),
-            ("trade-ambiguous", "BTCUSDT", "position_opened", second, "2026-11-24T10:00:00Z"),
+            (
+                "trade-ambiguous",
+                "BTCUSDT",
+                "position_opened",
+                first,
+                "2026-11-24T10:00:00Z",
+            ),
+            (
+                "trade-ambiguous",
+                "BTCUSDT",
+                "position_opened",
+                second,
+                "2026-11-24T10:00:00Z",
+            ),
         ],
         [],
     )
@@ -219,9 +231,7 @@ def test_streaming_dry_run_reads_already_scope_keyed_cutover_tables(
     runtime_fp = source_fingerprint(
         RUNTIME_SOURCE, "scoped-open", runtime, runtime_stamp
     )
-    closed_fp = source_fingerprint(
-        CLOSED_SOURCE, "scoped-closed", closed, closed_stamp
-    )
+    closed_fp = source_fingerprint(CLOSED_SOURCE, "scoped-closed", closed, closed_stamp)
     scope = "paper:cutover"
 
     class ScopedClient:
@@ -247,33 +257,37 @@ def test_streaming_dry_run_reads_already_scope_keyed_cutover_tables(
         def query_row_block_stream(self, query):
             if f"FROM {RUNTIME_SOURCE}" in query:
                 yield iter(
-                    [[
-                        (
-                            scope,
-                            "scoped-open",
-                            "BTCUSDT",
-                            "position_opened",
-                            runtime,
-                            runtime_stamp,
-                            runtime_fp,
-                            0,
-                            _scoped_payload_hash(runtime_item["payload"], scope),
-                        )
-                    ]]
+                    [
+                        [
+                            (
+                                scope,
+                                "scoped-open",
+                                "BTCUSDT",
+                                "position_opened",
+                                runtime,
+                                runtime_stamp,
+                                runtime_fp,
+                                0,
+                                _scoped_payload_hash(runtime_item["payload"], scope),
+                            )
+                        ]
+                    ]
                 )
             else:
                 yield iter(
-                    [[
-                        (
-                            scope,
-                            "scoped-closed",
-                            closed,
-                            closed_stamp,
-                            closed_fp,
-                            0,
-                            _scoped_payload_hash(closed_item["payload"], scope),
-                        )
-                    ]]
+                    [
+                        [
+                            (
+                                scope,
+                                "scoped-closed",
+                                closed,
+                                closed_stamp,
+                                closed_fp,
+                                0,
+                                _scoped_payload_hash(closed_item["payload"], scope),
+                            )
+                        ]
+                    ]
                 )
 
         def close(self):
