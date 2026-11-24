@@ -89,6 +89,7 @@ export default function OperatorBoundary({
       if (now >= expires) {
         setMode("signed_out");
         setPassword("");
+        setAuthenticatedIdentity("");
         setError("Your absolute session lifetime ended. Sign in again.");
       }
     }, 1000);
@@ -99,6 +100,7 @@ export default function OperatorBoundary({
       if (mode === "authenticated") {
         setMode("signed_out");
         setPassword("");
+        setAuthenticatedIdentity("");
         setError(
           "Your operator session expired or was revoked. Financial views were cleared.",
         );
