@@ -233,6 +233,54 @@ class WebAuthnRelyingParty:
             db.close()
         return serialized
 
+    def list_credentials(self, *, user_id: str) -> list[dict[str, Any]]:
+        """Return non-secret authenticator metadata for one authenticated subject."""
+        user = self._user_id(user_id)
+        db = self._connect()
+        try:
+            rows = db.execute(
+                "SELECT credential_id,transports_json,device_type,backed_up,"
+                "created_at,last_used_at FROM webauthn_credentials "
+                "WHERE user_id=? ORDER BY created_at,credential_id",
+                (user,),
+            ).fetchall()
+        finally:
+            db.close()
+        return [
+            {
+                "credential_id": row[0],
+                "transports": json.loads(row[1]),
+                "device_type": row[2],
+                "backed_up": bool(row[3]),
+                "created_at": int(row[4]),
+                "last_used_at": int(row[5]) if row[5] is not None else None,
+            }
+            for row in rows
+        ]
+
+    def revoke_credential(self, *, user_id: str, credential_id: str) -> bool:
+        """Offline-admin primitive; never exposed as a browser mutation route."""
+        user = self._user_id(user_id)
+        if (
+            not isinstance(credential_id, str)
+            or not 16 <= len(credential_id) <= 1024
+        ):
+            raise ValueError("valid credential identifier required")
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "DELETE FROM webauthn_credentials WHERE user_id=? AND credential_id=?",
+                (user, credential_id),
+            ).rowcount
+            db.commit()
+            return changed == 1
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def verify_registration(
         self, *, user_id: str, credential: dict[str, Any], now: int
     ) -> str:
