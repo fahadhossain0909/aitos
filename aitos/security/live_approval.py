@@ -52,6 +52,7 @@ class LiveApprovalControlPlane:
         allowed_origins: set[str],
         rp_id: str,
         ttl_seconds: int = 90,
+        role_authorizer: Callable[[str, str], bool] | None = None,
     ):
         if len(signing_key) < 32:
             raise ValueError("approval signing key must contain at least 256 bits")
@@ -62,6 +63,9 @@ class LiveApprovalControlPlane:
         self.origins = frozenset(allowed_origins)
         self.rp_id = rp_id
         self.ttl = ttl_seconds
+        if not callable(role_authorizer):
+            raise ValueError("server-side RBAC role_authorizer is required")
+        self.role_authorizer = role_authorizer
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -111,12 +115,15 @@ class LiveApprovalControlPlane:
         *,
         user_id: str,
         action: dict,
-        roles: set[str],
         required_role: str = "live_trader",
         now: int | None = None,
     ):
-        if not user_id or required_role not in roles:
-            raise ApprovalDenied("RBAC denied live approval request")
+        if (
+            not isinstance(user_id, str)
+            or not user_id
+            or not self.role_authorizer(user_id, required_role)
+        ):
+            raise ApprovalDenied("server-side RBAC denied live approval request")
         now = int(time.time()) if now is None else int(now)
         challenge_id, challenge = secrets.token_urlsafe(24), secrets.token_urlsafe(32)
         digest = self._digest(action)
@@ -220,13 +227,12 @@ class LiveApprovalControlPlane:
         token: SignedApproval,
         *,
         action: dict,
-        roles: set[str],
         required_role: str = "live_trader",
         now: int | None = None,
     ) -> str:
         now = int(time.time()) if now is None else int(now)
-        if required_role not in roles:
-            raise ApprovalDenied("RBAC denied execution")
+        if not self.role_authorizer(token.user_id, required_role):
+            raise ApprovalDenied("server-side RBAC denied execution")
         digest = self._digest(action)
         expected = hmac.new(
             self.key,
