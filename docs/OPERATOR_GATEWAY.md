@@ -180,11 +180,15 @@ user-verified assertion issues a short-lived, single-use signed approval receipt
 Audit rows are append-only. The browser displays the receipt ID, not the signing
 secret.
 
-The gateway deliberately does not execute or submit orders. Approval receipts
-must be consumed by a separate trusted server-side execution adapter using the
-same action digest, role policy and single-use control-plane store. No such
-consumer is exposed by the desktop gateway; an issued receipt is not execution
-confirmation.
+The gateway deliberately does not execute or submit orders. A trusted
+server-side receipt provider and exact-action, single-use consumer are now
+implemented in `LiveApprovalControlPlane` and
+`BinanceFuturesOrderExecutor`. The executor can retrieve only a receipt bound
+to the exact order action and consumes it before the venue side effect. The
+desktop gateway does not expose the signing material. Production runtime
+wiring remains fail-closed until the gateway and executor share a protected
+approval store and the deployment passes independent acceptance; an issued
+receipt is not execution confirmation.
 
 ## Limits and nonlocal deployment gate
 
