@@ -26,7 +26,6 @@ from scripts.migrate_scoped_clickhouse_state import (
     source_fingerprint,
 )
 
-
 IMPORT_DDL = """
 CREATE TABLE IF NOT EXISTS aitos_oms_legacy_imports (
     account_scope TEXT NOT NULL,
