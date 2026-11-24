@@ -6,6 +6,7 @@ sign-counter policy and user verification. This module deliberately accepts
 only a verifier callback and never treats a typed phrase or self-asserted MFA
 flag as authentication. Tokens are short-lived, signed and single-use.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -43,8 +44,15 @@ class SignedApproval:
 
 
 class LiveApprovalControlPlane:
-    def __init__(self, path: str | Path, *, signing_key: bytes,
-                 allowed_origins: set[str], rp_id: str, ttl_seconds: int = 90):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        signing_key: bytes,
+        allowed_origins: set[str],
+        rp_id: str,
+        ttl_seconds: int = 90,
+    ):
         if len(signing_key) < 32:
             raise ValueError("approval signing key must contain at least 256 bits")
         if not allowed_origins or not rp_id or not 1 <= ttl_seconds <= 300:
@@ -57,7 +65,8 @@ class LiveApprovalControlPlane:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript("""
+            db.executescript(
+                """
             CREATE TABLE IF NOT EXISTS live_approval_challenges(
               challenge_id TEXT PRIMARY KEY, challenge TEXT NOT NULL,
               user_id TEXT NOT NULL, action_digest TEXT NOT NULL,
@@ -79,20 +88,33 @@ class LiveApprovalControlPlane:
               BEFORE DELETE ON live_approval_audit BEGIN
                 SELECT RAISE(ABORT,'approval audit is append-only');
               END;
-            """)
+            """
+            )
 
     @staticmethod
     def _digest(action: dict) -> str:
         if type(action) is not dict or not action:
             raise ValueError("canonical live action required")
-        raw = json.dumps(action, sort_keys=True, separators=(",", ":"),
-                         ensure_ascii=False, allow_nan=False).encode()
+        raw = json.dumps(
+            action,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode()
         if len(raw) > 65536:
             raise ValueError("approval action too large")
         return hashlib.sha256(raw).hexdigest()
 
-    def issue_challenge(self, *, user_id: str, action: dict, roles: set[str],
-                        required_role: str = "live_trader", now: int | None = None):
+    def issue_challenge(
+        self,
+        *,
+        user_id: str,
+        action: dict,
+        roles: set[str],
+        required_role: str = "live_trader",
+        now: int | None = None,
+    ):
         if not user_id or required_role not in roles:
             raise ApprovalDenied("RBAC denied live approval request")
         now = int(time.time()) if now is None else int(now)
@@ -101,82 +123,156 @@ class LiveApprovalControlPlane:
         expiry = now + self.ttl
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("INSERT INTO live_approval_challenges VALUES(?,?,?,?,?,0)",
-                       (challenge_id, challenge, user_id, digest, expiry))
-            db.execute("INSERT INTO live_approval_audit(event,user_id,action_digest,recorded_at) "
-                       "VALUES('CHALLENGE_ISSUED',?,?,?)", (user_id,digest,now))
+            db.execute(
+                "INSERT INTO live_approval_challenges VALUES(?,?,?,?,?,0)",
+                (challenge_id, challenge, user_id, digest, expiry),
+            )
+            db.execute(
+                "INSERT INTO live_approval_audit(event,user_id,action_digest,recorded_at) "
+                "VALUES('CHALLENGE_ISSUED',?,?,?)",
+                (user_id, digest, now),
+            )
         return ApprovalChallenge(challenge_id, challenge, user_id, digest, expiry)
 
-    def approve(self, challenge: ApprovalChallenge, *, assertion: bytes,
-                verifier: Callable[..., dict], now: int | None = None) -> SignedApproval:
+    def approve(
+        self,
+        challenge: ApprovalChallenge,
+        *,
+        assertion: bytes,
+        verifier: Callable[..., dict],
+        now: int | None = None,
+    ) -> SignedApproval:
         now = int(time.time()) if now is None else int(now)
         if not assertion or not callable(verifier):
             raise ApprovalDenied("verified WebAuthn assertion is required")
         # The RP adapter returns claims only after cryptographic and origin/RP checks.
-        claims = verifier(assertion=assertion, challenge=challenge.challenge,
-                          expected_origin=self.origins, expected_rp_id=self.rp_id,
-                          require_user_verification=True)
-        if (not isinstance(claims, dict) or claims.get("verified") is not True
-                or claims.get("user_id") != challenge.user_id
-                or claims.get("user_verified") is not True
-                or claims.get("origin") not in self.origins
-                or claims.get("rp_id") != self.rp_id):
+        claims = verifier(
+            assertion=assertion,
+            challenge=challenge.challenge,
+            expected_origin=self.origins,
+            expected_rp_id=self.rp_id,
+            require_user_verification=True,
+        )
+        if (
+            not isinstance(claims, dict)
+            or claims.get("verified") is not True
+            or claims.get("user_id") != challenge.user_id
+            or claims.get("user_verified") is not True
+            or claims.get("origin") not in self.origins
+            or claims.get("rp_id") != self.rp_id
+        ):
             raise ApprovalDenied("WebAuthn assertion verification failed")
         token_id = secrets.token_urlsafe(24)
         expiry = min(challenge.expires_at, now + self.ttl)
         if now >= expiry:
             raise ApprovalDenied("approval challenge expired")
-        message = self._message(token_id, challenge.user_id,
-                                challenge.action_digest, now, expiry)
+        message = self._message(
+            token_id, challenge.user_id, challenge.action_digest, now, expiry
+        )
         signature = hmac.new(self.key, message, hashlib.sha256).hexdigest()
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT challenge,user_id,action_digest,expires_at,consumed "
-                             "FROM live_approval_challenges WHERE challenge_id=?",
-                             (challenge.challenge_id,)).fetchone()
-            if (row is None or row[4] or row[3] <= now or
-                row[:3] != (challenge.challenge,challenge.user_id,challenge.action_digest)):
+            row = db.execute(
+                "SELECT challenge,user_id,action_digest,expires_at,consumed "
+                "FROM live_approval_challenges WHERE challenge_id=?",
+                (challenge.challenge_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row[4]
+                or row[3] <= now
+                or row[:3]
+                != (challenge.challenge, challenge.user_id, challenge.action_digest)
+            ):
                 raise ApprovalDenied("challenge missing, expired, consumed or altered")
-            db.execute("UPDATE live_approval_challenges SET consumed=1 WHERE challenge_id=?",
-                       (challenge.challenge_id,))
-            db.execute("INSERT INTO live_approval_tokens VALUES(?,?,?,?,?,?,NULL)",
-                       (token_id,challenge.user_id,challenge.action_digest,now,expiry,signature))
-            db.execute("INSERT INTO live_approval_audit(event,user_id,action_digest,token_id,recorded_at) "
-                       "VALUES('APPROVAL_ISSUED',?,?,?,?)",
-                       (challenge.user_id,challenge.action_digest,token_id,now))
-        return SignedApproval(token_id,challenge.user_id,challenge.action_digest,
-                              now,expiry,signature)
+            db.execute(
+                "UPDATE live_approval_challenges SET consumed=1 WHERE challenge_id=?",
+                (challenge.challenge_id,),
+            )
+            db.execute(
+                "INSERT INTO live_approval_tokens VALUES(?,?,?,?,?,?,NULL)",
+                (
+                    token_id,
+                    challenge.user_id,
+                    challenge.action_digest,
+                    now,
+                    expiry,
+                    signature,
+                ),
+            )
+            db.execute(
+                "INSERT INTO live_approval_audit(event,user_id,action_digest,token_id,recorded_at) "
+                "VALUES('APPROVAL_ISSUED',?,?,?,?)",
+                (challenge.user_id, challenge.action_digest, token_id, now),
+            )
+        return SignedApproval(
+            token_id, challenge.user_id, challenge.action_digest, now, expiry, signature
+        )
 
     @staticmethod
     def _message(token_id, user_id, digest, issued, expires):
-        return json.dumps([token_id,user_id,digest,issued,expires],
-                          separators=(",", ":")).encode()
+        return json.dumps(
+            [token_id, user_id, digest, issued, expires], separators=(",", ":")
+        ).encode()
 
-    def consume(self, token: SignedApproval, *, action: dict,
-                roles: set[str], required_role: str = "live_trader",
-                now: int | None = None) -> str:
+    def consume(
+        self,
+        token: SignedApproval,
+        *,
+        action: dict,
+        roles: set[str],
+        required_role: str = "live_trader",
+        now: int | None = None,
+    ) -> str:
         now = int(time.time()) if now is None else int(now)
         if required_role not in roles:
             raise ApprovalDenied("RBAC denied execution")
         digest = self._digest(action)
-        expected = hmac.new(self.key, self._message(token.token_id,token.user_id,
-            token.action_digest,token.issued_at,token.expires_at),hashlib.sha256).hexdigest()
-        if (not hmac.compare_digest(expected,token.signature) or
-            digest != token.action_digest or now < token.issued_at or now >= token.expires_at):
+        expected = hmac.new(
+            self.key,
+            self._message(
+                token.token_id,
+                token.user_id,
+                token.action_digest,
+                token.issued_at,
+                token.expires_at,
+            ),
+            hashlib.sha256,
+        ).hexdigest()
+        if (
+            not hmac.compare_digest(expected, token.signature)
+            or digest != token.action_digest
+            or now < token.issued_at
+            or now >= token.expires_at
+        ):
             raise ApprovalDenied("invalid, mismatched or expired approval token")
         with sqlite3.connect(self.path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT user_id,action_digest,issued_at,expires_at,signature,consumed_at "
-                             "FROM live_approval_tokens WHERE token_id=?",
-                             (token.token_id,)).fetchone()
-            if row is None or row != (token.user_id,digest,token.issued_at,
-                                      token.expires_at,token.signature,None):
-                raise ApprovalDenied("approval token already consumed or not issued here")
-            db.execute("UPDATE live_approval_tokens SET consumed_at=? WHERE token_id=? AND consumed_at IS NULL",
-                       (now,token.token_id))
+            row = db.execute(
+                "SELECT user_id,action_digest,issued_at,expires_at,signature,consumed_at "
+                "FROM live_approval_tokens WHERE token_id=?",
+                (token.token_id,),
+            ).fetchone()
+            if row is None or row != (
+                token.user_id,
+                digest,
+                token.issued_at,
+                token.expires_at,
+                token.signature,
+                None,
+            ):
+                raise ApprovalDenied(
+                    "approval token already consumed or not issued here"
+                )
+            db.execute(
+                "UPDATE live_approval_tokens SET consumed_at=? WHERE token_id=? AND consumed_at IS NULL",
+                (now, token.token_id),
+            )
             if db.total_changes < 1:
                 raise ApprovalDenied("approval token replay")
-            db.execute("INSERT INTO live_approval_audit(event,user_id,action_digest,token_id,recorded_at) "
-                       "VALUES('APPROVAL_CONSUMED',?,?,?,?)",
-                       (token.user_id,digest,token.token_id,now))
+            db.execute(
+                "INSERT INTO live_approval_audit(event,user_id,action_digest,token_id,recorded_at) "
+                "VALUES('APPROVAL_CONSUMED',?,?,?,?)",
+                (token.user_id, digest, token.token_id, now),
+            )
         return token.user_id
