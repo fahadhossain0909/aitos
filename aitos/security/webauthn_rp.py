@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -53,7 +54,14 @@ class WebAuthnRelyingParty:
             raise ValueError(
                 "explicit RP identity, origins and bounded timeout required"
             )
-        self.path = Path(path)
+        self.path = Path(path).expanduser()
+        if self.path.is_symlink():
+            raise ValueError("WebAuthn credential database symlinks are forbidden")
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.path.parent.is_symlink():
+            raise ValueError("WebAuthn credential directory symlinks are forbidden")
+        if os.name != "nt":
+            os.chmod(self.path.parent, 0o700)
         self.rp_id = rp_id
         self.rp_name = rp_name
         self.origins = frozenset(allowed_origins)
@@ -108,6 +116,8 @@ class WebAuthnRelyingParty:
             )
         finally:
             db.close()
+        if self.path.exists() and os.name != "nt":
+            os.chmod(self.path, 0o600)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
