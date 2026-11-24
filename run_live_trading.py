@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 from contextlib import AsyncExitStack
 
 from aitos.app import (
@@ -19,6 +20,7 @@ from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
+from aitos.execution.postgres_oms import PostgresCanonicalOMS
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,
     recover_protection_handovers,
@@ -43,6 +45,10 @@ from aitos.runtime_connections import (
     try_connect_neo4j,
 )
 from aitos.runtime_ownership import RuntimeOwnership
+from aitos.storage.postgres_migrations import (
+    apply_postgres_migrations,
+    verify_postgres_schema,
+)
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
@@ -120,6 +126,23 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     )
     raw_order_executor = await prepare_live_executor(settings, symbols)
     cleanup.push_async_callback(raw_order_executor.close)
+    postgres_dsn = os.getenv("DATABASE_URL", "").strip()
+    if not postgres_dsn:
+        raise RuntimeError(
+            "live trading requires DATABASE_URL for the canonical PostgreSQL OMS"
+        )
+    import asyncpg
+
+    postgres_pool = await asyncpg.create_pool(
+        dsn=postgres_dsn,
+        min_size=1,
+        max_size=5,
+        command_timeout=10,
+    )
+    cleanup.push_async_callback(postgres_pool.close)
+    await apply_postgres_migrations(postgres_pool)
+    await verify_postgres_schema(postgres_pool)
+    postgres_oms = PostgresCanonicalOMS(postgres_pool)
     order_executor = IdempotentOrderExecutor(raw_order_executor)
     state_store = DurableTradingStateStore(
         market_repo, account_scope=raw_order_executor.execution_scope
@@ -168,6 +191,26 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(trade_state_persistence.shutdown)
     restored_count = await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
+    writer_id = f"live:{socket.gethostname()}:{os.getpid()}"
+    current_generation = await postgres_oms.writer_generation(
+        raw_order_executor.execution_scope
+    )
+    writer_fence = await postgres_oms.acquire_writer(
+        raw_order_executor.execution_scope,
+        writer_id,
+        expected_generation=current_generation,
+    )
+    components.trade_lifecycle.bind_postgres_canonical_oms(
+        postgres_oms, writer_fence
+    )
+    canonical_restore = await components.trade_lifecycle._postgres_canonical_oms_writer.restore_lifecycle(
+        components.trade_lifecycle
+    )
+    restored_count = canonical_restore["open"]
+    logger.warning(
+        "canonical PostgreSQL OMS restored lifecycle state",
+        extra={"aitos_extra": canonical_restore},
+    )
     await initialize_all(components)
     # First consume already-filled known protective orders, then compare the
     # resulting local ledger against the entire account before any new entry.
