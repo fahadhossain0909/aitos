@@ -282,6 +282,12 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
         )
         assert len(events) == 2
         assert all(row["event_id"].startswith("legacy:") for row in events)
+        with pytest.raises(asyncpg.PostgresError, match="append-only"):
+            await admin.execute(
+                "UPDATE aitos_oms_legacy_imports SET raw_payload='{}'"
+            )
+        with pytest.raises(asyncpg.PostgresError, match="append-only"):
+            await admin.execute("DELETE FROM aitos_oms_legacy_imports")
     finally:
         if not pool.is_closing():
             await pool.close()
