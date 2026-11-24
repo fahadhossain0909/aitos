@@ -15,6 +15,7 @@ import json
 import secrets
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -67,7 +68,7 @@ class LiveApprovalControlPlane:
             raise ValueError("server-side RBAC role_authorizer is required")
         self.role_authorizer = role_authorizer
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as db:
+        with self._connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(
                 """
@@ -94,6 +95,19 @@ class LiveApprovalControlPlane:
               END;
             """
             )
+
+    @contextmanager
+    def _connection(self):
+        db = sqlite3.connect(self.path, timeout=5)
+        try:
+            db.execute("PRAGMA busy_timeout=5000")
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     @staticmethod
     def _digest(action: dict) -> str:
@@ -132,7 +146,7 @@ class LiveApprovalControlPlane:
             raise ValueError("bounded server-issued WebAuthn challenge required")
         digest = self._digest(action)
         expiry = now + self.ttl
-        with sqlite3.connect(self.path, timeout=5) as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO live_approval_challenges VALUES(?,?,?,?,?,0)",
@@ -160,7 +174,12 @@ class LiveApprovalControlPlane:
                 "FROM live_approval_challenges WHERE challenge_id=?",
                 (challenge_id,),
             ).fetchone()
-        if row is None or row[1] != user_id or row[4]:
+        if (
+            row is None
+            or row[1] != user_id
+            or row[4]
+            or int(row[3]) <= int(time.time())
+        ):
             raise ApprovalDenied("approval challenge is unavailable")
         return ApprovalChallenge(
             challenge_id, row[0], row[1], row[2], int(row[3])
