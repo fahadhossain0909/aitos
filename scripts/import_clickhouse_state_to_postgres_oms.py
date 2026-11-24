@@ -153,6 +153,69 @@ async def _import_one(
     )
 
 
+def _select_clickhouse_source(client: Any, source: str) -> tuple[str, bool]:
+    """Prefer an already scope-keyed v2/active table and verify companion counts."""
+    target = f"{source}_v2"
+    backup = f"{source}_legacy_pre_scope_v1"
+    rows = client.query(
+        "SELECT table,name FROM system.columns "
+        "WHERE database=currentDatabase() AND table IN "
+        f"('{source}','{target}','{backup}')"
+    ).result_rows
+    columns: dict[str, set[str]] = defaultdict(set)
+    for table_name, column_name in rows:
+        columns[str(table_name)].add(str(column_name))
+    candidates = [
+        name for name in (source, target, backup) if name in columns
+    ]
+    if not candidates:
+        raise RuntimeError(f"ClickHouse source table {source} is missing")
+
+    if "account_scope" in columns.get(source, set()):
+        selected, scoped = source, True
+        companion = backup if backup in columns else None
+    elif "account_scope" in columns.get(target, set()):
+        selected, scoped = target, True
+        companion = source if source in columns else None
+    elif source in columns:
+        selected, scoped, companion = source, False, None
+    elif "account_scope" in columns.get(backup, set()):
+        selected, scoped, companion = backup, True, None
+    else:
+        raise RuntimeError(f"ClickHouse source table {source} has an unknown schema")
+
+    if companion is not None:
+        selected_count = int(
+            client.query(f"SELECT count() FROM {selected}").result_rows[0][0]
+        )
+        companion_count = int(
+            client.query(f"SELECT count() FROM {companion}").result_rows[0][0]
+        )
+        if selected_count != companion_count:
+            raise RuntimeError(
+                f"ClickHouse source/retained table count mismatch for {source}: "
+                f"{selected_count} != {companion_count}"
+            )
+    return selected, scoped
+
+
+def _scoped_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
+    canonical = dict(payload)
+    embedded = canonical.get("account_scope")
+    if embedded and embedded != account_scope:
+        raise ValueError("scoped ClickHouse row conflicts with payload account_scope")
+    canonical["account_scope"] = account_scope
+    encoded = json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.apply and not (
         args.confirm_writers_stopped and args.confirm_backup_retained
@@ -219,44 +282,127 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 counts: Counter[str] = Counter()
                 scope_counts: Counter[str] = Counter()
-                queries = {
-                    RUNTIME_SOURCE: (
-                        "SELECT trade_id,symbol,state,payload_json,updated_at "
-                        "FROM trade_runtime_state ORDER BY trade_id,updated_at "
-                        "SETTINGS max_result_rows=0,max_result_bytes=0,"
-                        "result_overflow_mode='throw',read_overflow_mode='throw'"
-                    ),
-                    CLOSED_SOURCE: (
-                        "SELECT trade_id,payload_json,updated_at "
-                        "FROM paper_closed_trade_ledger ORDER BY trade_id,updated_at "
-                        "SETTINGS max_result_rows=0,max_result_bytes=0,"
-                        "result_overflow_mode='throw',read_overflow_mode='throw'"
-                    ),
+                selected_sources = {
+                    source: _select_clickhouse_source(ch, source)
+                    for source in (RUNTIME_SOURCE, CLOSED_SOURCE)
                 }
+                queries = {}
+                for source, (table_name, scoped) in selected_sources.items():
+                    if scoped and source == RUNTIME_SOURCE:
+                        query = (
+                            "SELECT account_scope,trade_id,symbol,state,"
+                            "legacy_payload_json,updated_at,source_fingerprint,"
+                            "source_occurrence,payload_sha256 "
+                            f"FROM {table_name} ORDER BY trade_id,updated_at,"
+                            "source_fingerprint,source_occurrence "
+                            "SETTINGS max_result_rows=0,max_result_bytes=0,"
+                            "result_overflow_mode='throw',read_overflow_mode='throw'"
+                        )
+                    elif scoped:
+                        query = (
+                            "SELECT account_scope,trade_id,legacy_payload_json,"
+                            "updated_at,source_fingerprint,source_occurrence,"
+                            "payload_sha256 "
+                            f"FROM {table_name} ORDER BY trade_id,updated_at,"
+                            "source_fingerprint,source_occurrence "
+                            "SETTINGS max_result_rows=0,max_result_bytes=0,"
+                            "result_overflow_mode='throw',read_overflow_mode='throw'"
+                        )
+                    elif source == RUNTIME_SOURCE:
+                        query = (
+                            "SELECT trade_id,symbol,state,payload_json,updated_at "
+                            f"FROM {table_name} ORDER BY trade_id,updated_at "
+                            "SETTINGS max_result_rows=0,max_result_bytes=0,"
+                            "result_overflow_mode='throw',read_overflow_mode='throw'"
+                        )
+                    else:
+                        query = (
+                            "SELECT trade_id,payload_json,updated_at "
+                            f"FROM {table_name} ORDER BY trade_id,updated_at "
+                            "SETTINGS max_result_rows=0,max_result_bytes=0,"
+                            "result_overflow_mode='throw',read_overflow_mode='throw'"
+                        )
+                    queries[source] = (query, scoped, table_name)
                 with partial_manifest.open("w", encoding="utf-8", newline="\\n") as manifest:
-                    for table, query in queries.items():
+                    for table, (query, scoped, selected_table) in queries.items():
                         occurrences: Counter[str] = Counter()
                         with ch.query_row_block_stream(query) as blocks:
                             for block in blocks:
                                 for row in block:
-                                    trade_id = str(row[0])
-                                    raw = str(
-                                        row[3] if table == RUNTIME_SOURCE else row[1]
-                                    )
-                                    stamp = row[4] if table == RUNTIME_SOURCE else row[2]
-                                    fingerprint = source_fingerprint(
-                                        table, trade_id, raw, stamp
-                                    )
-                                    occurrence = occurrences[fingerprint]
-                                    occurrences[fingerprint] += 1
-                                    item = _manifest_row(table, row, occurrence)
-                                    mapped = args.scope_map.get(fingerprint)
-                                    embedded = item["payload"].get("account_scope")
-                                    if embedded and mapped and embedded != mapped:
-                                        raise ValueError(
-                                            f"scope map conflicts for {fingerprint}"
+                                    if scoped and table == RUNTIME_SOURCE:
+                                        (
+                                            row_scope,
+                                            trade_id,
+                                            symbol,
+                                            state,
+                                            raw,
+                                            stamp,
+                                            stored_fingerprint,
+                                            stored_occurrence,
+                                            stored_payload_hash,
+                                        ) = row
+                                        legacy_row = (
+                                            trade_id, symbol, state, raw, stamp
                                         )
-                                    scope = _scope(embedded or mapped)
+                                    elif scoped:
+                                        (
+                                            row_scope,
+                                            trade_id,
+                                            raw,
+                                            stamp,
+                                            stored_fingerprint,
+                                            stored_occurrence,
+                                            stored_payload_hash,
+                                        ) = row
+                                        legacy_row = (trade_id, raw, stamp)
+                                    elif table == RUNTIME_SOURCE:
+                                        trade_id = str(row[0])
+                                        raw, stamp = str(row[3]), row[4]
+                                        legacy_row = row
+                                        row_scope = None
+                                        stored_fingerprint = None
+                                        stored_occurrence = None
+                                        stored_payload_hash = None
+                                    else:
+                                        trade_id = str(row[0])
+                                        raw, stamp = str(row[1]), row[2]
+                                        legacy_row = row
+                                        row_scope = None
+                                        stored_fingerprint = None
+                                        stored_occurrence = None
+                                        stored_payload_hash = None
+
+                                    trade_id = str(trade_id)
+                                    fingerprint = source_fingerprint(
+                                        table, trade_id, str(raw), stamp
+                                    )
+                                    if scoped:
+                                        occurrence = int(stored_occurrence)
+                                        if fingerprint != str(stored_fingerprint):
+                                            raise RuntimeError(
+                                                "scoped ClickHouse source fingerprint mismatch"
+                                            )
+                                    else:
+                                        occurrence = occurrences[fingerprint]
+                                        occurrences[fingerprint] += 1
+                                    item = _manifest_row(table, legacy_row, occurrence)
+                                    if scoped:
+                                        scope = _scope(str(row_scope))
+                                        expected_hash = _scoped_payload_hash(
+                                            item["payload"], scope
+                                        )
+                                        if expected_hash != str(stored_payload_hash):
+                                            raise RuntimeError(
+                                                "scoped ClickHouse canonical payload hash mismatch"
+                                            )
+                                    else:
+                                        mapped = args.scope_map.get(fingerprint)
+                                        embedded = item["payload"].get("account_scope")
+                                        if embedded and mapped and embedded != mapped:
+                                            raise ValueError(
+                                                f"scope map conflicts for {fingerprint}"
+                                            )
+                                        scope = _scope(embedded or mapped)
                                     item["account_scope"] = scope
                                     stage.execute(
                                         """
