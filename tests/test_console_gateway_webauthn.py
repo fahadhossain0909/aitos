@@ -15,6 +15,19 @@ class FakeWebAuthn:
     def __init__(self, credentials=0):
         self.credentials = credentials
         self.registration_verified = False
+        self.bootstrap_consumed = set()
+
+    def consume_enrollment_bootstrap_token(
+        self, *, user_id, configured_token, supplied_token, now
+    ):
+        if (
+            user_id in self.bootstrap_consumed
+            or len(configured_token) < 32
+            or supplied_token != configured_token
+        ):
+            return False
+        self.bootstrap_consumed.add(user_id)
+        return True
 
     def credential_count(self, *, user_id):
         assert user_id == "operator-1"
@@ -302,6 +315,15 @@ async def test_remote_first_enrollment_requires_out_of_band_bootstrap_token(tmp_
         )
         assert allowed.status == 200
         assert (await allowed.json())["mfa_enrollment_required"] is True
+        replay = await client.post(
+            "/operator/v1/login",
+            json={
+                "password": PASSWORD,
+                "enrollment_token": "one-time-bootstrap-token-with-256-bit-minimum",
+            },
+            headers={"Origin": origin},
+        )
+        assert replay.status == 403
     finally:
         await client.close()
 
