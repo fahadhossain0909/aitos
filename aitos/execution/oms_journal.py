@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}\\Z")
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}\Z")
 _MAX = 2**63 - 1
 
 
