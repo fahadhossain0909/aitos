@@ -98,7 +98,12 @@ class WebAuthnRelyingParty:
 
     @staticmethod
     def _user_id(user_id: str) -> str:
-        if not isinstance(user_id, str) or not user_id.strip() or len(user_id) > 256:
+        if (
+            not isinstance(user_id, str)
+            or not user_id.strip()
+            or user_id != user_id.strip()
+            or len(user_id) > 256
+        ):
             raise ValueError("bounded authenticated user identity is required")
         return user_id
 
@@ -137,11 +142,19 @@ class WebAuthnRelyingParty:
         try:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
+                "DELETE FROM webauthn_registration_challenges "
+                "WHERE expires_at<=? OR consumed_at IS NOT NULL",
+                (int(now),),
+            )
+            db.execute(
                 "INSERT INTO webauthn_registration_challenges"
                 "(challenge,user_id,expires_at) VALUES(?,?,?)",
                 (challenge, user, int(now) + ttl_seconds),
             )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
         return serialized
@@ -202,6 +215,11 @@ class WebAuthnRelyingParty:
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "DELETE FROM webauthn_authentication_challenges "
+                "WHERE expires_at<=? OR consumed_at IS NOT NULL",
+                (int(now),),
+            )
             db.execute(
                 "INSERT INTO webauthn_authentication_challenges"
                 "(challenge,user_id,expires_at) VALUES(?,?,?)",
