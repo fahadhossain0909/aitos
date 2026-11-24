@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import uuid
@@ -188,15 +189,44 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
         server_settings={"search_path": schema},
     )
 
-    runtime_payload = (
-        '{"trade_id":"import-open","symbol":"BTCUSDT",'
-        '"state":"position_opened","account_scope":"paper:import",'
-        '"quantity":"0.125"}'
+    runtime_trade = Trade(
+        trade_id="import-open",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=0.125,
+        leverage=2.0,
+        position_size_usd=12.5,
+        risk_amount_usd=1.0,
+        strategy_id="legacy-import",
+        agent_consensus={},
+        explanation="legacy open import",
+        sl_price=95.0,
+        tp_price=110.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-11-24T10:00:00+00:00",
+        account_scope="paper:import",
     )
-    closed_payload = (
-        '{"trade_id":"import-closed","state":"position_closed",'
-        '"account_scope":"paper:import","pnl":"1.25"}'
+    closed_trade = Trade(
+        trade_id="import-closed",
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        entry_price=200.0,
+        quantity=0.25,
+        leverage=2.0,
+        position_size_usd=50.0,
+        risk_amount_usd=2.0,
+        strategy_id="legacy-import",
+        agent_consensus={},
+        explanation="legacy closed import",
+        sl_price=205.0,
+        tp_price=190.0,
+        state=TradeLifecycleState.POSITION_CLOSED,
+        entry_time="2026-11-24T10:30:00+00:00",
+        account_scope="paper:import",
     )
+    runtime_payload = json.dumps(runtime_trade.to_dict(), separators=(",", ":"))
+    closed_payload = json.dumps(closed_trade.to_dict(), separators=(",", ":"))
 
     class FakeClickHouse:
         closed = False
@@ -316,8 +346,17 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
         )
         restored = await recovery_writer.latest_snapshot("import-open")
         assert restored["trade_id"] == "import-open"
-        assert restored["quantity"] == "0.125"
+        assert restored["quantity"] == 0.125
         assert restored["account_scope"] == "paper:import"
+
+        class RecoveredLifecycle:
+            _open_trades = {}
+            _closed_trades = []
+
+        recovery = await recovery_writer.restore_lifecycle(RecoveredLifecycle())
+        assert recovery == {"open": 1, "closed": 1}
+        assert RecoveredLifecycle._open_trades["import-open"].quantity == 0.125
+        assert RecoveredLifecycle._closed_trades[0].trade_id == "import-closed"
     finally:
         if not pool.is_closing():
             await pool.close()
