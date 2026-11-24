@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { parseOperatorSession } from "./operatorSession";
+import { completeOperatorMfa } from "./webauthnClient";
 type Mode =
   "checking" | "development" | "authenticated" | "signed_out" | "error";
 export default function OperatorBoundary({
@@ -127,6 +128,19 @@ export default function OperatorBoundary({
               ? "Operator sign-in was rejected."
               : "Protected sign-in is unavailable.",
         );
+      const result = (await r.json()) as Record<string, unknown>;
+      if (
+        result.mfa_required === true ||
+        result.mfa_enrollment_required === true
+      ) {
+        setPassword("");
+        setError(
+          result.mfa_enrollment_required === true
+            ? "Registering this device's WebAuthn authenticator. Follow your browser's security-key prompt."
+            : "Complete the WebAuthn security-key check to finish signing in.",
+        );
+        await completeOperatorMfa(result);
+      }
       setPassword("");
       await check();
     } catch (e) {
