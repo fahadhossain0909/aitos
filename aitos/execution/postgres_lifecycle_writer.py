@@ -141,6 +141,7 @@ class PostgresLifecycleStateWriter:
                 snapshot = event.payload.get("trade")
                 if isinstance(snapshot, dict):
                     self._revisions[trade_id] = event.revision
+                    self._last_event_ids[trade_id] = event.event_id
                     return snapshot
                 legacy = event.payload.get("legacy_source")
                 if isinstance(legacy, dict):
@@ -169,6 +170,7 @@ class PostgresLifecycleStateWriter:
                         )
                     restored["account_scope"] = self.fence.account_scope
                     self._revisions[trade_id] = event.revision
+                    self._last_event_ids[trade_id] = event.event_id
                     return restored
         self._revisions[trade_id] = events[-1].revision if events else 0
         return None
