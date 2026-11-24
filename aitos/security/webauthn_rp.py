@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import sqlite3
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -61,8 +62,8 @@ class WebAuthnRelyingParty:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.path.parent.is_symlink():
             raise ValueError("WebAuthn credential directory symlinks are forbidden")
-        if os.name != "nt":
-            os.chmod(self.path.parent, 0o700)
+        if os.name != "nt" and stat.S_IMODE(self.path.parent.stat().st_mode) & 0o077:
+            raise ValueError("WebAuthn credential directory must have mode 0700")
         self.rp_id = rp_id
         self.rp_name = rp_name
         self.origins = frozenset(allowed_origins)
