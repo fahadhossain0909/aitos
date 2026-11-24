@@ -107,3 +107,64 @@ per-file review of event trust, permissions, secrets/environments, pinned
 actions, external side effects, destructive commands, required-check names,
 and dispatch/call dependencies. The reset and hard-reset workflows remain
 separate and must not be folded into routine CI.
+
+
+## Follow-on implementation — 2026-11-24
+
+The following code-level increments are now present on this draft branch:
+
+- `aitos/execution/postgres_lifecycle_writer.py` adds a PostgreSQL-first
+  TradeLifecycle state-writer adapter. It commits a scope-fenced aggregate
+  revision before calling the existing SQLite/ClickHouse projection writer,
+  and exposes `latest_snapshot()` for canonical snapshot recovery.
+  PostgreSQL integration coverage verifies that projection failure does not
+  roll back the canonical event.
+- `scripts/migrate_scoped_clickhouse_state.py` now has an explicit
+  `--cutover` path. It requires `--apply`, explicit writer-stopped and
+  restorable-backup confirmations, an Atomic database, absent retained-backup
+  names, row-count parity, and retains both legacy tables under
+  `*_legacy_pre_scope_v1`. Unit tests cover the Atomic/backup guards.
+- `aitos/security/webauthn_rp.py` adds a py_webauthn-backed RP implementation:
+  registration options, one-time user-bound registration challenges,
+  cryptographic attestation verification, persistent public-key credentials,
+  authenticator user-verification enforcement, signature verification and
+  sign-counter compare-and-update. `requirements.txt` now declares
+  `webauthn>=2.2.0,<3.0.0`.
+
+These are implementation components, not acceptance claims. In particular:
+
+1. The PostgreSQL writer adapter has **not yet been installed by the production
+   application composition root**. The runtime must acquire a fresh writer
+   fence on startup, bind this adapter after configuring the durable projection
+   callback, hydrate open trades from canonical snapshots before enabling
+   submissions, and prove repeated process restart/fencing recovery. Until
+   those steps are integrated, active lifecycle authority remains OPEN.
+2. The ClickHouse cutover has **not been run against the user's actual
+   production ClickHouse database**. The operator must quiesce all writers,
+   produce and verify a restorable backup, review every manifest scope mapping,
+   run the explicit cutover, then verify active and retained backup tables and
+   application readers. No live database was modified by this code change.
+3. The WebAuthn RP code has **not yet been bound to a trusted desktop identity
+   provider or exercised with an enrolled physical authenticator**. A real
+   credential registration and assertion must be completed in the configured
+   production origin/RP environment; callback-based approval tests are not
+   hardware credential acceptance.
+4. No authenticated desktop approval UI or MFA/session API has been enabled.
+   The existing desktop Operator Console remains read-only; do not add an
+   approval route to it until identity, CSRF/origin protection, session
+   revocation, RBAC and audit integration are complete.
+5. Protective POST-to-ID and triggered child-fill logic still needs the
+   authenticated Binance Demo/Testnet write-side drill, including response
+   loss after POST, client-ID lookup, triggered algo-to-child association,
+   cumulative partial fills, fee/funding reconciliation, and process restart.
+6. Three-store acceptance remains an opt-in real ClickHouse + SQLite + venue
+   drill. The current read-only CI fixture is not a substitute for repeated
+   restart and injected-failure acceptance against the authorized testnet and
+   persistent stores.
+
+## Release decision
+
+All seven requested gates remain OPEN until their own acceptance evidence is
+attached. Never treat successful static tests or a passing simulated venue
+fixture as proof of a live exchange, hardware WebAuthn, production database
+cutover, or desktop identity integration. Keep Mainnet fail-closed.
