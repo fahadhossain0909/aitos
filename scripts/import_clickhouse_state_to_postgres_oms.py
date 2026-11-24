@@ -29,21 +29,6 @@ from scripts.migrate_scoped_clickhouse_state import (
     source_fingerprint,
 )
 
-IMPORT_DDL = """
-CREATE TABLE IF NOT EXISTS aitos_oms_legacy_imports (
-    account_scope TEXT NOT NULL,
-    source_table TEXT NOT NULL,
-    source_fingerprint CHAR(64) NOT NULL,
-    source_occurrence BIGINT NOT NULL CHECK (source_occurrence >= 0),
-    trade_id TEXT NOT NULL,
-    source_updated_at TIMESTAMPTZ NOT NULL,
-    raw_payload TEXT NOT NULL,
-    raw_payload_sha256 CHAR(64) NOT NULL,
-    imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (account_scope, source_table, source_fingerprint, source_occurrence)
-)
-"""
-
 
 def _manifest_row(table: str, row: tuple[Any, ...], occurrence: int) -> dict[str, Any]:
     if table == RUNTIME_SOURCE:
@@ -88,11 +73,9 @@ async def _import_one(
     embedded = payload.get("account_scope")
     if embedded and embedded != scope:
         raise ValueError("source payload scope conflicts with explicit attribution")
-    payload["account_scope"] = scope
     trade_id = item["trade_id"]
     event_id = f"legacy:{item['source_fingerprint']}:{item['source_occurrence']}"
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute(IMPORT_DDL)
         await conn.execute(
             """
             INSERT INTO aitos_oms_legacy_imports
@@ -484,7 +467,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
                 pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
                 await apply_postgres_migrations(pool)
-                await pool.execute(IMPORT_DDL)
                 oms = PostgresCanonicalOMS(pool)
                 imported = 0
                 canonical_verified = 0
