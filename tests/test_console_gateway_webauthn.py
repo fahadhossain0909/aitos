@@ -1,6 +1,3 @@
-import json
-from pathlib import Path
-
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -61,7 +58,6 @@ async def gateway(tmp_path):
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "index.html").write_text("<html></html>", encoding="utf-8")
-    upstream = await __import__("aiohttp").web._run_app if False else None
     config = GatewayConfig(
         ORIGIN,
         "http://127.0.0.1:8765",
