@@ -5,6 +5,7 @@ import pytest
 
 from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
+from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.storage.postgres_migrations import apply_postgres_migrations
 
 
@@ -106,6 +107,35 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             await broken(TradeSnapshot())
         # Canonical event is committed before the projection callback fails.
         assert (await broken.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
+        restored_trade = Trade(
+            trade_id="trade-restore",
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            entry_price=100.0,
+            quantity=0.1,
+            leverage=2.0,
+            position_size_usd=10.0,
+            risk_amount_usd=1.0,
+            strategy_id="integration",
+            agent_consensus={},
+            explanation="OMS recovery integration",
+            sl_price=95.0,
+            tp_price=110.0,
+            state=TradeLifecycleState.POSITION_OPENED,
+            entry_time="2026-11-24T00:00:00+00:00",
+            account_scope="paper:integration",
+        )
+        await writer(restored_trade)
+
+        class LifecycleState:
+            _open_trades = {"trade-restore": restored_trade}
+            _closed_trades = []
+
+        recovery = await writer.restore_lifecycle(LifecycleState())
+        assert recovery == {"open": 1, "closed": 0}
+        assert list(LifecycleState._open_trades) == ["trade-restore"]
+        assert LifecycleState._open_trades["trade-restore"].symbol == "BTCUSDT"
+        assert LifecycleState._open_trades["trade-restore"].account_scope == "paper:integration"
         assert [
             item.revision
             for item in await oms.read_events("paper:integration", "trade-1")
