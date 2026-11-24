@@ -11,7 +11,9 @@ from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWrit
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.storage.postgres_migrations import apply_postgres_migrations
-from scripts.import_clickhouse_state_to_postgres_oms import run as run_clickhouse_oms_import
+from scripts.import_clickhouse_state_to_postgres_oms import (
+    run as run_clickhouse_oms_import,
+)
 
 
 @pytest.mark.asyncio
@@ -245,25 +247,29 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
         def query_row_block_stream(self, query):
             if "FROM trade_runtime_state" in query:
                 yield iter(
-                    [[
-                        (
-                            "import-open",
-                            "BTCUSDT",
-                            "position_opened",
-                            runtime_payload,
-                            "2026-11-24T10:00:00Z",
-                        )
-                    ]]
+                    [
+                        [
+                            (
+                                "import-open",
+                                "BTCUSDT",
+                                "position_opened",
+                                runtime_payload,
+                                "2026-11-24T10:00:00Z",
+                            )
+                        ]
+                    ]
                 )
             else:
                 yield iter(
-                    [[
-                        (
-                            "import-closed",
-                            closed_payload,
-                            "2026-11-24T11:00:00Z",
-                        )
-                    ]]
+                    [
+                        [
+                            (
+                                "import-closed",
+                                closed_payload,
+                                "2026-11-24T11:00:00Z",
+                            )
+                        ]
+                    ]
                 )
 
         def close(self):
@@ -313,15 +319,11 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
         assert len(events) == 2
         assert all(row["event_id"].startswith("legacy:") for row in events)
         with pytest.raises(asyncpg.PostgresError, match="append-only"):
-            await admin.execute(
-                "UPDATE aitos_oms_legacy_imports SET raw_payload='{}'"
-            )
+            await admin.execute("UPDATE aitos_oms_legacy_imports SET raw_payload='{}'")
         with pytest.raises(asyncpg.PostgresError, match="append-only"):
             await admin.execute("DELETE FROM aitos_oms_legacy_imports")
         with pytest.raises(asyncpg.PostgresError, match="append-only"):
-            await admin.execute(
-                "UPDATE aitos_oms_events SET event_id='tampered'"
-            )
+            await admin.execute("UPDATE aitos_oms_events SET event_id='tampered'")
         with pytest.raises(asyncpg.PostgresError, match="append-only"):
             await admin.execute("DELETE FROM aitos_oms_events")
 
