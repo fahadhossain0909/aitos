@@ -281,23 +281,25 @@ class LiveApprovalControlPlane:
         digest = self._digest(action)
         now = int(time.time())
         with self._connection() as db:
-            row = db.execute(
+            rows = db.execute(
                 "SELECT token_id,user_id,action_digest,issued_at,expires_at,signature "
                 "FROM live_approval_tokens WHERE action_digest=? "
                 "AND consumed_at IS NULL AND expires_at>? "
-                "ORDER BY issued_at,token_id LIMIT 1",
+                "ORDER BY issued_at,token_id",
                 (digest, now),
-            ).fetchone()
-        if row is None:
-            raise ApprovalDenied("no unconsumed approval exists for this exact action")
-        return SignedApproval(
-            token_id=row[0],
-            user_id=row[1],
-            action_digest=row[2],
-            issued_at=int(row[3]),
-            expires_at=int(row[4]),
-            signature=row[5],
-        )
+            ).fetchall()
+        for row in rows:
+            if not self.role_authorizer(row[1], "live_trader"):
+                continue
+            return SignedApproval(
+                token_id=row[0],
+                user_id=row[1],
+                action_digest=row[2],
+                issued_at=int(row[3]),
+                expires_at=int(row[4]),
+                signature=row[5],
+            )
+        raise ApprovalDenied("no authorized unconsumed approval exists for this exact action")
 
     def consume(
         self,
