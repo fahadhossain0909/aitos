@@ -195,6 +195,62 @@ MIGRATIONS = (
             FOR EACH ROW EXECUTE FUNCTION aitos_reject_legacy_import_mutation()
             """,
         ),
+    ),,
+
+    Migration(
+        version=4,
+        name="canonical_oms_financial_ledger",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_financial_ledger (
+                account_scope TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                line_no INTEGER NOT NULL CHECK (line_no >= 0),
+                trade_id TEXT NOT NULL,
+                account_code TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                debit NUMERIC(38, 18) NOT NULL DEFAULT 0 CHECK (debit >= 0),
+                credit NUMERIC(38, 18) NOT NULL DEFAULT 0 CHECK (credit >= 0),
+                reference TEXT,
+                recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, event_id, line_no),
+                FOREIGN KEY (account_scope, event_id)
+                  REFERENCES aitos_oms_events(account_scope, event_id),
+                CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_financial_trade
+            ON aitos_oms_financial_ledger
+              (account_scope, trade_id, currency, recorded_at)
+            """,
+            """
+            CREATE OR REPLACE FUNCTION aitos_reject_oms_financial_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $
+            BEGIN
+                RAISE EXCEPTION 'canonical OMS financial ledger is append-only';
+            END;
+            $
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_financial_no_update
+            ON aitos_oms_financial_ledger
+            """,
+            """
+            CREATE TRIGGER aitos_oms_financial_no_update
+            BEFORE UPDATE ON aitos_oms_financial_ledger
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_financial_mutation()
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_financial_no_delete
+            ON aitos_oms_financial_ledger
+            """,
+            """
+            CREATE TRIGGER aitos_oms_financial_no_delete
+            BEFORE DELETE ON aitos_oms_financial_ledger
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_financial_mutation()
+            """,
+        ),
     ),
 )
 
@@ -293,7 +349,7 @@ _REQUIRED_COLUMNS = {
         "revision",
         "projected_at",
     },
-    "aitos_oms_legacy_imports": {
+    "aitos_oms_financial_ledger": {\n        "account_scope", "event_id", "line_no", "trade_id", "account_code",\n        "currency", "debit", "credit", "recorded_at",\n    },\n    "aitos_oms_legacy_imports": {
         "account_scope",
         "source_table",
         "source_fingerprint",
