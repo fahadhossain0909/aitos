@@ -156,12 +156,14 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
     assert len(inventory) == 1
     assert inventory[0]["credential_id"] == "Y3JlZGVudGlhbC1h"
     assert inventory[0]["transports"] == ["usb"]
-    assert rp.revoke_credential(
-        user_id="operator-1", credential_id="Y3JlZGVudGlhbC1b"
-    ) is False
-    assert rp.revoke_credential(
-        user_id="operator-1", credential_id="Y3JlZGVudGlhbC1h"
-    ) is True
+    assert (
+        rp.revoke_credential(user_id="operator-1", credential_id="Y3JlZGVudGlhbC1b")
+        is False
+    )
+    assert (
+        rp.revoke_credential(user_id="operator-1", credential_id="Y3JlZGVudGlhbC1h")
+        is True
+    )
     assert rp.credential_count(user_id="operator-1") == 0
     assert rp.credential_count(user_id="operator-2") == 1
     db = rp._connect()
@@ -169,9 +171,7 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
         audit = db.execute(
             "SELECT event,user_id,credential_id FROM webauthn_credential_audit"
         ).fetchall()
-        assert audit == [
-            ("CREDENTIAL_REVOKED", "operator-1", "Y3JlZGVudGlhbC1h")
-        ]
+        assert audit == [("CREDENTIAL_REVOKED", "operator-1", "Y3JlZGVudGlhbC1h")]
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             db.execute("DELETE FROM webauthn_credential_audit")
     finally:
