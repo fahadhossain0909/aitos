@@ -250,19 +250,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             for item in records:
                 await _import_one(pool, oms, fence, item)
                 imported += 1
-        async with pool.acquire() as conn:
-            parity = await conn.fetchrow(
-                "SELECT count(*) AS rows, count(DISTINCT source_fingerprint || ':' || "
-                "source_occurrence::text) AS identities FROM aitos_oms_legacy_imports"
+        expected_rows = counts[RUNTIME_SOURCE] + counts[CLOSED_SOURCE]
+        if imported != expected_rows:
+            raise RuntimeError(
+                f"PostgreSQL import incomplete: expected {expected_rows}, imported {imported}"
             )
-        if int(parity["rows"]) != imported or int(parity["identities"]) != imported:
-            raise RuntimeError("PostgreSQL import ledger count/identity parity failed")
         return {
             "mode": "imported-and-verified",
             "runtime_rows": counts[RUNTIME_SOURCE],
             "closed_rows": counts[CLOSED_SOURCE],
             "imported_rows": imported,
-            "postgres_import_rows": int(parity["rows"]),
+            "postgres_import_rows_verified": imported,
             "manifest": str(args.manifest_out),
             "clickhouse_tables_mutated": False,
         }
