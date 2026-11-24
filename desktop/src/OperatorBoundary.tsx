@@ -21,6 +21,7 @@ export default function OperatorBoundary({
     [expires, setExpires] = useState(0),
     [clock, setClock] = useState(Date.now()),
     [password, setPassword] = useState(""),
+    [enrollmentToken, setEnrollmentToken] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [logoutFailed, setLogoutFailed] = useState(false);
@@ -116,7 +117,11 @@ export default function OperatorBoundary({
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(
+          enrollmentToken
+            ? { password, enrollment_token: enrollmentToken }
+            : { password },
+        ),
         signal: c.signal,
         cache: "no-store",
       });
@@ -155,6 +160,7 @@ export default function OperatorBoundary({
       if (mounted.current) {
         setBusy(false);
         setPassword("");
+        setEnrollmentToken("");
       }
     }
   }
@@ -262,6 +268,20 @@ export default function OperatorBoundary({
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Your configured operator password"
                 required
+                disabled={busy}
+              />
+            </div>
+            <div className="operator-password-field">
+              <KeyRound size={16} />
+              <input
+                id="operator-enrollment-token"
+                name="operator-enrollment-token"
+                type="password"
+                autoComplete="off"
+                value={enrollmentToken}
+                maxLength={1024}
+                onChange={(e) => setEnrollmentToken(e.target.value)}
+                placeholder="First remote device enrollment token (if required)"
                 disabled={busy}
               />
             </div>
