@@ -2829,7 +2829,7 @@ class TradeLifecycle(AITOSModule):
             await _call_sync_or_async(
                 intent_store.complete_protection_handover, handover_id
             )
-            await self._order_executor.acknowledge_protection_trade(result, trade)
+            await _acknowledge_protection(self._order_executor, result, trade)
         except BaseException:
             self._execution_recovery_required = True
             raise
