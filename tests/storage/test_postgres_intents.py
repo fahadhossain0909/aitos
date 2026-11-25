@@ -61,6 +61,15 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
                 "reduce_only": False,
             })
 
+        with pytest.raises(ValueError, match="positive fill evidence"):
+            await intents.transition(
+                "client-001",
+                expected_revision=1,
+                expected_state="SUBMITTING",
+                new_state="CONFIRMED",
+                result={"order_id": "9001", "filled_quantity": "0", "fill_price": "65000"},
+            )
+
         confirmed = await intents.transition(
             "client-001",
             expected_revision=1,
