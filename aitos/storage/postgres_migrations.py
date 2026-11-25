@@ -407,8 +407,6 @@ MIGRATIONS = (
         ),
     ),
 )
- 
-)
 
 
 async def verify_postgres_schema(pool) -> int:
