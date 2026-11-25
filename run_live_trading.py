@@ -289,12 +289,18 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await trade_state_persistence.initialize()
     components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
     canonical_writer = components.trade_lifecycle._postgres_canonical_oms_writer
+    async def read_projected_trade_state():
+        projected_open = await state_store.load_open_trades()
+        projected_closed = await state_store.load_closed_trades()
+        return [*projected_open, *projected_closed]
+
     outbox_projector = PostgresOMSOutboxProjector(
         postgres_oms,
         canonical_writer,
         worker_id=writer_id,
         batch_size=100,
         lease_seconds=60,
+        projection_reader=read_projected_trade_state,
     )
     # Replay projections left pending by a crash or a previous projection
     # failure before account reconciliation is allowed to authorize entries.
@@ -311,6 +317,21 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         "canonical PostgreSQL OMS restored lifecycle state",
         extra={"aitos_extra": canonical_restore},
     )
+    projection_audit = await outbox_projector.audit_and_repair_scope()
+    if projection_audit["after"].get("in_sync") is not True:
+        raise RuntimeError(
+            "canonical PostgreSQL OMS and durable ClickHouse projections are not in sync"
+        )
+    if projection_audit["repaired"]:
+        logger.warning(
+            "repaired durable trade projection drift from canonical PostgreSQL OMS",
+            extra={
+                "aitos_extra": {
+                    "before": projection_audit["before"],
+                    "rebuild": projection_audit["rebuild"],
+                }
+            },
+        )
     await initialize_all(components)
     # First consume already-filled known protective orders, then compare the
     # resulting local ledger against the entire account before any new entry.
