@@ -276,6 +276,55 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         ] == [1, 2, 3, 4]
         pending = await oms.claim_outbox()
         assert len(pending) == 3
+
+        first_claim = await oms.claim_outbox_leased(
+            "projector-a", limit=1, lease_seconds=60
+        )
+        assert len(first_claim) == 1
+        competing_claim = await oms.claim_outbox_leased(
+            "projector-b", limit=1, lease_seconds=60
+        )
+        assert len(competing_claim) == 1
+        assert (
+            first_claim[0]["account_scope"],
+            first_claim[0]["aggregate_id"],
+            first_claim[0]["revision"],
+        ) != (
+            competing_claim[0]["account_scope"],
+            competing_claim[0]["aggregate_id"],
+            competing_claim[0]["revision"],
+        )
+        with pytest.raises(OMSConflict, match="not owned"):
+            await oms.release_outbox_claim(
+                first_claim[0],
+                owner_id="projector-b",
+                claim_token=str(first_claim[0]["claim_token"]),
+                error="wrong worker",
+            )
+        await oms.release_outbox_claim(
+            first_claim[0],
+            owner_id="projector-a",
+            claim_token=str(first_claim[0]["claim_token"]),
+            error="simulated projection crash",
+        )
+        reclaimed = await oms.claim_outbox_leased(
+            "projector-c", limit=1, lease_seconds=60
+        )
+        assert len(reclaimed) == 1
+        assert reclaimed[0]["attempts"] == first_claim[0]["attempts"] + 1
+        assert reclaimed[0]["event_hash"] == first_claim[0]["event_hash"]
+        await oms.acknowledge_outbox_claim(
+            reclaimed[0],
+            owner_id="projector-c",
+            claim_token=str(reclaimed[0]["claim_token"]),
+        )
+        with pytest.raises(OMSConflict, match="stale, expired, or already"):
+            await oms.acknowledge_outbox_claim(
+                reclaimed[0],
+                owner_id="projector-c",
+                claim_token=str(reclaimed[0]["claim_token"]),
+            )
+
         await oms.mark_projected(
             "paper:integration",
             "trade-1",
