@@ -710,7 +710,9 @@ async def recover_accepted_initial_stop_submissions(
                         "symbol": symbol,
                         "side": trade_side,
                         "filled_quantity": "0",
-                        "fill_price": format(Decimal(str(request["reference_price"])), "f"),
+                        "fill_price": format(
+                            Decimal(str(request["reference_price"])), "f"
+                        ),
                         "success": True,
                         "client_order_id": client_id,
                     },
