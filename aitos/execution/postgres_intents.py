@@ -18,7 +18,6 @@ from aitos.execution.postgres_oms import (
     _identifier,
 )
 
-
 _ALLOWED_TRANSITIONS = {
     "SUBMITTING": {"CONFIRMED", "REJECTED", "PROTECTED"},
     "CONFIRMED": {"APPLIED", "TERMINAL"},
