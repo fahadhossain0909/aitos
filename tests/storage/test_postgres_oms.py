@@ -278,6 +278,35 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         assert replay == {"claimed": 1, "projected": 1, "failed": 0}
         assert projected[-1]["trade_id"] == "trade-restore"
 
+        # Binance fee/funding records become immutable, balanced postings in
+        # the same canonical trade event chain after lifecycle write-through.
+        await recovery_writer.latest_snapshot("trade-restore")
+        fee_event = await recovery_writer.append_cost_adjustment(
+            "trade-restore", "binance:income:fee-9001", "fee", "0.25"
+        )
+        funding_event = await recovery_writer.append_cost_adjustment(
+            "trade-restore", "binance:income:funding-9002", "funding", "-0.10"
+        )
+        duplicate_fee = await recovery_writer.append_cost_adjustment(
+            "trade-restore", "binance:income:fee-9001", "fee", "0.25"
+        )
+        assert duplicate_fee.event_hash == fee_event.event_hash
+        assert funding_event.revision == fee_event.revision + 1
+        assert fee_event.payload["event_type"] == "TRADE_COST_ADJUSTMENT"
+        ledger_lines = await oms.financial_trade_ledger(
+            "paper:recovery", "trade-restore"
+        )
+        assert len(ledger_lines) == 4
+        assert sum((line["debit"] for line in ledger_lines), Decimal("0")) == Decimal(
+            "0.35"
+        )
+        assert sum((line["credit"] for line in ledger_lines), Decimal("0")) == Decimal(
+            "0.35"
+        )
+        assert {
+            line["account_code"] for line in ledger_lines
+        } == {"EXPENSE_FEES", "CASH", "FUNDING_EXPENSE"}
+
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
             _closed_trades = []
