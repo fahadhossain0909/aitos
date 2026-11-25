@@ -1246,12 +1246,12 @@ class PostgresCanonicalExecutionIntentStore:
                 original_quantity = Decimal(str(request_payload["quantity"]))
                 delta_quantity = Decimal(str(child_fill["delta_quantity"]))
                 delta_quote = Decimal(str(child_fill["delta_quote"]))
-                cumulative_quantity = Decimal(
-                    str(child_fill["cumulative_quantity"])
-                )
+                cumulative_quantity = Decimal(str(child_fill["cumulative_quantity"]))
                 cumulative_quote = Decimal(str(child_fill["cumulative_quote"]))
             except (KeyError, InvalidOperation, TypeError, ValueError):
-                raise ValueError("protective child fill quantities are invalid") from None
+                raise ValueError(
+                    "protective child fill quantities are invalid"
+                ) from None
             child_status = str(child_fill["status"]).upper()
             allowed_child_statuses = {
                 "PARTIALLY_FILLED",
