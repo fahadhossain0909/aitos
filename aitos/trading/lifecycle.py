@@ -1427,6 +1427,7 @@ class TradeLifecycle(AITOSModule):
         reason: str,
         *,
         execution_intent_client_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
     ) -> Trade:
         self._require_initialized()
         if not _valid_market_price(exit_price):
@@ -1449,6 +1450,7 @@ class TradeLifecycle(AITOSModule):
                     execution.filled_quantity / trade.quantity,
                     execution_result=execution,
                     execution_intent_client_id=execution_intent_client_id,
+                    protection_child_fill=protection_child_fill,
                 )
                 trade.state = TradeLifecycleState.POSITION_OPENED
                 return trade
@@ -1519,6 +1521,7 @@ class TradeLifecycle(AITOSModule):
                     f"exit:{self._execution_faults.get(trade.trade_id, trade.trade_id)}",
                 ),
                 client_order_id=execution_intent_client_id,
+                protection_child_fill=protection_child_fill,
             )
         await self._resolve_decision_outcomes(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
@@ -2826,6 +2829,7 @@ class TradeLifecycle(AITOSModule):
         *,
         ledger_entries: list[dict[str, Any]] | None = None,
         client_order_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
     ) -> None:
         self._require_execution_writer()
         await self._execution_position_verifier()
@@ -2837,6 +2841,21 @@ class TradeLifecycle(AITOSModule):
             self, "_postgres_canonical_oms_writer", None
         )
         if (
+            canonical_intents is not None
+            and canonical_writer is not None
+            and client_id
+            and protection_child_fill is not None
+        ):
+            await canonical_writer.apply_protection_child_fill(
+                canonical_intents,
+                client_id,
+                trade,
+                child_fill=protection_child_fill,
+                ledger_entries=[] if ledger_entries is None else ledger_entries,
+            )
+            # Parent protective intent remains APPLIED until the venue reports
+            # terminal; this permits multiple child fills under one algo ID.
+        elif (
             canonical_intents is not None
             and canonical_writer is not None
             and client_id
@@ -3132,6 +3151,15 @@ class TradeLifecycle(AITOSModule):
             ):
                 pending.append(algo_order_id)
             client_id = str(algo.get("clientAlgoId", "")).strip()
+            child_fill_evidence = {
+                "algo_id": str(algo_id),
+                "child_order_id": str(child_id),
+                "cumulative_quantity": str(delta.cumulative_quantity),
+                "cumulative_quote": str(delta.cumulative_quote),
+                "delta_quantity": str(delta.delta_quantity),
+                "delta_quote": str(delta.delta_quote),
+                "status": delta.status,
+            }
             if not client_id:
                 raise ExecutionRecoveryRequired(
                     trade.symbol,
@@ -3171,6 +3199,7 @@ class TradeLifecycle(AITOSModule):
                                 float(delta.average_price),
                                 "exchange_protective_child_filled",
                                 execution_intent_client_id=client_id,
+                                protection_child_fill=child_fill_evidence,
                             )
                         finally:
                             self._confirmed_reductions.pop(trade_id, None)
@@ -3182,6 +3211,7 @@ class TradeLifecycle(AITOSModule):
                             execution_result=result,
                             refresh_protection=False,
                             execution_intent_client_id=client_id,
+                            protection_child_fill=child_fill_evidence,
                         )
                 else:
                     trade.updated_at = utc_now_iso()
@@ -3294,6 +3324,7 @@ class TradeLifecycle(AITOSModule):
         consume_tp: bool = False,
         refresh_protection: bool = True,
         execution_intent_client_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
     ) -> None:
         if not _valid_market_price(price):
             raise ValueError(f"price must be a finite positive number, got {price!r}")
@@ -3365,6 +3396,7 @@ class TradeLifecycle(AITOSModule):
                     f"reduction:{reduction_client_id}",
                 ),
                 client_order_id=execution_intent_client_id,
+                protection_child_fill=protection_child_fill,
             )
             if (
                 refresh_protection
