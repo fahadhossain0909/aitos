@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -558,6 +559,143 @@ class PostgresCanonicalOMS:
             previous = digest
             expected_revision += 1
         return result
+
+    async def claim_outbox_leased(
+        self,
+        owner_id: str,
+        *,
+        limit: int = 100,
+        lease_seconds: int = 30,
+    ) -> list[dict[str, Any]]:
+        """Atomically lease pending projection records to one worker.
+
+        The lease survives transaction completion and expires after a worker
+        crash. Competing workers cannot claim the same live lease; expired
+        claims are eligible for recovery without deleting canonical events.
+        """
+        owner = _identifier(owner_id, "outbox worker_id")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("outbox limit must be between 1 and 1000")
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
+            raise ValueError("outbox lease_seconds must be between 1 and 3600")
+        token = str(uuid.uuid4())
+        async with self._pool.acquire() as conn, conn.transaction():
+            rows = await conn.fetch(
+                """WITH candidates AS (
+                       SELECT account_scope,aggregate_id,revision
+                       FROM aitos_oms_outbox
+                       WHERE projected_at IS NULL
+                         AND (claim_until IS NULL OR claim_until <= now())
+                       ORDER BY created_at,account_scope,aggregate_id,revision
+                       LIMIT $1
+                       FOR UPDATE SKIP LOCKED
+                   )
+                   UPDATE aitos_oms_outbox AS o
+                   SET claim_owner=$2,claim_token=$3::uuid,
+                       claim_until=now()+($4 * interval '1 second'),
+                       attempts=o.attempts+1
+                   FROM candidates AS c
+                   JOIN aitos_oms_events AS e
+                     USING(account_scope,aggregate_id,revision)
+                   WHERE o.account_scope=c.account_scope
+                     AND o.aggregate_id=c.aggregate_id
+                     AND o.revision=c.revision
+                   RETURNING o.account_scope,o.aggregate_id,o.revision,
+                             o.attempts,o.claim_owner,o.claim_token,
+                             e.event_id,e.payload::text AS payload_json,
+                             e.event_hash""",
+                limit,
+                owner,
+                token,
+                lease_seconds,
+            )
+        return [dict(row) for row in rows]
+
+    async def acknowledge_outbox_claim(
+        self,
+        record: dict[str, Any],
+        *,
+        owner_id: str,
+        claim_token: str,
+    ) -> None:
+        """Acknowledge only the exact leased event after projection succeeds."""
+        if not isinstance(record, dict):
+            raise TypeError("outbox record must be an object")
+        owner = _identifier(owner_id, "outbox worker_id")
+        try:
+            token = str(uuid.UUID(claim_token))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("valid outbox claim token is required") from None
+        scope = _identifier(record.get("account_scope"), "account_scope")
+        aggregate = _identifier(record.get("aggregate_id"), "aggregate_id")
+        revision = record.get("revision")
+        if type(revision) is not int or revision < 1:
+            raise ValueError("outbox revision must be positive")
+        event_hash = record.get("event_hash")
+        if not isinstance(event_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", event_hash):
+            raise ValueError("outbox event hash is invalid")
+        async with self._pool.acquire() as conn, conn.transaction():
+            result = await conn.execute(
+                """UPDATE aitos_oms_outbox
+                   SET projected_at=now(),claim_owner=NULL,claim_token=NULL,
+                       claim_until=NULL,last_error=NULL
+                   WHERE account_scope=$1 AND aggregate_id=$2 AND revision=$3
+                     AND claim_owner=$4 AND claim_token=$5::uuid
+                     AND projected_at IS NULL
+                     AND EXISTS (
+                       SELECT 1 FROM aitos_oms_events e
+                       WHERE e.account_scope=$1 AND e.aggregate_id=$2
+                         AND e.revision=$3 AND e.event_hash=$6
+                     )""",
+                scope,
+                aggregate,
+                revision,
+                owner,
+                token,
+                event_hash,
+            )
+            if result != "UPDATE 1":
+                raise OMSConflict("outbox lease is stale, expired, or already acknowledged")
+
+    async def release_outbox_claim(
+        self,
+        record: dict[str, Any],
+        *,
+        owner_id: str,
+        claim_token: str,
+        error: str,
+    ) -> None:
+        """Release a failed projection for retry while retaining bounded diagnostics."""
+        if not isinstance(record, dict):
+            raise TypeError("outbox record must be an object")
+        owner = _identifier(owner_id, "outbox worker_id")
+        try:
+            token = str(uuid.UUID(claim_token))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("valid outbox claim token is required") from None
+        scope = _identifier(record.get("account_scope"), "account_scope")
+        aggregate = _identifier(record.get("aggregate_id"), "aggregate_id")
+        revision = record.get("revision")
+        if type(revision) is not int or revision < 1:
+            raise ValueError("outbox revision must be positive")
+        detail = str(error).replace("\\x00", "")[:2000] or "projection failed"
+        async with self._pool.acquire() as conn, conn.transaction():
+            result = await conn.execute(
+                """UPDATE aitos_oms_outbox
+                   SET claim_owner=NULL,claim_token=NULL,claim_until=NULL,
+                       last_error=$6
+                   WHERE account_scope=$1 AND aggregate_id=$2 AND revision=$3
+                     AND claim_owner=$4 AND claim_token=$5::uuid
+                     AND projected_at IS NULL""",
+                scope,
+                aggregate,
+                revision,
+                owner,
+                token,
+                detail,
+            )
+            if result != "UPDATE 1":
+                raise OMSConflict("cannot release an outbox lease not owned by this worker")
 
     async def claim_outbox(self, *, limit: int = 100) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 1000:
