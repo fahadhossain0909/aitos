@@ -852,6 +852,147 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 return "PARTIALLY_FILLED_TERMINAL"
         return status
 
+    async def _lookup_protective_post_result(
+        self, symbol: str, client_order_id: str
+    ) -> dict[str, Any]:
+        """Resolve an ambiguous protective POST by its stable client identity.
+
+        This is read-only recovery. A missing lookup result is not proof that
+        the venue rejected the POST, so the caller must retain the unresolved
+        preclaim and must never issue a second submission automatically.
+        """
+        try:
+            if self._conditional_orders_api == "algo":
+                recovered = await self.get_algo_order_by_client_id(
+                    symbol, client_order_id
+                )
+            else:
+                recovered = await self.get_order_by_client_id(
+                    symbol, client_order_id
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "protective POST outcome and client-ID recovery lookup are uncertain",
+            ) from None
+        if not isinstance(recovered, dict):
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "protective POST acknowledgement is missing; no resubmission is safe",
+            )
+        return recovered
+
+    def _validate_recovered_algo_protection(
+        self,
+        response: dict[str, Any],
+        *,
+        symbol: str,
+        position_side: TradeSide,
+        quantity: float,
+        trigger_price: float,
+        order_type: str,
+        client_order_id: str,
+    ) -> str:
+        """Validate every durable request identity against authenticated lookup."""
+        algo_id = response.get("algoId")
+        expected_side = "SELL" if position_side == TradeSide.LONG else "BUY"
+        expected_position_side = position_side.value if self._hedge_mode else "BOTH"
+        expected_reduce_only = not self._hedge_mode
+
+        def decimal_equal(actual: Any, expected: Any) -> bool:
+            if isinstance(actual, bool):
+                return False
+            try:
+                left, right = Decimal(str(actual)), Decimal(str(expected))
+            except (ArithmeticError, TypeError, ValueError):
+                return False
+            return left.is_finite() and right.is_finite() and left == right
+
+        def flag_equal(actual: Any, expected: bool) -> bool:
+            return (type(actual) is bool and actual is expected) or (
+                isinstance(actual, str) and actual == str(expected).lower()
+            )
+
+        if (
+            isinstance(algo_id, bool)
+            or not str(algo_id or "").isdigit()
+            or int(algo_id) <= 0
+            or response.get("clientAlgoId") != client_order_id
+            or response.get("symbol") != symbol
+            or response.get("algoType") != "CONDITIONAL"
+            or response.get("orderType") != order_type
+            or response.get("side") != expected_side
+            or response.get("positionSide") != expected_position_side
+            or not flag_equal(response.get("reduceOnly"), expected_reduce_only)
+            or not flag_equal(response.get("closePosition"), False)
+            or not decimal_equal(response.get("quantity"), quantity)
+            or not decimal_equal(response.get("triggerPrice"), trigger_price)
+            or response.get("algoStatus") not in {"NEW", "TRIGGERED", "FINISHED"}
+        ):
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "recovered protective algo does not match its durable request",
+            )
+        return str(int(algo_id))
+
+    def _validate_recovered_legacy_protection(
+        self,
+        response: dict[str, Any],
+        *,
+        symbol: str,
+        position_side: TradeSide,
+        quantity: float,
+        trigger_price: float,
+        order_type: str,
+        client_order_id: str,
+    ) -> str:
+        """Validate a legacy conditional order found by origClientOrderId."""
+        expected_side = "SELL" if position_side == TradeSide.LONG else "BUY"
+        expected_position_side = position_side.value if self._hedge_mode else "BOTH"
+        expected_reduce_only = not self._hedge_mode
+        order_id = response.get("orderId")
+
+        def decimal_equal(actual: Any, expected: Any) -> bool:
+            if isinstance(actual, bool):
+                return False
+            try:
+                left, right = Decimal(str(actual)), Decimal(str(expected))
+            except (ArithmeticError, TypeError, ValueError):
+                return False
+            return left.is_finite() and right.is_finite() and left == right
+
+        def flag_equal(actual: Any, expected: bool) -> bool:
+            return (type(actual) is bool and actual is expected) or (
+                isinstance(actual, str) and actual == str(expected).lower()
+            )
+
+        if (
+            isinstance(order_id, bool)
+            or not str(order_id or "").isdigit()
+            or int(order_id) <= 0
+            or response.get("clientOrderId") != client_order_id
+            or response.get("symbol") != symbol
+            or response.get("type") != order_type
+            or response.get("side") != expected_side
+            or response.get("positionSide") != expected_position_side
+            or not flag_equal(response.get("reduceOnly"), expected_reduce_only)
+            or not flag_equal(response.get("closePosition"), False)
+            or not decimal_equal(response.get("origQty"), quantity)
+            or not decimal_equal(response.get("stopPrice"), trigger_price)
+            or response.get("status") != "NEW"
+        ):
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "recovered legacy protection does not match its durable request",
+            )
+        return str(int(order_id))
+
     async def _place_reduce_only_stop(
         self,
         symbol: str,
@@ -919,50 +1060,143 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             params["algoType"] = "CONDITIONAL"
             params["triggerPrice"] = params.pop("stopPrice")
             params["clientAlgoId"] = params.pop("newClientOrderId")
+        recovered = False
         try:
             response = await self._signed_request("POST", endpoint, params)
+        except asyncio.CancelledError:
+            # Keep the committed preclaim. Startup reconciliation owns recovery.
+            raise
         except BinanceAPIError as exc:
-            logger.error(
-                f"{label} order placement failed",
-                extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+            definitive_rejections = {
+                -2019,
+                -2021,
+                -2022,
+                -1013,
+                -1111,
+                -1100,
+                -1102,
+                -1121,
+            }
+            if exc.code in definitive_rejections:
+                logger.warning(
+                    f"{label} order was definitively rejected",
+                    extra={"aitos_extra": {"symbol": symbol, "code": exc.code}},
+                )
+                rejected = OrderResult(
+                    order_id=client_order_id,
+                    symbol=symbol,
+                    side=position_side,
+                    filled_quantity=0.0,
+                    fill_price=0.0,
+                    success=False,
+                    error=str(exc),
+                    client_order_id=client_order_id,
+                )
+                return self._record_execution(client_order_id, rejected)
+            response = await self._lookup_protective_post_result(
+                symbol, client_order_id
             )
-            return OrderResult(
-                order_id=client_order_id,
+            recovered = True
+        except Exception:
+            response = await self._lookup_protective_post_result(
+                symbol, client_order_id
+            )
+            recovered = True
+
+        if self._conditional_orders_api == "algo":
+            algo_id = response.get("algoId") if isinstance(response, dict) else None
+            algo_status = response.get("algoStatus") if isinstance(response, dict) else None
+            if (
+                isinstance(algo_id, bool)
+                or not str(algo_id or "").isdigit()
+                or int(algo_id) <= 0
+                or algo_status not in {"NEW", "TRIGGERED", "FINISHED"}
+            ):
+                response = await self._lookup_protective_post_result(
+                    symbol, client_order_id
+                )
+                recovered = True
+                algo_status = response.get("algoStatus")
+            if recovered or algo_status != "NEW":
+                algo_id = self._validate_recovered_algo_protection(
+                    response,
+                    symbol=symbol,
+                    position_side=position_side,
+                    quantity=quantity,
+                    trigger_price=trigger_price,
+                    order_type=order_type,
+                    client_order_id=client_order_id,
+                )
+            else:
+                algo_id = str(int(algo_id))
+            if algo_status in {"TRIGGERED", "FINISHED"}:
+                try:
+                    child = await self.get_order_status(symbol, f"algo:{algo_id}")
+                    from aitos.execution.protection_child_reconciliation import (
+                        calculate_protection_child_fill_delta,
+                    )
+
+                    calculate_protection_child_fill_delta(
+                        dict(response),
+                        dict(child),
+                        expected_symbol=symbol,
+                        expected_side=(
+                            "SELL" if position_side == TradeSide.LONG else "BUY"
+                        ),
+                        expected_algo_id=algo_id,
+                        previously_applied_quantity="0",
+                        previously_applied_quote="0",
+                        expected_position_side=(
+                            position_side.value if self._hedge_mode else "BOTH"
+                        ),
+                        expected_reduce_only=not self._hedge_mode,
+                        expected_original_quantity=quantity,
+                    )
+                except Exception:
+                    raise ExecutionUncertainError(
+                        symbol,
+                        client_order_id,
+                        "triggered protective algo child requires reconciliation",
+                    ) from None
+            result = OrderResult(
+                order_id=f"algo:{algo_id}",
                 symbol=symbol,
                 side=position_side,
                 filled_quantity=0.0,
-                fill_price=0.0,
-                success=False,
-                error=str(exc),
-            )
-
-        if self._conditional_orders_api == "algo":
-            if not response.get("algoId") or response.get("algoStatus") != "NEW":
-                raise ExecutionUncertainError(
-                    symbol,
-                    client_order_id,
-                    "algo protection acceptance not established",
-                )
-            result = OrderResult(
-                order_id=f"algo:{response['algoId']}",
-                symbol=symbol,
-                side=position_side,
-                filled_quantity=0,
                 fill_price=trigger_price,
+                success=True,
                 client_order_id=client_order_id,
             )
         else:
-            if not response.get("orderId") or response.get("status") != "NEW":
-                raise ExecutionUncertainError(
-                    symbol,
-                    client_order_id,
-                    "legacy protection acceptance not established",
+            order_id = response.get("orderId") if isinstance(response, dict) else None
+            status = response.get("status") if isinstance(response, dict) else None
+            if (
+                isinstance(order_id, bool)
+                or not str(order_id or "").isdigit()
+                or int(order_id) <= 0
+                or status != "NEW"
+            ):
+                response = await self._lookup_protective_post_result(
+                    symbol, client_order_id
                 )
+                recovered = True
+            if recovered:
+                order_id = self._validate_recovered_legacy_protection(
+                    response,
+                    symbol=symbol,
+                    position_side=position_side,
+                    quantity=quantity,
+                    trigger_price=trigger_price,
+                    order_type=order_type,
+                    client_order_id=client_order_id,
+                )
+            else:
+                order_id = str(int(order_id))
             result = OrderResult(
-                order_id=str(response["orderId"]),
+                order_id=str(order_id),
                 symbol=symbol,
                 side=position_side,
-                filled_quantity=0,
+                filled_quantity=0.0,
                 fill_price=trigger_price,
                 success=True,
                 client_order_id=client_order_id,
