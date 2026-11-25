@@ -934,8 +934,6 @@ def restored_position_feeds_ready(
             return False
         normalized_expected.append(normalized)
     expected = set(normalized_expected)
-    if len(expected) != len(normalized_expected):
-        return False
     if restored_open_count == 0:
         return not expected
     if not expected or not isinstance(subscription_result, dict):
