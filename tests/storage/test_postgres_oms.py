@@ -8,6 +8,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from aitos.execution.postgres_intents import PostgresCanonicalExecutionIntentStore
 from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
@@ -347,6 +348,108 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             "CASH",
             "FUNDING_EXPENSE",
         }
+
+        # A triggered child fill advances the Trade, balanced ledger,
+        # execution-intent revision and child cumulative watermark atomically.
+        canonical_intents = PostgresCanonicalExecutionIntentStore(oms, recovery_fence)
+        protection_client_id = "protection-client-321"
+        await canonical_intents.begin(
+            {
+                "client_order_id": protection_client_id,
+                "symbol": "BTCUSDT",
+                "side": "SELL",
+                "order_type": "STOP_MARKET",
+                "quantity": "0.1",
+                "reduce_only": True,
+                "owner_trade_id": "trade-restore",
+            }
+        )
+        await canonical_intents.record_protection(
+            protection_client_id,
+            {
+                "order_id": "algo:321",
+                "symbol": "BTCUSDT",
+                "side": "SELL",
+                "filled_quantity": "0",
+                "fill_price": "95",
+                "success": True,
+                "client_order_id": protection_client_id,
+            },
+        )
+        await recovery_writer.apply_execution_intent(
+            canonical_intents,
+            protection_client_id,
+            restored_trade,
+            ledger_entries=[],
+        )
+        child_fill = {
+            "algo_id": "321",
+            "child_order_id": "654",
+            "cumulative_quantity": "0.02",
+            "cumulative_quote": "2",
+            "delta_quantity": "0.02",
+            "delta_quote": "2",
+            "status": "PARTIALLY_FILLED",
+        }
+        child_ledger = [
+            {
+                "account_code": "CASH",
+                "currency": "USDT",
+                "debit": "2",
+                "credit": "0",
+                "reference": "child:321:654",
+            },
+            {
+                "account_code": "OPEN_POSITION_ASSET",
+                "currency": "USDT",
+                "debit": "0",
+                "credit": "2",
+                "reference": "child:321:654",
+            },
+        ]
+        child_commit = await recovery_writer.apply_protection_child_fill(
+            canonical_intents,
+            protection_client_id,
+            restored_trade,
+            child_fill=child_fill,
+            ledger_entries=child_ledger,
+        )
+        child_watermark = await canonical_intents.protection_child_watermark(
+            "321", "654"
+        )
+        assert child_watermark["cumulative_quantity"] == Decimal("0.02")
+        assert child_watermark["cumulative_quote"] == Decimal("2")
+        assert child_commit["trade_revision"] == 7
+        intent_before_replay = await canonical_intents.get(protection_client_id)
+        trade_events_before_replay = await oms.read_events(
+            "paper:recovery", "trade-restore"
+        )
+        with pytest.raises(OMSConflict, match="watermark did not advance"):
+            await canonical_intents.append_protection_child_fill(
+                protection_client_id,
+                expected_revision=int(intent_before_replay["revision"]),
+                expected_state=intent_before_replay["state"],
+                trade_id="trade-restore",
+                expected_trade_revision=trade_events_before_replay[-1].revision,
+                trade_snapshot=restored_trade.to_dict(),
+                child_fill=child_fill,
+                ledger_entries=child_ledger,
+            )
+        intent_after_replay = await canonical_intents.get(protection_client_id)
+        trade_events_after_replay = await oms.read_events(
+            "paper:recovery", "trade-restore"
+        )
+        assert intent_after_replay["revision"] == intent_before_replay["revision"]
+        assert trade_events_after_replay[-1].revision == trade_events_before_replay[-1].revision
+        await canonical_intents.mark_protection_child_applied(
+            algo_id="321",
+            child_order_id="654",
+            trade_id="trade-restore",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.02",
+            cumulative_quote="2",
+            status="PARTIALLY_FILLED",
+        )
 
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}

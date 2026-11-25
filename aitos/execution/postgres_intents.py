@@ -1296,6 +1296,85 @@ class PostgresCanonicalExecutionIntentStore:
                     entry["credit"],
                     entry["reference"],
                 )
+            cumulative_quantity = Decimal(str(child_fill["cumulative_quantity"]))
+            cumulative_quote = Decimal(str(child_fill["cumulative_quote"]))
+            child_status = str(child_fill["status"]).upper()
+            if (
+                not cumulative_quantity.is_finite()
+                or not cumulative_quote.is_finite()
+                or cumulative_quantity <= 0
+                or cumulative_quote <= 0
+                or cumulative_quantity.as_tuple().exponent < -18
+                or cumulative_quote.as_tuple().exponent < -18
+                or not child_status
+            ):
+                raise ValueError("protective child cumulative watermark is invalid")
+            watermark = await conn.fetchrow(
+                """SELECT trade_id,symbol,cumulative_quantity,cumulative_quote,status
+                   FROM aitos_oms_protection_child_fills
+                   WHERE account_scope=$1 AND algo_id=$2 AND child_order_id=$3
+                   FOR UPDATE""",
+                self.scope,
+                algo_id,
+                child_order_id,
+            )
+            if watermark is not None:
+                if watermark["trade_id"] != trade or watermark["symbol"] != row["symbol"]:
+                    raise OMSConflict(
+                        "protective child watermark is owned by another Trade"
+                    )
+                previous_quantity = Decimal(str(watermark["cumulative_quantity"]))
+                previous_quote = Decimal(str(watermark["cumulative_quote"]))
+                if (
+                    cumulative_quantity <= previous_quantity
+                    or cumulative_quote <= previous_quote
+                ):
+                    raise OMSConflict(
+                        "protective child cumulative watermark did not advance"
+                    )
+                await conn.execute(
+                    """UPDATE aitos_oms_protection_child_fills
+                       SET cumulative_quantity=$4,cumulative_quote=$5,status=$6,
+                           updated_at=now()
+                       WHERE account_scope=$1 AND algo_id=$2 AND child_order_id=$3""",
+                    self.scope,
+                    algo_id,
+                    child_order_id,
+                    cumulative_quantity,
+                    cumulative_quote,
+                    child_status,
+                )
+            else:
+                await conn.execute(
+                    """INSERT INTO aitos_oms_protection_child_fills
+                       (account_scope,algo_id,child_order_id,trade_id,symbol,
+                        cumulative_quantity,cumulative_quote,status)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8)""",
+                    self.scope,
+                    algo_id,
+                    child_order_id,
+                    trade,
+                    row["symbol"],
+                    cumulative_quantity,
+                    cumulative_quote,
+                    child_status,
+                )
+            await self._append_protection_event(
+                conn,
+                f"protection-child-{algo_id}-{child_order_id}",
+                f"protection-child:{algo_id}:{child_order_id}",
+                {
+                    "event_type": "PROTECTION_CHILD_FILL_WATERMARK_UPDATED",
+                    "account_scope": self.scope,
+                    "algo_id": algo_id,
+                    "child_order_id": child_order_id,
+                    "trade_id": trade,
+                    "symbol": row["symbol"],
+                    "cumulative_quantity": format(cumulative_quantity, "f"),
+                    "cumulative_quote": format(cumulative_quote, "f"),
+                    "status": child_status,
+                },
+            )
             next_revision = expected_revision + 1
             await conn.execute(
                 """UPDATE aitos_oms_execution_intents
