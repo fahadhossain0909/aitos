@@ -69,7 +69,7 @@ class PostgresOMSOutboxProjector:
                     projected += 1
                 except asyncio.CancelledError:
                     raise
-                except Exception as exc:  # noqa: BLE001 - preserve the durable retry record
+                except Exception as exc:  # noqa: BLE001
                     failed += 1
                     await self.oms.release_outbox_claim(
                         record,
@@ -106,10 +106,14 @@ class PostgresOMSOutboxProjector:
             # source evidence and revalidated by the lifecycle adapter.
             snapshot = await self.lifecycle_writer.latest_snapshot(aggregate_id)
         if not isinstance(snapshot, dict):
-            raise OMSIntegrityError("trade snapshot outbox event has no recoverable state")
+            raise OMSIntegrityError(
+                "trade snapshot outbox event has no recoverable state"
+            )
         from aitos.trading.persistent_state import _trade_from_dict
 
         trade: Trade = _trade_from_dict(snapshot)
         if trade.trade_id != aggregate_id or trade.account_scope != scope:
-            raise OMSIntegrityError("projected trade identity or account scope mismatch")
+            raise OMSIntegrityError(
+                "projected trade identity or account scope mismatch"
+            )
         await self.lifecycle_writer.projection_writer(trade)
