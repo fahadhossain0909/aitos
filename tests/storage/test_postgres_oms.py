@@ -547,12 +547,13 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
                 claim_token=str(reclaimed[0]["claim_token"]),
             )
 
-        await oms.mark_projected(
-            "paper:integration",
-            "trade-1",
-            1,
-            event_hash=first.event_hash,
-        )
+        with pytest.raises(OMSConflict, match="projection acknowledgement"):
+            await oms.mark_projected(
+                "paper:integration",
+                "trade-1",
+                1,
+                event_hash=first.event_hash,
+            )
     finally:
         await pool.close()
         await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
