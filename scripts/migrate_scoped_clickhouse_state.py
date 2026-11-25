@@ -373,9 +373,29 @@ def _source_occurrence_records(
 
     for row in client.query(query).result_rows:
         if scope_keyed and runtime:
-            scope, trade_id, symbol, state, encoded, raw, stamp, stored_fp, occurrence, stored_hash = row
+            (
+                scope,
+                trade_id,
+                symbol,
+                state,
+                encoded,
+                raw,
+                stamp,
+                stored_fp,
+                occurrence,
+                stored_hash,
+            ) = row
         elif scope_keyed:
-            scope, trade_id, encoded, raw, stamp, stored_fp, occurrence, stored_hash = row
+            (
+                scope,
+                trade_id,
+                encoded,
+                raw,
+                stamp,
+                stored_fp,
+                occurrence,
+                stored_hash,
+            ) = row
             symbol = state = ""
         elif runtime:
             trade_id, symbol, state, raw, stamp = row
@@ -459,7 +479,8 @@ def _verify_scoped_matches_legacy(
     )
     if scoped != legacy:
         raise RuntimeError(
-            f"{source} rollback parity failed: scoped table differs from retained legacy backup"
+            f"{source} rollback parity failed: scoped table differs "
+            "from retained legacy backup"
         )
     return sum(legacy.values())
 
@@ -519,7 +540,8 @@ def _verified_cutover(client: Any) -> None:
         )
         if active_count != backup_count:
             raise RuntimeError(
-                f"post-cutover row-count mismatch: {active}={active_count}, {backup}={backup_count}"
+                "post-cutover row-count mismatch: "
+                f"{active}={active_count}, {backup}={backup_count}"
             )
 
 
@@ -550,7 +572,9 @@ def _verified_rollback(
     }
     required = {RUNTIME_SOURCE, CLOSED_SOURCE, RUNTIME_BACKUP, CLOSED_BACKUP}
     if not required.issubset(existing):
-        raise RuntimeError("rollback requires both active scope-keyed tables and backups")
+        raise RuntimeError(
+            "rollback requires both active scope-keyed tables and backups"
+        )
     if RUNTIME_TARGET in existing or CLOSED_TARGET in existing:
         raise RuntimeError("rollback refuses to overwrite existing v2 table names")
 
@@ -635,7 +659,9 @@ def run(
     try:
         if rollback:
             if cutover or apply:
-                raise ValueError("--rollback cannot be combined with --apply or --cutover")
+                raise ValueError(
+                    "--rollback cannot be combined with --apply or --cutover"
+                )
             return _verified_rollback(
                 client,
                 writers_quiesced=writers_quiesced,
@@ -667,7 +693,8 @@ def run(
             raise ValueError("--cutover requires --apply")
         if cutover and not (writers_quiesced and backup_confirmed):
             raise RuntimeError(
-                "cutover requires explicit writer-stop and restorable-backup confirmations"
+                "cutover requires explicit writer-stop and "
+                "restorable-backup confirmations"
             )
         if not apply:
             return {
@@ -675,7 +702,9 @@ def run(
                 "runtime_rows": len(sources[RUNTIME_SOURCE]),
                 "closed_rows": len(sources[CLOSED_SOURCE]),
                 "unattributed_records": 0,
-                "message": "No writes performed. Review attribution and rerun with --apply.",
+                "message": (
+                    "No writes performed. Review attribution and rerun with --apply."
+                ),
             }
 
         client.command(_ddl(RUNTIME_TARGET, runtime=True))
@@ -720,12 +749,18 @@ def main() -> int:
     parser.add_argument(
         "--cutover",
         action="store_true",
-        help="after verified import, atomically rename v2 tables into runtime names; requires frozen writers and explicit acknowledgement",
+        help=(
+            "after verified import, atomically rename v2 tables into runtime names; "
+            "requires frozen writers and explicit acknowledgement"
+        ),
     )
     parser.add_argument(
         "--rollback",
         action="store_true",
-        help="restore legacy runtime table names after exact parity and explicit freeze/backup confirmation",
+        help=(
+            "restore legacy runtime table names after exact parity and explicit "
+            "freeze/backup confirmation"
+        ),
     )
     parser.add_argument(
         "--scope-map",
