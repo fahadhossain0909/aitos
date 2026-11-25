@@ -1638,6 +1638,8 @@ class IdempotentOrderExecutor(OrderExecutor):
             "order_type": request.order_type,
             "client_order_id": request.client_order_id,
             "reduce_only": request.reduce_only,
+            "owner_trade_id": request.owner_trade_id,
+            "execution_context": dict(request.execution_context or {}),
         }
 
     @staticmethod
