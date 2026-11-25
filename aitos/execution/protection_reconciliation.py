@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import inspect
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -21,6 +22,16 @@ from aitos.execution.order_executor import OrderResult
 from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.protection_audit import audit_protection_inventory
 from aitos.models.trade import TradeSide
+
+
+async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call either a synchronous legacy journal API or an async PostgreSQL API."""
+    if inspect.iscoroutinefunction(function):
+        return await function(*args, **kwargs)
+    result = await asyncio.to_thread(function, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def _decimal_matches(left: Any, right: Any) -> bool:
@@ -369,7 +380,7 @@ async def audit_exchange_protection_inventory(
     if captured_at.utcoffset() is None:
         raise ValueError("timezone-aware inventory timestamp required")
     local_trades = tuple(trades) if trades is not None else None
-    rows = await asyncio.to_thread(journal_reader)
+    rows = await _call_sync_or_async(journal_reader)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded durable intent inventory required")
 
@@ -498,7 +509,7 @@ async def recover_accepted_initial_stop_submissions(
     lookup = getattr(executor, "get_algo_order_by_client_id", None)
     if not callable(lookup):
         raise TypeError("authenticated algo client-id lookup is required")
-    rows = await asyncio.to_thread(intent_store.protection_intents)
+    rows = await _call_sync_or_async(intent_store.protection_intents)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded protective intent history is required")
     open_trades = tuple(trades)
@@ -694,8 +705,8 @@ async def recover_accepted_initial_stop_submissions(
                 fill_price=float(request["reference_price"]),
                 client_order_id=client_id,
             )
-            await asyncio.to_thread(intent_store.record_protection, client_id, result)
-        await asyncio.to_thread(intent_store.mark_applied, client_id, owner_trade_id)
+            await _call_sync_or_async(intent_store.record_protection, client_id, result)
+        await _call_sync_or_async(intent_store.mark_applied, client_id, owner_trade_id)
         recovered.append(client_id)
 
     return {
@@ -737,7 +748,7 @@ async def recover_protection_handovers(
             "authenticated algo lookup and resting-order reconciliation are required"
         )
     handovers = await asyncio.to_thread(intent_store.protection_handovers)
-    intents = await asyncio.to_thread(intent_store.protection_intents)
+    intents = await _call_sync_or_async(intent_store.protection_intents)
     if (
         not isinstance(handovers, list)
         or len(handovers) > 10000
@@ -1114,7 +1125,7 @@ async def recover_protection_handovers(
                 fill_price=float(request["reference_price"]),
                 client_order_id=client_id,
             )
-            await asyncio.to_thread(intent_store.record_protection, client_id, result)
+            await _call_sync_or_async(intent_store.record_protection, client_id, result)
 
         if state == "NEW_ACCEPTED":
             await asyncio.to_thread(
