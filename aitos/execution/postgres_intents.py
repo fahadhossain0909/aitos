@@ -88,19 +88,25 @@ def _financial_state_snapshot(
         )
         max_drawdown = max(previous_max_drawdown, drawdown)
         max_drawdown_pct = max(previous_max_drawdown_pct, drawdown_pct)
+    def canonical_amount(value: Decimal) -> str:
+        if value == 0:
+            return "0"
+        encoded = format(value, "f")
+        return encoded.rstrip("0").rstrip(".") if "." in encoded else encoded
+
     return {
         "currency": currency,
-        "starting_equity": format(starting, "f"),
-        "realized_pnl": format(realized, "f"),
-        "unrealized_pnl": format(unrealized, "f"),
-        "fees": format(fees, "f"),
-        "funding": format(funding, "f"),
-        "equity": format(equity, "f"),
-        "peak_equity": format(peak, "f"),
-        "drawdown": format(drawdown, "f"),
-        "drawdown_pct": format(drawdown_pct, "f"),
-        "max_drawdown": format(max_drawdown, "f"),
-        "max_drawdown_pct": format(max_drawdown_pct, "f"),
+        "starting_equity": canonical_amount(starting),
+        "realized_pnl": canonical_amount(realized),
+        "unrealized_pnl": canonical_amount(unrealized),
+        "fees": canonical_amount(fees),
+        "funding": canonical_amount(funding),
+        "equity": canonical_amount(equity),
+        "peak_equity": canonical_amount(peak),
+        "drawdown": canonical_amount(drawdown),
+        "drawdown_pct": canonical_amount(drawdown_pct),
+        "max_drawdown": canonical_amount(max_drawdown),
+        "max_drawdown_pct": canonical_amount(max_drawdown_pct),
     }
 
 
