@@ -52,12 +52,28 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
                 "side": "BUY",
                 "quantity": "0.01",
                 "reduce_only": False,
+                "execution_context": {
+                    "approval_receipt": {
+                        "user_id": "operator-1",
+                        "token_id": "approval-token-001",
+                        "action_digest": "a" * 64,
+                        "issued_at": 100,
+                        "expires_at": 160,
+                    }
+                },
             }
         )
         assert created["state"] == "SUBMITTING"
         assert created["revision"] == 1
         stored_intent = await intents.get("client-001")
         assert stored_intent["request"]["symbol"] == "BTCUSDT"
+        receipt = stored_intent["request"]["execution_context"]["approval_receipt"]
+        intent_events = await oms.read_events(
+            "paper:intent-test", "intent-client-001"
+        )
+        assert intent_events[0].payload["request"]["execution_context"][
+            "approval_receipt"
+        ] == receipt
         assert isinstance((await intents.unresolved())[0]["request"], dict)
 
         with pytest.raises(OMSConflict, match="already exists"):
