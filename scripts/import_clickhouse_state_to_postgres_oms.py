@@ -220,6 +220,24 @@ def _scoped_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+
+
+def _write_reconciliation_report(path: Path, report: dict[str, Any]) -> None:
+    """Persist a private, immutable reconciliation summary beside the manifest."""
+    encoded = json.dumps(
+        report,
+        sort_keys=True,
+        indent=2,
+        ensure_ascii=False,
+        allow_nan=False,
+    ) + "\n"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+        output.write(encoded)
+        output.flush()
+        os.fsync(output.fileno())
+
+
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.apply and not (
         args.confirm_writers_stopped and args.confirm_backup_retained
@@ -245,11 +263,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path = Path(args.manifest_out)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     partial_manifest = manifest_path.with_suffix(manifest_path.suffix + ".partial")
+    report_path = manifest_path.with_name(
+        f"{manifest_path.stem}.reconciliation.json"
+    )
     if (
         manifest_path.exists()
         or manifest_path.is_symlink()
         or partial_manifest.exists()
         or partial_manifest.is_symlink()
+        or report_path.exists()
+        or report_path.is_symlink()
     ):
         raise FileExistsError(
             "manifest or partial manifest already exists; choose a new path "
@@ -489,15 +512,25 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
                 expected_rows = counts[RUNTIME_SOURCE] + counts[CLOSED_SOURCE]
                 if not args.apply:
-                    os.replace(partial_manifest, manifest_path)
-                    return {
+                    report = {
                         "mode": "dry-run",
+                        "source_rows": expected_rows,
                         "runtime_rows": counts[RUNTIME_SOURCE],
                         "closed_rows": counts[CLOSED_SOURCE],
+                        "scope_counts": dict(scope_counts),
+                        "source_fingerprints_verified": True,
+                        "occurrence_identity_preserved": True,
+                        "ambiguous_attribution": False,
+                        "postgres_connected": False,
+                        "writes": 0,
+                    }
+                    _write_reconciliation_report(report_path, report)
+                    os.replace(partial_manifest, manifest_path)
+                    return {
+                        **report,
                         "scopes": dict(scope_counts),
                         "manifest": str(manifest_path),
-                        "writes": 0,
-                        "postgres_connected": False,
+                        "reconciliation_report": str(report_path),
                     }
 
                 pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
@@ -512,6 +545,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                         "ORDER BY account_scope"
                     )
                 ]
+                scope_reconciliation = []
                 for scope in scopes:
                     generation = await oms.writer_generation(scope)
                     fence = await oms.acquire_writer(
@@ -569,6 +603,20 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             event.event_id: event.payload.get("legacy_source")
                             for event in events
                         }
+                        expected_legacy_ids = set(expected_events)
+                        actual_legacy_ids = {
+                            event.event_id
+                            for event in events
+                            if event.event_id.startswith("legacy:")
+                        }
+                        if actual_legacy_ids != expected_legacy_ids:
+                            missing = sorted(expected_legacy_ids - actual_legacy_ids)
+                            unexpected = sorted(actual_legacy_ids - expected_legacy_ids)
+                            raise RuntimeError(
+                                "canonical legacy event set differs from source: "
+                                f"scope={scope} trade={trade_id} "
+                                f"missing={len(missing)} unexpected={len(unexpected)}"
+                            )
                         for event_id, expected_source in expected_events.items():
                             if actual_events.get(event_id) != expected_source:
                                 raise RuntimeError(
@@ -577,21 +625,88 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                 )
                             canonical_verified += 1
 
+                    expected_evidence = {
+                        (
+                            str(row[0]),
+                            str(row[1]),
+                            int(row[2]),
+                            str(row[3]),
+                            str(row[4]),
+                            str(row[5]),
+                        )
+                        for row in stage.execute(
+                            """
+                            SELECT source_table,source_fingerprint,source_occurrence,
+                                   trade_id,updated_at,raw_payload_sha256
+                            FROM staged_source WHERE account_scope=?
+                            """,
+                            (scope,),
+                        ).fetchall()
+                    }
+                    async with pool.acquire() as conn:
+                        persisted_rows = await conn.fetch(
+                            """
+                            SELECT source_table,source_fingerprint,source_occurrence,
+                                   trade_id,source_updated_at,raw_payload_sha256
+                            FROM aitos_oms_legacy_imports
+                            WHERE account_scope=$1
+                            """,
+                            scope,
+                        )
+                    actual_evidence = {
+                        (
+                            str(row["source_table"]),
+                            str(row["source_fingerprint"]).strip(),
+                            int(row["source_occurrence"]),
+                            str(row["trade_id"]),
+                            row["source_updated_at"].isoformat(),
+                            str(row["raw_payload_sha256"]).strip(),
+                        )
+                        for row in persisted_rows
+                    }
+                    missing_evidence = expected_evidence - actual_evidence
+                    unexpected_evidence = actual_evidence - expected_evidence
+                    scope_report = {
+                        "account_scope": scope,
+                        "source_evidence_rows": len(expected_evidence),
+                        "target_evidence_rows": len(actual_evidence),
+                        "missing_evidence_rows": len(missing_evidence),
+                        "unexpected_evidence_rows": len(unexpected_evidence),
+                        "in_sync": not (missing_evidence or unexpected_evidence),
+                    }
+                    scope_reconciliation.append(scope_report)
+                    if missing_evidence or unexpected_evidence:
+                        raise RuntimeError(
+                            "PostgreSQL legacy evidence differs from ClickHouse source: "
+                            f"scope={scope}, missing={len(missing_evidence)}, "
+                            f"unexpected={len(unexpected_evidence)}"
+                        )
+
                 if imported != expected_rows or canonical_verified != expected_rows:
                     raise RuntimeError(
                         "PostgreSQL canonical import incomplete: "
                         f"source={expected_rows}, imported={imported}, "
                         f"verified={canonical_verified}"
                     )
-                os.replace(partial_manifest, manifest_path)
-                return {
+                report = {
                     "mode": "imported-and-verified",
+                    "source_rows": expected_rows,
                     "runtime_rows": counts[RUNTIME_SOURCE],
                     "closed_rows": counts[CLOSED_SOURCE],
                     "imported_rows": imported,
                     "canonical_events_verified": canonical_verified,
-                    "manifest": str(manifest_path),
+                    "scope_reconciliation": scope_reconciliation,
+                    "source_fingerprints_verified": True,
+                    "occurrence_identity_preserved": True,
+                    "ambiguous_attribution": False,
                     "clickhouse_tables_mutated": False,
+                }
+                _write_reconciliation_report(report_path, report)
+                os.replace(partial_manifest, manifest_path)
+                return {
+                    **report,
+                    "manifest": str(manifest_path),
+                    "reconciliation_report": str(report_path),
                 }
             finally:
                 stage.close()

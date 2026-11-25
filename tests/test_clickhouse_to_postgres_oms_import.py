@@ -41,6 +41,31 @@ def test_runtime_manifest_preserves_raw_payload_and_identity():
     assert len(item["raw_payload_sha256"]) == 64
 
 
+def test_duplicate_physical_rows_keep_distinct_occurrence_identity():
+    raw = json.dumps(
+        {"trade_id": "trade-duplicate", "symbol": "BTCUSDT", "state": "position_opened"},
+        separators=(",", ":"),
+    )
+    timestamp = "2026-11-24T10:00:00Z"
+    first = _manifest_row(
+        RUNTIME_SOURCE,
+        ("trade-duplicate", "BTCUSDT", "position_opened", raw, timestamp),
+        0,
+    )
+    second = _manifest_row(
+        RUNTIME_SOURCE,
+        ("trade-duplicate", "BTCUSDT", "position_opened", raw, timestamp),
+        1,
+    )
+    assert first["source_fingerprint"] == second["source_fingerprint"]
+    assert first["source_occurrence"] == 0
+    assert second["source_occurrence"] == 1
+    assert (
+        f"legacy:{first['source_fingerprint']}:{first['source_occurrence']}"
+        != f"legacy:{second['source_fingerprint']}:{second['source_occurrence']}"
+    )
+
+
 def test_closed_manifest_rejects_nonterminal_record():
     raw = json.dumps({"trade_id": "trade-2", "state": "position_opened"})
     with pytest.raises(ValueError, match="nonterminal"):
@@ -139,6 +164,14 @@ def test_streaming_dry_run_does_not_require_or_mutate_postgres(tmp_path, monkeyp
     assert rows[0]["raw_payload"] == runtime
     assert rows[1]["raw_payload"] == closed
     assert client.closed is True
+    report = json.loads(
+        (tmp_path / "manifest.reconciliation.json").read_text(encoding="utf-8")
+    )
+    assert report["mode"] == "dry-run"
+    assert report["source_rows"] == 2
+    assert report["source_fingerprints_verified"] is True
+    assert report["occurrence_identity_preserved"] is True
+    assert report["writes"] == 0
 
 
 def test_streaming_import_refuses_ambiguous_same_timestamp_snapshots(
