@@ -254,11 +254,11 @@ class PostgresCanonicalExecutionIntentStore:
             raise ValueError("positive expected_revision is required")
         if type(expected_trade_revision) is not int or expected_trade_revision < 0:
             raise ValueError("non-negative expected_trade_revision is required")
-        if new_state := "APPLIED":
-            if new_state not in _ALLOWED_TRANSITIONS.get(expected_state, set()):
-                raise ValueError(
-                    f"invalid execution-intent transition {expected_state}->{new_state}"
-                )
+        new_state = "APPLIED"
+        if new_state not in _ALLOWED_TRANSITIONS.get(expected_state, set()):
+            raise ValueError(
+                f"invalid execution-intent transition {expected_state}->{new_state}"
+            )
         if not isinstance(trade_snapshot, dict) or not trade_snapshot:
             raise ValueError("non-empty canonical trade snapshot is required")
         if trade_snapshot.get("trade_id") != trade:
@@ -277,22 +277,6 @@ class PostgresCanonicalExecutionIntentStore:
         intent_aggregate = f"intent-{client}"
         intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
         trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
-        intent_encoded = _canonical_payload(
-            {
-                "event_type": "EXECUTION_INTENT_TRANSITIONED",
-                "client_order_id": client,
-                "from_state": expected_state,
-                "state": "APPLIED",
-                "request": {},
-                "result": {},
-                "trade_id": trade,
-                "causality": {
-                    "causation_id": intent_event_id,
-                    "correlation_id": client,
-                    "parent_event_id": intent_event_id,
-                },
-            }
-        )
         await self._assert_fence()
         async with self.oms._pool.acquire() as conn, conn.transaction():
             await self._lock_fence(conn)
