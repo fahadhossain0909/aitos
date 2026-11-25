@@ -1646,8 +1646,9 @@ class TradeLifecycle(AITOSModule):
             trade.sl_order_id = sl_result.order_id
             if self._order_executor.requires_exchange_execution:
                 trade.updated_at = utc_now_iso()
-                await self._execution_state_writer(trade)
-                self._order_executor.acknowledge_protection(sl_result, trade.trade_id)
+                await self._order_executor.acknowledge_protection_trade(
+                    sl_result, trade
+                )
         else:
             if self._order_executor.requires_exchange_execution:
                 raise ExecutionUncertainError(
@@ -1689,9 +1690,8 @@ class TradeLifecycle(AITOSModule):
                 trade.tp_order_ids.append(tp_result.order_id)
                 if self._order_executor.requires_exchange_execution:
                     trade.updated_at = utc_now_iso()
-                    await self._execution_state_writer(trade)
-                    self._order_executor.acknowledge_protection(
-                        tp_result, trade.trade_id
+                    await self._order_executor.acknowledge_protection_trade(
+                        tp_result, trade
                     )
             else:
                 if self._order_executor.requires_exchange_execution:
@@ -2584,7 +2584,7 @@ class TradeLifecycle(AITOSModule):
             await self._execution_state_writer(trade)
             intent_store.complete_protection_handover(handover_id)
             await self._execution_position_verifier()
-            self._order_executor.acknowledge_protection(result, trade.trade_id)
+            await self._order_executor.acknowledge_protection_trade(result, trade)
         except BaseException:
             # Preserve the last durable handover stage. Startup recovery must
             # query the deterministic client ID before deciding whether the
