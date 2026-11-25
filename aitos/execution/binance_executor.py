@@ -616,7 +616,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         request.symbol, client_id
                     )
             result = self._confirmed_result(request, quantity, response, params["side"])
-            return self._record_execution(client_id, result)
+            return await self._record_execution(client_id, result)
         except asyncio.CancelledError:
             # The committed SUBMITTING intent survives cancellation/restart.
             raise

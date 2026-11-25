@@ -181,7 +181,7 @@ def _manifest(sources: dict[str, list[tuple[Any, ...]]]) -> list[dict[str, Any]]
                 trade_id, symbol, state, raw, stamp = row
             else:
                 trade_id, raw, stamp = row
-                symbol = state = ""
+                symbol = state = None
             fingerprint = source_fingerprint(table, str(trade_id), str(raw), stamp)
             payload = json.loads(str(raw))
             item = items.setdefault(
