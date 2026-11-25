@@ -346,7 +346,7 @@ MIGRATIONS = (
     ),
 )
 
- 
+
 async def verify_postgres_schema(pool) -> int:
     """Validate an existing schema using read-only transactions and no DDL."""
     async with pool.acquire() as conn, conn.transaction(readonly=True):
@@ -440,6 +440,11 @@ _REQUIRED_COLUMNS = {
         "aggregate_id",
         "revision",
         "projected_at",
+        "claim_owner",
+        "claim_token",
+        "claim_until",
+        "attempts",
+        "last_error",
     },
     "aitos_oms_financial_ledger": {
         "account_scope",
