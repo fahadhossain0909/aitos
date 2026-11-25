@@ -245,6 +245,103 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         await admin.close()
 
 
+@pytest.mark.asyncio
+async def test_postgres_protection_handover_and_child_fill_journal_are_fenced():
+    dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
+    if not dsn:
+        pytest.skip("AITOS_POSTGRES_OMS_TEST_DSN is not configured")
+    import asyncpg
+
+    schema = "aitos_protection_" + uuid.uuid4().hex
+    admin = await asyncpg.connect(dsn)
+    await admin.execute(f'CREATE SCHEMA "{schema}"')
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=1,
+        max_size=4,
+        server_settings={"search_path": schema},
+    )
+    try:
+        assert await apply_postgres_migrations(pool) == 7
+        oms = PostgresCanonicalOMS(pool)
+        fence = await oms.acquire_writer(
+            "live:protection-test", "protection-worker", expected_generation=0
+        )
+        intents = PostgresCanonicalExecutionIntentStore(oms, fence)
+
+        created = await intents.begin_protection_handover(
+            handover_id="rpl-001",
+            trade_id="trade-protection-1",
+            symbol="BTCUSDT",
+            old_order_id="algo:8001",
+            new_client_id="aitos-rpl-001",
+        )
+        assert created["state"] == "PREPARED"
+        accepted = await intents.record_handover_new_order("rpl-001", "algo:9001")
+        assert accepted["state"] == "NEW_ACCEPTED"
+        requested = await intents.mark_handover_old_cancel_requested("rpl-001")
+        assert requested["state"] == "OLD_CANCEL_REQUESTED"
+        cancelled = await intents.mark_handover_old_cancelled("rpl-001")
+        assert cancelled["state"] == "OLD_CANCELLED"
+        completed = await intents.complete_protection_handover("rpl-001")
+        assert completed["state"] == "APPLIED"
+        handovers = await intents.protection_handovers(
+            trade_id="trade-protection-1"
+        )
+        assert len(handovers) == 1
+        assert handovers[0]["new_order_id"] == "algo:9001"
+
+        first = await intents.mark_protection_child_applied(
+            algo_id="9001",
+            child_order_id="91001",
+            trade_id="trade-protection-1",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.005",
+            cumulative_quote="325",
+            status="PARTIALLY_FILLED",
+        )
+        assert str(first["cumulative_quantity"]) == "0.005"
+        second = await intents.mark_protection_child_applied(
+            algo_id="9001",
+            child_order_id="91001",
+            trade_id="trade-protection-1",
+            symbol="BTCUSDT",
+            cumulative_quantity="0.01",
+            cumulative_quote="650",
+            status="FILLED",
+        )
+        assert str(second["cumulative_quantity"]) == "0.01"
+        watermark = await intents.protection_child_watermark("9001", "91001")
+        assert str(watermark["cumulative_quote"]) == "650"
+        with pytest.raises(OMSConflict, match="regressed"):
+            await intents.mark_protection_child_applied(
+                algo_id="9001",
+                child_order_id="91001",
+                trade_id="trade-protection-1",
+                symbol="BTCUSDT",
+                cumulative_quantity="0.009",
+                cumulative_quote="600",
+                status="PARTIALLY_FILLED",
+            )
+
+        handover_events = await oms.read_events(
+            "live:protection-test", "protection-handover-rpl-001"
+        )
+        child_events = await oms.read_events(
+            "live:protection-test", "protection-child-9001-91001"
+        )
+        assert [event.revision for event in handover_events] == [1, 2, 3, 4, 5]
+        assert [event.revision for event in child_events] == [1, 2]
+        assert handover_events[-1].payload["event_type"] == (
+            "PROTECTION_HANDOVER_COMPLETED"
+        )
+        assert child_events[-1].payload["cumulative_quantity"] == "0.01"
+    finally:
+        await pool.close()
+        await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        await admin.close()
+
+
 def test_financial_state_snapshot_reconciles_venue_equity_without_hiding_variance():
     first = _financial_state_snapshot(
         {
