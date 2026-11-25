@@ -958,11 +958,7 @@ def restored_position_feeds_ready(
     if any(type(value) is not int for value in counters):
         return False
     ingestion_count, verified_count, failure_count = counters
-    if (
-        ingestion_count <= 0
-        or verified_count != ingestion_count
-        or failure_count != 0
-    ):
+    if ingestion_count <= 0 or verified_count != ingestion_count or failure_count != 0:
         return False
 
     evidence = subscription_result.get("ingestion_evidence")

@@ -66,9 +66,7 @@ def test_verified_trade_and_kline_coverage_allows_startup():
             )
         ],
     )
-    assert restored_position_feeds_ready(
-        2, result, ["BTCUSDT", "ETHUSDT"]
-    )
+    assert restored_position_feeds_ready(2, result, ["BTCUSDT", "ETHUSDT"])
 
 
 def test_expected_restored_symbols_must_match_reported_coverage():
@@ -99,12 +97,8 @@ def test_malformed_or_incomplete_recovery_evidence_fails_closed(result):
 
 
 def test_multiple_open_trades_for_one_symbol_are_supported():
-    assert restored_position_feeds_ready(
-        2, _result(), ["BTCUSDT", "BTCUSDT"]
-    )
+    assert restored_position_feeds_ready(2, _result(), ["BTCUSDT", "BTCUSDT"])
 
 
 def test_restored_position_with_missing_symbol_blocks_startup():
-    assert not restored_position_feeds_ready(
-        1, _result(malformed=1), [None]
-    )
+    assert not restored_position_feeds_ready(1, _result(malformed=1), [None])
