@@ -2528,7 +2528,8 @@ class TradeLifecycle(AITOSModule):
             if self._position_manager
             else trade.sl_price
         )
-        intent_store.begin_protection_handover(
+        await _call_sync_or_async(
+            intent_store.begin_protection_handover,
             handover_id=handover_id,
             trade_id=trade.trade_id,
             symbol=trade.symbol,
@@ -2550,7 +2551,9 @@ class TradeLifecycle(AITOSModule):
                     new_client_id,
                     "replacement stop acceptance is uncertain",
                 )
-            intent_store.record_handover_new_order(handover_id, result.order_id)
+            await _call_sync_or_async(
+                intent_store.record_handover_new_order, handover_id, result.order_id
+            )
             trade.sl_order_id = result.order_id
             pending = trade.agent_consensus.setdefault(
                 "_pending_stop_cancellations", []
@@ -2561,7 +2564,9 @@ class TradeLifecycle(AITOSModule):
             await self._execution_state_writer(trade)
 
             # Only a durable, venue-confirmed replacement permits cancellation.
-            intent_store.mark_handover_old_cancel_requested(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancel_requested, handover_id
+            )
             await self._order_executor.cancel_resting_order(trade.symbol, old_id)
             status_reader = getattr(
                 self._order_executor, "get_resting_order_status", None
@@ -2574,7 +2579,8 @@ class TradeLifecycle(AITOSModule):
                 )
             old_status = await status_reader(trade.symbol, old_id)
             if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
-                intent_store.block_protection_handover(
+                await _call_sync_or_async(
+                    intent_store.block_protection_handover,
                     handover_id,
                     "old stop triggered during replacement cancellation; "
                     "authenticated child-fill reconciliation required",
@@ -2596,11 +2602,15 @@ class TradeLifecycle(AITOSModule):
                     old_id,
                     f"old stop cancellation is unconfirmed: {old_status!r}",
                 )
-            intent_store.mark_handover_old_cancelled(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancelled, handover_id
+            )
             pending.remove(old_id)
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
-            intent_store.complete_protection_handover(handover_id)
+            await _call_sync_or_async(
+                intent_store.complete_protection_handover, handover_id
+            )
             await self._execution_position_verifier()
             await self._order_executor.acknowledge_protection_trade(result, trade)
         except BaseException:
@@ -2726,7 +2736,8 @@ class TradeLifecycle(AITOSModule):
         token = uuid.uuid4().hex[:16]
         handover_id = f"tpr-{token}"
         new_client_id = f"aitos-tpr-{token}"
-        intent_store.begin_protection_handover(
+        await _call_sync_or_async(
+            intent_store.begin_protection_handover,
             handover_id=handover_id,
             trade_id=trade.trade_id,
             symbol=trade.symbol,
@@ -3048,7 +3059,7 @@ class TradeLifecycle(AITOSModule):
                     algo_order_id,
                     "trade child-fill marker identity is malformed",
                 )
-            watermark = await asyncio.to_thread(
+            watermark = await _call_sync_or_async(
                 intent_store.protection_child_watermark, algo_id, child_id
             )
             if watermark is not None and not marker:
@@ -3191,7 +3202,7 @@ class TradeLifecycle(AITOSModule):
                     await _call_sync_or_async(
                         intent_store.mark_applied, client_id, trade_id
                     )
-                await asyncio.to_thread(
+                await _call_sync_or_async(
                     intent_store.mark_protection_child_applied,
                     algo_id=algo_id,
                     child_order_id=child_id,
