@@ -343,9 +343,7 @@ async def test_postgres_intent_cas_survives_independent_pools_and_restarts():
             server_settings={"search_path": schema},
         )
         restarted_oms = PostgresCanonicalOMS(pool_c)
-        restarted_store = PostgresCanonicalExecutionIntentStore(
-            restarted_oms, fence_b
-        )
+        restarted_store = PostgresCanonicalExecutionIntentStore(restarted_oms, fence_b)
         recovered = await restarted_store.get("multiwriter-client-001")
         assert recovered["state"] == "CONFIRMED"
         assert recovered["revision"] == 2
@@ -507,9 +505,7 @@ async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
         ]
         for index, fill in enumerate(fills, start=1):
             intent = await intents.get("protect-child-001")
-            trade_events = await oms.read_events(
-                "live:child-atomic", "trade-child-001"
-            )
+            trade_events = await oms.read_events("live:child-atomic", "trade-child-001")
             result = await intents.append_protection_child_fill(
                 "protect-child-001",
                 expected_revision=int(intent["revision"]),
@@ -537,20 +533,23 @@ async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
         intent_events = await oms.read_events(
             "live:child-atomic", "intent-protect-child-001"
         )
-        trade_events = await oms.read_events(
-            "live:child-atomic", "trade-child-001"
-        )
+        trade_events = await oms.read_events("live:child-atomic", "trade-child-001")
         assert [event.revision for event in intent_events] == [1, 2, 3, 4, 5]
-        assert [
-            event.payload["event_type"] for event in intent_events[-2:]
-        ] == ["PROTECTION_CHILD_FILL_APPLIED", "PROTECTION_CHILD_FILL_APPLIED"]
+        assert [event.payload["event_type"] for event in intent_events[-2:]] == [
+            "PROTECTION_CHILD_FILL_APPLIED",
+            "PROTECTION_CHILD_FILL_APPLIED",
+        ]
         assert [event.revision for event in trade_events] == [1, 2, 3]
         ledger_rows = await oms.financial_trade_ledger(
             "live:child-atomic", "trade-child-001"
         )
         assert len(ledger_rows) == 4
-        assert sum((line["debit"] for line in ledger_rows), Decimal("0")) == Decimal("650")
-        assert sum((line["credit"] for line in ledger_rows), Decimal("0")) == Decimal("650")
+        assert sum((line["debit"] for line in ledger_rows), Decimal("0")) == Decimal(
+            "650"
+        )
+        assert sum((line["credit"] for line in ledger_rows), Decimal("0")) == Decimal(
+            "650"
+        )
 
         terminal = await intents.mark_protection_terminal(
             "algo:7001",
@@ -606,9 +605,7 @@ async def test_postgres_protection_handover_and_child_fill_journal_are_fenced():
         assert cancelled["state"] == "OLD_CANCELLED"
         completed = await intents.complete_protection_handover("rpl-001")
         assert completed["state"] == "APPLIED"
-        handovers = await intents.protection_handovers(
-            trade_id="trade-protection-1"
-        )
+        handovers = await intents.protection_handovers(trade_id="trade-protection-1")
         assert len(handovers) == 1
         assert handovers[0]["new_order_id"] == "algo:9001"
 
