@@ -87,6 +87,91 @@ class PostgresLifecycleStateWriter:
                 event_hash=event.event_hash,
             )
 
+    async def append_cost_adjustment(
+        self,
+        trade_id: str,
+        adjustment_id: str,
+        kind: str,
+        amount_usd: Any,
+    ) -> Any:
+        """Append an idempotent fee/funding journal event to its trade aggregate.
+
+        The adjustment is committed to the canonical trade event chain and
+        balanced financial ledger under the same writer fence. Lifecycle
+        snapshot writes and cost events share the per-trade serialization lock.
+        """
+        from decimal import Decimal, InvalidOperation
+
+        trade = str(trade_id).strip()
+        adjustment = str(adjustment_id).strip()
+        if not trade or not adjustment:
+            raise ValueError("trade_id and adjustment_id are required")
+        if kind not in {"fee", "funding"}:
+            raise ValueError("cost adjustment kind must be fee or funding")
+        try:
+            amount = Decimal(str(amount_usd))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("cost adjustment amount must be decimal") from None
+        if not amount.is_finite() or amount == 0:
+            raise ValueError("cost adjustment amount must be finite and non-zero")
+        if kind == "fee" and amount < 0:
+            raise ValueError("fee adjustment must be a positive cost")
+
+        absolute = abs(amount)
+        if kind == "fee":
+            debit_account, credit_account = "EXPENSE_FEES", "CASH"
+        elif amount > 0:
+            debit_account, credit_account = "CASH", "FUNDING_INCOME"
+        else:
+            debit_account, credit_account = "FUNDING_EXPENSE", "CASH"
+        event_id = f"income:{adjustment}"
+        if len(event_id) > 192:
+            raise ValueError("income event identity exceeds canonical OMS limit")
+
+        lock = self._locks.setdefault(trade, asyncio.Lock())
+        async with lock:
+            revision = await self._revision(trade)
+            parent_event_id = self._last_event_ids.get(trade)
+            event = await self.oms.append(
+                self.fence,
+                aggregate_id=trade,
+                event_id=event_id,
+                expected_revision=revision,
+                payload={
+                    "event_type": "TRADE_COST_ADJUSTMENT",
+                    "trade_id": trade,
+                    "adjustment_id": adjustment,
+                    "kind": kind,
+                    "amount": format(amount, "f"),
+                    "currency": "USDT",
+                    "causality": {
+                        "causation_id": adjustment,
+                        "correlation_id": trade,
+                        "parent_event_id": parent_event_id,
+                    },
+                },
+                ledger_entries=[
+                    {
+                        "account_code": debit_account,
+                        "currency": "USDT",
+                        "debit": format(absolute, "f"),
+                        "credit": "0",
+                        "reference": adjustment,
+                    },
+                    {
+                        "account_code": credit_account,
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(absolute, "f"),
+                        "reference": adjustment,
+                    },
+                ],
+            )
+            if event.revision >= self._revisions.get(trade, 0):
+                self._revisions[trade] = event.revision
+                self._last_event_ids[trade] = event.event_id
+            return event
+
     async def restore_lifecycle(self, lifecycle: Any) -> dict[str, int]:
         """Replace projected lifecycle state with verified canonical OMS snapshots.
 
