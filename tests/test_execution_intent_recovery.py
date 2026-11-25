@@ -763,3 +763,18 @@ def test_execution_transition_sequence_is_scoped_and_survives_reopen(tmp_path):
 
     reopened = store(tmp_path, scope="account-A")
     assert reopened.read_transition_events()[0]["sequence"] == last
+
+
+def test_repeated_applied_acknowledgement_is_idempotent_and_trade_scoped(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(request())
+    journal.record_result("intent-one", result())
+    journal.mark_applied("intent-one", "durable-trade-one")
+
+    # Cumulative protective child fills can re-enter the acknowledgement path.
+    journal.mark_applied("intent-one", "durable-trade-one")
+    assert journal.get("intent-one")["state"] == "APPLIED"
+    assert journal.get("intent-one")["trade_id"] == "durable-trade-one"
+
+    with pytest.raises(ValueError, match="different trade"):
+        journal.mark_applied("intent-one", "different-trade")
