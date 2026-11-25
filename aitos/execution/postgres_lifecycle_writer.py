@@ -236,6 +236,77 @@ class PostgresLifecycleStateWriter:
         )
         return committed
 
+    async def apply_protection_child_fill(
+        self,
+        intents: Any,
+        client_id: str,
+        trade: Any,
+        *,
+        child_fill: dict[str, Any],
+        ledger_entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Atomically append one partial/terminal child-fill delta.
+
+        The parent protective intent stays APPLIED while its algo order remains
+        active. Each child fill advances both intent and Trade revisions and
+        posts a balanced journal in the same PostgreSQL transaction, allowing
+        subsequent cumulative fills to be applied without reopening the intent.
+        """
+        if getattr(intents, "oms", None) is not self.oms:
+            raise ValueError("execution intents must share the lifecycle writer OMS")
+        if getattr(intents, "fence", None) != self.fence:
+            raise ValueError("execution intents must use the lifecycle writer fence")
+        trade_id = str(getattr(trade, "trade_id", "")).strip()
+        to_dict = getattr(trade, "to_dict", None)
+        if not trade_id or not callable(to_dict):
+            raise ValueError("protective child fill requires a persisted Trade")
+        current_scope = str(getattr(trade, "account_scope", "") or "")
+        if current_scope and current_scope != self.fence.account_scope:
+            raise ValueError("trade account scope differs from canonical OMS writer")
+        trade.account_scope = self.fence.account_scope
+        lock = self._locks.setdefault(trade_id, asyncio.Lock())
+        async with lock:
+            intent = await intents.get(client_id)
+            if intent is None:
+                raise RuntimeError("canonical protective intent is missing")
+            expected_state = str(intent["state"])
+            if expected_state not in {"APPLIED", "PROTECTED"}:
+                raise RuntimeError(
+                    f"protective child fill cannot apply from {expected_state}"
+                )
+            revision = await self._revision(trade_id)
+            committed = await intents.append_protection_child_fill(
+                client_id,
+                expected_revision=int(intent["revision"]),
+                expected_state=expected_state,
+                trade_id=trade_id,
+                expected_trade_revision=revision,
+                trade_snapshot=to_dict(),
+                child_fill=child_fill,
+                ledger_entries=ledger_entries,
+            )
+            self._revisions[trade_id] = committed["trade_revision"]
+            self._last_event_ids[trade_id] = committed["trade_event_id"]
+            await self.projection_writer(trade)
+            events = await self.oms.read_events(self.fence.account_scope, trade_id)
+            event = next(
+                (
+                    item
+                    for item in reversed(events)
+                    if item.event_id == committed["trade_event_id"]
+                ),
+                None,
+            )
+            if event is None:
+                raise RuntimeError("canonical protective child Trade event disappeared")
+            await self.oms.mark_projected(
+                self.fence.account_scope,
+                trade_id,
+                committed["trade_revision"],
+                event_hash=event.event_hash,
+            )
+            return committed
+
     async def restore_lifecycle(self, lifecycle: Any) -> dict[str, int]:
         """Replace projected lifecycle state with verified canonical OMS snapshots.
 
