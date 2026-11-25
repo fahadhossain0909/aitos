@@ -371,7 +371,10 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         components.trade_lifecycle,
         event_bus,
         state_store,
-        persist_trade=trade_state_persistence.persist_execution_state,
+        # Cost adjustments must first update the canonical trade snapshot,
+        # then append the fee/funding journal event under the same OMS fence.
+        persist_trade=canonical_writer,
+        canonical_posting=canonical_writer.append_cost_adjustment,
     )
     cleanup.push_async_callback(income_reconciler.shutdown)
     income_reconciliation_ready = False
