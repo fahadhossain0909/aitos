@@ -2760,7 +2760,9 @@ class TradeLifecycle(AITOSModule):
                     new_client_id,
                     "replacement take-profit acceptance is uncertain",
                 )
-            intent_store.record_handover_new_order(handover_id, result.order_id)
+            await _call_sync_or_async(
+                intent_store.record_handover_new_order, handover_id, result.order_id
+            )
             trade.tp_order_ids[tp_index] = result.order_id
             trade.take_profit_levels[tp_index] = float(new_price)
             pending = trade.agent_consensus.setdefault(
@@ -2777,7 +2779,9 @@ class TradeLifecycle(AITOSModule):
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
 
-            intent_store.mark_handover_old_cancel_requested(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancel_requested, handover_id
+            )
             old_status = await status_reader(trade.symbol, old_id)
             if old_status != "NEW":
                 raise ExecutionRecoveryRequired(
@@ -2801,12 +2805,16 @@ class TradeLifecycle(AITOSModule):
                         f"(status={old_status!r})"
                     ),
                 )
-            intent_store.mark_handover_old_cancelled(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancelled, handover_id
+            )
             while old_id in pending:
                 pending.remove(old_id)
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
-            intent_store.complete_protection_handover(handover_id)
+            await _call_sync_or_async(
+                intent_store.complete_protection_handover, handover_id
+            )
             await self._order_executor.acknowledge_protection_trade(result, trade)
         except BaseException:
             self._execution_recovery_required = True
