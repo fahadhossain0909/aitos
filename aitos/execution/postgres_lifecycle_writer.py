@@ -223,7 +223,11 @@ class PostgresLifecycleStateWriter:
         await self.projection_writer(trade)
         trade_events = await self.oms.read_events(self.fence.account_scope, trade_id)
         trade_event = next(
-            (event for event in reversed(trade_events) if event.event_id == committed["trade_event_id"]),
+            (
+                event
+                for event in reversed(trade_events)
+                if event.event_id == committed["trade_event_id"]
+            ),
             None,
         )
         if trade_event is None:
@@ -330,9 +334,7 @@ class PostgresLifecycleStateWriter:
             )
         for trade_id in aggregate_ids:
             events = await self.oms.read_events(self.fence.account_scope, trade_id)
-            event_types = {
-                str(event.payload.get("event_type", "")) for event in events
-            }
+            event_types = {str(event.payload.get("event_type", "")) for event in events}
             if "TRADE_SNAPSHOT" not in event_types:
                 # Intent and financial aggregates share the canonical event
                 # journal but are not TradeLifecycle positions.
