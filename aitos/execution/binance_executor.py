@@ -197,7 +197,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         client_id = result.client_order_id
         if not client_id:
             raise ExecutionUncertainError(
-                trade.symbol, result.order_id, "protective acceptance lacks a client intent ID"
+                trade.symbol,
+                result.order_id,
+                "protective acceptance lacks a client intent ID",
             )
         if self._canonical_intent_store is not None:
             if self._canonical_lifecycle_writer is None:
