@@ -591,10 +591,28 @@ class PostgresCanonicalExecutionIntentStore:
         status: str,
         executed_quantity: float,
     ) -> dict[str, Any]:
+        terminal_states = {
+            "CANCELED",
+            "FILLED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }
+        if (
+            not isinstance(order_id, str)
+            or not order_id
+            or not isinstance(symbol, str)
+            or not symbol
+            or status not in terminal_states
+            or isinstance(executed_quantity, bool)
+            or not isinstance(executed_quantity, (int, float))
+            or not Decimal(str(executed_quantity)).is_finite()
+            or executed_quantity < 0
+        ):
+            raise ValueError("valid terminal protective-order evidence is required")
         rows = await self.protection_intents()
         matches = []
         for row in rows:
-            request = json.loads(row["request_json"])
             result = json.loads(row["result_json"]) if row["result_json"] else {}
             if (
                 row["symbol"] == symbol
@@ -604,7 +622,24 @@ class PostgresCanonicalExecutionIntentStore:
         if len(matches) != 1:
             raise OMSConflict("terminal protection order does not map to one canonical intent")
         row = matches[0]
-        return await self.mark_terminal(str(row["client_id"]))
+        current = await self.get(str(row["client_id"]))
+        if current is None:
+            raise OMSConflict("terminal protection intent disappeared")
+        if current["state"] == "TERMINAL":
+            return current
+        result = json.loads(current["result"]) if isinstance(current.get("result"), str) else current.get("result") or {}
+        result = dict(result)
+        result["terminal_status"] = status
+        result["terminal_executed_quantity"] = format(
+            Decimal(str(executed_quantity)), "f"
+        )
+        return await self.transition(
+            str(row["client_id"]),
+            expected_revision=int(current["revision"]),
+            expected_state=str(current["state"]),
+            new_state="TERMINAL",
+            result=result,
+        )
 
     async def mark_applied(self, client_id: str, trade_id: str) -> dict[str, Any]:
         """Compatibility recovery transition; normal writes use atomic Trade finalization."""
