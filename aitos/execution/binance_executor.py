@@ -461,12 +461,22 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return True
 
     def has_unresolved_orders(self, symbol: str | None = None) -> bool:
-        return any(
+        cached = any(
             symbol is None or candidate == symbol
             for candidate in self._pending_execution.values()
-        ) or bool(self._intent_store and self._intent_store.unresolved(symbol))
+        )
+        # In live mode the cache is refreshed from PostgreSQL at startup and
+        # maintained on every preclaim/acknowledgement. Do not synchronously
+        # query or depend on a legacy SQLite intent database.
+        if self._canonical_intent_store is not None:
+            return cached
+        return cached or bool(self._intent_store and self._intent_store.unresolved(symbol))
 
     def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        if self._canonical_intent_store is not None:
+            raise RuntimeError(
+                "PostgreSQL canonical execution acknowledgements must be awaited"
+            )
         if self._intent_store is not None:
             self._intent_store.mark_applied(client_order_id, trade_id)
         self._pending_execution.pop(client_order_id, None)
@@ -507,7 +517,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 raise PermissionError("mainnet execution approval is unavailable")
             action = {
                 "environment": "binance-usdm-mainnet",
-                "scope": self._intent_store.scope if self._intent_store else None,
+                "scope": self._execution_scope,
                 "client_order_id": client_id,
                 "symbol": request.symbol,
                 "side": str(getattr(request.side, "value", request.side)),
