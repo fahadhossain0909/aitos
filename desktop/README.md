@@ -76,7 +76,7 @@ independent review are still required before any nonlocal activation.
 - p50/p95/p99 stage selection; unmeasured values stay unavailable.
 - Bounded local configuration drafts, device save and unapplied JSON export.
 - Explicit gates for live activation, accounts, credentials and job launch.
-- Keyboard search (Ctrl/Cmd K), Escape, dialog focus containment/restoration.
+- Keyboard: Ctrl/Cmd K opens the Workspace Studio command palette, `/` focuses the journal search, Escape closes dialogs, with dialog focus containment/restoration.
 
 Exchange/mode selection is workspace context, **not runtime mutation**. Drafts do
 not apply configuration. Connections do not store keys or activate accounts.
@@ -227,3 +227,17 @@ credential, migration or order controls. A local ACK is not production certifica
 Verification: 84 frontend tests, production build, ten-page/mobile smoke, and an
 actual isolated projector → API → gateway → built authenticated browser test.
 Details/limitations: `../engineering/PROJECTOR_AND_PERSISTENCE_CONSOLE_2026-11-06.md`.
+
+## Appearance
+
+The floating **Appearance** control (bottom-right) switches between *Olive dark* (default, unchanged), *Terminal* (neutral dark, single blue accent, green/red reserved for P&L), *Ivory light* and *System*, and offers 100/115/130% text size. Choices persist locally (`aitos-theme-v1`, `aitos-text-v1`). Colours for every skin come from generated design tokens (see below); `src/themes.css` only adds what a palette transform cannot infer (P&L colours in Terminal, text size, live ribbon, switcher styles). Helpers are in `src/theme.ts` (unit-tested). When an attached runtime declares a live mode, a persistent red ribbon is shown.
+
+### Design tokens and structure
+
+Every colour in the console is a generated token (`--c-<hex>`, see `src/tokens.css`). The Olive palette is the source of truth; Terminal and Ivory are derived from it by `scripts/generate-theme-tokens.py` (run it from `desktop/` after adding a colour). `src/tokens.test.ts` fails the build if a raw colour literal appears in component styles or a token is missing from any theme. The trusted-signer window (`signer.css`) intentionally does not load the theme layer. Styles are split into `styles.css` plus `styles/{quality,persistence,workspace-studio}.css`; shared building blocks live in `src/components/`. Background tabs poll every 30 s and refresh immediately when shown; press `/` on the journal to focus search.
+
+### Risk page and live stream
+
+The **Risk** page derives gross/net exposure, stop-out risk and limit usage from the open positions and the read-only runtime configuration (`max_open_positions`, `max_risk_per_trade_pct`, `max_leverage`, `max_drawdown_pct`, ...). Percentage limits need an account value; without an attached feed they are shown as *not measured* rather than estimated, and correlated/sector exposure stay unmeasured until a correlation model and sector map exist. The sample workspace uses illustrative limits and account value.
+
+When a runtime is attached, the console also opens `GET /console/v1/stream`, a bounded (60 s, 2 clients) read-only server-sent snapshot stream that the operator gateway relays only after validating every frame. If the stream is unsupported or fails, polling continues unchanged.
