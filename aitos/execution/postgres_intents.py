@@ -74,9 +74,14 @@ def _financial_state_snapshot(
         fees = amount("fees", nonnegative=True)
         funding = amount("funding")
         model_equity = starting + realized + unrealized + funding - fees
-        venue_equity = (
-            amount("venue_equity") if "venue_equity" in snapshot else model_equity
-        )
+        if "venue_equity" in snapshot:
+            venue_equity = amount("venue_equity")
+        elif previous is not None:
+            venue_equity = model_equity + Decimal(
+                str(previous.get("unattributed_adjustments", "0"))
+            )
+        else:
+            venue_equity = model_equity
         unattributed_adjustments = venue_equity - model_equity
         equity = venue_equity
         if previous is not None:
@@ -704,6 +709,69 @@ class PostgresCanonicalExecutionIntentStore:
             trade_id=trade_id,
         )
 
+    async def _append_financial_snapshot_in_transaction(
+        self,
+        conn: Any,
+        snapshot: dict[str, Any],
+        expected_revision: int,
+        *,
+        causation_id: str,
+        correlation_id: str,
+    ) -> tuple[str, int, dict[str, str]]:
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected financial revision must be non-negative")
+        if not isinstance(snapshot, dict):
+            raise TypeError("financial snapshot must be an object")
+        currency = _identifier(str(snapshot.get("currency") or ""), "currency")
+        aggregate = f"financial:{currency}"
+        event_revision = expected_revision + 1
+        event_id = f"financial:{currency}:revision:{event_revision}"
+        if len(event_id) > 192:
+            raise ValueError("financial event identity exceeds 192 characters")
+        previous = await conn.fetchrow(
+            """SELECT revision,event_id,payload::text AS payload_json
+               FROM aitos_oms_events
+               WHERE account_scope=$1 AND aggregate_id=$2
+               ORDER BY revision DESC LIMIT 1""",
+            self.scope,
+            aggregate,
+        )
+        actual_revision = int(previous["revision"]) if previous is not None else 0
+        if actual_revision != expected_revision:
+            raise OMSConflict(
+                "financial aggregate revision CAS failed: "
+                f"expected {expected_revision}, actual {actual_revision}"
+            )
+        previous_state = None
+        previous_event_id = None
+        if previous is not None:
+            previous_payload = json.loads(previous["payload_json"])
+            if previous_payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
+                raise OMSConflict("financial aggregate contains a non-snapshot event")
+            previous_state = previous_payload.get("financial_state")
+            if not isinstance(previous_state, dict):
+                raise OMSConflict("canonical financial snapshot is malformed")
+            previous_event_id = previous["event_id"]
+        financial_state = _financial_state_snapshot(snapshot, previous_state)
+        payload = {
+            "event_type": "FINANCIAL_STATE_SNAPSHOT",
+            "account_scope": self.scope,
+            "financial_state": financial_state,
+            "causality": {
+                "causation_id": _identifier(causation_id, "causation_id"),
+                "correlation_id": _identifier(correlation_id, "correlation_id"),
+                "parent_event_id": previous_event_id,
+            },
+        }
+        await self._append_event(
+            conn,
+            aggregate,
+            event_id,
+            expected_revision,
+            _canonical_payload(payload),
+        )
+        return event_id, event_revision, financial_state
+
     async def begin(self, request: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(request, dict) or not request:
             raise ValueError("non-empty execution request is required")
@@ -1160,6 +1228,8 @@ class PostgresCanonicalExecutionIntentStore:
         expected_trade_revision: int,
         trade_snapshot: dict[str, Any],
         ledger_entries: list[dict[str, Any]],
+        financial_snapshot: dict[str, Any] | None = None,
+        expected_financial_revision: int | None = None,
     ) -> dict[str, Any]:
         """Persist a confirmed fill and ledger while keeping its intent unresolved.
 
@@ -1182,6 +1252,10 @@ class PostgresCanonicalExecutionIntentStore:
         normalized_entries = self.oms._validate_ledger_entries(ledger_entries)
         if not normalized_entries:
             raise ValueError("confirmed live entry requires balanced ledger entries")
+        if (financial_snapshot is None) != (expected_financial_revision is None):
+            raise ValueError(
+                "financial snapshot and expected revision must be supplied together"
+            )
         event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
         await self._assert_fence()
         async with self.oms._pool.acquire() as conn, conn.transaction():
@@ -1276,6 +1350,21 @@ class PostgresCanonicalExecutionIntentStore:
                     entry["credit"],
                     entry["reference"],
                 )
+            financial_event_id = None
+            financial_revision = None
+            financial_state = None
+            if financial_snapshot is not None:
+                (
+                    financial_event_id,
+                    financial_revision,
+                    financial_state,
+                ) = await self._append_financial_snapshot_in_transaction(
+                    conn,
+                    financial_snapshot,
+                    expected_financial_revision,
+                    causation_id=event_id,
+                    correlation_id=client,
+                )
         return {
             "account_scope": self.scope,
             "client_id": client,
@@ -1284,6 +1373,9 @@ class PostgresCanonicalExecutionIntentStore:
             "trade_revision": expected_trade_revision + 1,
             "trade_event_id": event_id,
             "intent_state": "CONFIRMED",
+            "financial_event_id": financial_event_id,
+            "financial_revision": financial_revision,
+            "financial_state": financial_state,
         }
 
     async def append_protection_child_fill(
@@ -1297,6 +1389,8 @@ class PostgresCanonicalExecutionIntentStore:
         trade_snapshot: dict[str, Any],
         child_fill: dict[str, Any],
         ledger_entries: list[dict[str, Any]],
+        financial_snapshot: dict[str, Any] | None = None,
+        expected_financial_revision: int | None = None,
     ) -> dict[str, Any]:
         """Append one cumulative child-fill delta without terminating its parent algo.
 
@@ -1342,6 +1436,10 @@ class PostgresCanonicalExecutionIntentStore:
         if not normalized_entries:
             raise ValueError(
                 "positive protective child fill requires balanced ledger entries"
+            )
+        if (financial_snapshot is None) != (expected_financial_revision is None):
+            raise ValueError(
+                "financial snapshot and expected revision must be supplied together"
             )
         intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
         trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
@@ -1571,6 +1669,21 @@ class PostgresCanonicalExecutionIntentStore:
                     cumulative_quote,
                     child_status,
                 )
+            financial_event_id = None
+            financial_revision = None
+            financial_state = None
+            if financial_snapshot is not None:
+                (
+                    financial_event_id,
+                    financial_revision,
+                    financial_state,
+                ) = await self._append_financial_snapshot_in_transaction(
+                    conn,
+                    financial_snapshot,
+                    expected_financial_revision,
+                    causation_id=trade_event_id,
+                    correlation_id=client,
+                )
             await self._append_protection_event(
                 conn,
                 f"protection-child-{algo_id}-{child_order_id}",
@@ -1611,6 +1724,9 @@ class PostgresCanonicalExecutionIntentStore:
             "trade_event_id": trade_event_id,
             "trade_revision": expected_trade_revision + 1,
             "child_fill": child_fill,
+            "financial_event_id": financial_event_id,
+            "financial_revision": financial_revision,
+            "financial_state": financial_state,
         }
 
     async def record_result(self, client_id: str, result: Any) -> dict[str, Any]:

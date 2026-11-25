@@ -73,65 +73,95 @@ HEALTH_SERVER_PORT = 8091
 SYMBOL_FILTER_TTL_SECONDS = 300.0
 
 
-async def _publish_canonical_financial_snapshot(
+async def _canonical_financial_snapshot_inputs(
     executor,
     intents: PostgresCanonicalExecutionIntentStore,
     lifecycle,
-) -> dict:
-    """Reconcile canonical trading PnL components to live USD-M margin equity."""
-    venue_equity = await executor.get_account_equity("USDT")
-    if isinstance(venue_equity, bool) or not math.isfinite(float(venue_equity)):
-        raise ValueError("live venue equity is not a finite USDT value")
-    position_rows = await executor.get_position_risk()
-    if not isinstance(position_rows, list) or len(position_rows) > 10000:
-        raise ValueError("bounded authenticated position-risk snapshot is required")
-    unrealized = 0.0
-    for row in position_rows:
-        if not isinstance(row, dict):
-            raise ValueError("malformed authenticated position-risk row")
-        raw = row.get("unRealizedProfit", "0")
-        if isinstance(raw, bool):
-            raise ValueError("position unrealized PnL is invalid")
-        value = float(raw)
-        if not math.isfinite(value):
-            raise ValueError("position unrealized PnL is non-finite")
-        unrealized += value
+    *,
+    trade=None,
+    reconcile_venue: bool,
+) -> tuple[dict, int]:
+    """Build account totals and pin them to the current financial revision.
+
+    Execution transactions reuse the last venue mark but atomically update
+    realized PnL, fees, funding, equity and drawdown with the fill/ledger.
+    The periodic reconciler refreshes unrealized PnL and venue equity.
+    """
+    events = await intents.oms.read_events(intents.scope, "financial:USDT")
+    previous_state = None
+    expected_revision = 0
+    if events:
+        previous_event = events[-1]
+        if previous_event.payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
+            raise RuntimeError("canonical financial aggregate is not a snapshot")
+        previous_state = previous_event.payload.get("financial_state")
+        if not isinstance(previous_state, dict):
+            raise RuntimeError("canonical financial snapshot is malformed")
+        expected_revision = previous_event.revision
 
     trades_by_id = {}
-    for trade in (
+    for item in (
         *lifecycle.get_open_trades(),
         *lifecycle.get_closed_trades(),
+        *((trade,) if trade is not None else ()),
     ):
-        trade_id = str(getattr(trade, "trade_id", "") or "")
+        trade_id = str(getattr(item, "trade_id", "") or "")
         if trade_id:
-            trades_by_id[trade_id] = trade
-    realized = sum(
-        float(getattr(trade, "gross_realized_pnl_usd", 0.0) or 0.0)
-        for trade in trades_by_id.values()
-    )
-    fees = sum(
-        float(getattr(trade, "fees_paid_usd", 0.0) or 0.0)
-        for trade in trades_by_id.values()
-    )
-    funding = sum(
-        float(getattr(trade, "funding_pnl_usd", 0.0) or 0.0)
-        for trade in trades_by_id.values()
-    )
-    for name, value in (
-        ("realized PnL", realized),
-        ("fees", fees),
-        ("funding", funding),
-    ):
-        if not math.isfinite(value):
-            raise ValueError(f"canonical trade {name} total is non-finite")
+            trades_by_id[trade_id] = item
 
-    previous = await intents.latest_financial_state("USDT")
-    if previous is None:
-        # First adoption establishes an explicit baseline from the observed
-        # venue equity; it does not fabricate pre-import account history.
-        starting_equity = float(venue_equity) - realized - unrealized - funding + fees
+    def trade_total(attribute: str) -> Decimal:
+        total = Decimal(0)
+        for item in trades_by_id.values():
+            raw = getattr(item, attribute, 0.0)
+            if isinstance(raw, bool):
+                raise ValueError(f"canonical trade {attribute} is invalid")
+            try:
+                value = Decimal(str(raw or 0))
+            except (TypeError, ValueError, ArithmeticError):
+                raise ValueError(
+                    f"canonical trade {attribute} is invalid"
+                ) from None
+            if not value.is_finite():
+                raise ValueError(f"canonical trade {attribute} is non-finite")
+            total += value
+        return total
+
+    realized = trade_total("gross_realized_pnl_usd")
+    fees = trade_total("fees_paid_usd")
+    funding = trade_total("funding_pnl_usd")
+    if reconcile_venue or previous_state is None:
+        raw_equity = await executor.get_account_equity("USDT")
+        if isinstance(raw_equity, bool):
+            raise ValueError("live venue equity is not a finite USDT value")
+        venue_equity = Decimal(str(raw_equity))
+        if not venue_equity.is_finite():
+            raise ValueError("live venue equity is not a finite USDT value")
+        position_rows = await executor.get_position_risk()
+        if not isinstance(position_rows, list) or len(position_rows) > 10000:
+            raise ValueError(
+                "bounded authenticated position-risk snapshot is required"
+            )
+        unrealized = Decimal(0)
+        for row in position_rows:
+            if not isinstance(row, dict):
+                raise ValueError("malformed authenticated position-risk row")
+            raw = row.get("unRealizedProfit", "0")
+            if isinstance(raw, bool):
+                raise ValueError("position unrealized PnL is invalid")
+            value = Decimal(str(raw))
+            if not value.is_finite():
+                raise ValueError("position unrealized PnL is non-finite")
+            unrealized += value
     else:
-        starting_equity = float(previous["starting_equity"])
+        venue_equity = None
+        unrealized = Decimal(str(previous_state["unrealized_pnl"]))
+
+    if previous_state is None:
+        starting_equity = (
+            venue_equity - realized - unrealized - funding + fees
+        )
+    else:
+        starting_equity = Decimal(str(previous_state["starting_equity"]))
     snapshot = {
         "currency": "USDT",
         "starting_equity": str(starting_equity),
@@ -139,8 +169,24 @@ async def _publish_canonical_financial_snapshot(
         "unrealized_pnl": str(unrealized),
         "fees": str(fees),
         "funding": str(funding),
-        "venue_equity": str(venue_equity),
     }
+    if venue_equity is not None:
+        snapshot["venue_equity"] = str(venue_equity)
+    return snapshot, expected_revision
+
+
+async def _publish_canonical_financial_snapshot(
+    executor,
+    intents: PostgresCanonicalExecutionIntentStore,
+    lifecycle,
+) -> dict:
+    """Reconcile canonical trading PnL components to live USD-M margin equity."""
+    snapshot, _ = await _canonical_financial_snapshot_inputs(
+        executor,
+        intents,
+        lifecycle,
+        reconcile_venue=True,
+    )
     financial_state = await intents.append_financial_snapshot(snapshot)
     unexplained = abs(Decimal(str(financial_state["unattributed_adjustments"])))
     if unexplained > Decimal("0.01"):
@@ -306,6 +352,15 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await trade_state_persistence.initialize()
     components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
     canonical_writer = components.trade_lifecycle._postgres_canonical_oms_writer
+    canonical_writer.set_financial_snapshot_provider(
+        lambda trade: _canonical_financial_snapshot_inputs(
+            raw_order_executor,
+            canonical_intents,
+            components.trade_lifecycle,
+            trade=trade,
+            reconcile_venue=False,
+        )
+    )
 
     async def read_projected_trade_state():
         projected_open = await state_store.load_open_trades()
@@ -551,11 +606,12 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     financial_reconciliation_ready = False
     if account_reconciliation_ready and income_reconciliation_ready:
         try:
-            financial_state = await _publish_canonical_financial_snapshot(
-                raw_order_executor,
-                canonical_intents,
-                components.trade_lifecycle,
-            )
+            async with canonical_writer._financial_lock:
+                financial_state = await _publish_canonical_financial_snapshot(
+                    raw_order_executor,
+                    canonical_intents,
+                    components.trade_lifecycle,
+                )
             financial_reconciliation_ready = True
             logger.info(
                 "canonical PostgreSQL financial snapshot reconciled to venue equity",
@@ -672,11 +728,12 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
             await trade_state_persistence.verify_execution_positions()
             if new_entries_allowed:
                 try:
-                    financial_state = await _publish_canonical_financial_snapshot(
-                        raw_order_executor,
-                        canonical_intents,
-                        components.trade_lifecycle,
-                    )
+                    async with canonical_writer._financial_lock:
+                        financial_state = await _publish_canonical_financial_snapshot(
+                            raw_order_executor,
+                            canonical_intents,
+                            components.trade_lifecycle,
+                        )
                     logger.info(
                         "canonical account financial snapshot updated",
                         extra={

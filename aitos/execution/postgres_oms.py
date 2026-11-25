@@ -156,6 +156,8 @@ class PostgresCanonicalOMS:
         causation_id: str | None = None,
         correlation_id: str | None = None,
         parent_event_id: str | None = None,
+        financial_snapshot: dict[str, Any] | None = None,
+        expected_financial_revision: int | None = None,
     ) -> OMSEvent:
         if type(fence) is not WriterFence:
             raise OMSConflict("a server-issued writer fence is required")
@@ -167,6 +169,15 @@ class PostgresCanonicalOMS:
         normalized_entries = self._validate_ledger_entries(
             [] if ledger_entries is None else ledger_entries
         )
+        if (financial_snapshot is None) != (expected_financial_revision is None):
+            raise ValueError(
+                "financial snapshot and expected revision must be supplied together"
+            )
+        if expected_financial_revision is not None and (
+            type(expected_financial_revision) is not int
+            or expected_financial_revision < 0
+        ):
+            raise ValueError("expected financial revision must be non-negative")
         canonical_payload = dict(payload)
         if "financial_ledger" in canonical_payload:
             raise ValueError(
@@ -319,6 +330,21 @@ class PostgresCanonicalOMS:
                     entry["debit"],
                     entry["credit"],
                     entry["reference"],
+                )
+            if financial_snapshot is not None:
+                # Reuse the intent store's transaction helper so the account
+                # valuation shares this event's PostgreSQL commit and outbox.
+                from aitos.execution.postgres_intents import (
+                    PostgresCanonicalExecutionIntentStore,
+                )
+
+                intent_store = PostgresCanonicalExecutionIntentStore(self, fence)
+                await intent_store._append_financial_snapshot_in_transaction(
+                    conn,
+                    financial_snapshot,
+                    expected_financial_revision,
+                    causation_id=event,
+                    correlation_id=correlation_id or aggregate,
                 )
         return OMSEvent(
             scope,

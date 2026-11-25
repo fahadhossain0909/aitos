@@ -382,6 +382,36 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             restored_trade,
             ledger_entries=[],
         )
+        await canonical_intents.append_financial_snapshot(
+            {
+                "currency": "USDT",
+                "starting_equity": "1000",
+                "realized_pnl": "0",
+                "unrealized_pnl": "0",
+                "fees": "0",
+                "funding": "0",
+                "venue_equity": "1000",
+            }
+        )
+
+        async def child_financial_snapshot_provider(trade):
+            events = await oms.read_events("paper:recovery", "financial:USDT")
+            previous = events[-1].payload["financial_state"]
+            return (
+                {
+                    "currency": "USDT",
+                    "starting_equity": previous["starting_equity"],
+                    "realized_pnl": str(trade.gross_realized_pnl_usd),
+                    "unrealized_pnl": previous["unrealized_pnl"],
+                    "fees": str(trade.fees_paid_usd),
+                    "funding": str(trade.funding_pnl_usd),
+                },
+                events[-1].revision,
+            )
+
+        recovery_writer.set_financial_snapshot_provider(
+            child_financial_snapshot_provider
+        )
         child_fill = {
             "algo_id": "321",
             "child_order_id": "654",
@@ -420,6 +450,15 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         assert child_watermark["cumulative_quantity"] == Decimal("0.02")
         assert child_watermark["cumulative_quote"] == Decimal("2")
         assert child_commit["trade_revision"] == 7
+        assert child_commit["financial_revision"] == 2
+        financial_events = await oms.read_events(
+            "paper:recovery", "financial:USDT"
+        )
+        assert len(financial_events) == 2
+        assert (
+            financial_events[-1].payload["causality"]["causation_id"]
+            == child_commit["trade_event_id"]
+        )
         intent_before_replay = await canonical_intents.get(protection_client_id)
         trade_events_before_replay = await oms.read_events(
             "paper:recovery", "trade-restore"

@@ -24,6 +24,9 @@ class PostgresLifecycleStateWriter:
         oms: PostgresCanonicalOMS,
         fence: WriterFence,
         projection_writer: Callable[[Any], Awaitable[None]],
+        financial_snapshot_provider: (
+            Callable[[Any], Awaitable[tuple[dict[str, Any], int]]] | None
+        ) = None,
     ) -> None:
         if not isinstance(oms, PostgresCanonicalOMS):
             raise TypeError("PostgresCanonicalOMS is required")
@@ -34,9 +37,30 @@ class PostgresLifecycleStateWriter:
         self.oms = oms
         self.fence = fence
         self.projection_writer = projection_writer
+        self.financial_snapshot_provider = financial_snapshot_provider
+        self._financial_lock = asyncio.Lock()
         self._revisions: dict[str, int] = {}
         self._last_event_ids: dict[str, str] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def set_financial_snapshot_provider(
+        self,
+        provider: Callable[[Any], Awaitable[tuple[dict[str, Any], int]]],
+    ) -> None:
+        if not callable(provider):
+            raise TypeError("financial snapshot provider must be callable")
+        self.financial_snapshot_provider = provider
+
+    async def _financial_snapshot(self, trade: Any):
+        provider = self.financial_snapshot_provider
+        if provider is None:
+            return None, None
+        snapshot, expected_revision = await provider(trade)
+        if not isinstance(snapshot, dict):
+            raise TypeError("financial snapshot provider returned no snapshot")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("financial snapshot provider returned an invalid revision")
+        return snapshot, expected_revision
 
     async def _revision(self, trade_id: str) -> int:
         if trade_id not in self._revisions:
@@ -276,40 +300,46 @@ class PostgresLifecycleStateWriter:
             else:
                 revision = events[-1].revision if events else 0
                 parent_event_id = events[-1].event_id if events else None
-                event = await self.oms.append(
-                    self.fence,
-                    aggregate_id=trade_id,
-                    event_id=event_id,
-                    expected_revision=revision,
-                    payload={
-                        "event_type": "TRADE_COST_ADJUSTMENT",
-                        "trade_id": trade_id,
-                        "adjustment_id": adjustment,
-                        "kind": kind,
-                        "amount": format(amount, "f"),
-                        "currency": "USDT",
-                        "trade": snapshot,
-                    },
-                    ledger_entries=[
-                        {
-                            "account_code": debit_account,
+                async with self._financial_lock:
+                    financial_snapshot, financial_revision = (
+                        await self._financial_snapshot(trade)
+                    )
+                    event = await self.oms.append(
+                        self.fence,
+                        aggregate_id=trade_id,
+                        event_id=event_id,
+                        expected_revision=revision,
+                        payload={
+                            "event_type": "TRADE_COST_ADJUSTMENT",
+                            "trade_id": trade_id,
+                            "adjustment_id": adjustment,
+                            "kind": kind,
+                            "amount": format(amount, "f"),
                             "currency": "USDT",
-                            "debit": format(absolute, "f"),
-                            "credit": "0",
-                            "reference": adjustment,
+                            "trade": snapshot,
                         },
-                        {
-                            "account_code": credit_account,
-                            "currency": "USDT",
-                            "debit": "0",
-                            "credit": format(absolute, "f"),
-                            "reference": adjustment,
-                        },
-                    ],
-                    causation_id=adjustment,
-                    correlation_id=trade_id,
-                    parent_event_id=parent_event_id,
-                )
+                        ledger_entries=[
+                            {
+                                "account_code": debit_account,
+                                "currency": "USDT",
+                                "debit": format(absolute, "f"),
+                                "credit": "0",
+                                "reference": adjustment,
+                            },
+                            {
+                                "account_code": credit_account,
+                                "currency": "USDT",
+                                "debit": "0",
+                                "credit": format(absolute, "f"),
+                                "reference": adjustment,
+                            },
+                        ],
+                        causation_id=adjustment,
+                        correlation_id=trade_id,
+                        parent_event_id=parent_event_id,
+                        financial_snapshot=financial_snapshot,
+                        expected_financial_revision=financial_revision,
+                    )
             self._revisions[trade_id] = event.revision
             self._last_event_ids[trade_id] = event.event_id
             async with self.oms._pool.acquire() as conn:
@@ -370,14 +400,20 @@ class PostgresLifecycleStateWriter:
         if intent is None or intent.get("state") != "CONFIRMED":
             raise RuntimeError("entry intent must remain CONFIRMED until protection")
         revision = await self._revision(trade_id)
-        committed = await intents.append_confirmed_trade_snapshot(
-            client_id,
-            expected_revision=int(intent["revision"]),
-            trade_id=trade_id,
-            expected_trade_revision=revision,
-            trade_snapshot=to_dict(),
-            ledger_entries=[] if ledger_entries is None else ledger_entries,
-        )
+        async with self._financial_lock:
+            financial_snapshot, financial_revision = await self._financial_snapshot(
+                trade
+            )
+            committed = await intents.append_confirmed_trade_snapshot(
+                client_id,
+                expected_revision=int(intent["revision"]),
+                trade_id=trade_id,
+                expected_trade_revision=revision,
+                trade_snapshot=to_dict(),
+                ledger_entries=[] if ledger_entries is None else ledger_entries,
+                financial_snapshot=financial_snapshot,
+                expected_financial_revision=financial_revision,
+            )
         self._revisions[trade_id] = committed["trade_revision"]
         self._last_event_ids[trade_id] = committed["trade_event_id"]
         try:
@@ -446,15 +482,21 @@ class PostgresLifecycleStateWriter:
                 f"canonical execution intent cannot be applied from {expected_state}"
             )
         trade_revision = await self._revision(trade_id)
-        committed = await intents.transition_with_trade_snapshot(
-            client_id,
-            expected_revision=int(intent["revision"]),
-            expected_state=expected_state,
-            trade_id=trade_id,
-            expected_trade_revision=trade_revision,
-            trade_snapshot=to_dict(),
-            ledger_entries=[] if ledger_entries is None else ledger_entries,
-        )
+        async with self._financial_lock:
+            financial_snapshot, financial_revision = await self._financial_snapshot(
+                trade
+            )
+            committed = await intents.transition_with_trade_snapshot(
+                client_id,
+                expected_revision=int(intent["revision"]),
+                expected_state=expected_state,
+                trade_id=trade_id,
+                expected_trade_revision=trade_revision,
+                trade_snapshot=to_dict(),
+                ledger_entries=[] if ledger_entries is None else ledger_entries,
+                financial_snapshot=financial_snapshot,
+                expected_financial_revision=financial_revision,
+            )
         self._revisions[trade_id] = committed["trade_revision"]
         self._last_event_ids[trade_id] = committed["trade_event_id"]
         # Projection is deliberately outside PostgreSQL's commit. Its outbox
@@ -518,16 +560,22 @@ class PostgresLifecycleStateWriter:
                     f"protective child fill cannot apply from {expected_state}"
                 )
             revision = await self._revision(trade_id)
-            committed = await intents.append_protection_child_fill(
-                client_id,
-                expected_revision=int(intent["revision"]),
-                expected_state=expected_state,
-                trade_id=trade_id,
-                expected_trade_revision=revision,
-                trade_snapshot=to_dict(),
-                child_fill=child_fill,
-                ledger_entries=ledger_entries,
-            )
+            async with self._financial_lock:
+                financial_snapshot, financial_revision = await self._financial_snapshot(
+                    trade
+                )
+                committed = await intents.append_protection_child_fill(
+                    client_id,
+                    expected_revision=int(intent["revision"]),
+                    expected_state=expected_state,
+                    trade_id=trade_id,
+                    expected_trade_revision=revision,
+                    trade_snapshot=to_dict(),
+                    child_fill=child_fill,
+                    ledger_entries=ledger_entries,
+                    financial_snapshot=financial_snapshot,
+                    expected_financial_revision=financial_revision,
+                )
             self._revisions[trade_id] = committed["trade_revision"]
             self._last_event_ids[trade_id] = committed["trade_event_id"]
             await self.projection_writer(trade)

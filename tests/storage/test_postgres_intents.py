@@ -241,6 +241,58 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         assert applied["financial_state"] == financial_state
         assert len(await oms.claim_outbox()) == 5
 
+        # Fee journal lines and the account equity/drawdown revision share one
+        # PostgreSQL transaction and one causal source event.
+        fee_event = await oms.append(
+            fence,
+            aggregate_id="trade-fee-atomic",
+            event_id="cost:atomic-fee-001",
+            expected_revision=0,
+            payload={
+                "event_type": "TRADE_COST_ADJUSTMENT",
+                "trade_id": "trade-fee-atomic",
+                "adjustment_id": "atomic-fee-001",
+                "kind": "fee",
+                "amount": "1",
+            },
+            ledger_entries=[
+                {
+                    "account_code": "EXPENSE_FEES",
+                    "currency": "USDT",
+                    "debit": "1",
+                    "credit": "0",
+                    "reference": "atomic-fee-001",
+                },
+                {
+                    "account_code": "CASH",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "1",
+                    "reference": "atomic-fee-001",
+                },
+            ],
+            causation_id="income:atomic-fee-001",
+            correlation_id="trade-fee-atomic",
+            financial_snapshot={
+                "currency": "USDT",
+                "starting_equity": "1000",
+                "realized_pnl": "-20",
+                "unrealized_pnl": "-20",
+                "fees": "11",
+                "funding": "0",
+                "venue_equity": "949",
+            },
+            expected_financial_revision=1,
+        )
+        fee_financial_events = await oms.read_events(
+            "paper:intent-test", "financial:USDT"
+        )
+        assert len(fee_financial_events) == 2
+        assert (
+            fee_financial_events[-1].payload["causality"]["causation_id"]
+            == fee_event.event_id
+        )
+
         # The entry Trade/ledger is committed while the execution intent stays
         # CONFIRMED until exchange-side protection and account verification pass.
         await intents.begin(
@@ -878,3 +930,33 @@ def test_financial_state_snapshot_keeps_peak_and_max_drawdown_monotonic():
 def test_financial_state_snapshot_rejects_invalid_accounting_inputs(snapshot):
     with pytest.raises(ValueError):
         _financial_state_snapshot(snapshot, None)
+
+
+
+def test_financial_snapshot_without_new_venue_mark_preserves_unattributed_adjustment():
+    previous = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "0",
+            "unrealized_pnl": "0",
+            "fees": "0",
+            "funding": "0",
+            "venue_equity": "1005",
+        },
+        None,
+    )
+    updated = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "1",
+            "unrealized_pnl": "0",
+            "fees": "0",
+            "funding": "0",
+        },
+        previous,
+    )
+    assert updated["venue_equity"] == "1006"
+    assert updated["equity"] == "1006"
+    assert updated["unattributed_adjustments"] == "5"
