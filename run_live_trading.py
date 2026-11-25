@@ -21,6 +21,7 @@ from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.execution.postgres_oms import PostgresCanonicalOMS
+from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,
     recover_protection_handovers,
@@ -201,7 +202,22 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         expected_generation=current_generation,
     )
     components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
-    canonical_restore = await components.trade_lifecycle._postgres_canonical_oms_writer.restore_lifecycle(
+    canonical_writer = components.trade_lifecycle._postgres_canonical_oms_writer
+    outbox_projector = PostgresOMSOutboxProjector(
+        postgres_oms,
+        canonical_writer,
+        worker_id=writer_id,
+        batch_size=100,
+        lease_seconds=60,
+    )
+    # Replay projections left pending by a crash or a previous projection
+    # failure before account reconciliation is allowed to authorize entries.
+    startup_projection = await outbox_projector.run_once()
+    if startup_projection["failed"]:
+        raise RuntimeError(
+            "canonical OMS projection recovery failed; live startup remains blocked"
+        )
+    canonical_restore = await canonical_writer.restore_lifecycle(
         components.trade_lifecycle
     )
     restored_count = canonical_restore["open"]
@@ -456,6 +472,11 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(components.trade_lifecycle.drain_live_submissions)
     while not stop_event.is_set():
         try:
+            projection_result = await outbox_projector.run_once()
+            if projection_result["failed"]:
+                raise RuntimeError(
+                    "canonical OMS projection replay failed; refusing fresh-exposure cycle"
+                )
             if components.reconciliation is not None:
                 await components.reconciliation.run_once()
             await trade_state_persistence.verify_execution_positions()
