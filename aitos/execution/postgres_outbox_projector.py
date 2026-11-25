@@ -193,11 +193,11 @@ class PostgresOMSOutboxProjector:
                 (
                     event
                     for event in reversed(events)
-                    if event.payload.get("event_type") in {
-                        "TRADE_SNAPSHOT",
-                        "TRADE_COST_ADJUSTMENT",
-                    }
-                    and isinstance(event.payload.get("trade"), dict)
+                    if (
+                        event.payload.get("event_type")
+                        in {"TRADE_SNAPSHOT", "TRADE_COST_ADJUSTMENT"}
+                        and isinstance(event.payload.get("trade"), dict)
+                    )
                 ),
                 None,
             )

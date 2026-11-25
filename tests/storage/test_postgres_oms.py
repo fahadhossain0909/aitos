@@ -242,7 +242,9 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         with pytest.raises(RuntimeError, match="projection unavailable"):
             await broken(trade_snapshot)
         # Canonical event is committed before the projection callback fails.
-        assert (await broken.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
+        assert (
+            await broken.latest_snapshot("trade-1")
+        )["state"] == "position_opened"
         restored_trade = Trade(
             trade_id="trade-restore",
             symbol="BTCUSDT",

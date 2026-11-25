@@ -2160,10 +2160,18 @@ class TradeLifecycle(AITOSModule):
                 **(
                     {
                         "statistical_risk_assessment": {
-                            "size_multiplier": statistical_risk_assessment.size_multiplier,
-                            "volatility_ratio": statistical_risk_assessment.volatility_ratio,
-                            "tail_probability": statistical_risk_assessment.tail_probability,
-                            "expected_shortfall": statistical_risk_assessment.expected_shortfall,
+                            "size_multiplier": (
+                            statistical_risk_assessment.size_multiplier
+                        ),
+                        "volatility_ratio": (
+                            statistical_risk_assessment.volatility_ratio
+                        ),
+                        "tail_probability": (
+                            statistical_risk_assessment.tail_probability
+                        ),
+                        "expected_shortfall": (
+                            statistical_risk_assessment.expected_shortfall
+                        ),
                             "reasons": list(statistical_risk_assessment.reasons),
                         }
                     }
@@ -2558,7 +2566,10 @@ class TradeLifecycle(AITOSModule):
                 float(evidence.get("avgPrice", 0)),
             )
         else:
-            identity = f"{trade.trade_id}|{float(trade.quantity).hex()}|{float(quantity).hex()}|{len(trade.partial_exits)}"
+            identity = (
+                f"{trade.trade_id}|{float(trade.quantity).hex()}|"
+                f"{float(quantity).hex()}|{len(trade.partial_exits)}"
+            )
             client_id = (
                 "aitos-exit-" + hashlib.sha256(identity.encode()).hexdigest()[:24]
             )
