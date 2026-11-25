@@ -237,11 +237,6 @@ class PostgresLifecycleStateWriter:
                     "amount": format(amount, "f"),
                     "currency": "USDT",
                     "trade": snapshot,
-                    "causality": {
-                        "causation_id": adjustment,
-                        "correlation_id": trade_id,
-                        "parent_event_id": parent_event_id,
-                    },
                 },
                 ledger_entries=[
                     {
@@ -265,13 +260,24 @@ class PostgresLifecycleStateWriter:
             )
             self._revisions[trade_id] = event.revision
             self._last_event_ids[trade_id] = event.event_id
-            await self.projection_writer(trade)
-            await self.oms.mark_projected(
-                self.fence.account_scope,
-                trade_id,
-                event.revision,
-                event_hash=event.event_hash,
-            )
+            async with self.oms._pool.acquire() as conn:
+                outbox_row = await conn.fetchrow(
+                    """SELECT projected_at FROM aitos_oms_outbox
+                       WHERE account_scope=$1 AND aggregate_id=$2 AND revision=$3""",
+                    self.fence.account_scope,
+                    trade_id,
+                    event.revision,
+                )
+            if outbox_row is None:
+                raise RuntimeError("canonical cost event has no projection outbox row")
+            if outbox_row["projected_at"] is None:
+                await self.projection_writer(trade)
+                await self.oms.mark_projected(
+                    self.fence.account_scope,
+                    trade_id,
+                    event.revision,
+                    event_hash=event.event_hash,
+                )
             return event
 
     async def apply_execution_intent(
@@ -477,7 +483,10 @@ class PostgresLifecycleStateWriter:
     async def latest_snapshot(self, trade_id: str) -> dict[str, Any] | None:
         events = await self.oms.read_events(self.fence.account_scope, trade_id)
         for event in reversed(events):
-            if event.payload.get("event_type") == "TRADE_SNAPSHOT":
+            if event.payload.get("event_type") in {
+                "TRADE_SNAPSHOT",
+                "TRADE_COST_ADJUSTMENT",
+            }:
                 snapshot = event.payload.get("trade")
                 if isinstance(snapshot, dict):
                     self._revisions[trade_id] = event.revision

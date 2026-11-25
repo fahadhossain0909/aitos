@@ -310,7 +310,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
 
     async def _apply_and_persist_adjustment(
         self, trade_id: str, adjustment_id: str, kind: str, amount_usd: float
-    ) -> None:
+    ) -> Any:
         apply_adjustment = getattr(self._lifecycle, "apply_cost_adjustment", None)
         if not callable(apply_adjustment) or self._persist_trade is None:
             raise RuntimeError(
