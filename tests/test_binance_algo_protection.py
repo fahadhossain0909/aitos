@@ -324,6 +324,131 @@ async def test_algo_client_id_lookup_rejects_cross_symbol_or_client_identity():
         await value.get_algo_order_by_client_id("BTCUSDT", "aitos-stop-1")
 
 
+async def test_lost_protective_post_ack_recovers_exact_algo_by_client_id(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "lost-ack.sqlite", scope="paper-account")
+    value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
+    client_id = "aitos-stop-lost-ack"
+    response = dict(
+        algoId=321,
+        clientAlgoId=client_id,
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.0",
+        algoStatus="NEW",
+        closePosition=False,
+        reduceOnly=True,
+    )
+    value._signed_request = AsyncMock(
+        side_effect=[TimeoutError("ack lost after venue accepted POST"), response]
+    )
+
+    result = await value.place_stop_loss_order(
+        "BTCUSDT",
+        TradeSide.LONG,
+        1.0,
+        98.0,
+        owner_trade_id="trade-lost-ack",
+        client_order_id=client_id,
+    )
+
+    assert result.success is True
+    assert result.order_id == "algo:321"
+    assert [call.args[:2] for call in value._signed_request.call_args_list] == [
+        ("POST", "/fapi/v1/algoOrder"),
+        ("GET", "/fapi/v1/algoOrder"),
+    ]
+    row = store.protection_intents()[0]
+    assert row["state"] == "PROTECTED"
+    assert json.loads(row["result_json"])["order_id"] == "algo:321"
+
+
+async def test_lost_protective_post_ack_with_absent_lookup_stays_unresolved(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "lost-ack-missing.sqlite", scope="paper-account")
+    value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
+    client_id = "aitos-stop-unknown"
+    value._signed_request = AsyncMock(
+        side_effect=[
+            TimeoutError("ack lost after venue accepted POST"),
+            BinanceAPIError("Binance API error -2013: not found", code=-2013),
+        ]
+    )
+
+    with pytest.raises(ExecutionUncertainError, match="no resubmission is safe"):
+        await value.place_stop_loss_order(
+            "BTCUSDT",
+            TradeSide.LONG,
+            1.0,
+            98.0,
+            owner_trade_id="trade-unknown",
+            client_order_id=client_id,
+        )
+
+    assert [call.args[0] for call in value._signed_request.call_args_list] == [
+        "POST",
+        "GET",
+    ]
+    assert store.protection_intents()[0]["state"] == "SUBMITTING"
+
+
+async def test_lost_ack_triggered_algo_validates_linked_cumulative_child(tmp_path):
+    store = ExecutionIntentStore(tmp_path / "lost-ack-triggered.sqlite", scope="paper-account")
+    value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
+    client_id = "aitos-stop-triggered"
+    algo = dict(
+        algoId=321,
+        clientAlgoId=client_id,
+        algoType="CONDITIONAL",
+        orderType="STOP_MARKET",
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        quantity="1.0",
+        triggerPrice="98.0",
+        algoStatus="TRIGGERED",
+        actualOrderId="456",
+        closePosition=False,
+        reduceOnly=True,
+    )
+    child = dict(
+        orderId=456,
+        symbol="BTCUSDT",
+        side="SELL",
+        positionSide="BOTH",
+        reduceOnly=True,
+        status="PARTIALLY_FILLED",
+        origQty="1.0",
+        executedQty="0.25",
+        cumQuote="24.375",
+        avgPrice="97.5",
+    )
+    value._signed_request = AsyncMock(
+        side_effect=[TimeoutError("ack lost"), algo, algo, child]
+    )
+
+    result = await value.place_stop_loss_order(
+        "BTCUSDT",
+        TradeSide.LONG,
+        1.0,
+        98.0,
+        owner_trade_id="trade-triggered",
+        client_order_id=client_id,
+    )
+
+    assert result.success is True
+    assert result.order_id == "algo:321"
+    assert store.protection_intents()[0]["state"] == "PROTECTED"
+    assert [call.args[1] for call in value._signed_request.call_args_list] == [
+        "/fapi/v1/algoOrder",
+        "/fapi/v1/algoOrder",
+        "/fapi/v1/algoOrder",
+        "/fapi/v1/order",
+    ]
+
+
 async def test_protective_preclaim_persists_owner_trade_identity(tmp_path):
     store = ExecutionIntentStore(tmp_path / "protective.sqlite", scope="test-account")
     value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
