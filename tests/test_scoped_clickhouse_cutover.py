@@ -105,9 +105,7 @@ class RollbackClient:
         runtime_fp = source_fingerprint(
             RUNTIME_SOURCE, "trade-open", runtime_raw, stamp
         )
-        closed_fp = source_fingerprint(
-            CLOSED_SOURCE, "trade-closed", closed_raw, stamp
-        )
+        closed_fp = source_fingerprint(CLOSED_SOURCE, "trade-closed", closed_raw, stamp)
         runtime_payload = json.loads(runtime_raw)
         runtime_payload["account_scope"] = "paper:account-a"
         runtime_encoded = json.dumps(
@@ -210,9 +208,7 @@ class RollbackClient:
 
 def test_verified_rollback_restores_legacy_names_after_exact_occurrence_parity():
     client = RollbackClient()
-    result = _verified_rollback(
-        client, writers_quiesced=True, backup_confirmed=True
-    )
+    result = _verified_rollback(client, writers_quiesced=True, backup_confirmed=True)
 
     assert result == {
         "mode": "rollback-and-verified",
@@ -231,18 +227,14 @@ def test_verified_rollback_restores_legacy_names_after_exact_occurrence_parity()
 def test_verified_rollback_requires_both_operator_confirmations():
     client = RollbackClient()
     with pytest.raises(RuntimeError, match="writer-stop"):
-        _verified_rollback(
-            client, writers_quiesced=True, backup_confirmed=False
-        )
+        _verified_rollback(client, writers_quiesced=True, backup_confirmed=False)
     assert client.commands == []
 
 
 def test_verified_rollback_refuses_raw_payload_divergence_before_rename():
     client = RollbackClient(mismatch=True)
     with pytest.raises(RuntimeError, match="source fingerprint mismatch"):
-        _verified_rollback(
-            client, writers_quiesced=True, backup_confirmed=True
-        )
+        _verified_rollback(client, writers_quiesced=True, backup_confirmed=True)
     assert client.commands == []
 
 
