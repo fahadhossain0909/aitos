@@ -329,6 +329,141 @@ def _insert_table(
     return expected
 
 
+def _source_occurrence_records(
+    client: Any,
+    table: str,
+    source: str,
+    *,
+    runtime: bool,
+    scope_keyed: bool,
+) -> Counter[tuple[Any, ...]]:
+    """Read physical occurrences and verify every scoped row's raw evidence."""
+    records: Counter[tuple[Any, ...]] = Counter()
+    occurrences: Counter[str] = Counter()
+    settings = (
+        " SETTINGS max_result_rows=250000,max_result_bytes=536870912,"
+        "result_overflow_mode='throw',read_overflow_mode='throw'"
+    )
+    if scope_keyed:
+        if runtime:
+            query = (
+                "SELECT account_scope,trade_id,symbol,state,payload_json,"
+                "legacy_payload_json,updated_at,source_fingerprint,"
+                "source_occurrence,payload_sha256 "
+                f"FROM {table} ORDER BY trade_id,updated_at,"
+                "source_fingerprint,source_occurrence" + settings
+            )
+        else:
+            query = (
+                "SELECT account_scope,trade_id,payload_json,legacy_payload_json,"
+                "updated_at,source_fingerprint,source_occurrence,payload_sha256 "
+                f"FROM {table} ORDER BY trade_id,updated_at,"
+                "source_fingerprint,source_occurrence" + settings
+            )
+    elif runtime:
+        query = (
+            "SELECT trade_id,symbol,state,payload_json,updated_at "
+            f"FROM {table} ORDER BY trade_id,updated_at" + settings
+        )
+    else:
+        query = (
+            "SELECT trade_id,payload_json,updated_at "
+            f"FROM {table} ORDER BY trade_id,updated_at" + settings
+        )
+
+    for row in client.query(query).result_rows:
+        if scope_keyed and runtime:
+            scope, trade_id, symbol, state, encoded, raw, stamp, stored_fp, occurrence, stored_hash = row
+        elif scope_keyed:
+            scope, trade_id, encoded, raw, stamp, stored_fp, occurrence, stored_hash = row
+            symbol = state = ""
+        elif runtime:
+            trade_id, symbol, state, raw, stamp = row
+            encoded = stored_fp = stored_hash = scope = None
+            occurrence = None
+        else:
+            trade_id, raw, stamp = row
+            symbol = state = encoded = stored_fp = stored_hash = scope = None
+            occurrence = None
+
+        trade_id = str(trade_id)
+        raw = str(raw)
+        stamp_key = _timestamp(stamp).isoformat(timespec="milliseconds")
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"{table} contains invalid legacy payload") from exc
+        if not isinstance(payload, dict) or payload.get("trade_id") != trade_id:
+            raise RuntimeError(f"{table} legacy payload identity mismatch")
+        if runtime:
+            symbol, state = str(symbol), str(state)
+            if payload.get("symbol") != symbol or payload.get("state") != state:
+                raise RuntimeError(f"{table} legacy metadata mismatch")
+        elif payload.get("state") != "position_closed":
+            raise RuntimeError(f"{table} contains a nonterminal record")
+
+        fingerprint = source_fingerprint(source, trade_id, raw, stamp)
+        if scope_keyed:
+            scope = _scope(str(scope))
+            if str(stored_fp) != fingerprint:
+                raise RuntimeError(f"{table} source fingerprint mismatch")
+            occurrence = int(occurrence)
+            if occurrence < 0:
+                raise RuntimeError(f"{table} has a negative source occurrence")
+            canonical = dict(payload)
+            embedded = canonical.get("account_scope")
+            if embedded and embedded != scope:
+                raise RuntimeError(f"{table} payload scope mismatch")
+            canonical["account_scope"] = scope
+            canonical_json = json.dumps(
+                canonical,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+                default=str,
+            )
+            digest = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+            if str(encoded) != canonical_json or str(stored_hash) != digest:
+                raise RuntimeError(f"{table} canonical payload hash mismatch")
+        else:
+            occurrence = occurrences[fingerprint]
+            occurrences[fingerprint] += 1
+
+        identity = (
+            fingerprint,
+            int(occurrence),
+            trade_id,
+            symbol,
+            state,
+            stamp_key,
+            raw,
+        )
+        records[identity] += 1
+    return records
+
+
+def _verify_scoped_matches_legacy(
+    client: Any,
+    *,
+    scoped_table: str,
+    legacy_table: str,
+    source: str,
+    runtime: bool,
+) -> int:
+    scoped = _source_occurrence_records(
+        client, scoped_table, source, runtime=runtime, scope_keyed=True
+    )
+    legacy = _source_occurrence_records(
+        client, legacy_table, source, runtime=runtime, scope_keyed=False
+    )
+    if scoped != legacy:
+        raise RuntimeError(
+            f"{source} rollback parity failed: scoped table differs from retained legacy backup"
+        )
+    return sum(legacy.values())
+
+
 def _verified_cutover(client: Any) -> None:
     """Atomically replace legacy table names after import/parity verification.
 
@@ -388,6 +523,91 @@ def _verified_cutover(client: Any) -> None:
             )
 
 
+
+def _verified_rollback(
+    client: Any, *, writers_quiesced: bool, backup_confirmed: bool
+) -> dict[str, Any]:
+    """Restore legacy table names only when no post-cutover data has diverged.
+
+    The scope-keyed tables are retained under their v2 names. A rollback is
+    refused if writers are not quiesced, either backup is absent, a v2 name is
+    already occupied, or the full physical source occurrence sets differ.
+    """
+    if not (writers_quiesced and backup_confirmed):
+        raise RuntimeError(
+            "rollback requires explicit writer-stop and restorable-backup confirmations"
+        )
+    engine = client.query(
+        "SELECT engine FROM system.databases WHERE name=currentDatabase()"
+    ).result_rows
+    if not engine or str(engine[0][0]).lower() != "atomic":
+        raise RuntimeError("verified rollback requires an Atomic ClickHouse database")
+    existing = {
+        str(row[0])
+        for row in client.query(
+            "SELECT name FROM system.tables WHERE database=currentDatabase()"
+        ).result_rows
+    }
+    required = {RUNTIME_SOURCE, CLOSED_SOURCE, RUNTIME_BACKUP, CLOSED_BACKUP}
+    if not required.issubset(existing):
+        raise RuntimeError("rollback requires both active scope-keyed tables and backups")
+    if RUNTIME_TARGET in existing or CLOSED_TARGET in existing:
+        raise RuntimeError("rollback refuses to overwrite existing v2 table names")
+
+    runtime_count = _verify_scoped_matches_legacy(
+        client,
+        scoped_table=RUNTIME_SOURCE,
+        legacy_table=RUNTIME_BACKUP,
+        source=RUNTIME_SOURCE,
+        runtime=True,
+    )
+    closed_count = _verify_scoped_matches_legacy(
+        client,
+        scoped_table=CLOSED_SOURCE,
+        legacy_table=CLOSED_BACKUP,
+        source=CLOSED_SOURCE,
+        runtime=False,
+    )
+    client.command(
+        f"RENAME TABLE {RUNTIME_SOURCE} TO {RUNTIME_TARGET}, "
+        f"{RUNTIME_BACKUP} TO {RUNTIME_SOURCE}, "
+        f"{CLOSED_SOURCE} TO {CLOSED_TARGET}, "
+        f"{CLOSED_BACKUP} TO {CLOSED_SOURCE}"
+    )
+    try:
+        _verify_scoped_matches_legacy(
+            client,
+            scoped_table=RUNTIME_TARGET,
+            legacy_table=RUNTIME_SOURCE,
+            source=RUNTIME_SOURCE,
+            runtime=True,
+        )
+        _verify_scoped_matches_legacy(
+            client,
+            scoped_table=CLOSED_TARGET,
+            legacy_table=CLOSED_SOURCE,
+            source=CLOSED_SOURCE,
+            runtime=False,
+        )
+    except Exception as exc:
+        # Re-enter the previous cutover layout; never leave a half-verified rollback.
+        client.command(
+            f"RENAME TABLE {RUNTIME_SOURCE} TO {RUNTIME_BACKUP}, "
+            f"{RUNTIME_TARGET} TO {RUNTIME_SOURCE}, "
+            f"{CLOSED_SOURCE} TO {CLOSED_BACKUP}, "
+            f"{CLOSED_TARGET} TO {CLOSED_SOURCE}"
+        )
+        raise RuntimeError(
+            "rollback postcondition failed; restored the previous cutover layout"
+        ) from exc
+    return {
+        "mode": "rollback-and-verified",
+        "runtime_rows": runtime_count,
+        "closed_rows": closed_count,
+        "legacy_tables_restored": True,
+        "scoped_tables_retained": [RUNTIME_TARGET, CLOSED_TARGET],
+    }
+
 def run(
     *,
     apply: bool,
@@ -396,6 +616,7 @@ def run(
     cutover: bool = False,
     writers_quiesced: bool = False,
     backup_confirmed: bool = False,
+    rollback: bool = False,
 ) -> dict[str, Any]:
     try:
         import clickhouse_connect
@@ -412,6 +633,14 @@ def run(
         secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
     )
     try:
+        if rollback:
+            if cutover or apply:
+                raise ValueError("--rollback cannot be combined with --apply or --cutover")
+            return _verified_rollback(
+                client,
+                writers_quiesced=writers_quiesced,
+                backup_confirmed=backup_confirmed,
+            )
         sources = _read_sources(client)
         manifest = _manifest(sources)
         if manifest_out is not None:
@@ -494,6 +723,11 @@ def main() -> int:
         help="after verified import, atomically rename v2 tables into runtime names; requires frozen writers and explicit acknowledgement",
     )
     parser.add_argument(
+        "--rollback",
+        action="store_true",
+        help="restore legacy runtime table names after exact parity and explicit freeze/backup confirmation",
+    )
+    parser.add_argument(
         "--scope-map",
         type=Path,
         help="JSON object mapping source_fingerprint to explicit account_scope",
@@ -522,6 +756,13 @@ def main() -> int:
             "--apply requires --confirm-writers-stopped and "
             "--confirm-backup-retained"
         )
+    if args.rollback and not (
+        args.confirm_writers_stopped and args.confirm_backup_retained
+    ):
+        parser.error(
+            "--rollback requires --confirm-writers-stopped and "
+            "--confirm-backup-retained"
+        )
     mapping = (
         json.loads(args.scope_map.read_text(encoding="utf-8")) if args.scope_map else {}
     )
@@ -534,6 +775,7 @@ def main() -> int:
         cutover=args.cutover,
         writers_quiesced=args.confirm_writers_stopped,
         backup_confirmed=args.confirm_backup_retained,
+        rollback=args.rollback,
     )
     print(json.dumps(result, indent=2))
     return 0 if result.get("mode") != "manifest-only" else 2
