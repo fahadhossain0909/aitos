@@ -42,10 +42,12 @@ class BinanceCostAdjustmentPublisher:
         event_bus: Any,
         resolve_trade_id: TradeResolver,
         apply_adjustment: Callable[..., Awaitable[Any]] | None = None,
+        canonical_posting: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._resolve_trade_id = resolve_trade_id
         self._apply_adjustment = apply_adjustment
+        self._canonical_posting = canonical_posting
 
     async def publish_income_rows(self, rows: Iterable[dict[str, Any]]) -> int:
         published = 0
@@ -85,6 +87,13 @@ class BinanceCostAdjustmentPublisher:
                 # advancing the exchange cursor. The event below is a replayable
                 # notification, not the sole financial persistence path.
                 await self._apply_adjustment(
+                    str(trade_id),
+                    f"binance:income:{transaction_id}",
+                    kind,
+                    amount_usd,
+                )
+            if self._canonical_posting is not None:
+                await self._canonical_posting(
                     str(trade_id),
                     f"binance:income:{transaction_id}",
                     kind,
@@ -133,6 +142,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
         commission_close_grace_ms: int = 120_000,
         account: str = "binance_usdm",
         persist_trade: Callable[[Any], Awaitable[None]] | None = None,
+        canonical_posting: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
@@ -151,6 +161,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
             event_bus,
             self.resolve_trade_id,
             self._apply_and_persist_adjustment if persist_trade is not None else None,
+            canonical_posting=canonical_posting,
         )
         self._task: asyncio.Task | None = None
         self._initialized = False
