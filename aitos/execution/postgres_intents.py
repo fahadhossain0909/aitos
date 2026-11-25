@@ -18,6 +18,7 @@ from aitos.execution.postgres_oms import (
     _identifier,
 )
 
+
 def _financial_state_snapshot(
     snapshot: dict[str, Any], previous: dict[str, Any] | None
 ) -> dict[str, str]:
@@ -86,6 +87,7 @@ def _financial_state_snapshot(
         drawdown_pct = drawdown / peak * Decimal(100) if peak > 0 else Decimal(0)
         max_drawdown = max(previous_max_drawdown, drawdown)
         max_drawdown_pct = max(previous_max_drawdown_pct, drawdown_pct)
+
     def canonical_amount(value: Decimal) -> str:
         if value == 0:
             return "0"
@@ -531,9 +533,7 @@ class PostgresCanonicalExecutionIntentStore:
                         raise OMSConflict(
                             "financial aggregate contains a non-snapshot event"
                         )
-                    previous_financial_state = previous_payload.get(
-                        "financial_state"
-                    )
+                    previous_financial_state = previous_payload.get("financial_state")
                     if not isinstance(previous_financial_state, dict):
                         raise OMSConflict("canonical financial snapshot is malformed")
                     previous_financial_event_id = previous_financial_event["event_id"]
@@ -586,18 +586,14 @@ class PostgresCanonicalExecutionIntentStore:
             "financial_state": financial_state,
         }
 
-    async def latest_financial_state(
-        self, currency: str
-    ) -> dict[str, Any] | None:
+    async def latest_financial_state(self, currency: str) -> dict[str, Any] | None:
         """Read the most recent canonical valuation snapshot for this currency."""
         normalized = _identifier(currency, "currency")
         if not 2 <= len(normalized) <= 12 or not all(
             "A" <= char <= "Z" or "0" <= char <= "9" for char in normalized
         ):
             raise ValueError("financial currency must be an uppercase code")
-        events = await self.oms.read_events(
-            self.scope, f"financial:{normalized}"
-        )
+        events = await self.oms.read_events(self.scope, f"financial:{normalized}")
         for event in reversed(events):
             if event.payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
                 raise OMSConflict("financial aggregate contains a non-snapshot event")
