@@ -560,6 +560,38 @@ class PostgresCanonicalOMS:
             expected_revision += 1
         return result
 
+    async def requeue_projection_outbox(
+        self, fence: WriterFence, *, confirm: bool = False
+    ) -> int:
+        """Make all scope projections replayable for a canonical full rebuild."""
+        if type(fence) is not WriterFence:
+            raise OMSConflict("server-issued writer fence is required")
+        if confirm is not True:
+            raise ValueError("explicit projection rebuild confirmation is required")
+        scope = _identifier(fence.account_scope, "account_scope")
+        async with self._pool.acquire() as conn, conn.transaction():
+            owner = await conn.fetchrow(
+                """SELECT writer_id,generation FROM aitos_oms_writer_fences
+                   WHERE account_scope=$1 FOR UPDATE""",
+                scope,
+            )
+            if owner is None or (
+                owner["writer_id"], int(owner["generation"])
+            ) != (fence.writer_id, fence.generation):
+                raise OMSConflict("stale writer fencing token")
+            result = await conn.execute(
+                """UPDATE aitos_oms_outbox
+                   SET projected_at=NULL,claim_owner=NULL,claim_token=NULL,
+                       claim_until=NULL,last_error='explicit canonical projection rebuild',
+                       attempts=attempts+1
+                   WHERE account_scope=$1 AND projected_at IS NOT NULL""",
+                scope,
+            )
+        try:
+            return int(str(result).split()[-1])
+        except (ValueError, IndexError):
+            raise RuntimeError("PostgreSQL did not report projection rebuild count") from None
+
     async def claim_outbox_leased(
         self,
         owner_id: str,
