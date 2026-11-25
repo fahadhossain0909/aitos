@@ -1285,7 +1285,9 @@ class PostgresCanonicalExecutionIntentStore:
                     and cumulative_quantity >= original_quantity
                 )
             ):
-                raise OMSConflict("protective child fill exceeds or violates intent bounds")
+                raise OMSConflict(
+                    "protective child fill exceeds or violates intent bounds"
+                )
             if len(intent_event_id) > 192 or len(trade_event_id) > 192:
                 raise ValueError("protective child event identity exceeds limit")
             intent_payload = {

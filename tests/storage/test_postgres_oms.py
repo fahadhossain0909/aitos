@@ -487,9 +487,9 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
                 },
                 ledger_entries=child_ledger,
             )
-        assert (
-            await canonical_intents.protection_child_watermark("321", "654")
-        )["cumulative_quantity"] == Decimal("0.02")
+        assert (await canonical_intents.protection_child_watermark("321", "654"))[
+            "cumulative_quantity"
+        ] == Decimal("0.02")
 
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
