@@ -130,27 +130,12 @@ class PostgresLifecycleStateWriter:
 
         lock = self._locks.setdefault(trade, asyncio.Lock())
         async with lock:
-            revision = await self._revision(trade)
-            parent_event_id = self._last_event_ids.get(trade)
-            event = await self.oms.append(
-                self.fence,
-                aggregate_id=trade,
-                event_id=event_id,
-                expected_revision=revision,
-                payload={
-                    "event_type": "TRADE_COST_ADJUSTMENT",
-                    "trade_id": trade,
-                    "adjustment_id": adjustment,
-                    "kind": kind,
-                    "amount": format(amount, "f"),
-                    "currency": "USDT",
-                    "causality": {
-                        "causation_id": adjustment,
-                        "correlation_id": trade,
-                        "parent_event_id": parent_event_id,
-                    },
-                },
-                ledger_entries=[
+            events = await self.oms.read_events(self.fence.account_scope, trade)
+            existing = next(
+                (item for item in events if item.event_id == event_id), None
+            )
+            if existing is not None:
+                expected_ledger = [
                     {
                         "account_code": debit_account,
                         "currency": "USDT",
@@ -165,8 +150,57 @@ class PostgresLifecycleStateWriter:
                         "credit": format(absolute, "f"),
                         "reference": adjustment,
                     },
-                ],
-            )
+                ]
+                if (
+                    existing.payload.get("event_type") != "TRADE_COST_ADJUSTMENT"
+                    or existing.payload.get("trade_id") != trade
+                    or existing.payload.get("adjustment_id") != adjustment
+                    or existing.payload.get("kind") != kind
+                    or existing.payload.get("amount") != format(amount, "f")
+                    or existing.payload.get("financial_ledger") != expected_ledger
+                ):
+                    raise RuntimeError(
+                        "canonical income event identity was reused with different content"
+                    )
+                event = existing
+            else:
+                revision = events[-1].revision if events else 0
+                parent_event_id = events[-1].event_id if events else None
+                event = await self.oms.append(
+                    self.fence,
+                    aggregate_id=trade,
+                    event_id=event_id,
+                    expected_revision=revision,
+                    payload={
+                        "event_type": "TRADE_COST_ADJUSTMENT",
+                        "trade_id": trade,
+                        "adjustment_id": adjustment,
+                        "kind": kind,
+                        "amount": format(amount, "f"),
+                        "currency": "USDT",
+                        "causality": {
+                            "causation_id": adjustment,
+                            "correlation_id": trade,
+                            "parent_event_id": parent_event_id,
+                        },
+                    },
+                    ledger_entries=[
+                        {
+                            "account_code": debit_account,
+                            "currency": "USDT",
+                            "debit": format(absolute, "f"),
+                            "credit": "0",
+                            "reference": adjustment,
+                        },
+                        {
+                            "account_code": credit_account,
+                            "currency": "USDT",
+                            "debit": "0",
+                            "credit": format(absolute, "f"),
+                            "reference": adjustment,
+                        },
+                    ],
+                )
             if event.revision >= self._revisions.get(trade, 0):
                 self._revisions[trade] = event.revision
                 self._last_event_ids[trade] = event.event_id
