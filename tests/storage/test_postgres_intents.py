@@ -37,7 +37,7 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         server_settings={"search_path": schema},
     )
     try:
-        assert await apply_postgres_migrations(pool) == 6
+        assert await apply_postgres_migrations(pool) == 7
         oms = PostgresCanonicalOMS(pool)
         fence = await oms.acquire_writer(
             "paper:intent-test", "worker-a", expected_generation=0
