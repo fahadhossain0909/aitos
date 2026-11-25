@@ -471,10 +471,11 @@ async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
             _open_trades = {}
             _closed_trades = []
 
-        recovery = await recovery_writer.restore_lifecycle(RecoveredLifecycle())
+        recovered_lifecycle = RecoveredLifecycle()
+        recovery = await recovery_writer.restore_lifecycle(recovered_lifecycle)
         assert recovery == {"open": 1, "closed": 1}
-        assert RecoveredLifecycle._open_trades["import-open"].quantity == 0.125
-        assert RecoveredLifecycle._closed_trades[0].trade_id == "import-closed"
+        assert recovered_lifecycle._open_trades["import-open"].quantity == 0.125
+        assert recovered_lifecycle._closed_trades[0].trade_id == "import-closed"
     finally:
         if not pool.is_closing():
             await pool.close()
