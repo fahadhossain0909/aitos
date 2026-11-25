@@ -172,6 +172,70 @@ class PostgresLifecycleStateWriter:
                 self._last_event_ids[trade] = event.event_id
             return event
 
+    async def apply_execution_intent(
+        self,
+        intents: Any,
+        client_id: str,
+        trade: Any,
+        *,
+        ledger_entries: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically apply a confirmed venue intent with its trade snapshot.
+
+        PostgreSQL commits the intent APPLIED transition, causal Trade snapshot,
+        balanced financial journal and their outbox records in one transaction.
+        The legacy stores are updated only after that canonical commit.
+        """
+        if getattr(intents, "oms", None) is not self.oms:
+            raise ValueError("execution intents must share the lifecycle writer OMS")
+        if getattr(intents, "fence", None) != self.fence:
+            raise ValueError("execution intents must use the lifecycle writer fence")
+        trade_id = str(getattr(trade, "trade_id", "")).strip()
+        to_dict = getattr(trade, "to_dict", None)
+        if not trade_id or not callable(to_dict):
+            raise ValueError("execution finalization requires a persisted Trade")
+        current_scope = str(getattr(trade, "account_scope", "") or "")
+        if current_scope and current_scope != self.fence.account_scope:
+            raise ValueError("trade account scope differs from canonical OMS writer")
+        trade.account_scope = self.fence.account_scope
+        intent = await intents.get(client_id)
+        if intent is None:
+            raise RuntimeError("canonical execution intent is missing")
+        expected_state = str(intent["state"])
+        if expected_state not in {"CONFIRMED", "PROTECTED"}:
+            raise RuntimeError(
+                f"canonical execution intent cannot be applied from {expected_state}"
+            )
+        trade_revision = await self._revision(trade_id)
+        committed = await intents.transition_with_trade_snapshot(
+            client_id,
+            expected_revision=int(intent["revision"]),
+            expected_state=expected_state,
+            trade_id=trade_id,
+            expected_trade_revision=trade_revision,
+            trade_snapshot=to_dict(),
+            ledger_entries=[] if ledger_entries is None else ledger_entries,
+        )
+        self._revisions[trade_id] = committed["trade_revision"]
+        self._last_event_ids[trade_id] = committed["trade_event_id"]
+        # Projection is deliberately outside PostgreSQL's commit. Its outbox
+        # row remains durable and replayable when the projection callback fails.
+        await self.projection_writer(trade)
+        trade_events = await self.oms.read_events(self.fence.account_scope, trade_id)
+        trade_event = next(
+            (event for event in reversed(trade_events) if event.event_id == committed["trade_event_id"]),
+            None,
+        )
+        if trade_event is None:
+            raise RuntimeError("canonical Trade event disappeared after commit")
+        await self.oms.mark_projected(
+            self.fence.account_scope,
+            trade_id,
+            committed["trade_revision"],
+            event_hash=trade_event.event_hash,
+        )
+        return committed
+
     async def restore_lifecycle(self, lifecycle: Any) -> dict[str, int]:
         """Replace projected lifecycle state with verified canonical OMS snapshots.
 
