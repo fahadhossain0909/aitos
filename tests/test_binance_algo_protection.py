@@ -367,7 +367,9 @@ async def test_lost_protective_post_ack_recovers_exact_algo_by_client_id(tmp_pat
 
 
 async def test_lost_protective_post_ack_with_absent_lookup_stays_unresolved(tmp_path):
-    store = ExecutionIntentStore(tmp_path / "lost-ack-missing.sqlite", scope="paper-account")
+    store = ExecutionIntentStore(
+        tmp_path / "lost-ack-missing.sqlite", scope="paper-account"
+    )
     value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
     client_id = "aitos-stop-unknown"
     value._signed_request = AsyncMock(
@@ -395,7 +397,9 @@ async def test_lost_protective_post_ack_with_absent_lookup_stays_unresolved(tmp_
 
 
 async def test_lost_ack_triggered_algo_validates_linked_cumulative_child(tmp_path):
-    store = ExecutionIntentStore(tmp_path / "lost-ack-triggered.sqlite", scope="paper-account")
+    store = ExecutionIntentStore(
+        tmp_path / "lost-ack-triggered.sqlite", scope="paper-account"
+    )
     value = BinanceFuturesOrderExecutor("dummy", "dummy", intent_store=store)
     client_id = "aitos-stop-triggered"
     algo = dict(
