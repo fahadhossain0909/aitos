@@ -1308,6 +1308,13 @@ class IdempotentOrderExecutor(OrderExecutor):
 
     def __init__(self, inner: OrderExecutor, state_store: Any | None = None) -> None:
         self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate venue/intent APIs not owned by the idempotency wrapper."""
+        inner = self.__dict__.get("_inner")
+        if inner is None:
+            raise AttributeError(name)
+        return getattr(inner, name)
         self._state_store = state_store
         self._completed: dict[str, OrderResult] = {}
         self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
