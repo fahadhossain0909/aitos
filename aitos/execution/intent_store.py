@@ -640,16 +640,42 @@ class ExecutionIntentStore:
             return cursor.rowcount == 1
 
     def mark_applied(self, client_id: str, trade_id: str) -> None:
+        """Idempotently acknowledge a confirmed intent for its owning trade.
+
+        Protective algo child fills can arrive cumulatively across several
+        reconciliation cycles. Once the parent intent is APPLIED, later child
+        deltas must not turn the same acknowledgement into a false failure.
+        Reusing the client identity for a different trade remains forbidden.
+        """
         if not trade_id:
             raise ValueError("applied execution requires durable trade identity")
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ValueError("applied execution requires client identity")
         with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state,trade_id FROM execution_intents "
+                "WHERE scope=? AND client_id=?",
+                (self.scope, client_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("execution intent does not exist")
+            if row["state"] == "APPLIED":
+                if row["trade_id"] != trade_id:
+                    raise ValueError("applied execution is owned by a different trade")
+                return
+            if row["state"] not in {"CONFIRMED", "PROTECTED"}:
+                raise ValueError("only confirmed execution can be applied")
+            if row["trade_id"] not in (None, trade_id):
+                raise ValueError("execution intent is already bound to a different trade")
             cursor = conn.execute(
-                "UPDATE execution_intents SET state='APPLIED',trade_id=?,updated_at=CURRENT_TIMESTAMP "
-                "WHERE scope=? AND client_id=? AND state IN ('CONFIRMED','PROTECTED')",
+                "UPDATE execution_intents SET state='APPLIED',trade_id=?,"
+                "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND client_id=? "
+                "AND state IN ('CONFIRMED','PROTECTED')",
                 (trade_id, self.scope, client_id),
             )
             if cursor.rowcount != 1:
-                raise ValueError("only confirmed execution can be applied")
+                raise ValueError("execution intent acknowledgement lost its state race")
 
     def unresolved(self, symbol: str | None = None) -> list[dict]:
         with self._connection() as conn:
