@@ -601,7 +601,11 @@ class WebAuthnRelyingParty:
                     raise WebAuthnCredentialError(
                         "authenticator did not verify the user"
                     )
-                new_sign_count = int(verified.new_sign_count)
+                if type(verified.new_sign_count) is not int:
+                    raise WebAuthnCredentialError(
+                        "authenticator signature counter is invalid"
+                    )
+                new_sign_count = verified.new_sign_count
                 if new_sign_count < 0:
                     raise WebAuthnCredentialError(
                         "authenticator signature counter is invalid"
