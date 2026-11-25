@@ -175,7 +175,7 @@ class RollbackClient:
             RUNTIME_TARGET,
             CLOSED_TARGET,
         ):
-            if f"FROM {table}" in sql:
+            if f"FROM {table} " in sql:
                 return Result(self.datasets.get(table, []))
         raise AssertionError(sql)
 
