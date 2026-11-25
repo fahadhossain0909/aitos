@@ -303,9 +303,11 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         assert sum((line["credit"] for line in ledger_lines), Decimal("0")) == Decimal(
             "0.35"
         )
-        assert {
-            line["account_code"] for line in ledger_lines
-        } == {"EXPENSE_FEES", "CASH", "FUNDING_EXPENSE"}
+        assert {line["account_code"] for line in ledger_lines} == {
+            "EXPENSE_FEES",
+            "CASH",
+            "FUNDING_EXPENSE",
+        }
 
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
