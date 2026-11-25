@@ -7,6 +7,7 @@ SQLite journal. Runtime adoption must be explicit; it never silently dual-writes
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
@@ -140,43 +141,402 @@ class PostgresCanonicalExecutionIntentStore:
         self.scope = fence.account_scope
         self._protection_journal = None
 
-    def bind_protection_journal(self, journal: Any) -> None:
-        """Bind the legacy handover/child-fill journal, not the order intent authority."""
-        if getattr(journal, "scope", None) != self.scope:
-            raise ValueError("protection journal scope differs from canonical OMS scope")
-        self._protection_journal = journal
+    async def _append_protection_event(
+        self,
+        conn: Any,
+        aggregate_id: str,
+        event_prefix: str,
+        payload: dict[str, Any],
+    ) -> tuple[int, str]:
+        head = await conn.fetchrow(
+            """SELECT revision FROM aitos_oms_aggregate_heads
+               WHERE account_scope=$1 AND aggregate_id=$2""",
+            self.scope,
+            aggregate_id,
+        )
+        expected = int(head["revision"]) if head is not None else 0
+        revision = expected + 1
+        event_id = f"{event_prefix}:revision:{revision}"
+        if len(event_id) > 192:
+            raise ValueError("protection event identity exceeds canonical OMS limit")
+        await self._append_event(
+            conn,
+            aggregate_id,
+            event_id,
+            expected,
+            _canonical_payload(payload),
+        )
+        return revision, event_id
 
-    def _protection(self):
-        if self._protection_journal is None:
-            raise RuntimeError("durable protection handover journal is not bound")
-        return self._protection_journal
+    @staticmethod
+    def _handover_payload(row: Any) -> dict[str, Any]:
+        return {
+            "handover_id": row["handover_id"],
+            "trade_id": row["trade_id"],
+            "symbol": row["symbol"],
+            "old_order_id": row["old_order_id"],
+            "new_client_id": row["new_client_id"],
+            "new_order_id": row["new_order_id"],
+            "order_type": row["order_type"],
+            "state": row["state"],
+            "blocked_reason": row["blocked_reason"],
+        }
 
-    def protection_handovers(self, trade_id: str | None = None) -> list[dict[str, Any]]:
-        return self._protection().protection_handovers(trade_id=trade_id)
+    async def begin_protection_handover(
+        self,
+        *,
+        handover_id: str,
+        trade_id: str,
+        symbol: str,
+        old_order_id: str,
+        new_client_id: str,
+        order_type: str = "STOP_MARKET",
+    ) -> dict[str, Any]:
+        """Create a fenced replacement claim before any venue POST."""
+        values = (handover_id, trade_id, symbol, old_order_id, new_client_id)
+        if any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("complete protective handover identity is required")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", handover_id):
+            raise ValueError("invalid protective handover identity")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", new_client_id):
+            raise ValueError("invalid replacement client identity")
+        if old_order_id == new_client_id:
+            raise ValueError("old and new protective identities must differ")
+        if order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+            raise ValueError("unsupported protective handover order type")
+        scope = self.scope
+        trade = _identifier(trade_id, "trade_id")
+        symbol_value = _identifier(symbol, "symbol")
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            existing = await conn.fetchrow(
+                """SELECT * FROM aitos_oms_protection_handovers
+                   WHERE account_scope=$1 AND handover_id=$2 FOR UPDATE""",
+                scope,
+                handover_id,
+            )
+            expected = {
+                "trade_id": trade,
+                "symbol": symbol_value,
+                "old_order_id": old_order_id,
+                "new_client_id": new_client_id,
+                "order_type": order_type,
+            }
+            if existing is not None:
+                if any(existing[key] != value for key, value in expected.items()):
+                    raise OMSConflict(
+                        "protective handover ID reused for different identity"
+                    )
+                return dict(existing)
+            active = await conn.fetchrow(
+                """SELECT handover_id FROM aitos_oms_protection_handovers
+                   WHERE account_scope=$1 AND trade_id=$2 AND state<>'APPLIED'
+                   LIMIT 1""",
+                scope,
+                trade,
+            )
+            if active is not None:
+                raise OMSConflict(
+                    "another protective handover requires reconciliation: "
+                    + str(active["handover_id"])
+                )
+            await conn.execute(
+                """INSERT INTO aitos_oms_protection_handovers
+                   (account_scope,handover_id,trade_id,symbol,old_order_id,
+                    new_client_id,order_type,state)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,'PREPARED')""",
+                scope,
+                handover_id,
+                trade,
+                symbol_value,
+                old_order_id,
+                new_client_id,
+                order_type,
+            )
+            row = await conn.fetchrow(
+                """SELECT * FROM aitos_oms_protection_handovers
+                   WHERE account_scope=$1 AND handover_id=$2""",
+                scope,
+                handover_id,
+            )
+            await self._append_protection_event(
+                conn,
+                f"protection-handover-{handover_id}",
+                f"protection-handover:{handover_id}",
+                {
+                    "event_type": "PROTECTION_HANDOVER_CREATED",
+                    "account_scope": scope,
+                    **self._handover_payload(row),
+                },
+            )
+            return dict(row)
 
-    def begin_protection_handover(self, **kwargs: Any) -> dict[str, Any]:
-        return self._protection().begin_protection_handover(**kwargs)
+    async def _transition_protection_handover(
+        self,
+        handover_id: str,
+        *,
+        allowed_states: set[str],
+        new_state: str,
+        event_type: str,
+        new_order_id: str | None = None,
+        blocked_reason: str | None = None,
+    ) -> dict[str, Any]:
+        handover = _identifier(handover_id, "handover_id")
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            row = await conn.fetchrow(
+                """SELECT * FROM aitos_oms_protection_handovers
+                   WHERE account_scope=$1 AND handover_id=$2 FOR UPDATE""",
+                self.scope,
+                handover,
+            )
+            if row is None:
+                raise OMSConflict("protective handover does not exist")
+            if row["state"] == new_state:
+                if new_order_id is not None and row["new_order_id"] != new_order_id:
+                    raise OMSConflict("protective handover order identity changed")
+                if blocked_reason is not None and row["blocked_reason"] != blocked_reason:
+                    raise OMSConflict("protective handover quarantine reason changed")
+                return dict(row)
+            if row["state"] not in allowed_states:
+                raise OMSConflict(
+                    f"invalid protection handover transition {row['state']}->{new_state}"
+                )
+            if new_order_id is not None and row["new_order_id"] not in (None, new_order_id):
+                raise OMSConflict("replacement venue order ID conflicts with durable claim")
+            if new_state == "OLD_CANCEL_REQUESTED" and not row["new_order_id"]:
+                raise OMSConflict("old-stop cancellation requires accepted replacement")
+            if new_state == "OLD_CANCELLED" and row["state"] != "OLD_CANCEL_REQUESTED":
+                raise OMSConflict("old-stop cancellation was not durably requested")
+            if new_state == "APPLIED" and row["state"] != "OLD_CANCELLED":
+                raise OMSConflict("handover cannot complete before old stop cancellation")
+            await conn.execute(
+                """UPDATE aitos_oms_protection_handovers
+                   SET state=$3,new_order_id=COALESCE($4,new_order_id),
+                       blocked_reason=COALESCE($5,blocked_reason),updated_at=now()
+                   WHERE account_scope=$1 AND handover_id=$2""",
+                self.scope,
+                handover,
+                new_state,
+                new_order_id,
+                blocked_reason[:500] if blocked_reason is not None else None,
+            )
+            updated = await conn.fetchrow(
+                """SELECT * FROM aitos_oms_protection_handovers
+                   WHERE account_scope=$1 AND handover_id=$2""",
+                self.scope,
+                handover,
+            )
+            await self._append_protection_event(
+                conn,
+                f"protection-handover-{handover}",
+                f"protection-handover:{handover}",
+                {
+                    "event_type": event_type,
+                    "account_scope": self.scope,
+                    **self._handover_payload(updated),
+                },
+            )
+            return dict(updated)
 
-    def record_handover_new_order(self, *args: Any, **kwargs: Any) -> None:
-        self._protection().record_handover_new_order(*args, **kwargs)
+    async def record_handover_new_order(
+        self, handover_id: str, new_order_id: str
+    ) -> dict[str, Any]:
+        if not re.fullmatch(r"algo:[1-9][0-9]{0,29}", str(new_order_id or "")):
+            raise ValueError("valid replacement algo order ID required")
+        return await self._transition_protection_handover(
+            handover_id,
+            allowed_states={"PREPARED"},
+            new_state="NEW_ACCEPTED",
+            event_type="PROTECTION_HANDOVER_NEW_ORDER_ACCEPTED",
+            new_order_id=new_order_id,
+        )
 
-    def mark_handover_old_cancel_requested(self, *args: Any, **kwargs: Any) -> None:
-        self._protection().mark_handover_old_cancel_requested(*args, **kwargs)
+    async def mark_handover_old_cancel_requested(
+        self, handover_id: str
+    ) -> dict[str, Any]:
+        return await self._transition_protection_handover(
+            handover_id,
+            allowed_states={"NEW_ACCEPTED"},
+            new_state="OLD_CANCEL_REQUESTED",
+            event_type="PROTECTION_HANDOVER_OLD_CANCEL_REQUESTED",
+        )
 
-    def mark_handover_old_cancelled(self, *args: Any, **kwargs: Any) -> None:
-        self._protection().mark_handover_old_cancelled(*args, **kwargs)
+    async def mark_handover_old_cancelled(self, handover_id: str) -> dict[str, Any]:
+        return await self._transition_protection_handover(
+            handover_id,
+            allowed_states={"OLD_CANCEL_REQUESTED"},
+            new_state="OLD_CANCELLED",
+            event_type="PROTECTION_HANDOVER_OLD_CANCELLED",
+        )
 
-    def complete_protection_handover(self, *args: Any, **kwargs: Any) -> None:
-        self._protection().complete_protection_handover(*args, **kwargs)
+    async def complete_protection_handover(self, handover_id: str) -> dict[str, Any]:
+        return await self._transition_protection_handover(
+            handover_id,
+            allowed_states={"OLD_CANCELLED"},
+            new_state="APPLIED",
+            event_type="PROTECTION_HANDOVER_COMPLETED",
+        )
 
-    def block_protection_handover(self, *args: Any, **kwargs: Any) -> None:
-        self._protection().block_protection_handover(*args, **kwargs)
+    async def block_protection_handover(
+        self, handover_id: str, reason: str
+    ) -> dict[str, Any]:
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("handover quarantine reason is required")
+        return await self._transition_protection_handover(
+            handover_id,
+            allowed_states={
+                "PREPARED",
+                "NEW_ACCEPTED",
+                "OLD_CANCEL_REQUESTED",
+                "OLD_CANCELLED",
+                "BLOCKED",
+            },
+            new_state="BLOCKED",
+            event_type="PROTECTION_HANDOVER_BLOCKED",
+            blocked_reason=reason,
+        )
 
-    def protection_child_watermark(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._protection().protection_child_watermark(*args, **kwargs)
+    async def protection_handovers(
+        self, *, trade_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        if trade_id is not None:
+            trade_id = _identifier(trade_id, "trade_id")
+        async with self.oms._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM aitos_oms_protection_handovers
+                   WHERE account_scope=$1 AND ($2::text IS NULL OR trade_id=$2)
+                   ORDER BY updated_at,handover_id""",
+                self.scope,
+                trade_id,
+            )
+        return [dict(row) for row in rows]
 
-    def mark_protection_child_applied(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._protection().mark_protection_child_applied(*args, **kwargs)
+    async def protection_child_watermark(
+        self, algo_id: str, child_order_id: str
+    ) -> dict[str, Any] | None:
+        algo = _identifier(str(algo_id), "algo_id")
+        child = _identifier(str(child_order_id), "child_order_id")
+        async with self.oms._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT account_scope,algo_id,child_order_id,trade_id,symbol,
+                          cumulative_quantity,cumulative_quote,status,updated_at
+                   FROM aitos_oms_protection_child_fills
+                   WHERE account_scope=$1 AND algo_id=$2 AND child_order_id=$3""",
+                self.scope,
+                algo,
+                child,
+            )
+        return dict(row) if row is not None else None
+
+    async def mark_protection_child_applied(
+        self,
+        *,
+        algo_id: str,
+        child_order_id: str,
+        trade_id: str,
+        symbol: str,
+        cumulative_quantity: str,
+        cumulative_quote: str,
+        status: str,
+    ) -> dict[str, Any]:
+        identities = (algo_id, child_order_id, trade_id, symbol, status)
+        if any(not isinstance(value, str) or not value.strip() for value in identities):
+            raise ValueError("complete child-fill application identity is required")
+        algo = _identifier(algo_id, "algo_id")
+        child = _identifier(child_order_id, "child_order_id")
+        trade = _identifier(trade_id, "trade_id")
+        symbol_value = _identifier(symbol, "symbol")
+        try:
+            quantity = Decimal(str(cumulative_quantity))
+            quote = Decimal(str(cumulative_quote))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("child cumulative values must be decimals") from None
+        if (
+            not quantity.is_finite()
+            or not quote.is_finite()
+            or quantity < 0
+            or quote < 0
+            or quantity.as_tuple().exponent < -18
+            or quote.as_tuple().exponent < -18
+        ):
+            raise ValueError("child cumulative values must be finite, non-negative and <=18 decimals")
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            current = await conn.fetchrow(
+                """SELECT * FROM aitos_oms_protection_child_fills
+                   WHERE account_scope=$1 AND algo_id=$2 AND child_order_id=$3
+                   FOR UPDATE""",
+                self.scope,
+                algo,
+                child,
+            )
+            if current is not None:
+                if current["trade_id"] != trade or current["symbol"] != symbol_value:
+                    raise OMSConflict("child-fill identity was reused across trade scope")
+                previous_quantity = Decimal(str(current["cumulative_quantity"]))
+                previous_quote = Decimal(str(current["cumulative_quote"]))
+                if quantity < previous_quantity or quote < previous_quote:
+                    raise OMSConflict("child-fill cumulative watermark regressed")
+                if (quantity == previous_quantity) != (quote == previous_quote):
+                    raise OMSConflict("child-fill quantity/quote watermark diverged")
+                if (
+                    quantity == previous_quantity
+                    and quote == previous_quote
+                    and current["status"] == status
+                ):
+                    return dict(current)
+                await conn.execute(
+                    """UPDATE aitos_oms_protection_child_fills
+                       SET cumulative_quantity=$4,cumulative_quote=$5,status=$6,updated_at=now()
+                       WHERE account_scope=$1 AND algo_id=$2 AND child_order_id=$3""",
+                    self.scope,
+                    algo,
+                    child,
+                    quantity,
+                    quote,
+                    status,
+                )
+            else:
+                await conn.execute(
+                    """INSERT INTO aitos_oms_protection_child_fills
+                       (account_scope,algo_id,child_order_id,trade_id,symbol,
+                        cumulative_quantity,cumulative_quote,status)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8)""",
+                    self.scope,
+                    algo,
+                    child,
+                    trade,
+                    symbol_value,
+                    quantity,
+                    quote,
+                    status,
+                )
+            updated = await conn.fetchrow(
+                """SELECT * FROM aitos_oms_protection_child_fills
+                   WHERE account_scope=$1 AND algo_id=$2 AND child_order_id=$3""",
+                self.scope,
+                algo,
+                child,
+            )
+            aggregate = f"protection-child-{algo}-{child}"
+            await self._append_protection_event(
+                conn,
+                aggregate,
+                f"protection-child:{algo}:{child}",
+                {
+                    "event_type": "PROTECTION_CHILD_FILL_WATERMARK_UPDATED",
+                    "account_scope": self.scope,
+                    "algo_id": algo,
+                    "child_order_id": child,
+                    "trade_id": trade,
+                    "symbol": symbol_value,
+                    "cumulative_quantity": format(quantity, "f"),
+                    "cumulative_quote": format(quote, "f"),
+                    "status": status,
+                },
+            )
+            return dict(updated)
 
     async def protection_intents(self, trade_id: str | None = None) -> list[dict[str, Any]]:
         async with self.oms._pool.acquire() as conn:
