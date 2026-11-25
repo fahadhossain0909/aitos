@@ -230,6 +230,190 @@ class PostgresCanonicalExecutionIntentStore:
                 "last_event_id": event_id,
             }
 
+    async def transition_with_trade_snapshot(
+        self,
+        client_id: str,
+        *,
+        expected_revision: int,
+        expected_state: str,
+        trade_id: str,
+        expected_trade_revision: int,
+        trade_snapshot: dict[str, Any],
+        ledger_entries: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically apply an execution intent, trade snapshot and ledger journal.
+
+        This is the canonical finalization boundary for an execution that has
+        already been confirmed by the venue. It commits the intent transition,
+        trade aggregate revision, financial ledger lines and both projection
+        outbox records in one PostgreSQL transaction. It does not submit orders.
+        """
+        client = _identifier(client_id, "client_id")
+        trade = _identifier(trade_id, "trade_id")
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("positive expected_revision is required")
+        if type(expected_trade_revision) is not int or expected_trade_revision < 0:
+            raise ValueError("non-negative expected_trade_revision is required")
+        if new_state := "APPLIED":
+            if new_state not in _ALLOWED_TRANSITIONS.get(expected_state, set()):
+                raise ValueError(
+                    f"invalid execution-intent transition {expected_state}->{new_state}"
+                )
+        if not isinstance(trade_snapshot, dict) or not trade_snapshot:
+            raise ValueError("non-empty canonical trade snapshot is required")
+        if trade_snapshot.get("trade_id") != trade:
+            raise ValueError("trade snapshot identity does not match execution intent")
+        snapshot_scope = trade_snapshot.get("account_scope")
+        if snapshot_scope != self.scope:
+            raise ValueError("trade snapshot account scope does not match writer fence")
+        normalized_entries = PostgresCanonicalOMS._validate_ledger_entries(
+            [] if ledger_entries is None else ledger_entries
+        )
+        for entry in normalized_entries:
+            reference = entry.get("reference")
+            if reference is not None and len(reference) > 256:
+                raise ValueError("financial ledger reference exceeds 256 characters")
+
+        intent_aggregate = f"intent-{client}"
+        intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
+        trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
+        intent_encoded = _canonical_payload(
+            {
+                "event_type": "EXECUTION_INTENT_TRANSITIONED",
+                "client_order_id": client,
+                "from_state": expected_state,
+                "state": "APPLIED",
+                "request": {},
+                "result": {},
+                "trade_id": trade,
+                "causality": {
+                    "causation_id": intent_event_id,
+                    "correlation_id": client,
+                    "parent_event_id": intent_event_id,
+                },
+            }
+        )
+        await self._assert_fence()
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            row = await conn.fetchrow(
+                """SELECT symbol,state,request::text AS request_json,
+                          result::text AS result_json,trade_id,revision,last_event_id
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND client_id=$2 FOR UPDATE""",
+                self.scope,
+                client,
+            )
+            if row is None:
+                raise OMSConflict("execution intent does not exist")
+            if (
+                int(row["revision"]) != expected_revision
+                or row["state"] != expected_state
+            ):
+                raise OMSConflict("execution intent revision/state CAS failed")
+            if expected_state not in {"CONFIRMED", "PROTECTED"}:
+                raise ValueError("only confirmed execution or protection can be applied")
+            if not row["result_json"]:
+                raise OMSConflict("execution intent has no durable venue result")
+            if row["trade_id"] not in (None, trade):
+                raise OMSConflict("execution intent is already bound to another trade")
+            request_payload = json.loads(row["request_json"])
+            result_payload = json.loads(row["result_json"])
+            intent_payload = {
+                "event_type": "EXECUTION_INTENT_TRANSITIONED",
+                "client_order_id": client,
+                "from_state": expected_state,
+                "state": "APPLIED",
+                "request": request_payload,
+                "result": result_payload,
+                "trade_id": trade,
+                "causality": {
+                    "causation_id": row["last_event_id"],
+                    "correlation_id": client,
+                    "parent_event_id": row["last_event_id"],
+                },
+            }
+            intent_encoded = _canonical_payload(intent_payload)
+            await self._append_event(
+                conn,
+                intent_aggregate,
+                intent_event_id,
+                expected_revision,
+                intent_encoded,
+            )
+
+            previous_trade_event = await conn.fetchrow(
+                """SELECT event_id FROM aitos_oms_events
+                   WHERE account_scope=$1 AND aggregate_id=$2
+                   ORDER BY revision DESC LIMIT 1""",
+                self.scope,
+                trade,
+            )
+            trade_payload = {
+                "event_type": "TRADE_SNAPSHOT",
+                "trade_id": trade,
+                "account_scope": self.scope,
+                "trade": trade_snapshot,
+                "causality": {
+                    "causation_id": intent_event_id,
+                    "correlation_id": client,
+                    "parent_event_id": (
+                        previous_trade_event["event_id"]
+                        if previous_trade_event is not None
+                        else None
+                    ),
+                },
+            }
+            trade_encoded = _canonical_payload(trade_payload)
+            await self._append_event(
+                conn,
+                trade,
+                trade_event_id,
+                expected_trade_revision,
+                trade_encoded,
+            )
+            for line_no, entry in enumerate(normalized_entries):
+                await conn.execute(
+                    """INSERT INTO aitos_oms_financial_ledger
+                       (account_scope,event_id,line_no,trade_id,account_code,
+                        currency,debit,credit,reference)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+                    self.scope,
+                    trade_event_id,
+                    line_no,
+                    trade,
+                    entry["account_code"],
+                    entry["currency"],
+                    entry["debit"],
+                    entry["credit"],
+                    entry["reference"],
+                )
+            next_revision = expected_revision + 1
+            await conn.execute(
+                """UPDATE aitos_oms_execution_intents
+                   SET state='APPLIED',trade_id=$3,revision=$4,last_event_id=$5,
+                       updated_at=now()
+                   WHERE account_scope=$1 AND client_id=$2""",
+                self.scope,
+                client,
+                trade,
+                next_revision,
+                intent_event_id,
+            )
+        return {
+            "account_scope": self.scope,
+            "client_id": client,
+            "symbol": row["symbol"],
+            "state": "APPLIED",
+            "request": request_payload,
+            "result": result_payload,
+            "trade_id": trade,
+            "revision": next_revision,
+            "last_event_id": intent_event_id,
+            "trade_event_id": trade_event_id,
+            "trade_revision": expected_trade_revision + 1,
+        }
+
     async def get(self, client_id: str) -> dict[str, Any] | None:
         client = _identifier(client_id, "client_id")
         async with self.oms._pool.acquire() as conn:
