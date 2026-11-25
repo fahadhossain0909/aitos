@@ -132,6 +132,17 @@ async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
     return result
 
 
+async def _acknowledge_protection(executor: Any, result: OrderResult, trade: Trade) -> Any:
+    """Use canonical async acknowledgement when available, legacy API otherwise."""
+    canonical = getattr(executor, "acknowledge_protection_trade", None)
+    if callable(canonical):
+        return await _call_sync_or_async(canonical, result, trade)
+    legacy = getattr(executor, "acknowledge_protection", None)
+    if not callable(legacy):
+        raise RuntimeError("executor exposes no protective acknowledgement API")
+    return await _call_sync_or_async(legacy, result, trade.trade_id)
+
+
 def _valid_market_price(value: Any) -> bool:
     """Return True only for finite, strictly positive market prices."""
     try:
@@ -1667,8 +1678,8 @@ class TradeLifecycle(AITOSModule):
             trade.sl_order_id = sl_result.order_id
             if self._order_executor.requires_exchange_execution:
                 trade.updated_at = utc_now_iso()
-                await self._order_executor.acknowledge_protection_trade(
-                    sl_result, trade
+                await _acknowledge_protection(
+                    self._order_executor, sl_result, trade
                 )
         else:
             if self._order_executor.requires_exchange_execution:
@@ -1711,8 +1722,8 @@ class TradeLifecycle(AITOSModule):
                 trade.tp_order_ids.append(tp_result.order_id)
                 if self._order_executor.requires_exchange_execution:
                     trade.updated_at = utc_now_iso()
-                    await self._order_executor.acknowledge_protection_trade(
-                        tp_result, trade
+                    await _acknowledge_protection(
+                        self._order_executor, tp_result, trade
                     )
             else:
                 if self._order_executor.requires_exchange_execution:
@@ -2615,7 +2626,7 @@ class TradeLifecycle(AITOSModule):
                 intent_store.complete_protection_handover, handover_id
             )
             await self._execution_position_verifier()
-            await self._order_executor.acknowledge_protection_trade(result, trade)
+            await _acknowledge_protection(self._order_executor, result, trade)
         except BaseException:
             # Preserve the last durable handover stage. Startup recovery must
             # query the deterministic client ID before deciding whether the
