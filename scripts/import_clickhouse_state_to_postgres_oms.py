@@ -608,6 +608,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                             )
                             quarantined_rows += 1
                             ambiguous_rows_quarantined += 1
+                if ambiguous_rows_quarantined:
+                    with quarantine_path.open("a", encoding="utf-8") as quarantine:
+                        quarantine.flush()
+                        os.fsync(quarantine.fileno())
 
                 expected_rows = counts[RUNTIME_SOURCE] + counts[CLOSED_SOURCE]
                 row_errors_quarantined = quarantined_rows - ambiguous_rows_quarantined
