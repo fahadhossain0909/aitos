@@ -764,7 +764,7 @@ async def recover_protection_handovers(
         raise TypeError(
             "authenticated algo lookup and resting-order reconciliation are required"
         )
-    handovers = await asyncio.to_thread(intent_store.protection_handovers)
+    handovers = await _call_sync_or_async(intent_store.protection_handovers)
     intents = await _call_sync_or_async(intent_store.protection_intents)
     if (
         not isinstance(handovers, list)
@@ -1027,7 +1027,7 @@ async def recover_protection_handovers(
             continue
 
         if state == "PREPARED":
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.record_handover_new_order, handover_id, new_id
             )
             state = "NEW_ACCEPTED"
@@ -1145,7 +1145,7 @@ async def recover_protection_handovers(
             await _call_sync_or_async(intent_store.record_protection, client_id, result)
 
         if state == "NEW_ACCEPTED":
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.mark_handover_old_cancel_requested, handover_id
             )
             state = "OLD_CANCEL_REQUESTED"
@@ -1196,7 +1196,7 @@ async def recover_protection_handovers(
                         }
                     )
                     continue
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.mark_handover_old_cancelled, handover_id
             )
             state = "OLD_CANCELLED"
@@ -1218,7 +1218,7 @@ async def recover_protection_handovers(
                     }
                 )
                 continue
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.complete_protection_handover, handover_id
             )
             if intent_state in {"SUBMITTING", "PROTECTED"}:
