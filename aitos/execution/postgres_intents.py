@@ -586,6 +586,79 @@ class PostgresCanonicalExecutionIntentStore:
             "financial_state": financial_state,
         }
 
+    async def record_result(self, client_id: str, result: Any) -> dict[str, Any]:
+        """Persist authoritative terminal venue evidence for a submitted intent."""
+        if not isinstance(result, dict):
+            raise TypeError("execution result payload must be an object")
+        row = await self.get(client_id)
+        if row is None:
+            raise OMSConflict("execution intent does not exist")
+        if row["state"] != "SUBMITTING":
+            raise OMSConflict("only a submitting intent can accept first venue evidence")
+        filled = Decimal(str(result.get("filled_quantity", "0")))
+        price = Decimal(str(result.get("fill_price", "0")))
+        success = result.get("success")
+        if type(success) is not bool or not filled.is_finite() or not price.is_finite():
+            raise ValueError("execution result evidence is malformed")
+        if filled > 0 and price > 0:
+            next_state = "CONFIRMED"
+        elif filled == 0 and price == 0 and not success:
+            next_state = "REJECTED"
+        else:
+            raise ValueError("execution result fill economics are inconsistent")
+        return await self.transition(
+            client_id,
+            expected_revision=int(row["revision"]),
+            expected_state="SUBMITTING",
+            new_state=next_state,
+            result=result,
+        )
+
+    async def record_protection(self, client_id: str, result: Any) -> dict[str, Any]:
+        """Persist a venue-accepted, currently unfilled protective order."""
+        if not isinstance(result, dict):
+            raise TypeError("protective result payload must be an object")
+        row = await self.get(client_id)
+        if row is None:
+            raise OMSConflict("protective execution intent does not exist")
+        if row["state"] != "SUBMITTING":
+            raise OMSConflict("only a submitting protection intent can be accepted")
+        try:
+            filled = Decimal(str(result.get("filled_quantity", "0")))
+            trigger = Decimal(str(result.get("fill_price", "0")))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("protective acceptance evidence is malformed") from None
+        if filled != 0 or not filled.is_finite() or not trigger.is_finite() or trigger <= 0:
+            raise ValueError("protective acceptance must be unfilled with a positive trigger")
+        order_id = result.get("order_id")
+        if not isinstance(order_id, str) or not order_id:
+            raise ValueError("protective acceptance requires a durable venue order ID")
+        return await self.transition(
+            client_id,
+            expected_revision=int(row["revision"]),
+            expected_state="SUBMITTING",
+            new_state="PROTECTED",
+            result=result,
+        )
+
+    async def mark_terminal(self, client_id: str, *, terminal_state: str = "TERMINAL") -> dict[str, Any]:
+        """Mark a previously accepted protection/intent terminal without losing evidence."""
+        if terminal_state != "TERMINAL":
+            raise ValueError("terminal_state must be TERMINAL")
+        row = await self.get(client_id)
+        if row is None:
+            raise OMSConflict("execution intent does not exist")
+        if row["state"] == "TERMINAL":
+            return row
+        if row["state"] not in {"PROTECTED", "APPLIED"}:
+            raise OMSConflict("only accepted or applied intents can become terminal")
+        return await self.transition(
+            client_id,
+            expected_revision=int(row["revision"]),
+            expected_state=str(row["state"]),
+            new_state="TERMINAL",
+        )
+
     async def latest_financial_state(self, currency: str) -> dict[str, Any] | None:
         """Read the most recent canonical valuation snapshot for this currency."""
         normalized = _identifier(currency, "currency")
