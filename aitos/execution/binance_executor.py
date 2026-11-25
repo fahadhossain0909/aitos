@@ -127,7 +127,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades"
             )
 
-    def _live_approval_consumer(self, action: dict[str, Any]) -> str:
+    def _live_approval_consumer(self, action: dict[str, Any]) -> dict[str, Any]:
         """Consume one exact-action receipt before any mainnet venue side effect."""
         if (
             self._live_approval_authority is None
