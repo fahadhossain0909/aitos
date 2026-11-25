@@ -2390,6 +2390,9 @@ class TradeLifecycle(AITOSModule):
         )
 
         writer = bind_postgres_canonical_oms(self, oms=oms, fence=fence)
+        bind_writer = getattr(self._order_executor, "bind_canonical_lifecycle_writer", None)
+        if callable(bind_writer):
+            bind_writer(writer)
         self._postgres_canonical_oms_required = True
         return writer
 
@@ -2769,16 +2772,154 @@ class TradeLifecycle(AITOSModule):
             self._execution_recovery_required = True
             raise
 
-    async def _commit_live_execution(self, trade: Trade) -> None:
+    async def _commit_live_execution(
+        self,
+        trade: Trade,
+        *,
+        ledger_entries: list[dict[str, Any]] | None = None,
+        client_order_id: str | None = None,
+    ) -> None:
         self._require_execution_writer()
         await self._execution_position_verifier()
-        await self._execution_state_writer(trade)
-        client_id = self._execution_faults.get(trade.trade_id)
-        if client_id and not client_id.startswith("resting:"):
-            self._order_executor.acknowledge_execution(client_id, trade.trade_id)
+        client_id = client_order_id or self._execution_faults.get(trade.trade_id)
+        canonical_intents = getattr(
+            self._order_executor, "canonical_intent_store", None
+        )
+        canonical_writer = getattr(
+            self, "_postgres_canonical_oms_writer", None
+        )
+        if (
+            canonical_intents is not None
+            and canonical_writer is not None
+            and client_id
+            and not client_id.startswith("resting:")
+        ):
+            await canonical_writer.apply_execution_intent(
+                canonical_intents,
+                client_id,
+                trade,
+                ledger_entries=ledger_entries,
+            )
+            acknowledge = getattr(
+                self._order_executor, "acknowledge_execution_async", None
+            )
+            if not callable(acknowledge):
+                raise RuntimeError("canonical executor acknowledgement is unavailable")
+            await acknowledge(client_id, trade.trade_id)
+        else:
+            await self._execution_state_writer(trade)
+            if client_id and not client_id.startswith("resting:"):
+                acknowledge = getattr(
+                    self._order_executor, "acknowledge_execution_async", None
+                )
+                if callable(acknowledge):
+                    await acknowledge(client_id, trade.trade_id)
+                else:
+                    self._order_executor.acknowledge_execution(
+                        client_id, trade.trade_id
+                    )
         self._execution_faults.pop(trade.trade_id, None)
         if hasattr(trade, "_aitos_filled_resting_order_ids"):
             del trade._aitos_filled_resting_order_ids
+
+    @staticmethod
+    def _position_entry_ledger(trade: Trade, reference: str) -> list[dict[str, Any]]:
+        notional = Decimal(str(trade.position_size_usd))
+        if not notional.is_finite() or notional <= 0:
+            raise ValueError("entry ledger requires a finite positive filled notional")
+        encoded = format(notional, "f")
+        return [
+            {
+                "account_code": "OPEN_POSITION_ASSET",
+                "currency": "USDT",
+                "debit": encoded,
+                "credit": "0",
+                "reference": reference,
+            },
+            {
+                "account_code": "CASH_CLEARING",
+                "currency": "USDT",
+                "debit": "0",
+                "credit": encoded,
+                "reference": reference,
+            },
+        ]
+
+    @staticmethod
+    def _position_reduction_ledger(
+        cost_basis_usd: float, execution: OrderResult, reference: str
+    ) -> list[dict[str, Any]]:
+        cost_basis = Decimal(str(cost_basis_usd))
+        proceeds = (
+            Decimal(str(execution.filled_quantity))
+            * Decimal(str(execution.fill_price))
+        )
+        if (
+            not cost_basis.is_finite()
+            or cost_basis <= 0
+            or not proceeds.is_finite()
+            or proceeds <= 0
+        ):
+            raise ValueError("reduction ledger requires finite positive basis and proceeds")
+        lines = []
+        if proceeds >= cost_basis:
+            lines.extend(
+                [
+                    {
+                        "account_code": "CASH",
+                        "currency": "USDT",
+                        "debit": format(proceeds, "f"),
+                        "credit": "0",
+                        "reference": reference,
+                    },
+                    {
+                        "account_code": "OPEN_POSITION_ASSET",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(cost_basis, "f"),
+                        "reference": reference,
+                    },
+                ]
+            )
+            gain = proceeds - cost_basis
+            if gain:
+                lines.append(
+                    {
+                        "account_code": "REALIZED_PNL_INCOME",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(gain, "f"),
+                        "reference": reference,
+                    }
+                )
+        else:
+            loss = cost_basis - proceeds
+            lines.extend(
+                [
+                    {
+                        "account_code": "CASH",
+                        "currency": "USDT",
+                        "debit": format(proceeds, "f"),
+                        "credit": "0",
+                        "reference": reference,
+                    },
+                    {
+                        "account_code": "REALIZED_PNL_EXPENSE",
+                        "currency": "USDT",
+                        "debit": format(loss, "f"),
+                        "credit": "0",
+                        "reference": reference,
+                    },
+                    {
+                        "account_code": "OPEN_POSITION_ASSET",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(cost_basis, "f"),
+                        "reference": reference,
+                    },
+                ]
+            )
+        return lines
 
     async def apply_triggered_protection_child_fill(
         self, trade_id: str, algo: Mapping[str, Any], child: Mapping[str, Any]
