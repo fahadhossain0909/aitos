@@ -9,6 +9,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
+from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.storage.postgres_migrations import apply_postgres_migrations
@@ -257,6 +258,25 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             oms, recovery_fence, projection_writer
         )
         await recovery_writer(restored_trade)
+
+        async def fail_recovery_projection(_trade):
+            raise RuntimeError("projection interrupted after canonical commit")
+
+        interrupted_writer = PostgresLifecycleStateWriter(
+            oms, recovery_fence, fail_recovery_projection
+        )
+        with pytest.raises(RuntimeError, match="projection interrupted"):
+            await interrupted_writer(restored_trade)
+        projector = PostgresOMSOutboxProjector(
+            oms,
+            recovery_writer,
+            worker_id="integration-outbox-recovery",
+            batch_size=10,
+            lease_seconds=30,
+        )
+        replay = await projector.run_once()
+        assert replay == {"claimed": 1, "projected": 1, "failed": 0}
+        assert projected[-1]["trade_id"] == "trade-restore"
 
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
