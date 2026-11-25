@@ -284,7 +284,9 @@ class PostgresCanonicalExecutionIntentStore:
         intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
         trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
         if len(intent_event_id) > 192 or len(trade_event_id) > 192:
-            raise ValueError("canonical execution event identity exceeds 192 characters")
+            raise ValueError(
+                "canonical execution event identity exceeds 192 characters"
+            )
         await self._assert_fence()
         async with self.oms._pool.acquire() as conn, conn.transaction():
             await self._lock_fence(conn)
@@ -304,7 +306,9 @@ class PostgresCanonicalExecutionIntentStore:
             ):
                 raise OMSConflict("execution intent revision/state CAS failed")
             if expected_state not in {"CONFIRMED", "PROTECTED"}:
-                raise ValueError("only confirmed execution or protection can be applied")
+                raise ValueError(
+                    "only confirmed execution or protection can be applied"
+                )
             if not row["result_json"]:
                 raise OMSConflict("execution intent has no durable venue result")
             if row["trade_id"] not in (None, trade):
