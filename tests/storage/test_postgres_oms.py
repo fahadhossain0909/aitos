@@ -225,7 +225,13 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
                 }
 
         await writer(TradeSnapshot())
-        assert projected == [{"trade_id": "trade-1", "state": "POSITION_OPENED"}]
+        assert projected == [
+            {
+                "trade_id": "trade-1",
+                "account_scope": "paper:integration",
+                "state": "POSITION_OPENED",
+            }
+        ]
         assert (await writer.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
 
         async def broken_projection(_trade):
