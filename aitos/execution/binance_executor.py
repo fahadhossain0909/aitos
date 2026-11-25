@@ -82,6 +82,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         symbol_filters: dict[str, SymbolFilters] | None = None,
         hedge_mode: bool = False,
         intent_store: ExecutionIntentStore | None = None,
+        execution_scope: str | None = None,
         conditional_orders_api: str = "algo",
         live_approval_authority: LiveApprovalControlPlane | None = None,
         live_approval_token_provider: (
@@ -104,6 +105,11 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise ValueError("conditional_orders_api must be algo or legacy")
         self._conditional_orders_api = conditional_orders_api
         self._intent_store = intent_store
+        self._execution_scope = (
+            execution_scope
+            if execution_scope is not None
+            else getattr(intent_store, "scope", None)
+        )
         self._canonical_intent_store = None
         self._canonical_lifecycle_writer = None
         self._live_approval_authority = live_approval_authority
@@ -151,9 +157,6 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise TypeError("PostgreSQL canonical execution-intent store is required")
         if getattr(store, "scope", None) != self.execution_scope:
             raise ValueError("PostgreSQL intent scope differs from Binance account scope")
-        bind_journal = getattr(store, "bind_protection_journal", None)
-        if callable(bind_journal) and self._intent_store is not None:
-            bind_journal(self._intent_store)
         self._canonical_intent_store = store
 
     async def refresh_canonical_intent_cache(self) -> dict[str, int]:
@@ -444,9 +447,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
     @property
     def execution_scope(self) -> str:
-        if self._intent_store is None:
+        if not isinstance(self._execution_scope, str) or not self._execution_scope:
             raise RuntimeError("durable execution scope is not configured")
-        return self._intent_store.scope
+        return self._execution_scope
 
     @property
     def execution_intent_store(self):
