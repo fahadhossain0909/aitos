@@ -192,9 +192,7 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
             == sum(item["credit"] for item in ledger)
             == 650
         )
-        financial_events = await oms.read_events(
-            "paper:intent-test", "financial:USDT"
-        )
+        financial_events = await oms.read_events("paper:intent-test", "financial:USDT")
         assert len(financial_events) == 1
         assert financial_events[0].revision == 1
         assert financial_events[0].payload["event_type"] == "FINANCIAL_STATE_SNAPSHOT"
