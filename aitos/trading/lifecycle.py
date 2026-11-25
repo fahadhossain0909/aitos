@@ -132,7 +132,9 @@ async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
     return result
 
 
-async def _acknowledge_protection(executor: Any, result: OrderResult, trade: Trade) -> Any:
+async def _acknowledge_protection(
+    executor: Any, result: OrderResult, trade: Trade
+) -> Any:
     """Use canonical async acknowledgement when available, legacy API otherwise."""
     canonical = getattr(executor, "acknowledge_protection_trade", None)
     if callable(canonical):
@@ -763,6 +765,10 @@ class TradeLifecycle(AITOSModule):
         self, opportunity: Opportunity, portfolio: PortfolioState
     ) -> Trade:
         self._require_initialized()
+        # Capital coordinators may reserve funds from this event; ensure durable
+        # execution persistence is available before publishing it.
+        if self._order_executor.requires_exchange_execution:
+            self._require_execution_writer()
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_OPPORTUNITY,
@@ -797,7 +803,6 @@ class TradeLifecycle(AITOSModule):
                     opportunity, f"governance denied: {governance.reason}"
                 )
         return await self._validate_and_open(opportunity, portfolio)
-
     def _emergency_stop_price(self, trade: Trade) -> float:
         """Return the independent catastrophic stop used while EIE is active."""
         configured = getattr(trade, "emergency_sl_price", None)
@@ -2018,7 +2023,9 @@ class TradeLifecycle(AITOSModule):
                 "size_multiplier": float(statistical_risk_assessment.size_multiplier),
                 "volatility_ratio": float(statistical_risk_assessment.volatility_ratio),
                 "tail_probability": float(statistical_risk_assessment.tail_probability),
-                "expected_shortfall": float(statistical_risk_assessment.expected_shortfall),
+                "expected_shortfall": float(
+                    statistical_risk_assessment.expected_shortfall
+                ),
                 "reasons": list(statistical_risk_assessment.reasons),
             }
         # Persist enough domain state to reconstruct a filled Trade after a
@@ -2579,7 +2586,9 @@ class TradeLifecycle(AITOSModule):
             )
         return result
 
-    async def _refresh_live_protection(self, trade: Trade) -> None:
+    async def _refresh_live_protection(
+        self, trade: Trade, *, old_order_terminal: bool = False
+    ) -> None:
         # The handover journal is committed before the replacement POST. The old
         # stop remains active until the new stop is accepted and durably owned.
         old_id = trade.sl_order_id
@@ -2643,17 +2652,22 @@ class TradeLifecycle(AITOSModule):
             await _call_sync_or_async(
                 intent_store.mark_handover_old_cancel_requested, handover_id
             )
-            await self._order_executor.cancel_resting_order(trade.symbol, old_id)
-            status_reader = getattr(
-                self._order_executor, "get_resting_order_status", None
-            )
-            if not callable(status_reader):
-                raise ExecutionRecoveryRequired(
-                    trade.symbol,
-                    old_id,
-                    "authenticated post-cancel status lookup is unavailable",
+            if old_order_terminal:
+                # Verified terminal child-fill evidence proves this order cannot
+                # execute again; do not send a redundant cancellation request.
+                old_status = "FILLED"
+            else:
+                await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+                status_reader = getattr(
+                    self._order_executor, "get_resting_order_status", None
                 )
-            old_status = await status_reader(trade.symbol, old_id)
+                if not callable(status_reader):
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        old_id,
+                        "authenticated post-cancel status lookup is unavailable",
+                    )
+                old_status = await status_reader(trade.symbol, old_id)
             if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
                 await _call_sync_or_async(
                     intent_store.block_protection_handover,
@@ -2672,6 +2686,8 @@ class TradeLifecycle(AITOSModule):
                 "EXPIRED",
                 "EXPIRED_IN_MATCH",
                 "REJECTED",
+                "FILLED",
+                "PARTIALLY_FILLED_TERMINAL",
             }:
                 raise ExecutionRecoveryRequired(
                     trade.symbol,
@@ -3349,7 +3365,9 @@ class TradeLifecycle(AITOSModule):
                         if order_type == "STOP_MARKET" and trade.quantity > 0:
                             # The old stop is terminal. A fresh stop is placed
                             # make-before-break against the remaining position.
-                            await self._refresh_live_protection(trade)
+                            await self._refresh_live_protection(
+                                trade, old_order_terminal=True
+                            )
                         elif order_type == "TAKE_PROFIT_MARKET":
                             tp_index = trade.tp_order_ids.index(algo_order_id)
                             trade.tp_order_ids.pop(tp_index)
