@@ -214,10 +214,15 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
 
         class TradeSnapshot:
             trade_id = "trade-1"
+            account_scope = "paper:integration"
 
             @staticmethod
             def to_dict():
-                return {"trade_id": "trade-1", "state": "POSITION_OPENED"}
+                return {
+                    "trade_id": "trade-1",
+                    "account_scope": "paper:integration",
+                    "state": "POSITION_OPENED",
+                }
 
         await writer(TradeSnapshot())
         assert projected == [{"trade_id": "trade-1", "state": "POSITION_OPENED"}]
@@ -275,7 +280,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             lease_seconds=30,
         )
         replay = await projector.run_once()
-        assert replay == {"claimed": 1, "projected": 1, "failed": 0}
+        assert replay == {"claimed": 4, "projected": 4, "failed": 0}
         assert projected[-1]["trade_id"] == "trade-restore"
 
         # Binance fee/funding records become immutable, balanced postings in
