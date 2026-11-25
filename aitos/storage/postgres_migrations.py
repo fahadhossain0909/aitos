@@ -279,6 +279,40 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=5,
+        name="canonical_postgres_execution_intents",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_execution_intents (
+                account_scope TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN (
+                    'SUBMITTING','CONFIRMED','REJECTED','PROTECTED',
+                    'APPLIED','TERMINAL'
+                )),
+                request JSONB NOT NULL,
+                result JSONB,
+                trade_id TEXT,
+                revision BIGINT NOT NULL CHECK (revision > 0),
+                last_event_id TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, client_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_execution_intents_unresolved
+            ON aitos_oms_execution_intents (account_scope, state, updated_at)
+            WHERE state NOT IN ('APPLIED','REJECTED','TERMINAL')
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_execution_intents_trade
+            ON aitos_oms_execution_intents (account_scope, trade_id)
+            WHERE trade_id IS NOT NULL
+            """,
+        ),
+    ),
 )
 
 
@@ -397,6 +431,18 @@ _REQUIRED_COLUMNS = {
         "raw_payload",
         "raw_payload_sha256",
         "imported_at",
+    },
+    "aitos_oms_execution_intents": {
+        "account_scope",
+        "client_id",
+        "symbol",
+        "state",
+        "request",
+        "result",
+        "trade_id",
+        "revision",
+        "last_event_id",
+        "updated_at",
     },
 }
 
