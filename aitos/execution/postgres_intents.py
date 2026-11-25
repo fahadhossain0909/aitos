@@ -1319,7 +1319,10 @@ class PostgresCanonicalExecutionIntentStore:
                 child_order_id,
             )
             if watermark is not None:
-                if watermark["trade_id"] != trade or watermark["symbol"] != row["symbol"]:
+                if (
+                    watermark["trade_id"] != trade
+                    or watermark["symbol"] != row["symbol"]
+                ):
                     raise OMSConflict(
                         "protective child watermark is owned by another Trade"
                     )

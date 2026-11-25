@@ -219,8 +219,6 @@ def _scoped_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
     )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-
-
 def _write_reconciliation_report(path: Path, report: dict[str, Any]) -> None:
     """Persist a private, immutable reconciliation summary beside the manifest."""
     encoded = (

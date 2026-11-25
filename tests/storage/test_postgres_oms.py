@@ -440,7 +440,10 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             "paper:recovery", "trade-restore"
         )
         assert intent_after_replay["revision"] == intent_before_replay["revision"]
-        assert trade_events_after_replay[-1].revision == trade_events_before_replay[-1].revision
+        assert (
+            trade_events_after_replay[-1].revision
+            == trade_events_before_replay[-1].revision
+        )
         await canonical_intents.mark_protection_child_applied(
             algo_id="321",
             child_order_id="654",
