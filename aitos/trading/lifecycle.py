@@ -2137,9 +2137,7 @@ class TradeLifecycle(AITOSModule):
             # Install durable ownership before optional telemetry can fail.
             await self._commit_live_execution(
                 trade,
-                ledger_entries=self._position_entry_ledger(
-                    trade, f"entry:{client_id}"
-                ),
+                ledger_entries=self._position_entry_ledger(trade, f"entry:{client_id}"),
             )
             await self._place_exchange_side_stops(trade)
         await self._event_bus.publish(
@@ -2422,7 +2420,9 @@ class TradeLifecycle(AITOSModule):
         )
 
         writer = bind_postgres_canonical_oms(self, oms=oms, fence=fence)
-        bind_writer = getattr(self._order_executor, "bind_canonical_lifecycle_writer", None)
+        bind_writer = getattr(
+            self._order_executor, "bind_canonical_lifecycle_writer", None
+        )
         if callable(bind_writer):
             bind_writer(writer)
         self._postgres_canonical_oms_required = True
@@ -2837,9 +2837,7 @@ class TradeLifecycle(AITOSModule):
         canonical_intents = getattr(
             self._order_executor, "canonical_intent_store", None
         )
-        canonical_writer = getattr(
-            self, "_postgres_canonical_oms_writer", None
-        )
+        canonical_writer = getattr(self, "_postgres_canonical_oms_writer", None)
         if (
             canonical_intents is not None
             and canonical_writer is not None
@@ -2921,9 +2919,8 @@ class TradeLifecycle(AITOSModule):
         cost_basis_usd: float, execution: OrderResult, reference: str
     ) -> list[dict[str, Any]]:
         cost_basis = Decimal(str(cost_basis_usd))
-        proceeds = (
-            Decimal(str(execution.filled_quantity))
-            * Decimal(str(execution.fill_price))
+        proceeds = Decimal(str(execution.filled_quantity)) * Decimal(
+            str(execution.fill_price)
         )
         if (
             not cost_basis.is_finite()
@@ -2931,7 +2928,9 @@ class TradeLifecycle(AITOSModule):
             or not proceeds.is_finite()
             or proceeds <= 0
         ):
-            raise ValueError("reduction ledger requires finite positive basis and proceeds")
+            raise ValueError(
+                "reduction ledger requires finite positive basis and proceeds"
+            )
         lines = []
         if proceeds >= cost_basis:
             lines.extend(
@@ -3234,8 +3233,14 @@ class TradeLifecycle(AITOSModule):
                         algo_order_id,
                         "triggered child has no unique durable client-algo intent",
                     )
-                if owned_rows[0].get("state") == "PROTECTED" and delta.delta_quantity > 0:
-                    if getattr(self._order_executor, "canonical_intent_store", None) is None:
+                if (
+                    owned_rows[0].get("state") == "PROTECTED"
+                    and delta.delta_quantity > 0
+                ):
+                    if (
+                        getattr(self._order_executor, "canonical_intent_store", None)
+                        is None
+                    ):
                         await _call_sync_or_async(
                             intent_store.mark_applied, client_id, trade_id
                         )
