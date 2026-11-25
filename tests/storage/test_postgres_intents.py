@@ -8,6 +8,7 @@ from aitos.execution.postgres_intents import (
     PostgresCanonicalExecutionIntentStore,
     _financial_state_snapshot,
 )
+from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.storage.postgres_migrations import apply_postgres_migrations
 
@@ -221,6 +222,84 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         assert applied["financial_revision"] == 1
         assert applied["financial_state"] == financial_state
         assert len(await oms.claim_outbox()) == 5
+
+        # The entry Trade/ledger is committed while the execution intent stays
+        # CONFIRMED until exchange-side protection and account verification pass.
+        await intents.begin(
+            {
+                "client_order_id": "client-002",
+                "symbol": "ETHUSDT",
+                "side": "BUY",
+                "quantity": "0.02",
+                "reference_price": "32500",
+                "order_type": "MARKET",
+                "reduce_only": False,
+                "owner_trade_id": "trade-002",
+            }
+        )
+        await intents.transition(
+            "client-002",
+            expected_revision=1,
+            expected_state="SUBMITTING",
+            new_state="CONFIRMED",
+            result={
+                "order_id": "9002",
+                "filled_quantity": "0.02",
+                "fill_price": "32500",
+                "success": True,
+            },
+        )
+
+        class TradeSnapshot:
+            trade_id = "trade-002"
+            account_scope = "paper:intent-test"
+            symbol = "ETHUSDT"
+
+            def to_dict(self):
+                return {
+                    "trade_id": self.trade_id,
+                    "account_scope": self.account_scope,
+                    "symbol": self.symbol,
+                    "state": "POSITION_OPENED",
+                    "quantity": "0.02",
+                    "entry_price": "32500",
+                }
+
+        projected = []
+
+        async def project_trade(trade):
+            projected.append(trade.trade_id)
+
+        writer = PostgresLifecycleStateWriter(oms, fence, project_trade)
+        pending_commit = await writer.persist_confirmed_execution(
+            intents,
+            "client-002",
+            TradeSnapshot(),
+            ledger_entries=[
+                {
+                    "account_code": "OPEN_POSITION_ASSET",
+                    "currency": "USDT",
+                    "debit": "650",
+                    "credit": "0",
+                    "reference": "entry:client-002",
+                },
+                {
+                    "account_code": "CASH_CLEARING",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "650",
+                    "reference": "entry:client-002",
+                },
+            ],
+        )
+        assert pending_commit["trade_revision"] == 1
+        pending_intent = await intents.get("client-002")
+        assert pending_intent["state"] == "CONFIRMED"
+        assert pending_intent["revision"] == 2
+        assert projected == ["trade-002"]
+        assert len(await oms.financial_trade_ledger("paper:intent-test", "trade-002")) == 2
+        applied_after_protection = await intents.mark_applied("client-002", "trade-002")
+        assert applied_after_protection["state"] == "APPLIED"
 
         stale_fence = fence
         next_fence = await oms.acquire_writer(
