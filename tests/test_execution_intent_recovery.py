@@ -281,7 +281,7 @@ async def test_protective_post_is_preclaimed_and_uncertain_post_stays_blocked(tm
     assert store(tmp_path).unresolved()[0]["state"] == "SUBMITTING"
     with pytest.raises(ExecutionUncertainError):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
-    assert value._signed_request.await_count == 1
+    assert value._signed_request.await_count == 2
 
 
 async def test_protection_acknowledgement_clears_only_after_durable_application(

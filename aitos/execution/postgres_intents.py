@@ -685,6 +685,17 @@ class PostgresCanonicalExecutionIntentStore:
             raise OMSConflict(
                 "execution intent cannot be acknowledged from current state"
             )
+        if row["state"] == "CONFIRMED":
+            events = await self.oms.read_events(self.scope, trade_id)
+            if not any(
+                isinstance(event.payload.get("confirmed_execution"), dict)
+                and event.payload["confirmed_execution"].get("client_order_id")
+                == client_id
+                for event in events
+            ):
+                raise OMSConflict(
+                    "confirmed execution Trade snapshot is not durably recorded"
+                )
         return await self.transition(
             client_id,
             expected_revision=int(row["revision"]),

@@ -377,25 +377,36 @@ class PostgresLifecycleStateWriter:
         )
         self._revisions[trade_id] = committed["trade_revision"]
         self._last_event_ids[trade_id] = committed["trade_event_id"]
-        await self.projection_writer(trade)
-        events = await self.oms.read_events(self.fence.account_scope, trade_id)
-        event = next(
-            (
-                item
-                for item in reversed(events)
-                if item.event_id == committed["trade_event_id"]
-            ),
-            None,
-        )
-        if event is None:
-            raise RuntimeError("confirmed Trade event disappeared after commit")
-        await self.oms.mark_projected(
-            self.fence.account_scope,
-            trade_id,
-            committed["trade_revision"],
-            event_hash=event.event_hash,
-        )
-        return committed
+        try:
+            await self.projection_writer(trade)
+            events = await self.oms.read_events(self.fence.account_scope, trade_id)
+            event = next(
+                (
+                    item
+                    for item in reversed(events)
+                    if item.event_id == committed["trade_event_id"]
+                ),
+                None,
+            )
+            if event is None:
+                raise RuntimeError("confirmed Trade event disappeared after commit")
+            await self.oms.mark_projected(
+                self.fence.account_scope,
+                trade_id,
+                committed["trade_revision"],
+                event_hash=event.event_hash,
+            )
+        except Exception:
+            # The canonical PostgreSQL commit is authoritative. A failed
+            # ClickHouse/SQLite projection must not delay exchange-side protection
+            # for a fill that already exists at the venue; the outbox remains
+            # pending and the lifecycle will still fail closed before new entries.
+            logger.exception(
+                "confirmed Trade projection failed; continuing to protective orders",
+                extra={"aitos_extra": {"trade_id": trade_id, "client_id": client_id}},
+            )
+            return {**committed, "projection_pending": True}
+        return {**committed, "projection_pending": False}
 
     async def apply_execution_intent(
         self,

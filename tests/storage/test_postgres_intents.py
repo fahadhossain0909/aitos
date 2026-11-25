@@ -97,6 +97,8 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         )
         assert confirmed["state"] == "CONFIRMED"
         assert confirmed["revision"] == 2
+        with pytest.raises(OMSConflict, match="not durably recorded"):
+            await intents.mark_applied("client-001", "trade-001")
         with pytest.raises(OMSConflict, match="revision CAS failed"):
             await intents.transition_with_trade_snapshot(
                 "client-001",
