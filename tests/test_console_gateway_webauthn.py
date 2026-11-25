@@ -475,7 +475,9 @@ async def test_additional_authenticator_requires_existing_webauthn_step_up(gatew
     assert (await inventory.json())["credentials"]
 
 
-async def test_revoking_authenticating_credential_invalidates_existing_sessions(gateway):
+async def test_revoking_authenticating_credential_invalidates_existing_sessions(
+    gateway,
+):
     client, rp = gateway
     login = await client.post(
         "/operator/v1/login",
