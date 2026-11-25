@@ -76,18 +76,14 @@ def _financial_state_snapshot(
                 )
             previous_peak = Decimal(str(previous["peak_equity"]))
             previous_max_drawdown = Decimal(str(previous["max_drawdown"]))
-            previous_max_drawdown_pct = Decimal(
-                str(previous["max_drawdown_pct"])
-            )
+            previous_max_drawdown_pct = Decimal(str(previous["max_drawdown_pct"]))
         else:
             previous_peak = starting
             previous_max_drawdown = Decimal(0)
             previous_max_drawdown_pct = Decimal(0)
         peak = max(previous_peak, equity)
         drawdown = max(Decimal(0), peak - equity)
-        drawdown_pct = (
-            drawdown / peak * Decimal(100) if peak > 0 else Decimal(0)
-        )
+        drawdown_pct = drawdown / peak * Decimal(100) if peak > 0 else Decimal(0)
         max_drawdown = max(previous_max_drawdown, drawdown)
         max_drawdown_pct = max(previous_max_drawdown_pct, drawdown_pct)
     def canonical_amount(value: Decimal) -> str:
