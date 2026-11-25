@@ -397,7 +397,6 @@ class TradeLifecycle(AITOSModule):
             created_at=trade.entry_time,
             feature_snapshot=snapshot,
         )
-
     def _record_statistical_outcome(self, trade: Trade) -> bool:
         if not isinstance(trade.agent_consensus.get("statistical_forecast"), Mapping):
             return False
@@ -1683,9 +1682,7 @@ class TradeLifecycle(AITOSModule):
             trade.sl_order_id = sl_result.order_id
             if self._order_executor.requires_exchange_execution:
                 trade.updated_at = utc_now_iso()
-                await _acknowledge_protection(
-                    self._order_executor, sl_result, trade
-                )
+                await _acknowledge_protection(self._order_executor, sl_result, trade)
         else:
             if self._order_executor.requires_exchange_execution:
                 raise ExecutionUncertainError(
