@@ -71,7 +71,9 @@ def _financial_state_snapshot(
                 raise ValueError("financial currency cannot change within an aggregate")
             previous_starting = Decimal(str(previous["starting_equity"]))
             if previous_starting != starting:
-                raise ValueError("starting equity is immutable within a currency ledger")
+                raise ValueError(
+                    "starting equity is immutable within a currency ledger"
+                )
             previous_peak = Decimal(str(previous["peak_equity"]))
             previous_max_drawdown = Decimal(str(previous["max_drawdown"]))
             previous_max_drawdown_pct = Decimal(
@@ -377,7 +379,8 @@ class PostgresCanonicalExecutionIntentStore:
             raise TypeError("financial_snapshot must be an object")
         if (financial_snapshot is None) != (expected_financial_revision is None):
             raise ValueError(
-                "financial snapshot and expected financial revision must be supplied together"
+                "financial snapshot and expected financial revision must be "
+                "supplied together"
             )
         if expected_financial_revision is not None and (
             type(expected_financial_revision) is not int
@@ -698,7 +701,8 @@ class PostgresCanonicalExecutionIntentStore:
         actual = int(head["revision"])
         if actual != expected_revision:
             raise OMSConflict(
-                f"execution intent revision CAS failed: expected {expected_revision}, actual {actual}"
+                "execution intent revision CAS failed: "
+                f"expected {expected_revision}, actual {actual}"
             )
         revision = actual + 1
         previous_hash = head["event_hash"]
