@@ -1705,5 +1705,3 @@ class IdempotentOrderExecutor(OrderExecutor):
     async def get_resting_order_status(self, *args: Any, **kwargs: Any) -> str | None:
         return await self._inner.get_resting_order_status(*args, **kwargs)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
