@@ -3,7 +3,10 @@ import uuid
 
 import pytest
 
-from aitos.execution.postgres_intents import PostgresCanonicalExecutionIntentStore
+from aitos.execution.postgres_intents import (
+    PostgresCanonicalExecutionIntentStore,
+    _financial_state_snapshot,
+)
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
 from aitos.storage.postgres_migrations import apply_postgres_migrations
 
@@ -152,6 +155,15 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
                     "reference": "entry:client-001",
                 },
             ],
+            financial_snapshot={
+                "currency": "USDT",
+                "starting_equity": "1000",
+                "realized_pnl": "-20",
+                "unrealized_pnl": "-20",
+                "fees": "10",
+                "funding": "0",
+            },
+            expected_financial_revision=0,
         )
         assert applied["trade_id"] == "trade-001"
         assert applied["state"] == "APPLIED"
@@ -180,7 +192,31 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
             == sum(item["credit"] for item in ledger)
             == 650
         )
-        assert len(await oms.claim_outbox()) == 4
+        financial_events = await oms.read_events(
+            "paper:intent-test", "financial:USDT"
+        )
+        assert len(financial_events) == 1
+        assert financial_events[0].revision == 1
+        assert financial_events[0].payload["event_type"] == "FINANCIAL_STATE_SNAPSHOT"
+        financial_state = await intents.latest_financial_state("USDT")
+        assert financial_state == {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "-20",
+            "unrealized_pnl": "-20",
+            "fees": "10",
+            "funding": "0",
+            "equity": "950",
+            "peak_equity": "1000",
+            "drawdown": "50",
+            "drawdown_pct": "5",
+            "max_drawdown": "50",
+            "max_drawdown_pct": "5",
+        }
+        assert applied["financial_event_id"] == financial_events[0].event_id
+        assert applied["financial_revision"] == 1
+        assert applied["financial_state"] == financial_state
+        assert len(await oms.claim_outbox()) == 5
 
         stale_fence = fence
         next_fence = await oms.acquire_writer(
@@ -207,3 +243,84 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         await pool.close()
         await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
         await admin.close()
+
+
+def test_financial_state_snapshot_keeps_peak_and_max_drawdown_monotonic():
+    first = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "-20",
+            "unrealized_pnl": "-20",
+            "fees": "10",
+            "funding": "0",
+        },
+        None,
+    )
+    second = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "-20",
+            "unrealized_pnl": "-80",
+            "fees": "10",
+            "funding": "0",
+        },
+        first,
+    )
+    recovered = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "40",
+            "unrealized_pnl": "0",
+            "fees": "10",
+            "funding": "0",
+        },
+        second,
+    )
+
+    assert first["equity"] == "950"
+    assert first["peak_equity"] == "1000"
+    assert second["equity"] == "890"
+    assert second["drawdown"] == "110"
+    assert second["drawdown_pct"] == "11"
+    assert recovered["equity"] == "1030"
+    assert recovered["peak_equity"] == "1030"
+    assert recovered["drawdown"] == "0"
+    assert recovered["max_drawdown"] == "110"
+    assert recovered["max_drawdown_pct"] == "11"
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "0",
+            "unrealized_pnl": "0",
+            "fees": "-1",
+            "funding": "0",
+        },
+        {
+            "currency": "usd-t",
+            "starting_equity": "1000",
+            "realized_pnl": "0",
+            "unrealized_pnl": "0",
+            "fees": "0",
+            "funding": "0",
+        },
+        {
+            "currency": "USDT",
+            "starting_equity": "1e30",
+            "realized_pnl": "0",
+            "unrealized_pnl": "0",
+            "fees": "0",
+            "funding": "0",
+        },
+    ],
+)
+def test_financial_state_snapshot_rejects_invalid_accounting_inputs(snapshot):
+    with pytest.raises(ValueError):
+        _financial_state_snapshot(snapshot, None)
