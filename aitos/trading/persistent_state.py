@@ -907,34 +907,81 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
 
 
 def restored_position_feeds_ready(
-    restored_open_count: int, subscription_result: dict[str, Any] | None
+    restored_open_count: int,
+    subscription_result: dict[str, Any] | None,
+    expected_symbols: list[str] | tuple[str, ...] | None = None,
 ) -> bool:
-    """Fail closed when restored positions are not covered by verified feeds.
+    """Require exact per-ingestion trade and kline coverage for restored trades.
 
-    An empty portfolio needs no position-specific subscriptions. Once at least
-    one persisted position is restored, every registered ingestion instance
-    must confirm both trade and kline coverage before a trading loop may start.
+    The aggregate counters alone are not sufficient evidence: every registered
+    ingestion must report both configured cohorts, and those cohorts must cover
+    the complete expected restored-position symbol set.
     """
+    if type(restored_open_count) is not int or restored_open_count < 0:
+        return False
+    if expected_symbols is None:
+        if restored_open_count == 0:
+            return True
+        return False
+    if not isinstance(expected_symbols, (list, tuple)):
+        return False
+    normalized_expected = []
+    for symbol in expected_symbols:
+        if type(symbol) is not str or not symbol or symbol != symbol.strip():
+            return False
+        normalized = symbol.upper()
+        if not normalized.isalnum() or len(normalized) > 32:
+            return False
+        normalized_expected.append(normalized)
+    expected = set(normalized_expected)
+    if len(expected) != len(normalized_expected):
+        return False
     if restored_open_count == 0:
-        return True
-    if restored_open_count < 0 or not isinstance(subscription_result, dict):
+        return not expected
+    if not expected or not isinstance(subscription_result, dict):
         return False
 
     symbols = subscription_result.get("symbols")
-    try:
-        ingestion_count = int(subscription_result.get("ingestions", 0))
-        verified_count = int(subscription_result.get("verified", 0))
-        failure_count = int(subscription_result.get("failures", 0))
-    except (TypeError, ValueError):
+    if (
+        not isinstance(symbols, list)
+        or any(type(symbol) is not str or not symbol for symbol in symbols)
+        or [symbol.upper() for symbol in symbols] != sorted(expected)
+    ):
         return False
 
-    return bool(
-        isinstance(symbols, list)
-        and symbols
-        and ingestion_count > 0
-        and verified_count == ingestion_count
-        and failure_count == 0
+    counters = (
+        subscription_result.get("ingestions"),
+        subscription_result.get("verified"),
+        subscription_result.get("failures"),
     )
+    malformed_count = subscription_result.get("malformed_trade_symbols")
+    if type(malformed_count) is not int or malformed_count != 0:
+        return False
+    if any(type(value) is not int for value in counters):
+        return False
+    ingestion_count, verified_count, failure_count = counters
+    if (
+        ingestion_count <= 0
+        or verified_count != ingestion_count
+        or failure_count != 0
+    ):
+        return False
+
+    evidence = subscription_result.get("ingestion_evidence")
+    if not isinstance(evidence, list) or len(evidence) != ingestion_count:
+        return False
+    for item in evidence:
+        if not isinstance(item, dict) or item.get("verified") is not True:
+            return False
+        for field in ("trade_symbols", "kline_symbols"):
+            values = item.get(field)
+            if (
+                not isinstance(values, list)
+                or any(type(value) is not str or not value for value in values)
+                or not expected.issubset({value.upper() for value in values})
+            ):
+                return False
+    return True
 
 
 class TradeStatePersistence:
@@ -1025,34 +1072,61 @@ class TradeStatePersistence:
     async def resubscribe_restored_positions(self) -> dict[str, Any]:
         """Reconcile restored position symbols with initialized live market feeds."""
         trades = list(self._lifecycle.get_open_trades())
-        symbols = list(
-            dict.fromkeys(str(trade.symbol).upper() for trade in trades if trade.symbol)
-        )
-        if not symbols:
-            return {"symbols": [], "ingestions": 0, "verified": 0, "failures": 0}
+        raw_symbols = [getattr(trade, "symbol", None) for trade in trades]
+        malformed_symbols = [
+            value
+            for value in raw_symbols
+            if type(value) is not str
+            or not value.strip()
+            or value != value.strip()
+            or not value.isalnum()
+        ]
+        symbols = sorted({value.upper() for value in raw_symbols if isinstance(value, str) and value.strip()})
+        if not trades:
+            return {
+                "symbols": [],
+                "ingestions": 0,
+                "verified": 0,
+                "failures": 0,
+                "ingestion_evidence": [],
+                "malformed_trade_symbols": 0,
+            }
 
-        ingestion_count = 0
+        ingestions = list(_INGESTIONS)
+        evidence = []
         verified_count = 0
-        failures = 0
-        for ingestion in list(_INGESTIONS):
+        failures = len(malformed_symbols)
+        for index, ingestion in enumerate(ingestions):
+            item = {
+                "ingestion": f"{type(ingestion).__name__}:{index}",
+                "trade_symbols": [],
+                "kline_symbols": [],
+                "verified": False,
+            }
             try:
                 # Install protected-position wrappers before this method is called,
                 # so scanner subscription churn cannot evict restored symbols.
                 await ingestion.update_live_trade_symbols(symbols)
                 await ingestion.update_live_kline_symbols(symbols)
-                ingestion_count += 1
 
-                live_trade_symbols = {
-                    str(s).upper()
-                    for s in getattr(ingestion, "_live_trade_symbols", [])
-                }
-                live_kline_symbols = {
-                    str(s).upper()
-                    for s in getattr(ingestion, "_live_kline_symbols", [])
-                }
-                missing_trade = sorted(set(symbols) - live_trade_symbols)
-                missing_kline = sorted(set(symbols) - live_kline_symbols)
-                if not missing_trade and not missing_kline:
+                item["trade_symbols"] = sorted(
+                    {
+                        str(value).upper()
+                        for value in getattr(ingestion, "_live_trade_symbols", [])
+                        if isinstance(value, str) and value
+                    }
+                )
+                item["kline_symbols"] = sorted(
+                    {
+                        str(value).upper()
+                        for value in getattr(ingestion, "_live_kline_symbols", [])
+                        if isinstance(value, str) and value
+                    }
+                )
+                missing_trade = sorted(set(symbols) - set(item["trade_symbols"]))
+                missing_kline = sorted(set(symbols) - set(item["kline_symbols"]))
+                item["verified"] = not malformed_symbols and not missing_trade and not missing_kline
+                if item["verified"]:
                     verified_count += 1
                 else:
                     failures += 1
@@ -1063,11 +1137,13 @@ class TradeStatePersistence:
                                 "symbols": symbols,
                                 "missing_trade_symbols": missing_trade,
                                 "missing_kline_symbols": missing_kline,
+                                "malformed_trade_symbol_count": len(malformed_symbols),
                             }
                         },
                     )
             except Exception as exc:
                 failures += 1
+                item["error"] = type(exc).__name__
                 logger.exception(
                     "failed to resubscribe restored position market data",
                     extra={
@@ -1077,24 +1153,26 @@ class TradeStatePersistence:
                         }
                     },
                 )
+            evidence.append(item)
 
+        if not ingestions:
+            failures += 1
+            logger.error(
+                "no DataIngestionService registered for restored position recovery",
+                extra={"aitos_extra": {"symbols": symbols}},
+            )
         result = {
             "symbols": symbols,
-            "ingestions": ingestion_count,
+            "ingestions": len(ingestions),
             "verified": verified_count,
             "failures": failures,
+            "ingestion_evidence": evidence,
+            "malformed_trade_symbols": len(malformed_symbols),
         }
         logger.info(
             "restored position market-data reconciliation complete",
             extra={"aitos_extra": result},
         )
-        if not _INGESTIONS:
-            failures = 1
-            result["failures"] = failures
-            logger.error(
-                "no DataIngestionService registered for restored position recovery",
-                extra={"aitos_extra": {"symbols": symbols}},
-            )
         return result
 
     async def initialize(self) -> None:

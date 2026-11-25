@@ -595,8 +595,14 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
+    expected_position_symbols = [
+        getattr(trade, "symbol", None)
+        for trade in components.trade_lifecycle.get_open_trades()
+    ]
     position_recovery_ready = restored_position_feeds_ready(
-        restored_count, position_subscription_result
+        restored_count,
+        position_subscription_result,
+        expected_position_symbols,
     )
     if not position_recovery_ready:
         logger.critical(
