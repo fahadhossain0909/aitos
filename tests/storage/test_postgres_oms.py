@@ -335,12 +335,12 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         ledger_lines = await oms.financial_trade_ledger(
             "paper:recovery", "trade-restore"
         )
-        assert len(ledger_lines) == 4
+        assert len(ledger_lines) == 6
         assert sum((line["debit"] for line in ledger_lines), Decimal("0")) == Decimal(
-            "0.35"
+            "0.40"
         )
         assert sum((line["credit"] for line in ledger_lines), Decimal("0")) == Decimal(
-            "0.35"
+            "0.40"
         )
         assert {line["account_code"] for line in ledger_lines} == {
             "EXPENSE_FEES",
