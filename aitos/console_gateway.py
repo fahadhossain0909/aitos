@@ -1277,6 +1277,8 @@ def main():
         "--operator-id", default=os.environ.get("AITOS_OPERATOR_ID", "local-operator")
     )
     args = parser.parse_args()
+    if args.webauthn_db is not None:
+        args.webauthn_db = args.webauthn_db.expanduser().resolve()
     try:
         config = GatewayConfig(
             args.origin, args.upstream, args.dist, os.environ.get("AITOS_CONSOLE_TOKEN")
@@ -1306,6 +1308,19 @@ def main():
                 parser.exit(
                     2,
                     "Approval requires both AITOS_APPROVAL_SIGNING_KEY and AITOS_OPERATOR_ROLE_MAP.\\n",
+                )
+            shared_webauthn_db = os.environ.get("AITOS_WEBAUTHN_DB", "").strip()
+            shared_origin = os.environ.get("AITOS_WEBAUTHN_ORIGIN", "").strip()
+            if (
+                not shared_webauthn_db
+                or Path(shared_webauthn_db).expanduser().resolve()
+                != args.webauthn_db
+                or shared_origin != config.public_origin
+            ):
+                parser.exit(
+                    2,
+                    "Approval gateway and executor must share AITOS_WEBAUTHN_DB "
+                    "and AITOS_WEBAUTHN_ORIGIN.\\n",
                 )
             role_map = json.loads(role_map_raw)
             if not isinstance(role_map, dict) or any(

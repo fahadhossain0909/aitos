@@ -4,13 +4,94 @@ import pytest
 from aioresponses import aioresponses
 
 from aitos.execution.binance_executor import TESTNET_URL
-from aitos.live_trading import confirm_live_trading, prepare_live_executor
+from aitos.live_trading import (
+    confirm_live_trading,
+    create_live_approval_control_plane,
+    prepare_live_executor,
+)
+from aitos.security.live_approval import LiveApprovalControlPlane
 
 
 def test_confirm_live_trading_blocks_mainnet_without_hardware_approval():
     with pytest.raises(SystemExit) as exc_info:
         confirm_live_trading(["BTCUSDT"], testnet=False, input_fn=lambda prompt: "")
     assert exc_info.value.code == 1
+
+
+def test_executor_factory_shares_gateway_approval_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("AITOS_WEBAUTHN_DB", str(tmp_path / "webauthn.sqlite"))
+    monkeypatch.setenv("AITOS_WEBAUTHN_ORIGIN", "https://console.example")
+    monkeypatch.setenv(
+        "AITOS_APPROVAL_SIGNING_KEY",
+        "shared-mainnet-approval-signing-key-at-least-32-bytes",
+    )
+    monkeypatch.setenv(
+        "AITOS_OPERATOR_ROLE_MAP",
+        '{"operator-1":["live_trader"]}',
+    )
+    first = create_live_approval_control_plane()
+    action = {
+        "environment": "binance-usdm-mainnet",
+        "scope": "live:account-1",
+        "client_order_id": "approved-order-1",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": "0.01",
+        "reference_price": "90000",
+        "order_type": "MARKET",
+        "reduce_only": False,
+        "owner_trade_id": "trade-1",
+    }
+    challenge = first.issue_challenge(
+        user_id="operator-1",
+        action=action,
+        webauthn_challenge="server-issued-challenge",
+    )
+    token = first.approve(
+        challenge,
+        assertion=b"verified-webauthn-assertion",
+        verifier=lambda **kwargs: {
+            "verified": True,
+            "user_id": "operator-1",
+            "user_verified": True,
+            "origin": "https://console.example",
+            "rp_id": "console.example",
+        },
+    )
+    second = create_live_approval_control_plane()
+    assert second.consume(token, action=action) == "operator-1"
+
+
+def test_live_mainnet_session_gate_requires_explicit_opt_in_and_authority(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("AITOS_ENABLE_MAINNET_EXECUTION", raising=False)
+    authority = LiveApprovalControlPlane(
+        tmp_path / "live-approvals.sqlite",
+        signing_key=b"shared-mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: user == "operator-1"
+        and role == "live_trader",
+    )
+    with pytest.raises(SystemExit):
+        confirm_live_trading(
+            ["BTCUSDT"],
+            testnet=False,
+            input_fn=lambda prompt: "unused",
+            approval_authority=authority,
+        )
+    monkeypatch.setenv("AITOS_ENABLE_MAINNET_EXECUTION", "1")
+    inputs = iter(["operator-1", "I APPROVE LIVE TRADING"])
+    assert (
+        confirm_live_trading(
+            ["BTCUSDT"],
+            testnet=False,
+            input_fn=lambda prompt: next(inputs),
+            approval_authority=authority,
+        )
+        == "operator-1"
+    )
 
 
 def test_confirm_live_trading_succeeds_with_exact_phrase():

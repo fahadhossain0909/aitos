@@ -181,14 +181,33 @@ Audit rows are append-only. The browser displays the receipt ID, not the signing
 secret.
 
 The gateway deliberately does not execute or submit orders. A trusted
-server-side receipt provider and exact-action, single-use consumer are now
+server-side receipt provider and exact-action, single-use consumer are
 implemented in `LiveApprovalControlPlane` and
-`BinanceFuturesOrderExecutor`. The executor can retrieve only a receipt bound
-to the exact order action and consumes it before the venue side effect. The
-desktop gateway does not expose the signing material. Production runtime
-wiring remains fail-closed until the gateway and executor share a protected
-approval store and the deployment passes independent acceptance; an issued
-receipt is not execution confirmation.
+`BinanceFuturesOrderExecutor`. Entry and protective STOP/TP orders bind the
+approval digest to the actual venue side, exact quantity, reference/trigger
+price, client order ID, account scope and trade owner. The executor persists
+the receipt ID, approver, digest and expiry in the durable execution-intent
+request before the venue POST; the canonical OMS intent event then provides
+the causal parent for the resulting Trade transition. The token itself and
+signing key are never copied into the OMS event.
+
+For gateway/runtime store sharing, both processes must use the same
+`AITOS_WEBAUTHN_DB`, `AITOS_WEBAUTHN_ORIGIN`,
+`AITOS_WEBAUTHN_RP_ID`, `AITOS_APPROVAL_SIGNING_KEY` and
+`AITOS_OPERATOR_ROLE_MAP`. The gateway's `--webauthn-db` and `--origin`
+must exactly match the two shared environment values. Both processes derive
+the same sibling `live-approvals.sqlite` file. If the gateway and executor
+run in separate containers, that file must be on one protected, durable,
+shared volume with SQLite-compatible locking; separate ephemeral container
+filesystems do not constitute a shared approval store.
+
+Mainnet execution remains disabled by default. It requires
+`AITOS_ENABLE_MAINNET_EXECUTION=1`, the shared approval configuration, the
+interactive session confirmation, and a fresh single-use WebAuthn receipt
+for every entry or protective order. The code does not set this flag or
+perform live execution as part of CI. An issued receipt is not execution
+confirmation; external account reconciliation and independent production
+acceptance remain mandatory.
 
 ## Limits and nonlocal deployment gate
 

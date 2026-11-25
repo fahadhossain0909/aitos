@@ -38,6 +38,7 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.live_trading import (
     confirm_live_trading,
+    create_live_approval_control_plane,
     create_live_capital_gateway,
     prepare_live_executor,
 )
@@ -204,11 +205,21 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         dynamic_limit=settings.tuning.scanner.dynamic_universe_limit,
         universe_limit=settings.tuning.scanner.universe_limit,
     )
+    approval_authority = (
+        None
+        if settings.binance.testnet
+        else create_live_approval_control_plane()
+    )
     approved_by = confirm_live_trading(
         symbols,
         testnet=settings.binance.testnet,
+        approval_authority=approval_authority,
     )
-    raw_order_executor = await prepare_live_executor(settings, symbols)
+    raw_order_executor = await prepare_live_executor(
+        settings,
+        symbols,
+        approval_authority=approval_authority,
+    )
     cleanup.push_async_callback(raw_order_executor.close)
     postgres_dsn = os.getenv("DATABASE_URL", "").strip()
     if not postgres_dsn:
