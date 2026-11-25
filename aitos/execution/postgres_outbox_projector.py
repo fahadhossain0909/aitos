@@ -193,11 +193,12 @@ class PostgresOMSOutboxProjector:
                 (
                     event
                     for event in reversed(events)
-                    if (
-                        event.payload.get("event_type")
-                        in {"TRADE_SNAPSHOT", "TRADE_COST_ADJUSTMENT"}
-                        and isinstance(event.payload.get("trade"), dict)
-                    )
+                    if item.payload.get("event_type")
+                    in {
+                        "TRADE_SNAPSHOT",
+                        "TRADE_COST_ADJUSTMENT",
+                    }
+                    and isinstance(item.payload.get("trade"), dict)
                 ),
                 None,
             )
@@ -302,10 +303,10 @@ class PostgresOMSOutboxProjector:
         if payload != event.payload:
             raise OMSIntegrityError("outbox payload differs from canonical event")
 
-        if (
-            payload.get("event_type") not in {"TRADE_SNAPSHOT", "TRADE_COST_ADJUSTMENT"}
-            or not isinstance(payload.get("trade"), dict)
-        ):
+        if payload.get("event_type") not in {
+            "TRADE_SNAPSHOT",
+            "TRADE_COST_ADJUSTMENT",
+        } or not isinstance(payload.get("trade"), dict):
             # Intent and financial-only events have no Trade read-model payload.
             return
 

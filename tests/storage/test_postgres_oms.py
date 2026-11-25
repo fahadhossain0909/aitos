@@ -242,9 +242,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         with pytest.raises(RuntimeError, match="projection unavailable"):
             await broken(trade_snapshot)
         # Canonical event is committed before the projection callback fails.
-        assert (
-            await broken.latest_snapshot("trade-1")
-        )["state"] == "position_opened"
+        assert (await broken.latest_snapshot("trade-1"))["state"] == "position_opened"
         restored_trade = Trade(
             trade_id="trade-restore",
             symbol="BTCUSDT",
@@ -317,9 +315,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         atomic_fee = await recovery_writer.apply_cost_adjustment(
             restored_trade, "binance:income:fee-9003", "fee", "0.05"
         )
-        canonical_cost_snapshot = await recovery_writer.latest_snapshot(
-            "trade-restore"
-        )
+        canonical_cost_snapshot = await recovery_writer.latest_snapshot("trade-restore")
         assert canonical_cost_snapshot["fees_paid_usd"] == 0.05
         assert atomic_fee.payload["event_type"] == "TRADE_COST_ADJUSTMENT"
         duplicate_atomic_fee = await recovery_writer.apply_cost_adjustment(

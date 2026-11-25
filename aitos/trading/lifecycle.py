@@ -2497,7 +2497,6 @@ class TradeLifecycle(AITOSModule):
                 self._execution_faults[trade_id],
                 "prior reduction/application requires reconciliation",
             )
-
     def bind_postgres_canonical_oms(self, oms: Any, fence: Any) -> Any:
         """Bind the PostgreSQL journal ahead of the configured durable projection.
 
@@ -2507,6 +2506,7 @@ class TradeLifecycle(AITOSModule):
         from aitos.execution.postgres_lifecycle_writer import (
             bind_postgres_canonical_oms,
         )
+
         writer = bind_postgres_canonical_oms(self, oms=oms, fence=fence)
         bind_writer = getattr(
             self._order_executor, "bind_canonical_lifecycle_writer", None
