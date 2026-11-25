@@ -456,20 +456,30 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                         else:
                                             occurrence = occurrences[fingerprint]
                                             occurrences[fingerprint] += 1
-                                        item = _manifest_row(table, legacy_row, occurrence)
+                                        item = _manifest_row(
+                                            table, legacy_row, occurrence
+                                        )
                                         if scoped:
                                             scope = _scope(str(row_scope))
                                             expected_hash = _scoped_payload_hash(
                                                 item["payload"], scope
                                             )
-                                            if expected_hash != str(stored_payload_hash):
+                                            if expected_hash != str(
+                                                stored_payload_hash
+                                            ):
                                                 raise RuntimeError(
                                                     "scoped ClickHouse canonical payload hash mismatch"
                                                 )
                                         else:
                                             mapped = args.scope_map.get(fingerprint)
-                                            embedded = item["payload"].get("account_scope")
-                                            if embedded and mapped and embedded != mapped:
+                                            embedded = item["payload"].get(
+                                                "account_scope"
+                                            )
+                                            if (
+                                                embedded
+                                                and mapped
+                                                and embedded != mapped
+                                            ):
                                                 raise ValueError(
                                                     f"scope map conflicts for {fingerprint}"
                                                 )
@@ -520,7 +530,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                                         f"{type(exc).__name__}: {exc}"
                                                     ),
                                                     "raw_payload": str(raw),
-                                                    "source_row": [str(value) for value in row],
+                                                    "source_row": [
+                                                        str(value) for value in row
+                                                    ],
                                                 },
                                                 separators=(",", ":"),
                                                 ensure_ascii=False,
