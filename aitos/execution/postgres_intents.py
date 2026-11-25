@@ -1,0 +1,298 @@
+"""PostgreSQL-backed execution intents sharing the canonical OMS transaction.
+
+This adapter is async and deliberately separate from the legacy synchronous
+SQLite journal. Runtime adoption must be explicit; it never silently dual-writes.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from aitos.execution.postgres_oms import (
+    OMSConflict,
+    WriterFence,
+    _canonical_payload,
+    _event_hash,
+    _identifier,
+)
+
+
+_ALLOWED_TRANSITIONS = {
+    "SUBMITTING": {"CONFIRMED", "REJECTED", "PROTECTED"},
+    "CONFIRMED": {"APPLIED", "TERMINAL"},
+    "PROTECTED": {"APPLIED", "TERMINAL"},
+    "APPLIED": {"TERMINAL"},
+    "REJECTED": set(),
+    "TERMINAL": set(),
+}
+
+
+class PostgresCanonicalExecutionIntentStore:
+    """Fenced, revisioned intent state committed with canonical OMS events/outbox.
+
+    Every mutation writes the intent row, append-only OMS event, aggregate head,
+    and projection outbox in one PostgreSQL transaction. It does not submit or
+    retry venue orders.
+    """
+
+    def __init__(self, oms: Any, fence: WriterFence) -> None:
+        from aitos.execution.postgres_oms import PostgresCanonicalOMS
+
+        if not isinstance(oms, PostgresCanonicalOMS):
+            raise TypeError("PostgresCanonicalOMS is required")
+        if type(fence) is not WriterFence:
+            raise TypeError("server-issued writer fence is required")
+        self.oms = oms
+        self.fence = fence
+        self.scope = fence.account_scope
+
+    async def begin(self, request: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(request, dict) or not request:
+            raise ValueError("non-empty execution request is required")
+        payload = json.dumps(
+            request, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        client_id = _identifier(str(request.get("client_order_id") or ""), "client_id")
+        if len(client_id) > 180:
+            raise ValueError("client_order_id exceeds canonical intent limit")
+        symbol = _identifier(str(request.get("symbol") or ""), "symbol")
+        aggregate = f"intent-{client_id}"
+        event_id = f"intent:{client_id}:revision:1"
+        event_payload = {
+            "event_type": "EXECUTION_INTENT_CREATED",
+            "client_order_id": client_id,
+            "state": "SUBMITTING",
+            "request": request,
+        }
+        await self._assert_fence()
+        encoded = _canonical_payload(event_payload)
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            existing = await conn.fetchrow(
+                """SELECT request::text AS request_json FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND client_id=$2 FOR UPDATE""",
+                self.scope,
+                client_id,
+            )
+            if existing is not None:
+                if json.loads(existing["request_json"]) != json.loads(payload):
+                    raise OMSConflict("client order ID reused with different request")
+                raise OMSConflict("execution intent already exists; reconcile, do not resubmit")
+            await self._append_event(conn, aggregate, event_id, 0, encoded)
+            await conn.execute(
+                """INSERT INTO aitos_oms_execution_intents
+                   (account_scope,client_id,symbol,state,request,result,trade_id,
+                    revision,last_event_id)
+                   VALUES($1,$2,$3,'SUBMITTING',$4::jsonb,NULL,NULL,1,$5)""",
+                self.scope,
+                client_id,
+                symbol,
+                payload,
+                event_id,
+            )
+        return {
+            "account_scope": self.scope,
+            "client_id": client_id,
+            "symbol": symbol,
+            "state": "SUBMITTING",
+            "request": request,
+            "result": None,
+            "trade_id": None,
+            "revision": 1,
+            "last_event_id": event_id,
+        }
+
+    async def transition(
+        self,
+        client_id: str,
+        *,
+        expected_revision: int,
+        expected_state: str,
+        new_state: str,
+        result: dict[str, Any] | None = None,
+        trade_id: str | None = None,
+    ) -> dict[str, Any]:
+        client = _identifier(client_id, "client_id")
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("positive expected_revision is required")
+        if new_state not in _ALLOWED_TRANSITIONS.get(expected_state, set()):
+            raise ValueError(f"invalid execution-intent transition {expected_state}->{new_state}")
+        if result is not None and not isinstance(result, dict):
+            raise TypeError("execution result must be an object")
+        if trade_id is not None:
+            trade_id = _identifier(trade_id, "trade_id")
+        aggregate = f"intent-{client}"
+        event_id = f"intent:{client}:revision:{expected_revision + 1}"
+        await self._assert_fence()
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            row = await conn.fetchrow(
+                """SELECT symbol,state,request::text AS request_json,
+                          result::text AS result_json,trade_id,revision,last_event_id
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND client_id=$2 FOR UPDATE""",
+                self.scope,
+                client,
+            )
+            if row is None:
+                raise OMSConflict("execution intent does not exist")
+            if int(row["revision"]) != expected_revision or row["state"] != expected_state:
+                raise OMSConflict("execution intent revision/state CAS failed")
+            if new_state == "APPLIED" and not trade_id:
+                raise ValueError("APPLIED intent requires durable trade_id")
+            if new_state in {"CONFIRMED", "PROTECTED"} and result is None:
+                raise ValueError(f"{new_state} intent requires durable result evidence")
+            next_revision = expected_revision + 1
+            payload = {
+                "event_type": "EXECUTION_INTENT_TRANSITIONED",
+                "client_order_id": client,
+                "from_state": expected_state,
+                "state": new_state,
+                "request": json.loads(row["request_json"]),
+                "result": result if result is not None else (
+                    json.loads(row["result_json"]) if row["result_json"] else None
+                ),
+                "trade_id": trade_id if trade_id is not None else row["trade_id"],
+                "causality": {
+                    "causation_id": row["last_event_id"],
+                    "correlation_id": client,
+                    "parent_event_id": row["last_event_id"],
+                },
+            }
+            encoded = _canonical_payload(payload)
+            await self._append_event(conn, aggregate, event_id, expected_revision, encoded)
+            await conn.execute(
+                """UPDATE aitos_oms_execution_intents
+                   SET state=$3,result=COALESCE($4::jsonb,result),
+                       trade_id=COALESCE($5,trade_id),revision=$6,
+                       last_event_id=$7,updated_at=now()
+                   WHERE account_scope=$1 AND client_id=$2""",
+                self.scope,
+                client,
+                new_state,
+                json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                if result is not None else None,
+                trade_id,
+                next_revision,
+                event_id,
+            )
+            return {
+                "account_scope": self.scope,
+                "client_id": client,
+                "symbol": row["symbol"],
+                "state": new_state,
+                "request": json.loads(row["request_json"]),
+                "result": payload["result"],
+                "trade_id": payload["trade_id"],
+                "revision": next_revision,
+                "last_event_id": event_id,
+            }
+
+    async def get(self, client_id: str) -> dict[str, Any] | None:
+        client = _identifier(client_id, "client_id")
+        async with self.oms._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT client_id,symbol,state,request,result,trade_id,revision,
+                          last_event_id,updated_at
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND client_id=$2""",
+                self.scope,
+                client,
+            )
+        return dict(row) if row else None
+
+    async def unresolved(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        async with self.oms._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT client_id,symbol,state,request,result,trade_id,revision,
+                          last_event_id,updated_at
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1
+                     AND state NOT IN ('APPLIED','REJECTED','TERMINAL')
+                     AND ($2::text IS NULL OR symbol=$2)
+                   ORDER BY client_id""",
+                self.scope,
+                symbol,
+            )
+        return [dict(row) for row in rows]
+
+    async def assert_ready(self) -> None:
+        rows = await self.unresolved()
+        if rows:
+            row = rows[0]
+            raise OMSConflict(
+                "startup requires execution-intent reconciliation for "
+                f"{row['symbol']}/{row['client_id']}"
+            )
+
+    async def _assert_fence(self) -> None:
+        async with self.oms._pool.acquire() as conn:
+            await self._check_fence(conn)
+
+    async def _check_fence(self, conn: Any) -> None:
+        owner = await conn.fetchrow(
+            """SELECT writer_id,generation FROM aitos_oms_writer_fences
+               WHERE account_scope=$1""",
+            self.scope,
+        )
+        if owner is None or (
+            owner["writer_id"], int(owner["generation"])
+        ) != (self.fence.writer_id, self.fence.generation):
+            raise OMSConflict("stale writer fencing token")
+
+    async def _lock_fence(self, conn: Any) -> None:
+        owner = await conn.fetchrow(
+            """SELECT writer_id,generation FROM aitos_oms_writer_fences
+               WHERE account_scope=$1 FOR UPDATE""",
+            self.scope,
+        )
+        if owner is None or (
+            owner["writer_id"], int(owner["generation"])
+        ) != (self.fence.writer_id, self.fence.generation):
+            raise OMSConflict("stale writer fencing token")
+
+    async def _append_event(
+        self, conn: Any, aggregate: str, event_id: str,
+        expected_revision: int, encoded: str
+    ) -> None:
+        await conn.execute(
+            """INSERT INTO aitos_oms_aggregate_heads
+               (account_scope,aggregate_id,revision,event_hash)
+               VALUES($1,$2,0,$3) ON CONFLICT DO NOTHING""",
+            self.scope, aggregate, "0" * 64
+        )
+        head = await conn.fetchrow(
+            """SELECT revision,event_hash FROM aitos_oms_aggregate_heads
+               WHERE account_scope=$1 AND aggregate_id=$2 FOR UPDATE""",
+            self.scope, aggregate
+        )
+        actual = int(head["revision"])
+        if actual != expected_revision:
+            raise OMSConflict(
+                f"execution intent revision CAS failed: expected {expected_revision}, actual {actual}"
+            )
+        revision = actual + 1
+        previous_hash = head["event_hash"]
+        digest = _event_hash(
+            self.scope, aggregate, revision, event_id, self.fence.writer_id,
+            self.fence.generation, previous_hash, encoded
+        )
+        await conn.execute(
+            """INSERT INTO aitos_oms_events
+               (account_scope,aggregate_id,revision,event_id,writer_id,generation,
+                payload,previous_hash,event_hash)
+               VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)""",
+            self.scope, aggregate, revision, event_id, self.fence.writer_id,
+            self.fence.generation, encoded, previous_hash, digest
+        )
+        await conn.execute(
+            """UPDATE aitos_oms_aggregate_heads SET revision=$3,event_hash=$4
+               WHERE account_scope=$1 AND aggregate_id=$2""",
+            self.scope, aggregate, revision, digest
+        )
+        await conn.execute(
+            """INSERT INTO aitos_oms_outbox(account_scope,aggregate_id,revision)
+               VALUES($1,$2,$3)""",
+            self.scope, aggregate, revision
+        )
