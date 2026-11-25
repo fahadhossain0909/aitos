@@ -1117,6 +1117,185 @@ class PostgresCanonicalExecutionIntentStore:
             "financial_state": financial_state,
         }
 
+    async def append_protection_child_fill(
+        self,
+        client_id: str,
+        *,
+        expected_revision: int,
+        expected_state: str,
+        trade_id: str,
+        expected_trade_revision: int,
+        trade_snapshot: dict[str, Any],
+        child_fill: dict[str, Any],
+        ledger_entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Append one cumulative child-fill delta without terminating its parent algo.
+
+        A protective algo may trigger multiple child executions. Each fill gets
+        its own intent revision, Trade revision, balanced ledger journal and
+        projection outbox in the same PostgreSQL transaction, while the
+        protective intent remains APPLIED until the venue reports terminal.
+        """
+        client = _identifier(client_id, "client_id")
+        trade = _identifier(trade_id, "trade_id")
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("positive expected intent revision is required")
+        if type(expected_trade_revision) is not int or expected_trade_revision < 0:
+            raise ValueError("non-negative expected Trade revision is required")
+        if expected_state not in {"APPLIED", "PROTECTED"}:
+            raise ValueError("protective child fill requires an accepted protection intent")
+        if (
+            not isinstance(trade_snapshot, dict)
+            or trade_snapshot.get("trade_id") != trade
+            or trade_snapshot.get("account_scope") != self.scope
+        ):
+            raise ValueError("child-fill Trade snapshot identity/scope mismatch")
+        if not isinstance(child_fill, dict):
+            raise TypeError("child_fill evidence must be an object")
+        required_child = {
+            "algo_id",
+            "child_order_id",
+            "cumulative_quantity",
+            "cumulative_quote",
+            "delta_quantity",
+            "delta_quote",
+            "status",
+        }
+        if not required_child.issubset(child_fill):
+            raise ValueError("child-fill evidence is incomplete")
+        algo_id = _identifier(str(child_fill["algo_id"]), "algo_id")
+        child_order_id = _identifier(
+            str(child_fill["child_order_id"]), "child_order_id"
+        )
+        normalized_entries = self.oms._validate_ledger_entries(ledger_entries)
+        if not normalized_entries:
+            raise ValueError("positive protective child fill requires balanced ledger entries")
+        intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
+        trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
+        await self._assert_fence()
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            row = await conn.fetchrow(
+                """SELECT symbol,state,request::text AS request_json,
+                          result::text AS result_json,trade_id,revision,last_event_id
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND client_id=$2 FOR UPDATE""",
+                self.scope,
+                client,
+            )
+            if row is None:
+                raise OMSConflict("canonical protective intent does not exist")
+            if (
+                int(row["revision"]) != expected_revision
+                or row["state"] != expected_state
+            ):
+                raise OMSConflict("protective child intent revision/state CAS failed")
+            if row["state"] not in {"APPLIED", "PROTECTED"}:
+                raise OMSConflict("protective intent is not accepted")
+            if row["trade_id"] != trade:
+                raise OMSConflict("protective intent is not owned by this Trade")
+            request_payload = json.loads(row["request_json"])
+            result_payload = json.loads(row["result_json"]) if row["result_json"] else None
+            if result_payload is None:
+                raise OMSConflict("protective intent has no durable venue acceptance")
+            if request_payload.get("owner_trade_id") != trade:
+                raise OMSConflict("protective request owner does not match Trade")
+            if (
+                len(intent_event_id) > 192
+                or len(trade_event_id) > 192
+            ):
+                raise ValueError("protective child event identity exceeds limit")
+            intent_payload = {
+                "event_type": "PROTECTION_CHILD_FILL_APPLIED",
+                "client_order_id": client,
+                "state": expected_state,
+                "trade_id": trade,
+                "algo_id": algo_id,
+                "child_order_id": child_order_id,
+                "child_fill": child_fill,
+                "causality": {
+                    "causation_id": row["last_event_id"],
+                    "correlation_id": client,
+                    "parent_event_id": row["last_event_id"],
+                },
+            }
+            await self._append_event(
+                conn,
+                f"intent-{client}",
+                intent_event_id,
+                expected_revision,
+                _canonical_payload(intent_payload),
+            )
+            previous_trade = await conn.fetchrow(
+                """SELECT event_id FROM aitos_oms_events
+                   WHERE account_scope=$1 AND aggregate_id=$2
+                   ORDER BY revision DESC LIMIT 1""",
+                self.scope,
+                trade,
+            )
+            trade_payload = {
+                "event_type": "TRADE_SNAPSHOT",
+                "trade_id": trade,
+                "account_scope": self.scope,
+                "trade": trade_snapshot,
+                "protection_child_fill": child_fill,
+                "causality": {
+                    "causation_id": intent_event_id,
+                    "correlation_id": client,
+                    "parent_event_id": (
+                        previous_trade["event_id"] if previous_trade else None
+                    ),
+                },
+            }
+            await self._append_event(
+                conn,
+                trade,
+                trade_event_id,
+                expected_trade_revision,
+                _canonical_payload(trade_payload),
+            )
+            for line_no, entry in enumerate(normalized_entries):
+                await conn.execute(
+                    """INSERT INTO aitos_oms_financial_ledger
+                       (account_scope,event_id,line_no,trade_id,account_code,
+                        currency,debit,credit,reference)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+                    self.scope,
+                    trade_event_id,
+                    line_no,
+                    trade,
+                    entry["account_code"],
+                    entry["currency"],
+                    entry["debit"],
+                    entry["credit"],
+                    entry["reference"],
+                )
+            next_revision = expected_revision + 1
+            await conn.execute(
+                """UPDATE aitos_oms_execution_intents
+                   SET trade_id=$3,revision=$4,last_event_id=$5,updated_at=now()
+                   WHERE account_scope=$1 AND client_id=$2""",
+                self.scope,
+                client,
+                trade,
+                next_revision,
+                intent_event_id,
+            )
+        return {
+            "account_scope": self.scope,
+            "client_id": client,
+            "symbol": row["symbol"],
+            "state": expected_state,
+            "request": request_payload,
+            "result": result_payload,
+            "trade_id": trade,
+            "revision": next_revision,
+            "last_event_id": intent_event_id,
+            "trade_event_id": trade_event_id,
+            "trade_revision": expected_trade_revision + 1,
+            "child_fill": child_fill,
+        }
+
     async def record_result(self, client_id: str, result: Any) -> dict[str, Any]:
         """Persist authoritative terminal venue evidence for a submitted intent."""
         if not isinstance(result, dict):
