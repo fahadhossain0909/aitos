@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import math
 import time
@@ -119,6 +120,16 @@ TOPIC_PARTIAL_CLOSE = "trade.partial_close"
 TOPIC_EXCHANGE_STOPS_PLACED = "trade.exchange_stops_placed"
 TOPIC_EXIT_DECISION = "decision.exit"
 DEFAULT_PARTIAL_CLOSE_FRACTION = 0.5
+
+
+async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
+    """Bridge legacy synchronous journals and the asynchronous PostgreSQL intent store."""
+    if inspect.iscoroutinefunction(function):
+        return await function(*args, **kwargs)
+    result = await asyncio.to_thread(function, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def _valid_market_price(value: Any) -> bool:
@@ -2639,7 +2650,7 @@ class TradeLifecycle(AITOSModule):
                 "durable protective handover journal unavailable",
             )
         matches = []
-        for row in await asyncio.to_thread(intent_store.protection_intents):
+        for row in await _call_sync_or_async(intent_store.protection_intents):
             result = row.get("result_json")
             request = row.get("request_json")
             if isinstance(result, str):
@@ -2778,7 +2789,7 @@ class TradeLifecycle(AITOSModule):
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
             intent_store.complete_protection_handover(handover_id)
-            self._order_executor.acknowledge_protection(result, trade.trade_id)
+            await self._order_executor.acknowledge_protection_trade(result, trade)
         except BaseException:
             self._execution_recovery_required = True
             raise
@@ -2995,7 +3006,7 @@ class TradeLifecycle(AITOSModule):
             expected_side = "SELL" if trade.side == TradeSide.LONG else "BUY"
             hedge_mode = bool(getattr(self._order_executor, "hedge_mode", False))
             expected_position_side = trade.side.value if hedge_mode else "BOTH"
-            intent_row = await asyncio.to_thread(
+            intent_row = await _call_sync_or_async(
                 intent_store.protection_intent_for_order,
                 algo_order_id,
                 trade_id,
@@ -3144,7 +3155,7 @@ class TradeLifecycle(AITOSModule):
                 # The durable trade snapshot (including its marker) must exist
                 # before either SQLite acknowledgement or terminal transition.
                 client_id = str(algo.get("clientAlgoId", ""))
-                intent_rows = await asyncio.to_thread(intent_store.protection_intents)
+                intent_rows = await _call_sync_or_async(intent_store.protection_intents)
                 owned_rows = [
                     row for row in intent_rows if row.get("client_id") == client_id
                 ]
@@ -3155,7 +3166,7 @@ class TradeLifecycle(AITOSModule):
                         "triggered child has no unique durable client-algo intent",
                     )
                 if owned_rows[0].get("state") == "PROTECTED":
-                    await asyncio.to_thread(
+                    await _call_sync_or_async(
                         intent_store.mark_applied, client_id, trade_id
                     )
                 await asyncio.to_thread(
@@ -3176,7 +3187,7 @@ class TradeLifecycle(AITOSModule):
                     "REJECTED",
                 }
                 if terminal:
-                    await asyncio.to_thread(
+                    await _call_sync_or_async(
                         intent_store.mark_protection_terminal,
                         algo_order_id,
                         symbol=trade.symbol,
