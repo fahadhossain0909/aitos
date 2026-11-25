@@ -575,9 +575,10 @@ class PostgresCanonicalOMS:
                    WHERE account_scope=$1 FOR UPDATE""",
                 scope,
             )
-            if owner is None or (
-                owner["writer_id"], int(owner["generation"])
-            ) != (fence.writer_id, fence.generation):
+            if owner is None or (owner["writer_id"], int(owner["generation"])) != (
+                fence.writer_id,
+                fence.generation,
+            ):
                 raise OMSConflict("stale writer fencing token")
             active_claim = await conn.fetchval(
                 """SELECT count(*) FROM aitos_oms_outbox
@@ -601,7 +602,9 @@ class PostgresCanonicalOMS:
         try:
             return int(str(result).split()[-1])
         except (ValueError, IndexError):
-            raise RuntimeError("PostgreSQL did not report projection rebuild count") from None
+            raise RuntimeError(
+                "PostgreSQL did not report projection rebuild count"
+            ) from None
 
     async def claim_outbox_leased(
         self,
