@@ -246,7 +246,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         raw_order_executor,
         raw_order_executor.execution_intent_store,
         components.trade_lifecycle.get_open_trades(),
-        trade_state_persistence.persist_execution_state,
+        canonical_writer,
     )
     if protection_recovery["recovered"]:
         logger.warning(
@@ -267,7 +267,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         raw_order_executor,
         raw_order_executor.execution_intent_store,
         components.trade_lifecycle.get_open_trades(),
-        trade_state_persistence.persist_execution_state,
+        canonical_writer,
     )
     if handover_recovery["recovered"]:
         logger.warning(
@@ -410,6 +410,24 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 }
             },
         )
+    pending_canonical_intents = await canonical_intents.unresolved()
+    canonical_intents_ready = not pending_canonical_intents
+    if not canonical_intents_ready:
+        account_reconciliation_ready = False
+        components.trade_lifecycle._account_reconciliation_error = True
+        logger.critical(
+            "live startup remains manage-only: PostgreSQL execution intents are unresolved",
+            extra={
+                "aitos_extra": {
+                    "pending_intents": len(pending_canonical_intents),
+                    "client_ids": [
+                        str(row.get("client_id", "")) for row in pending_canonical_intents[:20]
+                    ],
+                    "new_entries_allowed": False,
+                }
+            },
+        )
+
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
