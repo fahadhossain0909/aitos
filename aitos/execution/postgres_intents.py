@@ -1495,6 +1495,26 @@ class PostgresCanonicalExecutionIntentStore:
             return state
         return None
 
+    @staticmethod
+    def _decode_intent_row(row: Any) -> dict[str, Any]:
+        payload = dict(row)
+        for field in ("request", "result"):
+            value = payload.get(field)
+            if isinstance(value, str):
+                try:
+                    payload[field] = json.loads(value)
+                except json.JSONDecodeError as exc:
+                    raise OMSIntegrityError(
+                        f"canonical execution intent {field} JSON is malformed"
+                    ) from exc
+        if not isinstance(payload.get("request"), dict):
+            raise OMSIntegrityError("canonical execution intent request is malformed")
+        if payload.get("result") is not None and not isinstance(
+            payload.get("result"), dict
+        ):
+            raise OMSIntegrityError("canonical execution intent result is malformed")
+        return payload
+
     async def get(self, client_id: str) -> dict[str, Any] | None:
         client = _identifier(client_id, "client_id")
         async with self.oms._pool.acquire() as conn:
@@ -1506,7 +1526,7 @@ class PostgresCanonicalExecutionIntentStore:
                 self.scope,
                 client,
             )
-        return dict(row) if row else None
+        return self._decode_intent_row(row) if row else None
 
     async def unresolved(self, symbol: str | None = None) -> list[dict[str, Any]]:
         async with self.oms._pool.acquire() as conn:
@@ -1521,7 +1541,7 @@ class PostgresCanonicalExecutionIntentStore:
                 self.scope,
                 symbol,
             )
-        return [dict(row) for row in rows]
+        return [self._decode_intent_row(row) for row in rows]
 
     async def assert_ready(self) -> None:
         rows = await self.unresolved()
