@@ -1494,7 +1494,14 @@ class TradeLifecycle(AITOSModule):
                     continue
         self._closed_trades.append(trade)
         if self._order_executor.requires_exchange_execution:
-            await self._commit_live_execution(trade)
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_reduction_ledger(
+                    trade.position_size_usd,
+                    execution,
+                    f"exit:{self._execution_faults.get(trade.trade_id, trade.trade_id)}",
+                ),
+            )
         await self._resolve_decision_outcomes(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
@@ -2107,9 +2114,13 @@ class TradeLifecycle(AITOSModule):
             client_id = f"aitos-entry-{trade.trade_id}"
             self._execution_faults[trade.trade_id] = client_id
             # Install durable ownership before optional telemetry can fail.
-            await self._execution_state_writer(trade)
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_entry_ledger(
+                    trade, f"entry:{client_id}"
+                ),
+            )
             await self._place_exchange_side_stops(trade)
-            await self._commit_live_execution(trade)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_ORDER_SUBMITTED,
@@ -3290,13 +3301,23 @@ class TradeLifecycle(AITOSModule):
             ]
             if consumed_tp and trade.take_profit_levels:
                 trade.take_profit_levels.pop(0)
+            reduction_client_id = self._execution_faults.get(
+                trade.trade_id, f"resting:{execution_result.order_id}"
+            )
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_reduction_ledger(
+                    closed_notional,
+                    execution_result,
+                    f"reduction:{reduction_client_id}",
+                ),
+            )
             if (
                 refresh_protection
                 and self._use_exchange_side_stops
                 and trade.quantity > 0
             ):
                 await self._refresh_live_protection(trade)
-            await self._commit_live_execution(trade)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_PARTIAL_CLOSE,
