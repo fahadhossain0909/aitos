@@ -11,9 +11,7 @@ from aitos.storage.postgres_migrations import apply_postgres_migrations
 def test_postgres_execution_intent_transition_graph_is_fail_closed():
     from aitos.execution.postgres_intents import _ALLOWED_TRANSITIONS
 
-    assert _ALLOWED_TRANSITIONS["SUBMITTING"] == {
-        "CONFIRMED", "REJECTED", "PROTECTED"
-    }
+    assert _ALLOWED_TRANSITIONS["SUBMITTING"] == {"CONFIRMED", "REJECTED", "PROTECTED"}
     assert _ALLOWED_TRANSITIONS["REJECTED"] == set()
     assert _ALLOWED_TRANSITIONS["TERMINAL"] == set()
     assert "SUBMITTING" not in _ALLOWED_TRANSITIONS["APPLIED"]
@@ -42,24 +40,28 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
             "paper:intent-test", "worker-a", expected_generation=0
         )
         intents = PostgresCanonicalExecutionIntentStore(oms, fence)
-        created = await intents.begin({
-            "client_order_id": "client-001",
-            "symbol": "BTCUSDT",
-            "side": "BUY",
-            "quantity": "0.01",
-            "reduce_only": False,
-        })
-        assert created["state"] == "SUBMITTING"
-        assert created["revision"] == 1
-
-        with pytest.raises(OMSConflict, match="already exists"):
-            await intents.begin({
+        created = await intents.begin(
+            {
                 "client_order_id": "client-001",
                 "symbol": "BTCUSDT",
                 "side": "BUY",
                 "quantity": "0.01",
                 "reduce_only": False,
-            })
+            }
+        )
+        assert created["state"] == "SUBMITTING"
+        assert created["revision"] == 1
+
+        with pytest.raises(OMSConflict, match="already exists"):
+            await intents.begin(
+                {
+                    "client_order_id": "client-001",
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "quantity": "0.01",
+                    "reduce_only": False,
+                }
+            )
 
         with pytest.raises(ValueError, match="positive fill evidence"):
             await intents.transition(
@@ -67,7 +69,11 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
                 expected_revision=1,
                 expected_state="SUBMITTING",
                 new_state="CONFIRMED",
-                result={"order_id": "9001", "filled_quantity": "0", "fill_price": "65000"},
+                result={
+                    "order_id": "9001",
+                    "filled_quantity": "0",
+                    "fill_price": "65000",
+                },
             )
 
         confirmed = await intents.transition(
@@ -95,9 +101,7 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         assert await intents.unresolved() == []
         assert await intents.get("client-001") is not None
 
-        events = await oms.read_events(
-            "paper:intent-test", "intent-client-001"
-        )
+        events = await oms.read_events("paper:intent-test", "intent-client-001")
         assert [event.revision for event in events] == [1, 2, 3]
         assert [event.payload["event_type"] for event in events] == [
             "EXECUTION_INTENT_CREATED",
