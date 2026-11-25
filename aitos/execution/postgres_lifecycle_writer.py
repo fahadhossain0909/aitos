@@ -223,7 +223,9 @@ class PostgresLifecycleStateWriter:
         lock = self._locks.setdefault(trade_id, asyncio.Lock())
         async with lock:
             events = await self.oms.read_events(self.fence.account_scope, trade_id)
-            existing = next((item for item in events if item.event_id == event_id), None)
+            existing = next(
+                (item for item in events if item.event_id == event_id), None
+            )
             if existing is not None:
                 payload = existing.payload
                 if (
@@ -286,7 +288,9 @@ class PostgresLifecycleStateWriter:
             if outbox_row["projected_at"] is None:
                 latest = await self.latest_snapshot(trade_id)
                 if not isinstance(latest, dict):
-                    raise RuntimeError("canonical cost event has no recoverable Trade snapshot")
+                    raise RuntimeError(
+                        "canonical cost event has no recoverable Trade snapshot"
+                    )
                 from aitos.trading.persistent_state import _trade_from_dict
 
                 latest_trade = _trade_from_dict(latest)

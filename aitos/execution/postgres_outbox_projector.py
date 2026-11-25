@@ -317,7 +317,8 @@ class PostgresOMSOutboxProjector:
             (
                 item
                 for item in reversed(events)
-                if item.payload.get("event_type") in {
+                if item.payload.get("event_type")
+                in {
                     "TRADE_SNAPSHOT",
                     "TRADE_COST_ADJUSTMENT",
                 }

@@ -2497,6 +2497,7 @@ class TradeLifecycle(AITOSModule):
                 self._execution_faults[trade_id],
                 "prior reduction/application requires reconciliation",
             )
+
     def bind_postgres_canonical_oms(self, oms: Any, fence: Any) -> Any:
         """Bind the PostgreSQL journal ahead of the configured durable projection.
 
