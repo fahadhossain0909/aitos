@@ -2875,7 +2875,11 @@ class TradeLifecycle(AITOSModule):
             await acknowledge(client_id, trade.trade_id)
         else:
             await self._execution_state_writer(trade)
-            if client_id and not client_id.startswith("resting:"):
+            if (
+                client_id
+                and not client_id.startswith("resting:")
+                and protection_child_fill is None
+            ):
                 acknowledge = getattr(
                     self._order_executor, "acknowledge_execution_async", None
                 )
