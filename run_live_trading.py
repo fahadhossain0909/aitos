@@ -21,6 +21,7 @@ from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.execution.postgres_oms import PostgresCanonicalOMS
+from aitos.execution.postgres_intents import PostgresCanonicalExecutionIntentStore
 from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,
@@ -144,6 +145,26 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await apply_postgres_migrations(postgres_pool)
     await verify_postgres_schema(postgres_pool)
     postgres_oms = PostgresCanonicalOMS(postgres_pool)
+    writer_id = f"live:{socket.gethostname()}:{os.getpid()}"
+    current_generation = await postgres_oms.writer_generation(
+        raw_order_executor.execution_scope
+    )
+    writer_fence = await postgres_oms.acquire_writer(
+        raw_order_executor.execution_scope,
+        writer_id,
+        expected_generation=current_generation,
+    )
+    canonical_intents = PostgresCanonicalExecutionIntentStore(
+        postgres_oms, writer_fence
+    )
+    raw_order_executor.bind_postgres_intent_store(canonical_intents)
+    intent_recovery = await raw_order_executor.refresh_canonical_intent_cache()
+    if intent_recovery["unresolved"]:
+        logger.critical(
+            "unresolved PostgreSQL execution intents found at startup; "
+            "fresh exposure remains blocked pending venue/trade reconciliation",
+            extra={"aitos_extra": intent_recovery},
+        )
     order_executor = IdempotentOrderExecutor(raw_order_executor)
     state_store = DurableTradingStateStore(
         market_repo, account_scope=raw_order_executor.execution_scope
@@ -192,15 +213,6 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(trade_state_persistence.shutdown)
     restored_count = await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
-    writer_id = f"live:{socket.gethostname()}:{os.getpid()}"
-    current_generation = await postgres_oms.writer_generation(
-        raw_order_executor.execution_scope
-    )
-    writer_fence = await postgres_oms.acquire_writer(
-        raw_order_executor.execution_scope,
-        writer_id,
-        expected_generation=current_generation,
-    )
     components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
     canonical_writer = components.trade_lifecycle._postgres_canonical_oms_writer
     outbox_projector = PostgresOMSOutboxProjector(
