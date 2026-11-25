@@ -525,13 +525,6 @@ class PostgresCanonicalExecutionIntentStore:
                     status,
                 )
             else:
-                if (
-                    cumulative_quantity != delta_quantity
-                    or cumulative_quote != delta_quote
-                ):
-                    raise OMSConflict(
-                        "initial protective child cumulative fill lacks a baseline"
-                    )
                 await conn.execute(
                     """INSERT INTO aitos_oms_protection_child_fills
                        (account_scope,algo_id,child_order_id,trade_id,symbol,
@@ -1407,6 +1400,13 @@ class PostgresCanonicalExecutionIntentStore:
                     child_status,
                 )
             else:
+                if (
+                    cumulative_quantity != delta_quantity
+                    or cumulative_quote != delta_quote
+                ):
+                    raise OMSConflict(
+                        "initial protective child cumulative fill lacks a baseline"
+                    )
                 await conn.execute(
                     """INSERT INTO aitos_oms_protection_child_fills
                        (account_scope,algo_id,child_order_id,trade_id,symbol,
