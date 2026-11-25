@@ -521,7 +521,7 @@ async def recover_accepted_initial_stop_submissions(
 
     handover_reader = getattr(intent_store, "protection_handovers", None)
     handover_rows = (
-        await asyncio.to_thread(handover_reader) if callable(handover_reader) else []
+        await _call_sync_or_async(handover_reader) if callable(handover_reader) else []
     )
     handover_client_ids = {
         item.get("new_client_id")
