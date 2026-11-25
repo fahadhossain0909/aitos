@@ -3112,6 +3112,13 @@ class TradeLifecycle(AITOSModule):
                 and algo_order_id not in pending
             ):
                 pending.append(algo_order_id)
+            client_id = str(algo.get("clientAlgoId", "")).strip()
+            if not client_id:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "triggered child has no canonical protective client intent ID",
+                )
 
             try:
                 if delta.delta_quantity > 0:
@@ -3138,11 +3145,13 @@ class TradeLifecycle(AITOSModule):
                             f"resting:{algo_order_id}",
                             result,
                         )
+                        trade._aitos_filled_resting_order_ids = {algo_order_id}
                         try:
                             await self._close_trade_unlocked(
                                 trade_id,
                                 float(delta.average_price),
                                 "exchange_protective_child_filled",
+                                execution_intent_client_id=client_id,
                             )
                         finally:
                             self._confirmed_reductions.pop(trade_id, None)
@@ -3153,6 +3162,7 @@ class TradeLifecycle(AITOSModule):
                             float(delta.delta_quantity / Decimal(str(trade.quantity))),
                             execution_result=result,
                             refresh_protection=False,
+                            execution_intent_client_id=client_id,
                         )
                 else:
                     trade.updated_at = utc_now_iso()
@@ -3161,7 +3171,6 @@ class TradeLifecycle(AITOSModule):
 
                 # The durable trade snapshot (including its marker) must exist
                 # before either SQLite acknowledgement or terminal transition.
-                client_id = str(algo.get("clientAlgoId", ""))
                 intent_rows = await _call_sync_or_async(intent_store.protection_intents)
                 owned_rows = [
                     row for row in intent_rows if row.get("client_id") == client_id
@@ -3173,9 +3182,20 @@ class TradeLifecycle(AITOSModule):
                         "triggered child has no unique durable client-algo intent",
                     )
                 if owned_rows[0].get("state") == "PROTECTED":
-                    await _call_sync_or_async(
-                        intent_store.mark_applied, client_id, trade_id
-                    )
+                    if delta.delta_quantity > 0 and getattr(
+                        executor := self._order_executor, "canonical_intent_store", None
+                    ) is not None:
+                        applied_intent = await executor.canonical_intent_store.get(client_id)
+                        if applied_intent is None or applied_intent.get("state") != "APPLIED":
+                            raise ExecutionRecoveryRequired(
+                                trade.symbol,
+                                algo_order_id,
+                                "child fill Trade snapshot did not atomically apply its canonical protection intent",
+                            )
+                    elif delta.delta_quantity > 0:
+                        await _call_sync_or_async(
+                            intent_store.mark_applied, client_id, trade_id
+                        )
                 await asyncio.to_thread(
                     intent_store.mark_protection_child_applied,
                     algo_id=algo_id,
