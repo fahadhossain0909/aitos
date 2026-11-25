@@ -8,6 +8,7 @@ import math
 import os
 import socket
 from contextlib import AsyncExitStack
+from decimal import Decimal
 
 from aitos.app import (
     build_system,
@@ -139,7 +140,16 @@ async def _publish_canonical_financial_snapshot(
         "funding": str(funding),
         "venue_equity": str(venue_equity),
     }
-    return await intents.append_financial_snapshot(snapshot)
+    financial_state = await intents.append_financial_snapshot(snapshot)
+    unexplained = abs(Decimal(str(financial_state["unattributed_adjustments"])))
+    if unexplained > Decimal("0.01"):
+        raise RuntimeError(
+            "venue equity differs from canonical trade PnL/fees/funding by "
+            f"{financial_state['unattributed_adjustments']} USDT; reconcile "
+            "deposit, withdrawal, external execution or missing income before "
+            "authorizing new exposure"
+        )
+    return financial_state
 
 
 async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
