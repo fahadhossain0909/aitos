@@ -134,8 +134,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return self._live_approval_authority.consume(token, action=action)
 
     @property
-    def intent_store(self) -> ExecutionIntentStore | None:
-        return self._intent_store
+    def intent_store(self):
+        """Canonical intent authority with legacy protection-handover delegation."""
+        return self._canonical_intent_store or self._intent_store
 
     @property
     def canonical_intent_store(self):
@@ -150,6 +151,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise TypeError("PostgreSQL canonical execution-intent store is required")
         if getattr(store, "scope", None) != self.execution_scope:
             raise ValueError("PostgreSQL intent scope differs from Binance account scope")
+        bind_journal = getattr(store, "bind_protection_journal", None)
+        if callable(bind_journal) and self._intent_store is not None:
+            bind_journal(self._intent_store)
         self._canonical_intent_store = store
 
     async def refresh_canonical_intent_cache(self) -> dict[str, int]:
@@ -177,23 +181,6 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         elif self._intent_store is not None:
             self._intent_store.mark_applied(client_order_id, trade_id)
         self._pending_execution.pop(client_order_id, None)
-
-    async def acknowledge_protection_async(self, result: OrderResult, trade_id: str) -> None:
-        client_id = result.client_order_id
-        if not client_id:
-            raise ExecutionUncertainError(
-                trade_id, result.order_id, "protective acceptance lacks a client intent ID"
-            )
-        if self._canonical_intent_store is not None:
-            if self._canonical_lifecycle_writer is None:
-                raise RuntimeError("canonical lifecycle writer is not bound")
-            class _TradeLookup:
-                pass
-            # The lifecycle passes the active Trade through the dedicated method below.
-            raise RuntimeError("acknowledge_protection_async requires a Trade snapshot")
-        if self._intent_store is not None:
-            self._intent_store.mark_applied(client_id, trade_id)
-        self._pending_execution.pop(client_id, None)
 
     async def acknowledge_protection_trade(
         self, result: OrderResult, trade: Any
@@ -462,9 +449,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return self._intent_store.scope
 
     @property
-    def execution_intent_store(self) -> ExecutionIntentStore | None:
-        """Expose the scoped durable intent journal for read-only diagnostics."""
-        return self._intent_store
+    def execution_intent_store(self):
+        """Expose PostgreSQL canonical intents when the live runtime has bound them."""
+        return self._canonical_intent_store or self._intent_store
 
     @property
     def requires_exchange_execution(self) -> bool:
@@ -813,10 +800,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             )
         return dict(response)
 
-    def _record_terminal_protection(
+    async def _record_terminal_protection(
         self, symbol: str, order_id: str, evidence: dict[str, Any]
     ) -> None:
-        if self._intent_store is None or evidence.get("status") not in {
+        if (self._canonical_intent_store is None and self._intent_store is None) or evidence.get("status") not in {
             "CANCELED",
             "FILLED",
             "EXPIRED",
@@ -836,12 +823,20 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 symbol, order_id, "terminal protective fill quantity is invalid"
             ) from None
         try:
-            self._intent_store.mark_protection_terminal(
-                order_id,
-                symbol=symbol,
-                status=str(evidence["status"]),
-                executed_quantity=executed_quantity,
-            )
+            if self._canonical_intent_store is not None:
+                await self._canonical_intent_store.mark_protection_terminal(
+                    order_id,
+                    symbol=symbol,
+                    status=str(evidence["status"]),
+                    executed_quantity=executed_quantity,
+                )
+            elif self._intent_store is not None:
+                self._intent_store.mark_protection_terminal(
+                    order_id,
+                    symbol=symbol,
+                    status=str(evidence["status"]),
+                    executed_quantity=executed_quantity,
+                )
         except (TypeError, ValueError, OverflowError) as exc:
             raise ExecutionUncertainError(
                 symbol, order_id, "terminal protective journal update failed"
@@ -861,7 +856,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
             )
         if isinstance(evidence, dict):
-            self._record_terminal_protection(symbol, order_id, evidence)
+            await self._record_terminal_protection(symbol, order_id, evidence)
         return evidence
 
     @property
@@ -1125,7 +1120,39 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         client_order_id = client_order_id or f"aitos-{label}-{uuid.uuid4().hex[:16]}"
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", client_order_id):
             raise ValueError("invalid protective client order ID")
-        if self._intent_store is not None:
+        protection_request = OrderRequest(
+            symbol=symbol,
+            side=position_side,
+            quantity=quantity,
+            reference_price=trigger_price,
+            order_type=order_type,
+            client_order_id=client_order_id,
+            reduce_only=True,
+            owner_trade_id=owner_trade_id,
+        )
+        if self._canonical_intent_store is not None:
+            pending_rows = await self._canonical_intent_store.unresolved(symbol)
+            for pending in pending_rows:
+                request_payload = pending.get("request") or {}
+                if request_payload.get("order_type") in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+                    raise ExecutionUncertainError(
+                        symbol,
+                        str(pending["client_id"]),
+                        "prior protective intent requires reconciliation",
+                    )
+            await self._canonical_intent_store.begin(
+                {
+                    "client_order_id": client_order_id,
+                    "symbol": symbol,
+                    "side": position_side.value,
+                    "quantity": format(Decimal(str(quantity)), "f"),
+                    "reference_price": format(Decimal(str(trigger_price)), "f"),
+                    "order_type": order_type,
+                    "reduce_only": True,
+                    "owner_trade_id": owner_trade_id,
+                }
+            )
+        elif self._intent_store is not None:
             for pending in self._intent_store.unresolved(symbol):
                 if json.loads(pending["request_json"])["order_type"] in {
                     "STOP_MARKET",
@@ -1136,18 +1163,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         pending["client_id"],
                         "prior protective intent requires reconciliation",
                     )
-            self._intent_store.begin(
-                OrderRequest(
-                    symbol=symbol,
-                    side=position_side,
-                    quantity=quantity,
-                    reference_price=trigger_price,
-                    order_type=order_type,
-                    client_order_id=client_order_id,
-                    reduce_only=True,
-                    owner_trade_id=owner_trade_id,
-                )
-            )
+            self._intent_store.begin(protection_request)
         self._pending_execution[client_order_id] = symbol
         params = {
             "symbol": symbol,
@@ -1313,8 +1329,22 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 success=True,
                 client_order_id=client_order_id,
             )
-        if result.success and self._intent_store is not None:
-            self._intent_store.record_protection(client_order_id, result)
+        if result.success:
+            if self._canonical_intent_store is not None:
+                await self._canonical_intent_store.record_protection(
+                    client_order_id,
+                    {
+                        "order_id": result.order_id,
+                        "symbol": result.symbol,
+                        "side": result.side.value,
+                        "filled_quantity": "0",
+                        "fill_price": format(Decimal(str(result.fill_price)), "f"),
+                        "success": True,
+                        "client_order_id": client_order_id,
+                    },
+                )
+            elif self._intent_store is not None:
+                self._intent_store.record_protection(client_order_id, result)
         return result
 
     # -- Internals --------------------------------------------------------------
