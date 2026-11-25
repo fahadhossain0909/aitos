@@ -315,9 +315,7 @@ class OperatorSessions:
     def revoke_pending(self, token: str | None) -> None:
         self.pending.pop(self._key(token), None)
 
-    def issue(
-        self, user_id: str | None = None, *, credential_id: str | None = None
-    ):
+    def issue(self, user_id: str | None = None, *, credential_id: str | None = None):
         user = user_id or self.default_user
         if user not in self.credentials:
             raise ValueError("unknown operator identity")
