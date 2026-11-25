@@ -272,7 +272,9 @@ class PostgresCanonicalExecutionIntentStore:
             [] if ledger_entries is None else ledger_entries
         )
         if expected_state == "CONFIRMED" and not normalized_entries:
-            raise ValueError("confirmed execution requires balanced financial ledger entries")
+            raise ValueError(
+                "confirmed execution requires balanced financial ledger entries"
+            )
         for entry in normalized_entries:
             reference = entry.get("reference")
             if reference is not None and len(reference) > 256:
