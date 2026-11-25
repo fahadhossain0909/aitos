@@ -246,6 +246,190 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
 
 
 @pytest.mark.asyncio
+async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
+    dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
+    if not dsn:
+        pytest.skip("AITOS_POSTGRES_OMS_TEST_DSN is not configured")
+    import asyncpg
+
+    schema = "aitos_child_atomic_" + uuid.uuid4().hex
+    admin = await asyncpg.connect(dsn)
+    await admin.execute(f'CREATE SCHEMA "{schema}"')
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=1,
+        max_size=4,
+        server_settings={"search_path": schema},
+    )
+    try:
+        assert await apply_postgres_migrations(pool) == 7
+        oms = PostgresCanonicalOMS(pool)
+        fence = await oms.acquire_writer(
+            "live:child-atomic", "child-fill-worker", expected_generation=0
+        )
+        intents = PostgresCanonicalExecutionIntentStore(oms, fence)
+        await intents.begin(
+            {
+                "client_order_id": "protect-child-001",
+                "symbol": "BTCUSDT",
+                "side": "SELL",
+                "quantity": "0.01",
+                "reference_price": "65000",
+                "order_type": "STOP_MARKET",
+                "reduce_only": True,
+                "owner_trade_id": "trade-child-001",
+            }
+        )
+        protected = await intents.record_protection(
+            "protect-child-001",
+            {
+                "order_id": "algo:7001",
+                "symbol": "BTCUSDT",
+                "side": "SELL",
+                "filled_quantity": "0",
+                "fill_price": "64000",
+                "success": True,
+                "client_order_id": "protect-child-001",
+            },
+        )
+        assert protected["state"] == "PROTECTED"
+        initial = await intents.transition_with_trade_snapshot(
+            "protect-child-001",
+            expected_revision=2,
+            expected_state="PROTECTED",
+            trade_id="trade-child-001",
+            expected_trade_revision=0,
+            trade_snapshot={
+                "trade_id": "trade-child-001",
+                "account_scope": "live:child-atomic",
+                "symbol": "BTCUSDT",
+                "state": "POSITION_OPENED",
+                "quantity": "0.01",
+                "entry_price": "65000",
+            },
+            ledger_entries=[],
+        )
+        assert initial["state"] == "APPLIED"
+
+        def trade_snapshot(quantity, marker_quantity, marker_quote):
+            return {
+                "trade_id": "trade-child-001",
+                "account_scope": "live:child-atomic",
+                "symbol": "BTCUSDT",
+                "state": "POSITION_OPENED",
+                "quantity": quantity,
+                "entry_price": "65000",
+                "protection_child_fills": {
+                    "7001:71001": {
+                        "algo_id": "7001",
+                        "child_order_id": "71001",
+                        "cumulative_quantity": marker_quantity,
+                        "cumulative_quote": marker_quote,
+                    }
+                },
+            }
+
+        def ledger(reference):
+            return [
+                {
+                    "account_code": "CASH",
+                    "currency": "USDT",
+                    "debit": "325",
+                    "credit": "0",
+                    "reference": reference,
+                },
+                {
+                    "account_code": "OPEN_POSITION_ASSET",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "325",
+                    "reference": reference,
+                },
+            ]
+
+        results = []
+        fills = [
+            {
+                "algo_id": "7001",
+                "child_order_id": "71001",
+                "cumulative_quantity": "0.005",
+                "cumulative_quote": "325",
+                "delta_quantity": "0.005",
+                "delta_quote": "325",
+                "status": "PARTIALLY_FILLED",
+            },
+            {
+                "algo_id": "7001",
+                "child_order_id": "71001",
+                "cumulative_quantity": "0.01",
+                "cumulative_quote": "650",
+                "delta_quantity": "0.005",
+                "delta_quote": "325",
+                "status": "FILLED",
+            },
+        ]
+        for index, fill in enumerate(fills, start=1):
+            intent = await intents.get("protect-child-001")
+            trade_events = await oms.read_events(
+                "live:child-atomic", "trade-child-001"
+            )
+            result = await intents.append_protection_child_fill(
+                "protect-child-001",
+                expected_revision=int(intent["revision"]),
+                expected_state=intent["state"],
+                trade_id="trade-child-001",
+                expected_trade_revision=trade_events[-1].revision,
+                trade_snapshot=trade_snapshot(
+                    "0.01" if index == 1 else "0",
+                    fill["cumulative_quantity"],
+                    fill["cumulative_quote"],
+                ),
+                child_fill=fill,
+                ledger_entries=ledger(f"child-fill-{index}"),
+            )
+            results.append(result)
+            assert result["state"] == "APPLIED"
+            assert result["revision"] == index + 3
+
+        # The exact same parent algo intent remains active across both fills;
+        # each child delta gets a new intent revision and a Trade+ledger commit.
+        current = await intents.get("protect-child-001")
+        assert current["state"] == "APPLIED"
+        assert current["revision"] == 4
+        assert current["trade_id"] == "trade-child-001"
+        intent_events = await oms.read_events(
+            "live:child-atomic", "intent-protect-child-001"
+        )
+        trade_events = await oms.read_events(
+            "live:child-atomic", "trade-child-001"
+        )
+        assert [event.revision for event in intent_events] == [1, 2, 3, 4]
+        assert [
+            event.payload["event_type"] for event in intent_events[-2:]
+        ] == ["PROTECTION_CHILD_FILL_APPLIED", "PROTECTION_CHILD_FILL_APPLIED"]
+        assert [event.revision for event in trade_events] == [1, 2, 3]
+        ledger_rows = await oms.financial_trade_ledger(
+            "live:child-atomic", "trade-child-001"
+        )
+        assert len(ledger_rows) == 4
+        assert sum((line["debit"] for line in ledger_rows), Decimal("0")) == Decimal("650")
+        assert sum((line["credit"] for line in ledger_rows), Decimal("0")) == Decimal("650")
+
+        terminal = await intents.mark_protection_terminal(
+            "algo:7001",
+            symbol="BTCUSDT",
+            status="FILLED",
+            executed_quantity=0.01,
+        )
+        assert terminal["state"] == "TERMINAL"
+        assert terminal["revision"] == 5
+    finally:
+        await pool.close()
+        await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        await admin.close()
+
+
+@pytest.mark.asyncio
 async def test_postgres_protection_handover_and_child_fill_journal_are_fenced():
     dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
     if not dsn:
