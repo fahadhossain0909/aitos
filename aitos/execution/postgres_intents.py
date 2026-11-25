@@ -268,7 +268,7 @@ class PostgresCanonicalExecutionIntentStore:
         snapshot_scope = trade_snapshot.get("account_scope")
         if snapshot_scope != self.scope:
             raise ValueError("trade snapshot account scope does not match writer fence")
-        normalized_entries = PostgresCanonicalOMS._validate_ledger_entries(
+        normalized_entries = self.oms._validate_ledger_entries(
             [] if ledger_entries is None else ledger_entries
         )
         if expected_state == "CONFIRMED" and not normalized_entries:
