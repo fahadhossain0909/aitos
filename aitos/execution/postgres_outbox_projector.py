@@ -86,9 +86,7 @@ class PostgresOMSOutboxProjector:
                 "failed": failed,
             }
 
-    async def run_until_drained(
-        self, *, max_records: int = 100000
-    ) -> dict[str, int]:
+    async def run_until_drained(self, *, max_records: int = 100000) -> dict[str, int]:
         """Drain the currently pending scope outbox with a strict work bound."""
         if type(max_records) is not int or not 1 <= max_records <= 1_000_000:
             raise ValueError("max_records must be between 1 and 1,000,000")
@@ -143,7 +141,9 @@ class PostgresOMSOutboxProjector:
                     claim_token=str(record["claim_token"]),
                     error="projection rebuild exceeded configured record bound",
                 )
-                raise RuntimeError("canonical projection rebuild exceeded its record bound")
+                raise RuntimeError(
+                    "canonical projection rebuild exceeded its record bound"
+                )
         return {
             "claimed": total_claimed,
             "projected": total_projected,
@@ -153,10 +153,14 @@ class PostgresOMSOutboxProjector:
     async def audit_scope(self) -> dict[str, Any]:
         """Compare every canonical Trade snapshot with its durable read model."""
         if self.projection_reader is None:
-            raise RuntimeError("projection_reader is required for read-model parity audit")
+            raise RuntimeError(
+                "projection_reader is required for read-model parity audit"
+            )
         projected_rows = await self.projection_reader()
         if not isinstance(projected_rows, Iterable):
-            raise TypeError("projection reader must return an iterable of Trade records")
+            raise TypeError(
+                "projection reader must return an iterable of Trade records"
+            )
         projected: dict[str, str] = {}
         duplicate_projection_ids: set[str] = set()
         for trade in projected_rows:
@@ -168,7 +172,9 @@ class PostgresOMSOutboxProjector:
                 or scope != self.lifecycle_writer.fence.account_scope
                 or not callable(to_dict)
             ):
-                raise OMSIntegrityError("projection reader returned invalid Trade identity")
+                raise OMSIntegrityError(
+                    "projection reader returned invalid Trade identity"
+                )
             if trade_id in projected:
                 duplicate_projection_ids.add(trade_id)
             projected[trade_id] = json.dumps(
@@ -202,7 +208,9 @@ class PostgresOMSOutboxProjector:
 
             trade = _trade_from_dict(snapshot)
             if trade.trade_id != aggregate_id or trade.account_scope != scope:
-                raise OMSIntegrityError("canonical projection audit scope/identity mismatch")
+                raise OMSIntegrityError(
+                    "canonical projection audit scope/identity mismatch"
+                )
             canonical[aggregate_id] = json.dumps(
                 trade.to_dict(),
                 sort_keys=True,
@@ -227,7 +235,9 @@ class PostgresOMSOutboxProjector:
             "unexpected_trade_ids": unexpected,
             "mismatched_trade_ids": mismatched,
             "duplicate_projection_trade_ids": sorted(duplicate_projection_ids),
-            "in_sync": not (missing or unexpected or mismatched or duplicate_projection_ids),
+            "in_sync": not (
+                missing or unexpected or mismatched or duplicate_projection_ids
+            ),
         }
 
     async def rebuild_scope(
@@ -235,9 +245,13 @@ class PostgresOMSOutboxProjector:
     ) -> dict[str, Any]:
         """Explicitly replay canonical Trade snapshots and verify read-model parity."""
         if confirm is not True:
-            raise ValueError("explicit full projection rebuild confirmation is required")
+            raise ValueError(
+                "explicit full projection rebuild confirmation is required"
+            )
         if self.projection_reader is None:
-            raise RuntimeError("projection_reader is required for full rebuild verification")
+            raise RuntimeError(
+                "projection_reader is required for full rebuild verification"
+            )
         requeued = await self.oms.requeue_projection_outbox(
             self.lifecycle_writer.fence,
             confirm=True,
@@ -265,7 +279,12 @@ class PostgresOMSOutboxProjector:
         if before["in_sync"]:
             return {"repaired": False, "before": before, "after": before}
         rebuilt = await self.rebuild_scope(confirm=True, max_records=max_records)
-        return {"repaired": True, "before": before, "rebuild": rebuilt, "after": rebuilt["audit"]}
+        return {
+            "repaired": True,
+            "before": before,
+            "rebuild": rebuilt,
+            "after": rebuilt["audit"],
+        }
 
     async def _verify_and_project(self, record: dict[str, Any]) -> None:
         scope = str(record["account_scope"])
