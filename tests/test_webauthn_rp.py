@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -226,3 +227,174 @@ def test_remote_enrollment_bootstrap_is_single_use_and_persistent(tmp_path):
         ("BOOTSTRAP_TOKEN_RESET",),
         ("BOOTSTRAP_TOKEN_CONSUMED",),
     ]
+
+
+def seed_authentication_assertion(rp, *, sign_count, expires_at=200):
+    from webauthn.helpers import bytes_to_base64url
+
+    credential_id = bytes_to_base64url(b"credential-id")
+    challenge = bytes_to_base64url(b"one-time-challenge")
+    client_data = bytes_to_base64url(
+        json.dumps({"origin": "https://console.example"}).encode("utf-8")
+    )
+    db = rp._connect()
+    try:
+        db.execute(
+            "INSERT INTO webauthn_credentials "
+            "(credential_id,user_id,public_key,sign_count,transports_json,"
+            "device_type,backed_up,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                credential_id,
+                "operator-1",
+                b"test-public-key",
+                sign_count,
+                "[]",
+                "single_device",
+                0,
+                100,
+            ),
+        )
+        db.execute(
+            "INSERT INTO webauthn_authentication_challenges"
+            "(challenge,user_id,expires_at) VALUES(?,?,?)",
+            (challenge, "operator-1", expires_at),
+        )
+    finally:
+        db.close()
+    assertion = json.dumps(
+        {
+            "id": credential_id,
+            "response": {"clientDataJSON": client_data},
+        }
+    ).encode("utf-8")
+    return challenge, assertion, credential_id
+
+
+def test_authenticator_counter_rollback_or_reset_is_clone_suspected(
+    tmp_path, monkeypatch
+):
+    rp = make_rp(tmp_path)
+    challenge, assertion, credential_id = seed_authentication_assertion(
+        rp, sign_count=7
+    )
+    monkeypatch.setattr(
+        "aitos.security.webauthn_rp.verify_authentication_response",
+        lambda **kwargs: SimpleNamespace(
+            user_verified=True, new_sign_count=0, credential_id=b"credential-id"
+        ),
+    )
+
+    with pytest.raises(WebAuthnCredentialError, match="rollback or clone"):
+        rp.verify_assertion(
+            assertion=assertion,
+            challenge=challenge,
+            expected_origin={"https://console.example"},
+            expected_rp_id="console.example",
+            now=100,
+        )
+
+    db = rp._connect()
+    try:
+        row = db.execute(
+            "SELECT sign_count FROM webauthn_credentials WHERE credential_id=?",
+            (credential_id,),
+        ).fetchone()
+        consumed = db.execute(
+            "SELECT consumed_at FROM webauthn_authentication_challenges "
+            "WHERE challenge=?",
+            (challenge,),
+        ).fetchone()
+    finally:
+        db.close()
+    assert row == (7,)
+    assert consumed == (None,)
+
+
+def test_authenticator_counter_must_increase_when_supported(tmp_path, monkeypatch):
+    rp = make_rp(tmp_path)
+    challenge, assertion, _ = seed_authentication_assertion(rp, sign_count=7)
+    monkeypatch.setattr(
+        "aitos.security.webauthn_rp.verify_authentication_response",
+        lambda **kwargs: SimpleNamespace(
+            user_verified=True, new_sign_count=7, credential_id=b"credential-id"
+        ),
+    )
+
+    with pytest.raises(WebAuthnCredentialError, match="rollback or clone"):
+        rp.verify_assertion(
+            assertion=assertion,
+            challenge=challenge,
+            expected_origin={"https://console.example"},
+            expected_rp_id="console.example",
+            now=100,
+        )
+
+
+def test_zero_counter_authenticator_can_authenticate_and_challenge_is_one_time(
+    tmp_path, monkeypatch
+):
+    rp = make_rp(tmp_path)
+    challenge, assertion, credential_id = seed_authentication_assertion(
+        rp, sign_count=0
+    )
+    monkeypatch.setattr(
+        "aitos.security.webauthn_rp.verify_authentication_response",
+        lambda **kwargs: SimpleNamespace(
+            user_verified=True, new_sign_count=0, credential_id=b"credential-id"
+        ),
+    )
+
+    claims = rp.verify_assertion(
+        assertion=assertion,
+        challenge=challenge,
+        expected_origin={"https://console.example"},
+        expected_rp_id="console.example",
+        now=100,
+    )
+    assert claims["verified"] is True
+    assert claims["new_sign_count"] == 0
+    with pytest.raises(WebAuthnCredentialError, match="missing, expired or already consumed"):
+        rp.verify_assertion(
+            assertion=assertion,
+            challenge=challenge,
+            expected_origin={"https://console.example"},
+            expected_rp_id="console.example",
+            now=101,
+        )
+    db = rp._connect()
+    try:
+        row = db.execute(
+            "SELECT last_used_at FROM webauthn_credentials WHERE credential_id=?",
+            (credential_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    assert row == (100,)
+
+
+def test_authentication_challenge_expiry_uses_injected_clock(tmp_path, monkeypatch):
+    rp = make_rp(tmp_path)
+    challenge, assertion, _ = seed_authentication_assertion(
+        rp, sign_count=0, expires_at=200
+    )
+    verifier_called = False
+
+    def verifier(**kwargs):
+        nonlocal verifier_called
+        verifier_called = True
+        return SimpleNamespace(
+            user_verified=True, new_sign_count=0, credential_id=b"credential-id"
+        )
+
+    monkeypatch.setattr(
+        "aitos.security.webauthn_rp.verify_authentication_response", verifier
+    )
+    with pytest.raises(WebAuthnCredentialError, match="missing, expired or already consumed"):
+        rp.verify_assertion(
+            assertion=assertion,
+            challenge=challenge,
+            expected_origin={"https://console.example"},
+            expected_rp_id="console.example",
+            now=200,
+        )
+    assert verifier_called is False
