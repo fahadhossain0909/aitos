@@ -395,7 +395,7 @@ async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
         # each child delta gets a new intent revision and a Trade+ledger commit.
         current = await intents.get("protect-child-001")
         assert current["state"] == "APPLIED"
-        assert current["revision"] == 4
+        assert current["revision"] == 5
         assert current["trade_id"] == "trade-child-001"
         intent_events = await oms.read_events(
             "live:child-atomic", "intent-protect-child-001"
@@ -403,7 +403,7 @@ async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
         trade_events = await oms.read_events(
             "live:child-atomic", "trade-child-001"
         )
-        assert [event.revision for event in intent_events] == [1, 2, 3, 4]
+        assert [event.revision for event in intent_events] == [1, 2, 3, 4, 5]
         assert [
             event.payload["event_type"] for event in intent_events[-2:]
         ] == ["PROTECTION_CHILD_FILL_APPLIED", "PROTECTION_CHILD_FILL_APPLIED"]
@@ -422,7 +422,7 @@ async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
             executed_quantity=0.01,
         )
         assert terminal["state"] == "TERMINAL"
-        assert terminal["revision"] == 5
+        assert terminal["revision"] == 6
     finally:
         await pool.close()
         await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
