@@ -204,6 +204,8 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
             "unrealized_pnl": "-20",
             "fees": "10",
             "funding": "0",
+            "venue_equity": "950",
+            "unattributed_adjustments": "0",
             "equity": "950",
             "peak_equity": "1000",
             "drawdown": "50",
@@ -241,6 +243,43 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         await pool.close()
         await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
         await admin.close()
+
+
+def test_financial_state_snapshot_reconciles_venue_equity_without_hiding_variance():
+    first = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "20",
+            "unrealized_pnl": "5",
+            "fees": "2",
+            "funding": "1",
+            "venue_equity": "1020",
+        },
+        None,
+    )
+    second = _financial_state_snapshot(
+        {
+            "currency": "USDT",
+            "starting_equity": "1000",
+            "realized_pnl": "20",
+            "unrealized_pnl": "-30",
+            "fees": "2",
+            "funding": "1",
+            "venue_equity": "990",
+        },
+        first,
+    )
+
+    assert first["equity"] == "1020"
+    assert first["venue_equity"] == "1020"
+    assert first["unattributed_adjustments"] == "-4"
+    assert first["peak_equity"] == "1020"
+    assert second["equity"] == "990"
+    assert second["unattributed_adjustments"] == "1"
+    assert second["drawdown"] == "30"
+    assert second["drawdown_pct"] == "2.941176470588235294117647059"
+    assert second["max_drawdown"] == "30"
 
 
 def test_financial_state_snapshot_keeps_peak_and_max_drawdown_monotonic():
