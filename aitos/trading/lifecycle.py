@@ -3403,3 +3403,160 @@ class TradeLifecycle(AITOSModule):
         *,
         consume_tp: bool = False,
     ) -> None:
+        if not self._order_executor.requires_exchange_execution:
+            return await self._partial_close_unlocked(trade, price, close_fraction)
+        if close_fraction == 1:
+            await self.close_trade(trade.trade_id, price, "full_reduction_requested")
+            return
+        async with self._execution_locks.setdefault(trade.trade_id, asyncio.Lock()):
+            self._assert_execution_unlatched(trade.trade_id)
+            return await self._partial_close_unlocked(
+                trade, price, close_fraction, consume_tp=consume_tp
+            )
+
+    async def _partial_close_unlocked(
+        self,
+        trade: Trade,
+        price: float,
+        close_fraction: float,
+        *,
+        execution_result: OrderResult | None = None,
+        consume_tp: bool = False,
+        refresh_protection: bool = True,
+        execution_intent_client_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
+    ) -> None:
+        if not _valid_market_price(price):
+            raise ValueError(f"price must be a finite positive number, got {price!r}")
+        if not 0.0 < close_fraction <= 1.0:
+            raise ValueError(
+                f"close_fraction must be in (0, 1], got {close_fraction!r}"
+            )
+        if trade.position_size_usd <= 0.0 or trade.quantity <= 0.0:
+            raise ValueError(
+                f"trade has no remaining position to close: {trade.trade_id}"
+            )
+        if self._order_executor.requires_exchange_execution:
+            execution_result = execution_result or await self._execute_live_reduction(
+                trade, trade.quantity * close_fraction, price
+            )
+            price = execution_result.fill_price
+            close_fraction = execution_result.filled_quantity / trade.quantity
+        direction = 1 if trade.side == TradeSide.LONG else -1
+        pnl_pct = ((price - trade.entry_price) / trade.entry_price) * direction
+        # Keep full precision internally. Rounding the USD ledger to cents while
+        # reducing quantity at full precision causes quantity/notional drift,
+        # especially when the remaining position is only a few cents.
+        closed_notional = trade.position_size_usd * close_fraction
+        closed_quantity = trade.quantity * close_fraction
+        remaining_notional = trade.position_size_usd - closed_notional
+        remaining_quantity = trade.quantity - closed_quantity
+        realized = closed_notional * pnl_pct
+        trade.partial_exits.append(
+            PartialExit(
+                price=price,
+                size_usd=closed_notional,
+                r_multiple=round(trade.unrealized_r_multiple(price), 4),
+            )
+        )
+        trade.position_size_usd = max(0.0, remaining_notional)
+        trade.quantity = max(0.0, remaining_quantity)
+        if self._order_executor.requires_exchange_execution:
+            trade.risk_amount_usd *= 1 - close_fraction
+        trade.gross_realized_pnl_usd += realized
+        trade.pnl = round(
+            trade.gross_realized_pnl_usd - trade.fees_paid_usd + trade.funding_pnl_usd,
+            8,
+        )
+        trade.updated_at = utc_now_iso()
+        if self._order_executor.requires_exchange_execution:
+            consumed = set(getattr(trade, "_aitos_filled_resting_order_ids", set()))
+            if consume_tp:
+                if trade.tp_order_ids:
+                    consumed_id = trade.tp_order_ids.pop(0)
+                    await self._order_executor.cancel_resting_order(
+                        trade.symbol, consumed_id
+                    )
+                if trade.take_profit_levels:
+                    trade.take_profit_levels.pop(0)
+            consumed_tp = consumed.intersection(trade.tp_order_ids)
+            trade.tp_order_ids = [
+                order_id for order_id in trade.tp_order_ids if order_id not in consumed
+            ]
+            if consumed_tp and trade.take_profit_levels:
+                trade.take_profit_levels.pop(0)
+            reduction_client_id = self._execution_faults.get(
+                trade.trade_id, f"resting:{execution_result.order_id}"
+            )
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_reduction_ledger(
+                    closed_notional,
+                    execution_result,
+                    f"reduction:{reduction_client_id}",
+                ),
+                client_order_id=execution_intent_client_id,
+                protection_child_fill=protection_child_fill,
+            )
+            if (
+                refresh_protection
+                and self._use_exchange_side_stops
+                and trade.quantity > 0
+            ):
+                await self._refresh_live_protection(trade)
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_PARTIAL_CLOSE,
+                payload={
+                    **trade.to_dict(),
+                    "closed_notional_usd": closed_notional,
+                    "closed_quantity": closed_quantity,
+                    "realized_pnl": realized,
+                },
+                source_module=self.module_id,
+            )
+        )
+
+    def configure_position_switching(self, coordinator: Any) -> None:
+        """Attach the durable, fail-closed position-switch coordinator.
+
+        Switching remains unavailable until the caller supplies a persistent
+        journal, an idempotent reduce-only close adapter and venue-flat check.
+        """
+        if coordinator is None:
+            raise ValueError("position switch coordinator is required")
+        if getattr(coordinator, "lifecycle", None) is not self:
+            raise ValueError("coordinator must be bound to this TradeLifecycle")
+        self._position_switch_coordinator = coordinator
+        self._switch_recovery_report = None
+        # The switching coordinator and the final submit guard must share one
+        # reservation ledger so incumbent release and candidate authorization
+        # reconcile against the same source of truth.
+        self._aitos_capital_gateway = coordinator.gateway
+
+    async def evaluate_rebalance_scan_cycle(
+        self, opportunities: list[Opportunity]
+    ) -> list[tuple[Trade, Opportunity, Any]]:
+        """Rank all scanner-approved opportunities against current open positions."""
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            return []
+        return await coordinator.evaluate_scan_cycle(opportunities)
+
+    async def switch_position(
+        self, incumbent: Trade, candidate: Opportunity, decision: Any
+    ) -> Trade | None:
+        """Execute one approved replacement through the durable switch state machine."""
+        self._require_initialized()
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            raise RuntimeError("safe position switching is not configured")
+        return await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=decision
+        )
+
+    def _require_initialized(self) -> None:
+        if not self._initialized:
+            raise ModuleNotInitializedError(
+                "TradeLifecycle.initialize() must be called first"
+            )
