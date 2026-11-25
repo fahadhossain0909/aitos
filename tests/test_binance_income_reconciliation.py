@@ -102,7 +102,7 @@ def make_trade(
     )
 
 
-def make_service(exchange, lifecycle, bus=None, store=None):
+def make_service(exchange, lifecycle, bus=None, store=None, canonical_posting=None):
     bus = bus or FakeEventBus()
     store = store or FakeStateStore()
 
@@ -110,7 +110,12 @@ def make_service(exchange, lifecycle, bus=None, store=None):
         store.persisted.append(trade.trade_id)
 
     service = BinanceIncomeReconciliationService(
-        exchange, lifecycle, bus, store, persist_trade=persist_trade
+        exchange,
+        lifecycle,
+        bus,
+        store,
+        persist_trade=persist_trade,
+        canonical_posting=canonical_posting,
     )
     return service, bus, store
 
@@ -211,6 +216,41 @@ async def test_run_once_publishes_fee_and_advances_durable_cursor():
     assert store.persisted == ["position-1"]
     assert store.saved and store.cursor >= int(now.timestamp() * 1000)
     assert exchange.calls[0]["start_time_ms"] <= int(entry.timestamp() * 1000)
+
+
+@pytest.mark.asyncio
+async def test_income_reconciliation_posts_to_canonical_ledger_before_cursor():
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle([make_trade("position-canonical", entry_time=entry)])
+    now = datetime.now(timezone.utc)
+    exchange = FakeExchange(
+        [
+            {
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.03",
+                "tranId": 9010,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": int((now - timedelta(seconds=10)).timestamp() * 1000),
+            }
+        ]
+    )
+    canonical_posts = []
+
+    async def post_canonical(trade_id, adjustment_id, kind, amount):
+        canonical_posts.append((trade_id, adjustment_id, kind, amount))
+
+    service, bus, store = make_service(
+        exchange, lifecycle, canonical_posting=post_canonical
+    )
+    result = await service.run_once()
+
+    assert result == {"rows": 1, "published": 1, "unattributed": 0}
+    assert canonical_posts == [
+        ("position-canonical", "binance:income:9010", "funding", -0.03)
+    ]
+    assert bus.events[0].payload["adjustment_id"] == "binance:income:9010"
+    assert store.saved
 
 
 @pytest.mark.asyncio
