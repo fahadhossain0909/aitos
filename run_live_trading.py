@@ -127,9 +127,7 @@ async def _publish_canonical_financial_snapshot(
     if previous is None:
         # First adoption establishes an explicit baseline from the observed
         # venue equity; it does not fabricate pre-import account history.
-        starting_equity = (
-            float(venue_equity) - realized - unrealized - funding + fees
-        )
+        starting_equity = float(venue_equity) - realized - unrealized - funding + fees
     else:
         starting_equity = float(previous["starting_equity"])
     snapshot = {
@@ -289,6 +287,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     await trade_state_persistence.initialize()
     components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
     canonical_writer = components.trade_lifecycle._postgres_canonical_oms_writer
+
     async def read_projected_trade_state():
         projected_open = await state_store.load_open_trades()
         projected_closed = await state_store.load_closed_trades()
@@ -516,7 +515,8 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 "aitos_extra": {
                     "pending_intents": len(pending_canonical_intents),
                     "client_ids": [
-                        str(row.get("client_id", "")) for row in pending_canonical_intents[:20]
+                        str(row.get("client_id", ""))
+                        for row in pending_canonical_intents[:20]
                     ],
                     "new_entries_allowed": False,
                 }
