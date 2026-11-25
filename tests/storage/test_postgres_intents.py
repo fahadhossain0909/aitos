@@ -247,6 +247,142 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
 
 
 @pytest.mark.asyncio
+async def test_postgres_intent_cas_survives_independent_pools_and_restarts():
+    dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
+    if not dsn:
+        pytest.skip("AITOS_POSTGRES_OMS_TEST_DSN is not configured")
+    import asyncpg
+
+    schema = "aitos_multiwriter_restart_" + uuid.uuid4().hex
+    admin = await asyncpg.connect(dsn)
+    await admin.execute(f'CREATE SCHEMA "{schema}"')
+    pool_a = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=1,
+        max_size=3,
+        server_settings={"search_path": schema},
+    )
+    pool_b = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=1,
+        max_size=3,
+        server_settings={"search_path": schema},
+    )
+    pool_c = None
+    try:
+        versions = await __import__("asyncio").gather(
+            apply_postgres_migrations(pool_a),
+            apply_postgres_migrations(pool_b),
+        )
+        assert versions == [7, 7]
+        oms_a = PostgresCanonicalOMS(pool_a)
+        oms_b = PostgresCanonicalOMS(pool_b)
+        fence_a = await oms_a.acquire_writer(
+            "live:multiwriter", "writer-a", expected_generation=0
+        )
+        store_a = PostgresCanonicalExecutionIntentStore(oms_a, fence_a)
+        store_b = PostgresCanonicalExecutionIntentStore(oms_b, fence_a)
+        await store_a.begin(
+            {
+                "client_order_id": "multiwriter-client-001",
+                "symbol": "ETHUSDT",
+                "side": "BUY",
+                "quantity": "0.1",
+                "reference_price": "3000",
+                "reduce_only": False,
+            }
+        )
+        outcomes = await __import__("asyncio").gather(
+            store_a.record_result(
+                "multiwriter-client-001",
+                {
+                    "order_id": "5001",
+                    "symbol": "ETHUSDT",
+                    "side": "BUY",
+                    "filled_quantity": "0.1",
+                    "fill_price": "3000",
+                    "success": True,
+                },
+            ),
+            store_b.record_result(
+                "multiwriter-client-001",
+                {
+                    "order_id": "5001",
+                    "symbol": "ETHUSDT",
+                    "side": "BUY",
+                    "filled_quantity": "0.1",
+                    "fill_price": "3000",
+                    "success": True,
+                },
+            ),
+            return_exceptions=True,
+        )
+        assert sum(isinstance(value, dict) for value in outcomes) == 1
+        assert sum(isinstance(value, OMSConflict) for value in outcomes) == 1
+        accepted = await store_b.get("multiwriter-client-001")
+        assert accepted["state"] == "CONFIRMED"
+        assert accepted["revision"] == 2
+
+        fence_b = await oms_b.acquire_writer(
+            "live:multiwriter", "writer-b", expected_generation=1
+        )
+        stale_store = PostgresCanonicalExecutionIntentStore(oms_a, fence_a)
+        with pytest.raises(OMSConflict, match="stale writer"):
+            await stale_store.transition(
+                "multiwriter-client-001",
+                expected_revision=2,
+                expected_state="CONFIRMED",
+                new_state="TERMINAL",
+            )
+
+        await pool_a.close()
+        pool_c = await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=1,
+            max_size=2,
+            server_settings={"search_path": schema},
+        )
+        restarted_oms = PostgresCanonicalOMS(pool_c)
+        restarted_store = PostgresCanonicalExecutionIntentStore(
+            restarted_oms, fence_b
+        )
+        recovered = await restarted_store.get("multiwriter-client-001")
+        assert recovered["state"] == "CONFIRMED"
+        assert recovered["revision"] == 2
+        events = await restarted_oms.read_events(
+            "live:multiwriter", "intent-multiwriter-client-001"
+        )
+        assert [event.revision for event in events] == [1, 2]
+        assert events[-1].payload["result"]["order_id"] == "5001"
+
+        # A second independent pool restart reads the same committed history.
+        await pool_b.close()
+        await pool_c.close()
+        pool_b = await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=1,
+            max_size=2,
+            server_settings={"search_path": schema},
+        )
+        second_restart = PostgresCanonicalOMS(pool_b)
+        final_events = await second_restart.read_events(
+            "live:multiwriter", "intent-multiwriter-client-001"
+        )
+        assert [event.event_hash for event in final_events] == [
+            event.event_hash for event in events
+        ]
+    finally:
+        if pool_a is not None and not pool_a.is_closing():
+            await pool_a.close()
+        if pool_b is not None and not pool_b.is_closing():
+            await pool_b.close()
+        if pool_c is not None and not pool_c.is_closing():
+            await pool_c.close()
+        await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        await admin.close()
+
+
+@pytest.mark.asyncio
 async def test_postgres_protection_intent_accepts_multiple_atomic_child_fills():
     dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
     if not dsn:
