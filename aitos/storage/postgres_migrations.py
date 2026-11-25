@@ -313,9 +313,40 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=6,
+        name="canonical_oms_outbox_leases",
+        statements=(
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS claim_owner TEXT
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS claim_token UUID
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS last_error TEXT
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_outbox_lease
+            ON aitos_oms_outbox (claim_until, created_at)
+            WHERE projected_at IS NULL
+            """,
+        ),
+    ),
 )
 
-
+ 
 async def verify_postgres_schema(pool) -> int:
     """Validate an existing schema using read-only transactions and no DDL."""
     async with pool.acquire() as conn, conn.transaction(readonly=True):
