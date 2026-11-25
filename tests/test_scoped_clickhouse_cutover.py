@@ -186,7 +186,9 @@ class RollbackClient:
             self.tables.remove(RUNTIME_BACKUP)
             self.tables.remove(CLOSED_SOURCE)
             self.tables.remove(CLOSED_BACKUP)
-            self.tables.update({RUNTIME_SOURCE, CLOSED_SOURCE, RUNTIME_TARGET, CLOSED_TARGET})
+            self.tables.update(
+                {RUNTIME_SOURCE, CLOSED_SOURCE, RUNTIME_TARGET, CLOSED_TARGET}
+            )
             self.datasets[RUNTIME_TARGET] = self.datasets.pop(RUNTIME_SOURCE)
             self.datasets[RUNTIME_SOURCE] = self.datasets.pop(RUNTIME_BACKUP)
             self.datasets[CLOSED_TARGET] = self.datasets.pop(CLOSED_SOURCE)
@@ -197,7 +199,9 @@ class RollbackClient:
             self.tables.remove(CLOSED_SOURCE)
             self.tables.remove(RUNTIME_TARGET)
             self.tables.remove(CLOSED_TARGET)
-            self.tables.update({RUNTIME_SOURCE, CLOSED_SOURCE, RUNTIME_BACKUP, CLOSED_BACKUP})
+            self.tables.update(
+                {RUNTIME_SOURCE, CLOSED_SOURCE, RUNTIME_BACKUP, CLOSED_BACKUP}
+            )
             self.datasets[RUNTIME_BACKUP] = self.datasets.pop(RUNTIME_SOURCE)
             self.datasets[RUNTIME_SOURCE] = self.datasets.pop(RUNTIME_TARGET)
             self.datasets[CLOSED_BACKUP] = self.datasets.pop(CLOSED_SOURCE)
@@ -235,7 +239,7 @@ def test_verified_rollback_requires_both_operator_confirmations():
 
 def test_verified_rollback_refuses_raw_payload_divergence_before_rename():
     client = RollbackClient(mismatch=True)
-    with pytest.raises(RuntimeError, match="rollback parity failed"):
+    with pytest.raises(RuntimeError, match="source fingerprint mismatch"):
         _verified_rollback(
             client, writers_quiesced=True, backup_confirmed=True
         )
