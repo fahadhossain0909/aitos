@@ -491,6 +491,47 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             "cumulative_quantity"
         ] == Decimal("0.02")
 
+        # A child may be partially filled and then canceled/expired. The
+        # terminal venue status must still be accepted and journaled atomically.
+        terminal_child_fill = {
+            **child_fill,
+            "cumulative_quantity": "0.03",
+            "cumulative_quote": "3",
+            "delta_quantity": "0.01",
+            "delta_quote": "1",
+            "status": "CANCELED",
+        }
+        terminal_child_ledger = [
+            {
+                "account_code": "CASH",
+                "currency": "USDT",
+                "debit": "1",
+                "credit": "0",
+                "reference": "child:321:654:terminal",
+            },
+            {
+                "account_code": "OPEN_POSITION_ASSET",
+                "currency": "USDT",
+                "debit": "0",
+                "credit": "1",
+                "reference": "child:321:654:terminal",
+            },
+        ]
+        terminal_commit = await recovery_writer.apply_protection_child_fill(
+            canonical_intents,
+            protection_client_id,
+            restored_trade,
+            child_fill=terminal_child_fill,
+            ledger_entries=terminal_child_ledger,
+        )
+        assert terminal_commit["trade_revision"] == 8
+        terminal_watermark = await canonical_intents.protection_child_watermark(
+            "321", "654"
+        )
+        assert terminal_watermark["cumulative_quantity"] == Decimal("0.03")
+        assert terminal_watermark["cumulative_quote"] == Decimal("3")
+        assert terminal_watermark["status"] == "CANCELED"
+
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
             _closed_trades = []

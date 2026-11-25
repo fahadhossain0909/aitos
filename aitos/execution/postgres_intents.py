@@ -1249,6 +1249,10 @@ class PostgresCanonicalExecutionIntentStore:
             allowed_child_statuses = {
                 "PARTIALLY_FILLED",
                 "FILLED",
+                "CANCELED",
+                "EXPIRED",
+                "EXPIRED_IN_MATCH",
+                "REJECTED",
                 "PARTIALLY_FILLED_TERMINAL",
             }
             if (
