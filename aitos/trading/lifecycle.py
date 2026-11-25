@@ -1259,6 +1259,7 @@ class TradeLifecycle(AITOSModule):
         adjustment_id: str,
         kind: str,
         amount_usd: float,
+        publish: bool = True,
     ) -> Trade:
         """Apply an idempotent realized fee or funding adjustment.
 
@@ -1331,18 +1332,19 @@ class TradeLifecycle(AITOSModule):
                         extra={"aitos_extra": {"trade_id": trade.trade_id}},
                     )
         trade.updated_at = utc_now_iso()
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_POSITION_UPDATED,
-                payload={
-                    **trade.to_dict(),
-                    "reason": "trade_cost_adjustment",
-                    "adjustment_id": adjustment_id,
-                    "adjustment_kind": kind,
-                },
-                source_module=self.module_id,
+        if publish:
+            await self._event_bus.publish(
+                Event(
+                    topic=TOPIC_POSITION_UPDATED,
+                    payload={
+                        **trade.to_dict(),
+                        "reason": "trade_cost_adjustment",
+                        "adjustment_id": adjustment_id,
+                        "adjustment_kind": kind,
+                    },
+                    source_module=self.module_id,
+                )
             )
-        )
         return trade
 
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
@@ -2497,7 +2499,6 @@ class TradeLifecycle(AITOSModule):
         from aitos.execution.postgres_lifecycle_writer import (
             bind_postgres_canonical_oms,
         )
-
         writer = bind_postgres_canonical_oms(self, oms=oms, fence=fence)
         bind_writer = getattr(
             self._order_executor, "bind_canonical_lifecycle_writer", None

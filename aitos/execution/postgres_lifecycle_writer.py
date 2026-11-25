@@ -172,6 +172,108 @@ class PostgresLifecycleStateWriter:
                 self._last_event_ids[trade] = event.event_id
             return event
 
+    async def apply_cost_adjustment(
+        self,
+        trade: Any,
+        adjustment_id: str,
+        kind: str,
+        amount_usd: Any,
+    ) -> Any:
+        """Atomically persist a fee/funding adjustment, Trade snapshot and ledger.
+
+        The caller applies the idempotent adjustment to its in-memory Trade
+        without publishing or writing a legacy projection. PostgreSQL then
+        commits the event, balanced journal lines and projection outbox as one
+        transaction. A projection failure is replayable from the outbox.
+        """
+        from decimal import Decimal, InvalidOperation
+
+        trade_id = str(getattr(trade, "trade_id", "") or "").strip()
+        to_dict = getattr(trade, "to_dict", None)
+        adjustment = str(adjustment_id).strip()
+        if not trade_id or not callable(to_dict) or not adjustment:
+            raise ValueError("Trade and stable adjustment identity are required")
+        if kind not in {"fee", "funding"}:
+            raise ValueError("cost adjustment kind must be fee or funding")
+        try:
+            amount = Decimal(str(amount_usd))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError("cost adjustment amount must be decimal") from None
+        if not amount.is_finite() or amount == 0:
+            raise ValueError("cost adjustment amount must be finite and non-zero")
+        if kind == "fee" and amount < 0:
+            raise ValueError("fee adjustment must be a positive cost")
+        scope = str(getattr(trade, "account_scope", "") or "")
+        if scope and scope != self.fence.account_scope:
+            raise ValueError("Trade account scope differs from canonical OMS writer")
+        trade.account_scope = self.fence.account_scope
+        snapshot = to_dict()
+        if not isinstance(snapshot, dict) or snapshot.get("trade_id") != trade_id:
+            raise ValueError("cost adjustment Trade snapshot identity is invalid")
+        absolute = abs(amount)
+        if kind == "fee":
+            debit_account, credit_account = "EXPENSE_FEES", "CASH"
+        elif amount > 0:
+            debit_account, credit_account = "CASH", "FUNDING_INCOME"
+        else:
+            debit_account, credit_account = "FUNDING_EXPENSE", "CASH"
+        event_id = f"income:{adjustment}"
+        if len(event_id) > 192:
+            raise ValueError("income event identity exceeds canonical OMS limit")
+        lock = self._locks.setdefault(trade_id, asyncio.Lock())
+        async with lock:
+            revision = await self._revision(trade_id)
+            parent_event_id = self._last_event_ids.get(trade_id)
+            event = await self.oms.append(
+                self.fence,
+                aggregate_id=trade_id,
+                event_id=event_id,
+                expected_revision=revision,
+                payload={
+                    "event_type": "TRADE_COST_ADJUSTMENT",
+                    "trade_id": trade_id,
+                    "adjustment_id": adjustment,
+                    "kind": kind,
+                    "amount": format(amount, "f"),
+                    "currency": "USDT",
+                    "trade": snapshot,
+                    "causality": {
+                        "causation_id": adjustment,
+                        "correlation_id": trade_id,
+                        "parent_event_id": parent_event_id,
+                    },
+                },
+                ledger_entries=[
+                    {
+                        "account_code": debit_account,
+                        "currency": "USDT",
+                        "debit": format(absolute, "f"),
+                        "credit": "0",
+                        "reference": adjustment,
+                    },
+                    {
+                        "account_code": credit_account,
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(absolute, "f"),
+                        "reference": adjustment,
+                    },
+                ],
+                causation_id=adjustment,
+                correlation_id=trade_id,
+                parent_event_id=parent_event_id,
+            )
+            self._revisions[trade_id] = event.revision
+            self._last_event_ids[trade_id] = event.event_id
+            await self.projection_writer(trade)
+            await self.oms.mark_projected(
+                self.fence.account_scope,
+                trade_id,
+                event.revision,
+                event_hash=event.event_hash,
+            )
+            return event
+
     async def apply_execution_intent(
         self,
         intents: Any,

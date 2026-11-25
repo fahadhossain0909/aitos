@@ -487,10 +487,10 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         components.trade_lifecycle,
         event_bus,
         state_store,
-        # Cost adjustments must first update the canonical trade snapshot,
-        # then append the fee/funding journal event under the same OMS fence.
+        # Cost adjustments are committed as one PostgreSQL event containing
+        # both the updated Trade snapshot and balanced fee/funding ledger lines.
         persist_trade=canonical_writer,
-        canonical_posting=canonical_writer.append_cost_adjustment,
+        canonical_posting=canonical_writer.apply_cost_adjustment,
     )
     cleanup.push_async_callback(income_reconciler.shutdown)
     income_reconciliation_ready = False

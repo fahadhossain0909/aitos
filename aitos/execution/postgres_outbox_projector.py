@@ -193,7 +193,11 @@ class PostgresOMSOutboxProjector:
                 (
                     event
                     for event in reversed(events)
-                    if event.payload.get("event_type") == "TRADE_SNAPSHOT"
+                    if event.payload.get("event_type") in {
+                        "TRADE_SNAPSHOT",
+                        "TRADE_COST_ADJUSTMENT",
+                    }
+                    and isinstance(event.payload.get("trade"), dict)
                 ),
                 None,
             )
@@ -298,9 +302,11 @@ class PostgresOMSOutboxProjector:
         if payload != event.payload:
             raise OMSIntegrityError("outbox payload differs from canonical event")
 
-        if payload.get("event_type") != "TRADE_SNAPSHOT":
-            # Execution-intent and financial events are canonical write models;
-            # they require no duplicate mutable projection in the legacy stores.
+        if (
+            payload.get("event_type") not in {"TRADE_SNAPSHOT", "TRADE_COST_ADJUSTMENT"}
+            or not isinstance(payload.get("trade"), dict)
+        ):
+            # Intent and financial-only events have no Trade read-model payload.
             return
 
         # A delayed/expired worker may be replaying an older snapshot after a
@@ -310,7 +316,11 @@ class PostgresOMSOutboxProjector:
             (
                 item
                 for item in reversed(events)
-                if item.payload.get("event_type") == "TRADE_SNAPSHOT"
+                if item.payload.get("event_type") in {
+                    "TRADE_SNAPSHOT",
+                    "TRADE_COST_ADJUSTMENT",
+                }
+                and isinstance(item.payload.get("trade"), dict)
             ),
             None,
         )

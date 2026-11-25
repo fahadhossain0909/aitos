@@ -303,6 +303,31 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             "trade-restore", "binance:income:fee-9001", "fee", "0.25"
         )
         assert duplicate_fee.event_hash == fee_event.event_hash
+
+        # A real income adjustment carries the updated Trade snapshot and its
+        # balanced financial postings in one canonical PostgreSQL transaction.
+        restored_trade.fees_paid_usd = 0.05
+        restored_trade.cost_adjustments["binance:income:fee-9003"] = {
+            "kind": "fee",
+            "amount_usd": 0.05,
+            "recorded_at": "2026-11-25T00:00:00+00:00",
+        }
+        atomic_fee = await recovery_writer.apply_cost_adjustment(
+            restored_trade, "binance:income:fee-9003", "fee", "0.05"
+        )
+        canonical_cost_snapshot = await recovery_writer.latest_snapshot(
+            "trade-restore"
+        )
+        assert canonical_cost_snapshot["fees_paid_usd"] == 0.05
+        assert atomic_fee.payload["event_type"] == "TRADE_COST_ADJUSTMENT"
+        atomic_fee_lines = await oms.financial_trade_ledger(
+            "paper:recovery", "trade-restore"
+        )
+        assert any(
+            row["reference"] == "binance:income:fee-9003"
+            and row["account_code"] == "EXPENSE_FEES"
+            for row in atomic_fee_lines
+        )
         assert funding_event.revision == fee_event.revision + 1
         assert fee_event.payload["event_type"] == "TRADE_COST_ADJUSTMENT"
         ledger_lines = await oms.financial_trade_ledger(

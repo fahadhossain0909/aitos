@@ -82,19 +82,24 @@ class BinanceCostAdjustmentPublisher:
             # Binance reports commission as a negative income; lifecycle fee
             # accounting expects a positive cost. Funding remains signed.
             amount_usd = abs(amount) if kind == "fee" else amount
+            applied_trade = None
             if self._apply_adjustment is not None:
-                # Apply and write through to the durable trade snapshot before
-                # advancing the exchange cursor. The event below is a replayable
-                # notification, not the sole financial persistence path.
-                await self._apply_adjustment(
+                # Mutate the in-memory Trade idempotently. When a canonical
+                # posting callback is configured it owns the atomic PostgreSQL
+                # Trade snapshot + financial ledger transaction and projection.
+                applied_trade = await self._apply_adjustment(
                     str(trade_id),
                     f"binance:income:{transaction_id}",
                     kind,
                     amount_usd,
                 )
             if self._canonical_posting is not None:
+                if applied_trade is None:
+                    raise RuntimeError(
+                        "canonical cost posting requires the resolved Trade aggregate"
+                    )
                 await self._canonical_posting(
-                    str(trade_id),
+                    applied_trade,
                     f"binance:income:{transaction_id}",
                     kind,
                     amount_usd,
@@ -157,6 +162,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
         self._commission_close_grace_ms = int(commission_close_grace_ms)
         self._account = account
         self._persist_trade = persist_trade
+        self._canonical_posting = canonical_posting
         self._publisher = BinanceCostAdjustmentPublisher(
             event_bus,
             self.resolve_trade_id,
@@ -315,8 +321,11 @@ class BinanceIncomeReconciliationService(AITOSModule):
             adjustment_id=adjustment_id,
             kind=kind,
             amount_usd=amount_usd,
+            publish=self._canonical_posting is None,
         )
-        await self._persist_trade(trade)
+        if self._canonical_posting is None:
+            await self._persist_trade(trade)
+        return trade
 
     async def reconcile_startup(self) -> dict[str, int]:
         """Run one complete durable fee/funding pass before live entries.
