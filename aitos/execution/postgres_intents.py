@@ -7,6 +7,7 @@ SQLite journal. Runtime adoption must be explicit; it never silently dual-writes
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from aitos.execution.postgres_oms import (
@@ -120,6 +121,27 @@ class PostgresCanonicalExecutionIntentStore:
             raise ValueError(f"invalid execution-intent transition {expected_state}->{new_state}")
         if result is not None and not isinstance(result, dict):
             raise TypeError("execution result must be an object")
+        if new_state in {"CONFIRMED", "PROTECTED", "REJECTED"}:
+            if result is None:
+                raise ValueError(f"{new_state} intent requires result evidence")
+            order_id = result.get("order_id")
+            if new_state in {"CONFIRMED", "PROTECTED"} and (
+                not isinstance(order_id, str) or not order_id
+            ):
+                raise ValueError(f"{new_state} intent requires a venue order_id")
+            try:
+                filled = Decimal(str(result.get("filled_quantity", "0")))
+                fill_price = Decimal(str(result.get("fill_price", "0")))
+            except (InvalidOperation, ValueError):
+                raise ValueError("execution fill evidence must be decimal") from None
+            if not filled.is_finite() or not fill_price.is_finite():
+                raise ValueError("execution fill evidence must be finite")
+            if new_state == "CONFIRMED" and (filled <= 0 or fill_price <= 0):
+                raise ValueError("confirmed execution requires positive fill evidence")
+            if new_state == "PROTECTED" and (filled != 0 or fill_price <= 0):
+                raise ValueError("protective acceptance must be unfilled with a positive trigger")
+            if new_state == "REJECTED" and filled != 0:
+                raise ValueError("rejected execution cannot contain a partial fill")
         if trade_id is not None:
             trade_id = _identifier(trade_id, "trade_id")
         aggregate = f"intent-{client}"
