@@ -85,3 +85,39 @@ def test_role_authorizer_is_mandatory(tmp_path):
             allowed_origins={"https://console.example"},
             rp_id="console.example",
         )
+
+
+def test_signed_approval_is_shared_across_instances_and_consumed_once(tmp_path):
+    path = tmp_path / "shared-approval.sqlite"
+    first = LiveApprovalControlPlane(
+        path,
+        signing_key=b"s" * 32,
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: user == "alice" and role == "live_trader",
+    )
+    executor_authority = LiveApprovalControlPlane(
+        path,
+        signing_key=b"s" * 32,
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: user == "alice" and role == "live_trader",
+    )
+    action = {
+        "environment": "binance-usdm-mainnet",
+        "client_order_id": "aitos-approved-client-001",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": "0.01",
+        "order_type": "MARKET",
+        "reduce_only": False,
+    }
+    challenge = first.issue_challenge(user_id="alice", action=action, now=100)
+    first.approve(
+        challenge, assertion=b"authenticator-assertion", verifier=verifier, now=101
+    )
+
+    receipt = executor_authority.get_unconsumed_token(action)
+    assert executor_authority.consume(receipt, action=action, now=102) == "alice"
+    with pytest.raises(ApprovalDenied, match="consumed"):
+        first.consume(receipt, action=action, now=103)
