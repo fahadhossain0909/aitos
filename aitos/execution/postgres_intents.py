@@ -1196,11 +1196,10 @@ class PostgresCanonicalExecutionIntentStore:
             )
             if row is None:
                 raise OMSConflict("confirmed execution intent does not exist")
-            if (
-                int(row["revision"]) != expected_revision
-                or row["state"] != "CONFIRMED"
-            ):
-                raise OMSConflict("confirmed execution intent revision/state CAS failed")
+            if int(row["revision"]) != expected_revision or row["state"] != "CONFIRMED":
+                raise OMSConflict(
+                    "confirmed execution intent revision/state CAS failed"
+                )
             if row["trade_id"] not in {None, trade}:
                 raise OMSConflict("confirmed execution intent belongs to another Trade")
             request_payload = json.loads(row["request_json"])
@@ -1219,7 +1218,9 @@ class PostgresCanonicalExecutionIntentStore:
                 filled_quantity = Decimal(str(result_payload["filled_quantity"]))
                 fill_price = Decimal(str(result_payload["fill_price"]))
             except (KeyError, InvalidOperation, TypeError, ValueError):
-                raise OMSConflict("confirmed execution fill evidence is malformed") from None
+                raise OMSConflict(
+                    "confirmed execution fill evidence is malformed"
+                ) from None
             if (
                 not filled_quantity.is_finite()
                 or not fill_price.is_finite()

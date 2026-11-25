@@ -282,7 +282,9 @@ class LiveApprovalControlPlane:
         digest = self._digest(action)
         now = int(time.time()) if now is None else now
         if type(now) is not int or now < 0:
-            raise ValueError("approval token lookup time must be a non-negative integer")
+            raise ValueError(
+                "approval token lookup time must be a non-negative integer"
+            )
         with self._connection() as db:
             rows = db.execute(
                 "SELECT token_id,user_id,action_digest,issued_at,expires_at,signature "

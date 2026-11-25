@@ -299,7 +299,9 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         assert pending_intent["state"] == "CONFIRMED"
         assert pending_intent["revision"] == 2
         assert projected == ["trade-002"]
-        assert len(await oms.financial_trade_ledger("paper:intent-test", "trade-002")) == 2
+        assert (
+            len(await oms.financial_trade_ledger("paper:intent-test", "trade-002")) == 2
+        )
         applied_after_protection = await intents.mark_applied("client-002", "trade-002")
         assert applied_after_protection["state"] == "APPLIED"
 

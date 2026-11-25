@@ -1310,7 +1310,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     error=str(exc),
                     client_order_id=client_order_id,
                 )
-                return self._record_execution(client_order_id, rejected)
+                return await self._record_execution(client_order_id, rejected)
             response = await self._lookup_protective_post_result(
                 symbol, client_order_id
             )

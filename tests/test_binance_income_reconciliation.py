@@ -249,7 +249,12 @@ async def test_income_reconciliation_posts_to_canonical_ledger_before_cursor():
 
     assert result == {"rows": 1, "published": 1, "unattributed": 0}
     assert canonical_posts == [
-        ("position-canonical", "binance:income:9010", "funding", -0.03)
+        (
+            lifecycle.open_trades[0],
+            "binance:income:9010",
+            "funding",
+            -0.03,
+        )
     ]
     assert bus.events[0].payload["adjustment_id"] == "binance:income:9010"
     assert store.saved
