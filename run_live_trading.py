@@ -206,9 +206,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         universe_limit=settings.tuning.scanner.universe_limit,
     )
     approval_authority = (
-        None
-        if settings.binance.testnet
-        else create_live_approval_control_plane()
+        None if settings.binance.testnet else create_live_approval_control_plane()
     )
     approved_by = confirm_live_trading(
         symbols,

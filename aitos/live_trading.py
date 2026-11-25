@@ -67,15 +67,10 @@ def create_live_approval_control_plane() -> LiveApprovalControlPlane:
         for user, roles in role_map.items()
     ):
         raise SystemExit("AITOS_OPERATOR_ROLE_MAP must map users to role arrays")
-    rp_id = (
-        os.environ.get("AITOS_WEBAUTHN_RP_ID", "").strip()
-        or parsed_origin.hostname
-    )
+    rp_id = os.environ.get("AITOS_WEBAUTHN_RP_ID", "").strip() or parsed_origin.hostname
     try:
         return LiveApprovalControlPlane(
-            Path(webauthn_db).expanduser().resolve().with_name(
-                "live-approvals.sqlite"
-            ),
+            Path(webauthn_db).expanduser().resolve().with_name("live-approvals.sqlite"),
             signing_key=signing_key.encode("utf-8"),
             allowed_origins={origin},
             rp_id=rp_id,

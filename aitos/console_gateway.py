@@ -1313,8 +1313,7 @@ def main():
             shared_origin = os.environ.get("AITOS_WEBAUTHN_ORIGIN", "").strip()
             if (
                 not shared_webauthn_db
-                or Path(shared_webauthn_db).expanduser().resolve()
-                != args.webauthn_db
+                or Path(shared_webauthn_db).expanduser().resolve() != args.webauthn_db
                 or shared_origin != config.public_origin
             ):
                 parser.exit(
