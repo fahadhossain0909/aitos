@@ -319,6 +319,30 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             LifecycleState._open_trades["trade-restore"].account_scope
             == "paper:recovery"
         )
+        # Canonical intent and financial aggregates share the journal but
+        # must never be hydrated as TradeLifecycle positions.
+        await oms.append(
+            recovery_fence,
+            aggregate_id="intent-client-1",
+            event_id="intent:client-1:revision:1",
+            expected_revision=0,
+            payload={"event_type": "EXECUTION_INTENT_CREATED", "state": "SUBMITTING"},
+        )
+        await oms.append(
+            recovery_fence,
+            aggregate_id="financial:USDT",
+            event_id="financial:USDT:revision:1",
+            expected_revision=0,
+            payload={
+                "event_type": "FINANCIAL_STATE_SNAPSHOT",
+                "financial_state": {"currency": "USDT"},
+            },
+        )
+        recovered_with_non_trade_aggregates = await recovery_writer.restore_lifecycle(
+            LifecycleState()
+        )
+        assert recovered_with_non_trade_aggregates == {"open": 1, "closed": 0}
+        assert list(LifecycleState._open_trades) == ["trade-restore"]
         assert [
             item.revision
             for item in await oms.read_events("paper:integration", "trade-1")
