@@ -234,3 +234,13 @@ cutover, or desktop identity integration. Keep Mainnet fail-closed.
   WebAuthn assertion. It does not submit or execute orders. The executor's
   server-side receipt consumer still needs a secure service integration, and
   hardware/external-origin acceptance remains open.
+
+
+## Additional implementation update — durable projection replay
+
+- PostgreSQL migration v6 adds owner/token/expiry leases, attempt counters and bounded failure diagnostics to canonical OMS outbox rows.
+- `PostgresCanonicalOMS.claim_outbox_leased()` uses `FOR UPDATE SKIP LOCKED` plus durable expiry so competing workers do not claim the same active record and abandoned claims can be recovered after process death.
+- Acknowledgement and release are fenced by the exact owner and claim token and verify the canonical event hash. Stale or duplicate acknowledgements fail closed.
+- `PostgresOMSOutboxProjector` verifies each event against the aggregate hash chain, replays trade snapshots into the configured durable projection callback, acknowledges canonical-only intent/financial events, and releases failed projections for retry.
+- The live runner invokes one bounded replay batch before startup reconciliation and on each management cycle; replay failures block fresh-exposure cycles.
+- PostgreSQL integration tests now cover exclusive claims, worker ownership, release/reclaim attempt increments and stale acknowledgement rejection. These tests are awaiting exact-head CI execution. Full ClickHouse/SQLite projection rebuild, repair of missing/out-of-order projection state, and real multi-process crash/restart acceptance remain open.
