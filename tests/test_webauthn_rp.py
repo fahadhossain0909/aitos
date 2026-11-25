@@ -391,7 +391,9 @@ def test_authentication_challenge_expiry_uses_injected_clock(tmp_path, monkeypat
     monkeypatch.setattr(
         "aitos.security.webauthn_rp.verify_authentication_response", verifier
     )
-    with pytest.raises(WebAuthnCredentialError, match="missing, expired or already consumed"):
+    with pytest.raises(
+        WebAuthnCredentialError, match="missing, expired or already consumed"
+    ):
         rp.verify_assertion(
             assertion=assertion,
             challenge=challenge,
