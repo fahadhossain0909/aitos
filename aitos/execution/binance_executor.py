@@ -104,6 +104,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise ValueError("conditional_orders_api must be algo or legacy")
         self._conditional_orders_api = conditional_orders_api
         self._intent_store = intent_store
+        self._canonical_intent_store = None
+        self._canonical_lifecycle_writer = None
         self._live_approval_authority = live_approval_authority
         self._live_approval_token_provider = live_approval_token_provider
         if not testnet and (
@@ -134,6 +136,85 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
     @property
     def intent_store(self) -> ExecutionIntentStore | None:
         return self._intent_store
+
+    @property
+    def canonical_intent_store(self):
+        """PostgreSQL execution-intent authority when bound by the live runtime."""
+        return self._canonical_intent_store
+
+    def bind_postgres_intent_store(self, store: Any) -> None:
+        """Bind the scope-fenced PostgreSQL intent store before live components start."""
+        if not callable(getattr(store, "begin", None)) or not callable(
+            getattr(store, "transition", None)
+        ):
+            raise TypeError("PostgreSQL canonical execution-intent store is required")
+        if getattr(store, "scope", None) != self.execution_scope:
+            raise ValueError("PostgreSQL intent scope differs from Binance account scope")
+        self._canonical_intent_store = store
+
+    async def refresh_canonical_intent_cache(self) -> dict[str, int]:
+        """Restore unresolved PostgreSQL submissions into the in-process safety cache."""
+        if self._canonical_intent_store is None:
+            return {"unresolved": 0}
+        rows = await self._canonical_intent_store.unresolved()
+        self._pending_execution = {
+            str(row["client_id"]): str(row["symbol"]) for row in rows
+        }
+        return {"unresolved": len(rows)}
+
+    def bind_canonical_lifecycle_writer(self, writer: Any) -> None:
+        if not callable(getattr(writer, "apply_execution_intent", None)):
+            raise TypeError("canonical lifecycle writer is required")
+        self._canonical_lifecycle_writer = writer
+
+    async def acknowledge_execution_async(self, client_order_id: str, trade_id: str) -> None:
+        if self._canonical_intent_store is not None:
+            row = await self._canonical_intent_store.get(client_order_id)
+            if row is None or row["state"] not in {"APPLIED", "TERMINAL"}:
+                raise ExecutionUncertainError(
+                    trade_id, client_order_id, "canonical execution intent is not atomically applied"
+                )
+        elif self._intent_store is not None:
+            self._intent_store.mark_applied(client_order_id, trade_id)
+        self._pending_execution.pop(client_order_id, None)
+
+    async def acknowledge_protection_async(self, result: OrderResult, trade_id: str) -> None:
+        client_id = result.client_order_id
+        if not client_id:
+            raise ExecutionUncertainError(
+                trade_id, result.order_id, "protective acceptance lacks a client intent ID"
+            )
+        if self._canonical_intent_store is not None:
+            if self._canonical_lifecycle_writer is None:
+                raise RuntimeError("canonical lifecycle writer is not bound")
+            class _TradeLookup:
+                pass
+            # The lifecycle passes the active Trade through the dedicated method below.
+            raise RuntimeError("acknowledge_protection_async requires a Trade snapshot")
+        if self._intent_store is not None:
+            self._intent_store.mark_applied(client_id, trade_id)
+        self._pending_execution.pop(client_id, None)
+
+    async def acknowledge_protection_trade(
+        self, result: OrderResult, trade: Any
+    ) -> None:
+        client_id = result.client_order_id
+        if not client_id:
+            raise ExecutionUncertainError(
+                trade.symbol, result.order_id, "protective acceptance lacks a client intent ID"
+            )
+        if self._canonical_intent_store is not None:
+            if self._canonical_lifecycle_writer is None:
+                raise RuntimeError("canonical lifecycle writer is not bound")
+            await self._canonical_lifecycle_writer.apply_execution_intent(
+                self._canonical_intent_store,
+                client_id,
+                trade,
+                ledger_entries=[],
+            )
+        elif self._intent_store is not None:
+            self._intent_store.mark_applied(client_id, trade.trade_id)
+        self._pending_execution.pop(client_id, None)
 
     @property
     def hedge_mode(self) -> bool:
@@ -461,7 +542,20 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         params.update(
             self._position_params(request.side, is_closing_order=request.reduce_only)
         )
-        if self._intent_store is not None:
+        if self._canonical_intent_store is not None:
+            await self._canonical_intent_store.begin(
+                {
+                    "client_order_id": client_id,
+                    "symbol": request.symbol,
+                    "side": request.side.value,
+                    "quantity": format(Decimal(str(quantity)), "f"),
+                    "reference_price": format(Decimal(str(request.reference_price)), "f"),
+                    "order_type": request.order_type,
+                    "reduce_only": request.reduce_only,
+                    "owner_trade_id": request.owner_trade_id,
+                }
+            )
+        elif self._intent_store is not None:
             self._intent_store.begin(request)
         self._pending_execution[client_id] = request.symbol
         try:
@@ -480,7 +574,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         success=False,
                         error=str(exc),
                     )
-                    return self._record_execution(client_id, result)
+                    return await self._record_execution(client_id, result)
                 response = await self.get_order_by_client_id(request.symbol, client_id)
             except asyncio.CancelledError:
                 raise
@@ -520,8 +614,20 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "authoritative terminal fill/rejection not established",
             ) from None
 
-    def _record_execution(self, client_id: str, result: OrderResult) -> OrderResult:
-        if self._intent_store is not None:
+    async def _record_execution(self, client_id: str, result: OrderResult) -> OrderResult:
+        payload = {
+            "order_id": str(result.order_id),
+            "symbol": result.symbol,
+            "side": result.side.value,
+            "filled_quantity": format(Decimal(str(result.filled_quantity)), "f"),
+            "fill_price": format(Decimal(str(result.fill_price)), "f"),
+            "filled_at": result.filled_at,
+            "success": bool(result.success),
+            "error": result.error,
+        }
+        if self._canonical_intent_store is not None:
+            await self._canonical_intent_store.record_result(client_id, payload)
+        elif self._intent_store is not None:
             self._intent_store.record_result(client_id, result)
         if not result.success:
             self._pending_execution.pop(client_id, None)
