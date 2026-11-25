@@ -1081,7 +1081,13 @@ class TradeStatePersistence:
             or value != value.strip()
             or not value.isalnum()
         ]
-        symbols = sorted({value.upper() for value in raw_symbols if isinstance(value, str) and value.strip()})
+        symbols = sorted(
+            {
+                value.upper()
+                for value in raw_symbols
+                if isinstance(value, str) and value.strip()
+            }
+        )
         if not trades:
             return {
                 "symbols": [],
@@ -1125,7 +1131,9 @@ class TradeStatePersistence:
                 )
                 missing_trade = sorted(set(symbols) - set(item["trade_symbols"]))
                 missing_kline = sorted(set(symbols) - set(item["kline_symbols"]))
-                item["verified"] = not malformed_symbols and not missing_trade and not missing_kline
+                item["verified"] = (
+                    not malformed_symbols and not missing_trade and not missing_kline
+                )
                 if item["verified"]:
                     verified_count += 1
                 else:
