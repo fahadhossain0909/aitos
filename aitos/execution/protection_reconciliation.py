@@ -736,7 +736,7 @@ async def recover_accepted_initial_stop_submissions(
             trade.updated_at = datetime.now(timezone.utc).isoformat()
             await persist_trade(trade)
             if row.get("state") == "SUBMITTING":
-                await intent_store.record_protection(client_id, result)
+                await _call_sync_or_async(intent_store.record_protection, client_id, result)
             await _call_sync_or_async(
                 intent_store.mark_applied, client_id, owner_trade_id
             )
@@ -1247,7 +1247,7 @@ async def recover_protection_handovers(
                     client_order_id=client_id,
                 )
                 if getattr(executor, "canonical_intent_store", None) is not None:
-                    await executor.acknowledge_protection_trade(result, trade)
+                    await _acknowledge_protection(executor, result, trade)
                 else:
                     executor.acknowledge_protection(result, trade_id)
             recovered.append(handover_id)
