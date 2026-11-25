@@ -7,7 +7,7 @@ SQLite journal. Runtime adoption must be explicit; it never silently dual-writes
 from __future__ import annotations
 
 import json
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
 from aitos.execution.postgres_oms import (
@@ -17,6 +17,92 @@ from aitos.execution.postgres_oms import (
     _event_hash,
     _identifier,
 )
+
+def _financial_state_snapshot(
+    snapshot: dict[str, Any], previous: dict[str, Any] | None
+) -> dict[str, str]:
+    """Validate accounting inputs and derive equity and path-dependent drawdown."""
+    required = {
+        "currency",
+        "starting_equity",
+        "realized_pnl",
+        "unrealized_pnl",
+        "fees",
+        "funding",
+    }
+    if not isinstance(snapshot, dict) or set(snapshot) != required:
+        raise ValueError(
+            "financial snapshot must contain currency, starting_equity, "
+            "realized_pnl, unrealized_pnl, fees and funding only"
+        )
+    currency = _identifier(str(snapshot.get("currency") or ""), "currency")
+    if not 2 <= len(currency) <= 12 or not all(
+        "A" <= char <= "Z" or "0" <= char <= "9" for char in currency
+    ):
+        raise ValueError("financial snapshot currency must be an uppercase code")
+
+    def amount(name: str, *, nonnegative: bool = False) -> Decimal:
+        raw = snapshot[name]
+        if isinstance(raw, bool):
+            raise ValueError(f"financial {name} must be a decimal amount")
+        try:
+            value = Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError(f"financial {name} must be a decimal amount") from None
+        if not value.is_finite() or (nonnegative and value < 0):
+            raise ValueError(f"financial {name} is non-finite or negative")
+        normalized = value.normalize()
+        scale = max(0, -normalized.as_tuple().exponent)
+        integer_digits = max(1, normalized.adjusted() + 1) if value else 1
+        if scale > 18 or integer_digits > 20:
+            raise ValueError(f"financial {name} exceeds NUMERIC(38,18)")
+        return value
+
+    with localcontext() as context:
+        context.prec = 60
+        starting = amount("starting_equity", nonnegative=True)
+        realized = amount("realized_pnl")
+        unrealized = amount("unrealized_pnl")
+        fees = amount("fees", nonnegative=True)
+        funding = amount("funding")
+        equity = starting + realized + unrealized + funding - fees
+        if previous is not None:
+            if previous.get("currency") != currency:
+                raise ValueError("financial currency cannot change within an aggregate")
+            previous_starting = Decimal(str(previous["starting_equity"]))
+            if previous_starting != starting:
+                raise ValueError("starting equity is immutable within a currency ledger")
+            previous_peak = Decimal(str(previous["peak_equity"]))
+            previous_max_drawdown = Decimal(str(previous["max_drawdown"]))
+            previous_max_drawdown_pct = Decimal(
+                str(previous["max_drawdown_pct"])
+            )
+        else:
+            previous_peak = starting
+            previous_max_drawdown = Decimal(0)
+            previous_max_drawdown_pct = Decimal(0)
+        peak = max(previous_peak, equity)
+        drawdown = max(Decimal(0), peak - equity)
+        drawdown_pct = (
+            drawdown / peak * Decimal(100) if peak > 0 else Decimal(0)
+        )
+        max_drawdown = max(previous_max_drawdown, drawdown)
+        max_drawdown_pct = max(previous_max_drawdown_pct, drawdown_pct)
+    return {
+        "currency": currency,
+        "starting_equity": format(starting, "f"),
+        "realized_pnl": format(realized, "f"),
+        "unrealized_pnl": format(unrealized, "f"),
+        "fees": format(fees, "f"),
+        "funding": format(funding, "f"),
+        "equity": format(equity, "f"),
+        "peak_equity": format(peak, "f"),
+        "drawdown": format(drawdown, "f"),
+        "drawdown_pct": format(drawdown_pct, "f"),
+        "max_drawdown": format(max_drawdown, "f"),
+        "max_drawdown_pct": format(max_drawdown_pct, "f"),
+    }
+
 
 _ALLOWED_TRANSITIONS = {
     "SUBMITTING": {"CONFIRMED", "REJECTED", "PROTECTED"},
@@ -240,6 +326,8 @@ class PostgresCanonicalExecutionIntentStore:
         expected_trade_revision: int,
         trade_snapshot: dict[str, Any],
         ledger_entries: list[dict[str, Any]] | None = None,
+        financial_snapshot: dict[str, Any] | None = None,
+        expected_financial_revision: int | None = None,
     ) -> dict[str, Any]:
         """Atomically apply an execution intent, trade snapshot and ledger journal.
 
@@ -279,6 +367,15 @@ class PostgresCanonicalExecutionIntentStore:
             reference = entry.get("reference")
             if reference is not None and len(reference) > 256:
                 raise ValueError("financial ledger reference exceeds 256 characters")
+        if (financial_snapshot is None) != (expected_financial_revision is None):
+            raise ValueError(
+                "financial snapshot and expected financial revision must be supplied together"
+            )
+        if expected_financial_revision is not None and (
+            type(expected_financial_revision) is not int
+            or expected_financial_revision < 0
+        ):
+            raise ValueError("expected financial revision must be non-negative")
 
         intent_aggregate = f"intent-{client}"
         intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
@@ -384,6 +481,75 @@ class PostgresCanonicalExecutionIntentStore:
                     entry["credit"],
                     entry["reference"],
                 )
+            financial_state = None
+            financial_event_id = None
+            financial_revision = None
+            if financial_snapshot is not None:
+                currency = _identifier(
+                    str(financial_snapshot.get("currency") or ""), "currency"
+                )
+                financial_aggregate = f"financial:{currency}"
+                financial_revision = expected_financial_revision + 1
+                financial_event_id = (
+                    f"financial:{currency}:revision:{financial_revision}"
+                )
+                if len(financial_event_id) > 192:
+                    raise ValueError("financial event identity exceeds 192 characters")
+                previous_financial_event = await conn.fetchrow(
+                    """SELECT revision,event_id,payload::text AS payload_json
+                       FROM aitos_oms_events
+                       WHERE account_scope=$1 AND aggregate_id=$2
+                       ORDER BY revision DESC LIMIT 1""",
+                    self.scope,
+                    financial_aggregate,
+                )
+                actual_financial_revision = (
+                    int(previous_financial_event["revision"])
+                    if previous_financial_event is not None
+                    else 0
+                )
+                if actual_financial_revision != expected_financial_revision:
+                    raise OMSConflict(
+                        "financial aggregate revision CAS failed: "
+                        f"expected {expected_financial_revision}, "
+                        f"actual {actual_financial_revision}"
+                    )
+                previous_financial_state = None
+                previous_financial_event_id = None
+                if previous_financial_event is not None:
+                    previous_payload = json.loads(
+                        previous_financial_event["payload_json"]
+                    )
+                    if previous_payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
+                        raise OMSConflict(
+                            "financial aggregate contains a non-snapshot event"
+                        )
+                    previous_financial_state = previous_payload.get(
+                        "financial_state"
+                    )
+                    if not isinstance(previous_financial_state, dict):
+                        raise OMSConflict("canonical financial snapshot is malformed")
+                    previous_financial_event_id = previous_financial_event["event_id"]
+                financial_state = _financial_state_snapshot(
+                    financial_snapshot, previous_financial_state
+                )
+                financial_payload = {
+                    "event_type": "FINANCIAL_STATE_SNAPSHOT",
+                    "account_scope": self.scope,
+                    "financial_state": financial_state,
+                    "causality": {
+                        "causation_id": trade_event_id,
+                        "correlation_id": client,
+                        "parent_event_id": previous_financial_event_id,
+                    },
+                }
+                await self._append_event(
+                    conn,
+                    financial_aggregate,
+                    financial_event_id,
+                    expected_financial_revision,
+                    _canonical_payload(financial_payload),
+                )
             next_revision = expected_revision + 1
             await conn.execute(
                 """UPDATE aitos_oms_execution_intents
@@ -408,7 +574,31 @@ class PostgresCanonicalExecutionIntentStore:
             "last_event_id": intent_event_id,
             "trade_event_id": trade_event_id,
             "trade_revision": expected_trade_revision + 1,
+            "financial_event_id": financial_event_id,
+            "financial_revision": financial_revision,
+            "financial_state": financial_state,
         }
+
+    async def latest_financial_state(
+        self, currency: str
+    ) -> dict[str, Any] | None:
+        """Read the most recent canonical valuation snapshot for this currency."""
+        normalized = _identifier(currency, "currency")
+        if not 2 <= len(normalized) <= 12 or not all(
+            "A" <= char <= "Z" or "0" <= char <= "9" for char in normalized
+        ):
+            raise ValueError("financial currency must be an uppercase code")
+        events = await self.oms.read_events(
+            self.scope, f"financial:{normalized}"
+        )
+        for event in reversed(events):
+            if event.payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
+                raise OMSConflict("financial aggregate contains a non-snapshot event")
+            state = event.payload.get("financial_state")
+            if not isinstance(state, dict) or state.get("currency") != normalized:
+                raise OMSConflict("canonical financial snapshot is malformed")
+            return state
+        return None
 
     async def get(self, client_id: str) -> dict[str, Any] | None:
         client = _identifier(client_id, "client_id")
