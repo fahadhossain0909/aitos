@@ -307,21 +307,31 @@ class PostgresCanonicalExecutionIntentStore:
             if row["state"] == new_state:
                 if new_order_id is not None and row["new_order_id"] != new_order_id:
                     raise OMSConflict("protective handover order identity changed")
-                if blocked_reason is not None and row["blocked_reason"] != blocked_reason:
+                if (
+                    blocked_reason is not None
+                    and row["blocked_reason"] != blocked_reason
+                ):
                     raise OMSConflict("protective handover quarantine reason changed")
                 return dict(row)
             if row["state"] not in allowed_states:
                 raise OMSConflict(
                     f"invalid protection handover transition {row['state']}->{new_state}"
                 )
-            if new_order_id is not None and row["new_order_id"] not in (None, new_order_id):
-                raise OMSConflict("replacement venue order ID conflicts with durable claim")
+            if new_order_id is not None and row["new_order_id"] not in (
+                None,
+                new_order_id,
+            ):
+                raise OMSConflict(
+                    "replacement venue order ID conflicts with durable claim"
+                )
             if new_state == "OLD_CANCEL_REQUESTED" and not row["new_order_id"]:
                 raise OMSConflict("old-stop cancellation requires accepted replacement")
             if new_state == "OLD_CANCELLED" and row["state"] != "OLD_CANCEL_REQUESTED":
                 raise OMSConflict("old-stop cancellation was not durably requested")
             if new_state == "APPLIED" and row["state"] != "OLD_CANCELLED":
-                raise OMSConflict("handover cannot complete before old stop cancellation")
+                raise OMSConflict(
+                    "handover cannot complete before old stop cancellation"
+                )
             await conn.execute(
                 """UPDATE aitos_oms_protection_handovers
                    SET state=$3,new_order_id=COALESCE($4,new_order_id),
@@ -472,7 +482,9 @@ class PostgresCanonicalExecutionIntentStore:
             or quantity.as_tuple().exponent < -18
             or quote.as_tuple().exponent < -18
         ):
-            raise ValueError("child cumulative values must be finite, non-negative and <=18 decimals")
+            raise ValueError(
+                "child cumulative values must be finite, non-negative and <=18 decimals"
+            )
         async with self.oms._pool.acquire() as conn, conn.transaction():
             await self._lock_fence(conn)
             current = await conn.fetchrow(
@@ -485,7 +497,9 @@ class PostgresCanonicalExecutionIntentStore:
             )
             if current is not None:
                 if current["trade_id"] != trade or current["symbol"] != symbol_value:
-                    raise OMSConflict("child-fill identity was reused across trade scope")
+                    raise OMSConflict(
+                        "child-fill identity was reused across trade scope"
+                    )
                 previous_quantity = Decimal(str(current["cumulative_quantity"]))
                 previous_quote = Decimal(str(current["cumulative_quote"]))
                 if quantity < previous_quantity or quote < previous_quote:
@@ -550,7 +564,9 @@ class PostgresCanonicalExecutionIntentStore:
             )
             return dict(updated)
 
-    async def protection_intents(self, trade_id: str | None = None) -> list[dict[str, Any]]:
+    async def protection_intents(
+        self, trade_id: str | None = None
+    ) -> list[dict[str, Any]]:
         async with self.oms._pool.acquire() as conn:
             rows = await conn.fetch(
                 """SELECT client_id,symbol,state,request::text AS request_json,
@@ -589,9 +605,7 @@ class PostgresCanonicalExecutionIntentStore:
         decoded = dict(row)
         decoded["request"] = json.loads(decoded["request_json"])
         decoded["result"] = (
-            json.loads(decoded["result_json"])
-            if decoded.get("result_json")
-            else None
+            json.loads(decoded["result_json"]) if decoded.get("result_json") else None
         )
         return decoded
 
@@ -626,20 +640,26 @@ class PostgresCanonicalExecutionIntentStore:
         matches = []
         for row in rows:
             result = json.loads(row["result_json"]) if row["result_json"] else {}
-            if (
-                row["symbol"] == symbol
-                and order_id in {str(result.get("order_id", "")), str(row["client_id"])}
-            ):
+            if row["symbol"] == symbol and order_id in {
+                str(result.get("order_id", "")),
+                str(row["client_id"]),
+            }:
                 matches.append(row)
         if len(matches) != 1:
-            raise OMSConflict("terminal protection order does not map to one canonical intent")
+            raise OMSConflict(
+                "terminal protection order does not map to one canonical intent"
+            )
         row = matches[0]
         current = await self.get(str(row["client_id"]))
         if current is None:
             raise OMSConflict("terminal protection intent disappeared")
         if current["state"] == "TERMINAL":
             return current
-        result = json.loads(current["result"]) if isinstance(current.get("result"), str) else current.get("result") or {}
+        result = (
+            json.loads(current["result"])
+            if isinstance(current.get("result"), str)
+            else current.get("result") or {}
+        )
         result = dict(result)
         result["terminal_status"] = status
         result["terminal_executed_quantity"] = format(
@@ -661,7 +681,9 @@ class PostgresCanonicalExecutionIntentStore:
         if row["state"] == "APPLIED" and row["trade_id"] == trade_id:
             return row
         if row["state"] not in {"CONFIRMED", "PROTECTED"}:
-            raise OMSConflict("execution intent cannot be acknowledged from current state")
+            raise OMSConflict(
+                "execution intent cannot be acknowledged from current state"
+            )
         return await self.transition(
             client_id,
             expected_revision=int(row["revision"]),
@@ -1143,7 +1165,9 @@ class PostgresCanonicalExecutionIntentStore:
         if type(expected_trade_revision) is not int or expected_trade_revision < 0:
             raise ValueError("non-negative expected Trade revision is required")
         if expected_state not in {"APPLIED", "PROTECTED"}:
-            raise ValueError("protective child fill requires an accepted protection intent")
+            raise ValueError(
+                "protective child fill requires an accepted protection intent"
+            )
         if (
             not isinstance(trade_snapshot, dict)
             or trade_snapshot.get("trade_id") != trade
@@ -1169,7 +1193,9 @@ class PostgresCanonicalExecutionIntentStore:
         )
         normalized_entries = self.oms._validate_ledger_entries(ledger_entries)
         if not normalized_entries:
-            raise ValueError("positive protective child fill requires balanced ledger entries")
+            raise ValueError(
+                "positive protective child fill requires balanced ledger entries"
+            )
         intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
         trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
         await self._assert_fence()
@@ -1195,15 +1221,14 @@ class PostgresCanonicalExecutionIntentStore:
             if row["trade_id"] != trade:
                 raise OMSConflict("protective intent is not owned by this Trade")
             request_payload = json.loads(row["request_json"])
-            result_payload = json.loads(row["result_json"]) if row["result_json"] else None
+            result_payload = (
+                json.loads(row["result_json"]) if row["result_json"] else None
+            )
             if result_payload is None:
                 raise OMSConflict("protective intent has no durable venue acceptance")
             if request_payload.get("owner_trade_id") != trade:
                 raise OMSConflict("protective request owner does not match Trade")
-            if (
-                len(intent_event_id) > 192
-                or len(trade_event_id) > 192
-            ):
+            if len(intent_event_id) > 192 or len(trade_event_id) > 192:
                 raise ValueError("protective child event identity exceeds limit")
             intent_payload = {
                 "event_type": "PROTECTION_CHILD_FILL_APPLIED",
@@ -1304,7 +1329,9 @@ class PostgresCanonicalExecutionIntentStore:
         if row is None:
             raise OMSConflict("execution intent does not exist")
         if row["state"] != "SUBMITTING":
-            raise OMSConflict("only a submitting intent can accept first venue evidence")
+            raise OMSConflict(
+                "only a submitting intent can accept first venue evidence"
+            )
         filled = Decimal(str(result.get("filled_quantity", "0")))
         price = Decimal(str(result.get("fill_price", "0")))
         success = result.get("success")
@@ -1327,20 +1354,31 @@ class PostgresCanonicalExecutionIntentStore:
     async def record_protection(self, client_id: str, result: Any) -> dict[str, Any]:
         """Persist a venue-accepted, currently unfilled protective order."""
         if not isinstance(result, dict):
-            if all(hasattr(result, name) for name in (
-                "order_id", "symbol", "side", "filled_quantity", "fill_price"
-            )):
+            if all(
+                hasattr(result, name)
+                for name in (
+                    "order_id",
+                    "symbol",
+                    "side",
+                    "filled_quantity",
+                    "fill_price",
+                )
+            ):
                 result = {
                     "order_id": str(result.order_id),
                     "symbol": str(result.symbol),
                     "side": str(getattr(result.side, "value", result.side)),
-                    "filled_quantity": format(Decimal(str(result.filled_quantity)), "f"),
+                    "filled_quantity": format(
+                        Decimal(str(result.filled_quantity)), "f"
+                    ),
                     "fill_price": format(Decimal(str(result.fill_price)), "f"),
                     "success": bool(getattr(result, "success", True)),
                     "client_order_id": getattr(result, "client_order_id", client_id),
                 }
             else:
-                raise TypeError("protective result payload must be an object or OrderResult")
+                raise TypeError(
+                    "protective result payload must be an object or OrderResult"
+                )
         row = await self.get(client_id)
         if row is None:
             raise OMSConflict("protective execution intent does not exist")
@@ -1351,8 +1389,15 @@ class PostgresCanonicalExecutionIntentStore:
             trigger = Decimal(str(result.get("fill_price", "0")))
         except (InvalidOperation, TypeError, ValueError):
             raise ValueError("protective acceptance evidence is malformed") from None
-        if filled != 0 or not filled.is_finite() or not trigger.is_finite() or trigger <= 0:
-            raise ValueError("protective acceptance must be unfilled with a positive trigger")
+        if (
+            filled != 0
+            or not filled.is_finite()
+            or not trigger.is_finite()
+            or trigger <= 0
+        ):
+            raise ValueError(
+                "protective acceptance must be unfilled with a positive trigger"
+            )
         order_id = result.get("order_id")
         if not isinstance(order_id, str) or not order_id:
             raise ValueError("protective acceptance requires a durable venue order ID")
@@ -1364,7 +1409,9 @@ class PostgresCanonicalExecutionIntentStore:
             result=result,
         )
 
-    async def mark_terminal(self, client_id: str, *, terminal_state: str = "TERMINAL") -> dict[str, Any]:
+    async def mark_terminal(
+        self, client_id: str, *, terminal_state: str = "TERMINAL"
+    ) -> dict[str, Any]:
         """Mark a previously accepted protection/intent terminal without losing evidence."""
         if terminal_state != "TERMINAL":
             raise ValueError("terminal_state must be TERMINAL")
