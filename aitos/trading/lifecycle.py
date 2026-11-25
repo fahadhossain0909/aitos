@@ -2161,17 +2161,17 @@ class TradeLifecycle(AITOSModule):
                     {
                         "statistical_risk_assessment": {
                             "size_multiplier": (
-                            statistical_risk_assessment.size_multiplier
-                        ),
-                        "volatility_ratio": (
-                            statistical_risk_assessment.volatility_ratio
-                        ),
-                        "tail_probability": (
-                            statistical_risk_assessment.tail_probability
-                        ),
-                        "expected_shortfall": (
-                            statistical_risk_assessment.expected_shortfall
-                        ),
+                                statistical_risk_assessment.size_multiplier
+                            ),
+                            "volatility_ratio": (
+                                statistical_risk_assessment.volatility_ratio
+                            ),
+                            "tail_probability": (
+                                statistical_risk_assessment.tail_probability
+                            ),
+                            "expected_shortfall": (
+                                statistical_risk_assessment.expected_shortfall
+                            ),
                             "reasons": list(statistical_risk_assessment.reasons),
                         }
                     }
@@ -2497,7 +2497,6 @@ class TradeLifecycle(AITOSModule):
                 self._execution_faults[trade_id],
                 "prior reduction/application requires reconciliation",
             )
-
     def bind_postgres_canonical_oms(self, oms: Any, fence: Any) -> Any:
         """Bind the PostgreSQL journal ahead of the configured durable projection.
 
