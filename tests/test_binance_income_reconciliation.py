@@ -63,7 +63,9 @@ class FakeLifecycle:
         self.closed_trades = list(closed_trades or [])
         self.adjustments = []
 
-    async def apply_cost_adjustment(self, trade_id, *, adjustment_id, kind, amount_usd):
+    async def apply_cost_adjustment(
+        self, trade_id, *, adjustment_id, kind, amount_usd, publish=True
+    ):
         trade = next(
             (
                 item

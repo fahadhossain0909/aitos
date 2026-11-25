@@ -276,7 +276,7 @@ async def test_protective_post_is_preclaimed_and_uncertain_post_stays_blocked(tm
         raise TimeoutError("offline response lost")
 
     value._signed_request = AsyncMock(side_effect=uncertain_post)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(ExecutionUncertainError, match="outcome and client-ID recovery lookup"):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
     assert store(tmp_path).unresolved()[0]["state"] == "SUBMITTING"
     with pytest.raises(ExecutionUncertainError):

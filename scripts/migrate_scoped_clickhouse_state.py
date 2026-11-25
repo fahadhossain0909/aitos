@@ -403,7 +403,8 @@ def _source_occurrence_records(
             occurrence = None
         else:
             trade_id, raw, stamp = row
-            symbol = state = encoded = stored_fp = stored_hash = scope = None
+            symbol = state = ""
+            encoded = stored_fp = stored_hash = scope = None
             occurrence = None
 
         trade_id = str(trade_id)

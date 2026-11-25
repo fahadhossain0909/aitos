@@ -1140,6 +1140,140 @@ class PostgresCanonicalExecutionIntentStore:
             "financial_state": financial_state,
         }
 
+    async def append_confirmed_trade_snapshot(
+        self,
+        client_id: str,
+        *,
+        expected_revision: int,
+        trade_id: str,
+        expected_trade_revision: int,
+        trade_snapshot: dict[str, Any],
+        ledger_entries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Persist a confirmed fill and ledger while keeping its intent unresolved.
+
+        Entry intents remain CONFIRMED until the trade's exchange-side
+        protection and account-position verification have completed. The
+        snapshot, financial lines and projection outbox still commit atomically.
+        """
+        client = _identifier(client_id, "client_id")
+        trade = _identifier(trade_id, "trade_id")
+        if type(expected_revision) is not int or expected_revision < 1:
+            raise ValueError("positive expected intent revision is required")
+        if type(expected_trade_revision) is not int or expected_trade_revision < 0:
+            raise ValueError("non-negative expected Trade revision is required")
+        if (
+            not isinstance(trade_snapshot, dict)
+            or trade_snapshot.get("trade_id") != trade
+            or trade_snapshot.get("account_scope") != self.scope
+        ):
+            raise ValueError("confirmed Trade snapshot identity/scope mismatch")
+        normalized_entries = self.oms._validate_ledger_entries(ledger_entries)
+        if not normalized_entries:
+            raise ValueError("confirmed live entry requires balanced ledger entries")
+        event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
+        await self._assert_fence()
+        async with self.oms._pool.acquire() as conn, conn.transaction():
+            await self._lock_fence(conn)
+            row = await conn.fetchrow(
+                """SELECT symbol,state,request::text AS request_json,
+                          result::text AS result_json,trade_id,revision,last_event_id
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND client_id=$2 FOR UPDATE""",
+                self.scope,
+                client,
+            )
+            if row is None:
+                raise OMSConflict("confirmed execution intent does not exist")
+            if (
+                int(row["revision"]) != expected_revision
+                or row["state"] != "CONFIRMED"
+            ):
+                raise OMSConflict("confirmed execution intent revision/state CAS failed")
+            if row["trade_id"] not in {None, trade}:
+                raise OMSConflict("confirmed execution intent belongs to another Trade")
+            request_payload = json.loads(row["request_json"])
+            result_payload = (
+                json.loads(row["result_json"]) if row["result_json"] else None
+            )
+            if (
+                request_payload.get("owner_trade_id") != trade
+                or request_payload.get("symbol") != row["symbol"]
+                or trade_snapshot.get("symbol") != row["symbol"]
+                or not isinstance(result_payload, dict)
+                or result_payload.get("success") is not True
+            ):
+                raise OMSConflict("confirmed execution evidence does not match Trade")
+            try:
+                filled_quantity = Decimal(str(result_payload["filled_quantity"]))
+                fill_price = Decimal(str(result_payload["fill_price"]))
+            except (KeyError, InvalidOperation, TypeError, ValueError):
+                raise OMSConflict("confirmed execution fill evidence is malformed") from None
+            if (
+                not filled_quantity.is_finite()
+                or not fill_price.is_finite()
+                or filled_quantity <= 0
+                or fill_price <= 0
+            ):
+                raise OMSConflict("confirmed execution requires a positive fill")
+            previous_trade = await conn.fetchrow(
+                """SELECT event_id FROM aitos_oms_events
+                   WHERE account_scope=$1 AND aggregate_id=$2
+                   ORDER BY revision DESC LIMIT 1""",
+                self.scope,
+                trade,
+            )
+            payload = {
+                "event_type": "TRADE_SNAPSHOT",
+                "trade_id": trade,
+                "account_scope": self.scope,
+                "trade": trade_snapshot,
+                "confirmed_execution": {
+                    "client_order_id": client,
+                    "intent_revision": expected_revision,
+                    "intent_event_id": row["last_event_id"],
+                },
+                "causality": {
+                    "causation_id": row["last_event_id"],
+                    "correlation_id": client,
+                    "parent_event_id": (
+                        previous_trade["event_id"] if previous_trade else None
+                    ),
+                },
+            }
+            await self._append_event(
+                conn,
+                trade,
+                event_id,
+                expected_trade_revision,
+                _canonical_payload(payload),
+            )
+            for line_no, entry in enumerate(normalized_entries):
+                await conn.execute(
+                    """INSERT INTO aitos_oms_financial_ledger
+                       (account_scope,event_id,line_no,trade_id,account_code,
+                        currency,debit,credit,reference)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+                    self.scope,
+                    event_id,
+                    line_no,
+                    trade,
+                    entry["account_code"],
+                    entry["currency"],
+                    entry["debit"],
+                    entry["credit"],
+                    entry["reference"],
+                )
+        return {
+            "account_scope": self.scope,
+            "client_id": client,
+            "trade_id": trade,
+            "intent_revision": expected_revision,
+            "trade_revision": expected_trade_revision + 1,
+            "trade_event_id": event_id,
+            "intent_state": "CONFIRMED",
+        }
+
     async def append_protection_child_fill(
         self,
         client_id: str,

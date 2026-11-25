@@ -337,6 +337,66 @@ class PostgresLifecycleStateWriter:
                 )
             return event
 
+    async def persist_confirmed_execution(
+        self,
+        intents: Any,
+        client_id: str,
+        trade: Any,
+        *,
+        ledger_entries: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a filled Trade without acknowledging it before protection.
+
+        The PostgreSQL intent remains CONFIRMED until exchange-side protection
+        and account-position verification succeed. Trade snapshot, entry ledger
+        and projection outbox are committed together under the shared fence.
+        """
+        if getattr(intents, "oms", None) is not self.oms:
+            raise ValueError("execution intents must share the lifecycle writer OMS")
+        if getattr(intents, "fence", None) != self.fence:
+            raise ValueError("execution intents must use the lifecycle writer fence")
+        trade_id = str(getattr(trade, "trade_id", "")).strip()
+        to_dict = getattr(trade, "to_dict", None)
+        if not trade_id or not callable(to_dict):
+            raise ValueError("confirmed execution requires a persisted Trade")
+        current_scope = str(getattr(trade, "account_scope", "") or "")
+        if current_scope and current_scope != self.fence.account_scope:
+            raise ValueError("trade account scope differs from canonical OMS writer")
+        trade.account_scope = self.fence.account_scope
+        intent = await intents.get(client_id)
+        if intent is None or intent.get("state") != "CONFIRMED":
+            raise RuntimeError("entry intent must remain CONFIRMED until protection")
+        revision = await self._revision(trade_id)
+        committed = await intents.append_confirmed_trade_snapshot(
+            client_id,
+            expected_revision=int(intent["revision"]),
+            trade_id=trade_id,
+            expected_trade_revision=revision,
+            trade_snapshot=to_dict(),
+            ledger_entries=[] if ledger_entries is None else ledger_entries,
+        )
+        self._revisions[trade_id] = committed["trade_revision"]
+        self._last_event_ids[trade_id] = committed["trade_event_id"]
+        await self.projection_writer(trade)
+        events = await self.oms.read_events(self.fence.account_scope, trade_id)
+        event = next(
+            (
+                item
+                for item in reversed(events)
+                if item.event_id == committed["trade_event_id"]
+            ),
+            None,
+        )
+        if event is None:
+            raise RuntimeError("confirmed Trade event disappeared after commit")
+        await self.oms.mark_projected(
+            self.fence.account_scope,
+            trade_id,
+            committed["trade_revision"],
+            event_hash=event.event_hash,
+        )
+        return committed
+
     async def apply_execution_intent(
         self,
         intents: Any,

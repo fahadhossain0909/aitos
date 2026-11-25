@@ -188,7 +188,15 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
     ) -> None:
         if self._canonical_intent_store is not None:
             row = await self._canonical_intent_store.get(client_order_id)
-            if row is None or row["state"] not in {"APPLIED", "TERMINAL"}:
+            if row is not None and row["state"] in {"CONFIRMED", "PROTECTED"}:
+                row = await self._canonical_intent_store.mark_applied(
+                    client_order_id, trade_id
+                )
+            if (
+                row is None
+                or row["state"] not in {"APPLIED", "TERMINAL"}
+                or row.get("trade_id") != trade_id
+            ):
                 raise ExecutionUncertainError(
                     trade_id,
                     client_order_id,

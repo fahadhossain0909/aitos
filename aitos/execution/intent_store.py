@@ -679,6 +679,25 @@ class ExecutionIntentStore:
             if cursor.rowcount != 1:
                 raise ValueError("execution intent acknowledgement lost its state race")
 
+    def get(self, client_id: str) -> dict | None:
+        """Read one scope-owned intent with decoded request/result evidence."""
+        if not isinstance(client_id, str) or not client_id:
+            raise ValueError("client order identity is required")
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT scope,client_id,symbol,request_json,state,result_json,trade_id,"
+                "updated_at FROM execution_intents WHERE scope=? AND client_id=?",
+                (self.scope, client_id),
+            ).fetchone()
+        if row is None:
+            return None
+        decoded = dict(row)
+        decoded["request"] = json.loads(decoded["request_json"])
+        decoded["result"] = (
+            json.loads(decoded["result_json"]) if decoded["result_json"] else None
+        )
+        return decoded
+
     def unresolved(self, symbol: str | None = None) -> list[dict]:
         with self._connection() as conn:
             rows = conn.execute(

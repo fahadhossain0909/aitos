@@ -2227,8 +2227,18 @@ class TradeLifecycle(AITOSModule):
             await self._commit_live_execution(
                 trade,
                 ledger_entries=self._position_entry_ledger(trade, f"entry:{client_id}"),
+                defer_intent_acknowledgement=True,
             )
             await self._place_exchange_side_stops(trade)
+            await self._execution_position_verifier()
+            acknowledge = getattr(
+                self._order_executor, "acknowledge_execution_async", None
+            )
+            if callable(acknowledge):
+                await acknowledge(client_id, trade.trade_id)
+            else:
+                self._order_executor.acknowledge_execution(client_id, trade.trade_id)
+            self._execution_faults.pop(trade.trade_id, None)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_ORDER_SUBMITTED,
@@ -2934,9 +2944,11 @@ class TradeLifecycle(AITOSModule):
         ledger_entries: list[dict[str, Any]] | None = None,
         client_order_id: str | None = None,
         protection_child_fill: dict[str, Any] | None = None,
+        defer_intent_acknowledgement: bool = False,
     ) -> None:
         self._require_execution_writer()
-        await self._execution_position_verifier()
+        if not defer_intent_acknowledgement:
+            await self._execution_position_verifier()
         client_id = client_order_id or self._execution_faults.get(trade.trade_id)
         canonical_intents = getattr(
             self._order_executor, "canonical_intent_store", None
@@ -2961,6 +2973,18 @@ class TradeLifecycle(AITOSModule):
             canonical_intents is not None
             and canonical_writer is not None
             and client_id
+            and defer_intent_acknowledgement
+        ):
+            await canonical_writer.persist_confirmed_execution(
+                canonical_intents,
+                client_id,
+                trade,
+                ledger_entries=ledger_entries,
+            )
+        elif (
+            canonical_intents is not None
+            and canonical_writer is not None
+            and client_id
             and not client_id.startswith("resting:")
         ):
             await canonical_writer.apply_execution_intent(
@@ -2981,6 +3005,7 @@ class TradeLifecycle(AITOSModule):
                 client_id
                 and not client_id.startswith("resting:")
                 and protection_child_fill is None
+                and not defer_intent_acknowledgement
             ):
                 acknowledge = getattr(
                     self._order_executor, "acknowledge_execution_async", None
@@ -2991,7 +3016,8 @@ class TradeLifecycle(AITOSModule):
                     self._order_executor.acknowledge_execution(
                         client_id, trade.trade_id
                     )
-        self._execution_faults.pop(trade.trade_id, None)
+        if not defer_intent_acknowledgement:
+            self._execution_faults.pop(trade.trade_id, None)
         if hasattr(trade, "_aitos_filled_resting_order_ids"):
             del trade._aitos_filled_resting_order_ids
 

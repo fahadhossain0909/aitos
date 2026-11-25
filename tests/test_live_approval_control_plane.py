@@ -117,7 +117,7 @@ def test_signed_approval_is_shared_across_instances_and_consumed_once(tmp_path):
         challenge, assertion=b"authenticator-assertion", verifier=verifier, now=101
     )
 
-    receipt = executor_authority.get_unconsumed_token(action)
+    receipt = executor_authority.get_unconsumed_token(action, now=102)
     assert executor_authority.consume(receipt, action=action, now=102) == "alice"
     with pytest.raises(ApprovalDenied, match="consumed"):
         first.consume(receipt, action=action, now=103)
