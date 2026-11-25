@@ -138,6 +138,121 @@ class PostgresCanonicalExecutionIntentStore:
         self.oms = oms
         self.fence = fence
         self.scope = fence.account_scope
+        self._protection_journal = None
+
+    def bind_protection_journal(self, journal: Any) -> None:
+        """Bind the legacy handover/child-fill journal, not the order intent authority."""
+        if getattr(journal, "scope", None) != self.scope:
+            raise ValueError("protection journal scope differs from canonical OMS scope")
+        self._protection_journal = journal
+
+    def _protection(self):
+        if self._protection_journal is None:
+            raise RuntimeError("durable protection handover journal is not bound")
+        return self._protection_journal
+
+    def protection_handovers(self, trade_id: str | None = None) -> list[dict[str, Any]]:
+        return self._protection().protection_handovers(trade_id=trade_id)
+
+    def begin_protection_handover(self, **kwargs: Any) -> dict[str, Any]:
+        return self._protection().begin_protection_handover(**kwargs)
+
+    def record_handover_new_order(self, *args: Any, **kwargs: Any) -> None:
+        self._protection().record_handover_new_order(*args, **kwargs)
+
+    def mark_handover_old_cancel_requested(self, *args: Any, **kwargs: Any) -> None:
+        self._protection().mark_handover_old_cancel_requested(*args, **kwargs)
+
+    def mark_handover_old_cancelled(self, *args: Any, **kwargs: Any) -> None:
+        self._protection().mark_handover_old_cancelled(*args, **kwargs)
+
+    def complete_protection_handover(self, *args: Any, **kwargs: Any) -> None:
+        self._protection().complete_protection_handover(*args, **kwargs)
+
+    def block_protection_handover(self, *args: Any, **kwargs: Any) -> None:
+        self._protection().block_protection_handover(*args, **kwargs)
+
+    def protection_child_watermark(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._protection().protection_child_watermark(*args, **kwargs)
+
+    def mark_protection_child_applied(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._protection().mark_protection_child_applied(*args, **kwargs)
+
+    async def protection_intents(self, trade_id: str | None = None) -> list[dict[str, Any]]:
+        async with self.oms._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT client_id,symbol,state,request::text AS request_json,
+                          result::text AS result_json,trade_id,revision,last_event_id
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1
+                     AND request->>'order_type' IN ('STOP_MARKET','TAKE_PROFIT_MARKET')
+                     AND ($2::text IS NULL OR trade_id=$2 OR request->>'owner_trade_id'=$2)
+                   ORDER BY client_id""",
+                self.scope,
+                trade_id,
+            )
+        return [dict(row) for row in rows]
+
+    async def protection_intent_for_order(
+        self, order_id: str, trade_id: str
+    ) -> dict[str, Any] | None:
+        if not isinstance(order_id, str) or not order_id:
+            raise ValueError("protective order ID is required")
+        trade = _identifier(trade_id, "trade_id")
+        async with self.oms._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT client_id,symbol,state,request::text AS request_json,
+                          result::text AS result_json,trade_id,revision,last_event_id
+                   FROM aitos_oms_execution_intents
+                   WHERE account_scope=$1 AND trade_id=$2
+                     AND request->>'order_type' IN ('STOP_MARKET','TAKE_PROFIT_MARKET')
+                     AND (result->>'order_id'=$3 OR client_id=$3)
+                   ORDER BY revision DESC LIMIT 1""",
+                self.scope,
+                trade,
+                order_id,
+            )
+        return dict(row) if row else None
+
+    async def mark_protection_terminal(
+        self,
+        order_id: str,
+        *,
+        symbol: str,
+        status: str,
+        executed_quantity: float,
+    ) -> dict[str, Any]:
+        rows = await self.protection_intents()
+        matches = []
+        for row in rows:
+            request = json.loads(row["request_json"])
+            result = json.loads(row["result_json"]) if row["result_json"] else {}
+            if (
+                row["symbol"] == symbol
+                and order_id in {str(result.get("order_id", "")), str(row["client_id"])}
+            ):
+                matches.append(row)
+        if len(matches) != 1:
+            raise OMSConflict("terminal protection order does not map to one canonical intent")
+        row = matches[0]
+        return await self.mark_terminal(str(row["client_id"]))
+
+    async def mark_applied(self, client_id: str, trade_id: str) -> dict[str, Any]:
+        """Compatibility recovery transition; normal writes use atomic Trade finalization."""
+        row = await self.get(client_id)
+        if row is None:
+            raise OMSConflict("execution intent does not exist")
+        if row["state"] == "APPLIED" and row["trade_id"] == trade_id:
+            return row
+        if row["state"] not in {"CONFIRMED", "PROTECTED"}:
+            raise OMSConflict("execution intent cannot be acknowledged from current state")
+        return await self.transition(
+            client_id,
+            expected_revision=int(row["revision"]),
+            expected_state=str(row["state"]),
+            new_state="APPLIED",
+            trade_id=trade_id,
+        )
 
     async def begin(self, request: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(request, dict) or not request:
