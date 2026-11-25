@@ -1,6 +1,8 @@
 import hashlib
 import hmac
+import json
 import re
+from dataclasses import replace
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
@@ -13,8 +15,8 @@ from aitos.execution.binance_executor import (
     BinanceFuturesOrderExecutor,
     round_step,
 )
-from aitos.models.trade import TradeSide
 from aitos.execution.intent_store import ExecutionIntentStore
+from aitos.models.trade import TradeSide
 from aitos.security.live_approval import ApprovalDenied, LiveApprovalControlPlane
 
 
@@ -823,6 +825,89 @@ def test_mainnet_executor_consumes_exact_action_receipt_before_order_submission(
     assert receipt["token_id"]
     with pytest.raises(ApprovalDenied, match="no authorized unconsumed approval"):
         executor._live_approval_consumer(action)
+
+
+@pytest.mark.asyncio
+async def test_mainnet_entry_order_binds_approval_receipt_before_venue_post(tmp_path):
+    scope = "live:account-1"
+    client_id = "approved-entry-1"
+    action = {
+        "environment": "binance-usdm-mainnet",
+        "scope": scope,
+        "client_order_id": client_id,
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": "0.01",
+        "reference_price": "90000.0",
+        "order_type": "MARKET",
+        "reduce_only": False,
+        "owner_trade_id": "trade-1",
+    }
+    authority = LiveApprovalControlPlane(
+        tmp_path / "entry-approvals.sqlite",
+        signing_key=b"mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: user == "operator-1"
+        and role == "live_trader",
+    )
+    challenge = authority.issue_challenge(
+        user_id="operator-1",
+        action=action,
+        webauthn_challenge="server-issued-entry-challenge",
+    )
+    authority.approve(
+        challenge,
+        assertion=b"verified-webauthn-assertion",
+        verifier=lambda **kwargs: {
+            "verified": True,
+            "user_id": "operator-1",
+            "user_verified": True,
+            "origin": "https://console.example",
+            "rp_id": "console.example",
+        },
+    )
+    journal = ExecutionIntentStore(tmp_path / "entry-intents.sqlite", scope=scope)
+    executor = BinanceFuturesOrderExecutor(
+        api_key="mainnet-key",
+        api_secret="mainnet-secret",
+        testnet=False,
+        intent_store=journal,
+        execution_scope=scope,
+        live_approval_authority=authority,
+        live_approval_token_provider=authority.get_unconsumed_token,
+    )
+    calls = []
+
+    async def accepted_post(method, path, params):
+        calls.append((method, path, dict(params)))
+        return {
+            "orderId": 456,
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "clientOrderId": client_id,
+            "status": "FILLED",
+            "executedQty": "0.01",
+            "avgPrice": "90000",
+        }
+
+    executor._signed_request = accepted_post
+    request = replace(
+        _order_request(quantity=0.01),
+        reference_price=90000.0,
+        client_order_id=client_id,
+        owner_trade_id="trade-1",
+    )
+    result = await executor.submit_order(request)
+    assert result.success is True
+    assert calls and calls[0][0] == "POST"
+    stored = journal.unresolved()
+    assert len(stored) == 1
+    payload = json.loads(stored[0]["request_json"])
+    approval = payload["execution_context"]["approval_receipt"]
+    assert approval["user_id"] == "operator-1"
+    assert approval["action_digest"] == authority._digest(action)
+    assert approval["token_id"]
 
 
 @pytest.mark.asyncio

@@ -137,7 +137,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         token = self._live_approval_token_provider(action)
         if not isinstance(token, SignedApproval):
             raise PermissionError("approval provider returned no signed receipt")
-        return self._live_approval_authority.consume(token, action=action)
+        approver = self._live_approval_authority.consume(token, action=action)
+        return {
+            "user_id": approver,
+            "token_id": token.token_id,
+            "action_digest": token.action_digest,
+            "issued_at": token.issued_at,
+            "expires_at": token.expires_at,
+        }
 
     @property
     def intent_store(self):
@@ -525,23 +532,41 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 or self._live_approval_token_provider is None
             ):
                 raise PermissionError("mainnet execution approval is unavailable")
+            if not isinstance(self._execution_scope, str) or not self._execution_scope:
+                raise PermissionError("mainnet execution requires an account scope")
+            venue_side = (
+                ("SELL" if request.side == TradeSide.LONG else "BUY")
+                if request.reduce_only
+                else ("BUY" if request.side == TradeSide.LONG else "SELL")
+            )
             action = {
                 "environment": "binance-usdm-mainnet",
                 "scope": self._execution_scope,
                 "client_order_id": client_id,
                 "symbol": request.symbol,
-                "side": str(getattr(request.side, "value", request.side)),
+                "side": venue_side,
                 "quantity": format(Decimal(str(quantity)), "f"),
                 "reference_price": format(Decimal(str(request.reference_price)), "f"),
                 "order_type": request.order_type,
                 "reduce_only": bool(request.reduce_only),
                 "owner_trade_id": request.owner_trade_id,
             }
-            approver = self._live_approval_consumer(action)
-            if not isinstance(approver, str) or not approver:
+            approval_receipt = self._live_approval_consumer(action)
+            if (
+                not isinstance(approval_receipt, dict)
+                or not isinstance(approval_receipt.get("user_id"), str)
+                or not approval_receipt.get("token_id")
+                or approval_receipt.get("action_digest")
+                != self._live_approval_authority._digest(action)
+            ):
                 raise PermissionError(
-                    "approval consumer did not identify an authenticated approver"
+                    "approval consumer did not return an authenticated exact-intent receipt"
                 )
+            execution_context = dict(request.execution_context or {})
+            if "approval_receipt" in execution_context:
+                raise ValueError("approval_receipt is reserved for the executor")
+            execution_context["approval_receipt"] = approval_receipt
+            request = replace(request, execution_context=execution_context)
         params = {
             "symbol": request.symbol,
             "type": request.order_type,
@@ -1150,6 +1175,34 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         client_order_id = client_order_id or f"aitos-{label}-{uuid.uuid4().hex[:16]}"
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", client_order_id):
             raise ValueError("invalid protective client order ID")
+        execution_context = {}
+        if self._base_url != TESTNET_URL:
+            if not isinstance(self._execution_scope, str) or not self._execution_scope:
+                raise PermissionError("mainnet execution requires an account scope")
+            action = {
+                "environment": "binance-usdm-mainnet",
+                "scope": self._execution_scope,
+                "client_order_id": client_order_id,
+                "symbol": symbol,
+                "side": "SELL" if position_side == TradeSide.LONG else "BUY",
+                "quantity": format(Decimal(str(quantity)), "f"),
+                "reference_price": format(Decimal(str(trigger_price)), "f"),
+                "order_type": order_type,
+                "reduce_only": True,
+                "owner_trade_id": owner_trade_id,
+            }
+            approval_receipt = self._live_approval_consumer(action)
+            if (
+                not isinstance(approval_receipt, dict)
+                or not isinstance(approval_receipt.get("user_id"), str)
+                or not approval_receipt.get("token_id")
+                or approval_receipt.get("action_digest")
+                != self._live_approval_authority._digest(action)
+            ):
+                raise PermissionError(
+                    "approval consumer did not return an authenticated exact-intent receipt"
+                )
+            execution_context["approval_receipt"] = approval_receipt
         protection_request = OrderRequest(
             symbol=symbol,
             side=position_side,
@@ -1159,6 +1212,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             client_order_id=client_order_id,
             reduce_only=True,
             owner_trade_id=owner_trade_id,
+            execution_context=execution_context,
         )
         if self._canonical_intent_store is not None:
             pending_rows = await self._canonical_intent_store.unresolved(symbol)
@@ -1183,6 +1237,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     "order_type": order_type,
                     "reduce_only": True,
                     "owner_trade_id": owner_trade_id,
+                    "execution_context": dict(protection_request.execution_context or {}),
                 }
             )
         elif self._intent_store is not None:
