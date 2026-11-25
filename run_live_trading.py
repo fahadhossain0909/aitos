@@ -22,8 +22,8 @@ from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
-from aitos.execution.postgres_oms import PostgresCanonicalOMS
 from aitos.execution.postgres_intents import PostgresCanonicalExecutionIntentStore
+from aitos.execution.postgres_oms import PostgresCanonicalOMS
 from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,

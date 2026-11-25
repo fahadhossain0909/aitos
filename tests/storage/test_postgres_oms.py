@@ -233,7 +233,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
 
         await writer(trade_snapshot)
         assert projected == [trade_snapshot.to_dict()]
-        assert (await writer.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
+        assert (await writer.latest_snapshot("trade-1"))["state"] == "position_opened"
 
         async def broken_projection(_trade):
             raise RuntimeError("projection unavailable")
