@@ -525,6 +525,13 @@ class PostgresCanonicalExecutionIntentStore:
                     status,
                 )
             else:
+                if (
+                    cumulative_quantity != delta_quantity
+                    or cumulative_quote != delta_quote
+                ):
+                    raise OMSConflict(
+                        "initial protective child cumulative fill lacks a baseline"
+                    )
                 await conn.execute(
                     """INSERT INTO aitos_oms_protection_child_fills
                        (account_scope,algo_id,child_order_id,trade_id,symbol,
@@ -1269,6 +1276,14 @@ class PostgresCanonicalExecutionIntentStore:
                 or cumulative_quote < delta_quote
                 or cumulative_quantity > original_quantity
                 or child_status not in allowed_child_statuses
+                or (
+                    child_status == "FILLED"
+                    and cumulative_quantity != original_quantity
+                )
+                or (
+                    child_status != "FILLED"
+                    and cumulative_quantity >= original_quantity
+                )
             ):
                 raise OMSConflict("protective child fill exceeds or violates intent bounds")
             if len(intent_event_id) > 192 or len(trade_event_id) > 192:
@@ -1371,11 +1386,11 @@ class PostgresCanonicalExecutionIntentStore:
                 previous_quantity = Decimal(str(watermark["cumulative_quantity"]))
                 previous_quote = Decimal(str(watermark["cumulative_quote"]))
                 if (
-                    cumulative_quantity <= previous_quantity
-                    or cumulative_quote <= previous_quote
+                    cumulative_quantity != previous_quantity + delta_quantity
+                    or cumulative_quote != previous_quote + delta_quote
                 ):
                     raise OMSConflict(
-                        "protective child cumulative watermark did not advance"
+                        "protective child cumulative fill delta is inconsistent"
                     )
                 await conn.execute(
                     """UPDATE aitos_oms_protection_child_fills
