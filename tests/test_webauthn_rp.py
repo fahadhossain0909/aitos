@@ -157,6 +157,8 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
     assert len(inventory) == 1
     assert inventory[0]["credential_id"] == "Y3JlZGVudGlhbC1h"
     assert inventory[0]["transports"] == ["usb"]
+    assert rp.is_credential_active("operator-1", "Y3JlZGVudGlhbC1h")
+    assert not rp.is_credential_active("operator-2", "Y3JlZGVudGlhbC1h")
     assert (
         rp.revoke_credential(user_id="operator-1", credential_id="Y3JlZGVudGlhbC1b")
         is False
@@ -166,6 +168,7 @@ def test_credential_inventory_and_scoped_offline_revocation(tmp_path):
         is True
     )
     assert rp.credential_count(user_id="operator-1") == 0
+    assert not rp.is_credential_active("operator-1", "Y3JlZGVudGlhbC1h")
     assert rp.credential_count(user_id="operator-2") == 1
     db = rp._connect()
     try:
