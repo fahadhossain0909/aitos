@@ -13,6 +13,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aitos.execution.postgres_oms import PostgresCanonicalOMS, WriterFence
+from aitos.logging_setup import get_logger
+
+logger = get_logger("aitos.execution.postgres_lifecycle_writer")
 
 
 class PostgresLifecycleStateWriter:
