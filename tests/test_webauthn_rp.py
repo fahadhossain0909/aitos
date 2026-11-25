@@ -353,7 +353,9 @@ def test_zero_counter_authenticator_can_authenticate_and_challenge_is_one_time(
     )
     assert claims["verified"] is True
     assert claims["new_sign_count"] == 0
-    with pytest.raises(WebAuthnCredentialError, match="missing, expired or already consumed"):
+    with pytest.raises(
+        WebAuthnCredentialError, match="missing, expired or already consumed"
+    ):
         rp.verify_assertion(
             assertion=assertion,
             challenge=challenge,
