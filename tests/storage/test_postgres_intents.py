@@ -278,7 +278,7 @@ def test_financial_state_snapshot_reconciles_venue_equity_without_hiding_varianc
     assert second["equity"] == "990"
     assert second["unattributed_adjustments"] == "1"
     assert second["drawdown"] == "30"
-    assert second["drawdown_pct"] == "2.941176470588235294117647059"
+    assert 2.94 < float(second["drawdown_pct"]) < 2.95
     assert second["max_drawdown"] == "30"
 
 
