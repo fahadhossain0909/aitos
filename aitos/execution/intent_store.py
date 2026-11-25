@@ -667,7 +667,9 @@ class ExecutionIntentStore:
             if row["state"] not in {"CONFIRMED", "PROTECTED"}:
                 raise ValueError("only confirmed execution can be applied")
             if row["trade_id"] not in (None, trade_id):
-                raise ValueError("execution intent is already bound to a different trade")
+                raise ValueError(
+                    "execution intent is already bound to a different trade"
+                )
             cursor = conn.execute(
                 "UPDATE execution_intents SET state='APPLIED',trade_id=?,"
                 "updated_at=CURRENT_TIMESTAMP WHERE scope=? AND client_id=? "
