@@ -2012,6 +2012,66 @@ class TradeLifecycle(AITOSModule):
         # Bind both durable ledgers to one stable logical opportunity identity.
         # The client ID suffix must remain the actual trade ID for orphan checks.
         trade_id = hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24]
+        recovery_consensus = dict(opportunity.agent_consensus)
+        if statistical_risk_assessment is not None:
+            recovery_consensus["statistical_risk_assessment"] = {
+                "size_multiplier": float(statistical_risk_assessment.size_multiplier),
+                "volatility_ratio": float(statistical_risk_assessment.volatility_ratio),
+                "tail_probability": float(statistical_risk_assessment.tail_probability),
+                "expected_shortfall": float(statistical_risk_assessment.expected_shortfall),
+                "reasons": list(statistical_risk_assessment.reasons),
+            }
+        # Persist enough domain state to reconstruct a filled Trade after a
+        # lost venue response and process restart.
+        recovery_context = {
+            "schema_version": 1,
+            "trade_id": trade_id,
+            "strategy_id": str(opportunity.strategy_id),
+            "agent_consensus": recovery_consensus,
+            "explanation": str(opportunity.rationale),
+            "sl_price": float(opportunity.stop_loss_price),
+            "tp_price": float(
+                opportunity.take_profit_levels[0]
+                if opportunity.take_profit_levels
+                else opportunity.entry_price
+            ),
+            "take_profit_levels": [
+                float(value) for value in opportunity.take_profit_levels
+            ],
+            "leverage": float(sizing.leverage),
+            "trailing_sl_enabled": bool(opportunity.trailing_sl_enabled),
+            "breakeven_at_r_multiple": (
+                float(opportunity.breakeven_at_r_multiple)
+                if opportunity.breakeven_at_r_multiple is not None
+                else None
+            ),
+            "regime": str(opportunity.regime) if opportunity.regime is not None else "",
+            "emergency_stop_r_multiple": (
+                float(self._tuning.positions.emergency_stop_r_multiple)
+                if self._position_manager is not None
+                else None
+            ),
+            "entry_created_at": utc_now_iso(),
+        }
+        try:
+            recovery_context = json.loads(
+                json.dumps(
+                    recovery_context,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            )
+            if len(json.dumps(recovery_context).encode("utf-8")) > 48000:
+                raise ValueError("entry recovery context exceeds 48 KiB")
+        except (TypeError, ValueError, OverflowError) as exc:
+            if live_execution:
+                raise ExecutionRecoveryRequired(
+                    opportunity.symbol,
+                    f"aitos-entry-{trade_id}",
+                    f"entry recovery context is not persistable: {exc}",
+                ) from exc
+            recovery_context = {}
         order_result = await self._order_executor.submit_order(
             OrderRequest(
                 symbol=opportunity.symbol,
@@ -2019,6 +2079,8 @@ class TradeLifecycle(AITOSModule):
                 quantity=quantity,
                 reference_price=opportunity.entry_price,
                 client_order_id=f"aitos-entry-{trade_id}",
+                owner_trade_id=trade_id,
+                execution_context=recovery_context,
             )
         )
         if not order_result.success and order_result.filled_quantity <= 0.0:
