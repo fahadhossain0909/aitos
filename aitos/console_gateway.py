@@ -18,6 +18,7 @@ import re
 import secrets
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -204,9 +205,11 @@ class OperatorSessions:
         default_user: str,
         identities: dict[str, str] | None = None,
         clock=time.monotonic,
+        credential_validator: Callable[[str, str], bool] | None = None,
     ):
         self.config = config
         self.clock = clock
+        self.credential_validator = credential_validator
         self.default_user = default_user
         source = identities or {default_user: password}
         if (
@@ -230,7 +233,7 @@ class OperatorSessions:
                 )
             salt = secrets.token_bytes(16)
             self.credentials[user_id] = (salt, self._derive(secret, salt))
-        self.sessions: dict[bytes, tuple[float, str]] = {}
+        self.sessions: dict[bytes, tuple[float, str, str | None]] = {}
         self.pending: dict[bytes, tuple[float, str]] = {}
         self.attempts: deque[float] = deque()
         self.hash_lock = asyncio.Lock()
@@ -263,14 +266,32 @@ class OperatorSessions:
         while self.attempts and self.attempts[0] <= now - 60:
             self.attempts.popleft()
 
-    def remaining(self, cookie):
+    def _active_session(self, cookie):
         self.prune()
-        record = self.sessions.get(self._key(cookie))
+        key = self._key(cookie)
+        record = self.sessions.get(key) if key is not None else None
+        if record is None:
+            return None
+        if self.credential_validator is not None:
+            credential_id = record[2]
+            try:
+                active = bool(
+                    credential_id
+                    and self.credential_validator(record[1], credential_id)
+                )
+            except Exception:
+                active = False
+            if not active:
+                self.sessions.pop(key, None)
+                return None
+        return record
+
+    def remaining(self, cookie):
+        record = self._active_session(cookie)
         return max(0, int(record[0] - self.clock())) if record else 0
 
     def identity(self, cookie):
-        self.prune()
-        record = self.sessions.get(self._key(cookie))
+        record = self._active_session(cookie)
         return record[1] if record else None
 
     def revoke(self, cookie):
@@ -294,10 +315,21 @@ class OperatorSessions:
     def revoke_pending(self, token: str | None) -> None:
         self.pending.pop(self._key(token), None)
 
-    def issue(self, user_id: str | None = None):
+    def issue(
+        self, user_id: str | None = None, *, credential_id: str | None = None
+    ):
         user = user_id or self.default_user
         if user not in self.credentials:
             raise ValueError("unknown operator identity")
+        if self.credential_validator is not None and (
+            not isinstance(credential_id, str)
+            or not credential_id
+            or len(credential_id) > 1024
+            or not self.credential_validator(user, credential_id)
+        ):
+            raise PermissionError(
+                "a currently registered WebAuthn credential is required for session issuance"
+            )
         self.prune()
         if len(self.sessions) >= self.config.max_sessions:
             del self.sessions[min(self.sessions, key=lambda key: self.sessions[key][0])]
@@ -305,6 +337,7 @@ class OperatorSessions:
         self.sessions[self._key(token)] = (
             self.clock() + self.config.session_seconds,
             user,
+            credential_id,
         )
         return token
 
@@ -496,8 +529,20 @@ def create_gateway(
         or len(webauthn_enrollment_token) < 32
     ):
         raise ValueError("WebAuthn enrollment token must contain at least 256 bits")
+    credential_validator = (
+        getattr(webauthn_rp, "is_credential_active", None)
+        if webauthn_rp is not None
+        else None
+    )
+    if credential_validator is not None and not callable(credential_validator):
+        raise TypeError("WebAuthn credential activity verifier must be callable")
     state = OperatorSessions(
-        config, password, default_user=operator_id, identities=identities, clock=clock
+        config,
+        password,
+        default_user=operator_id,
+        identities=identities,
+        clock=clock,
+        credential_validator=credential_validator,
     )
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
@@ -603,10 +648,12 @@ def create_gateway(
             raise web.HTTPUnauthorized(text="MFA pre-authentication expired")
         return user_id
 
-    def issue_operator_session(response, request, user_id):
+    def issue_operator_session(
+        response, request, user_id, *, credential_id: str | None = None
+    ):
         state.revoke(request.cookies.get(cookie_name))
         state.revoke_pending(request.cookies.get(pending_cookie))
-        token = state.issue(user_id)
+        token = state.issue(user_id, credential_id=credential_id)
         response.set_cookie(
             cookie_name,
             token,
@@ -942,7 +989,12 @@ def create_gateway(
             }
         )
         logger.info("operator MFA sign-in accepted")
-        return issue_operator_session(response, request, user_id)
+        credential_id = claims.get("credential_id")
+        if not isinstance(credential_id, str) or not credential_id:
+            raise web.HTTPUnauthorized(text="WebAuthn credential identity unavailable")
+        return issue_operator_session(
+            response, request, user_id, credential_id=credential_id
+        )
 
     async def list_operator_credentials(request):
         user_id = require_operator_session(request)

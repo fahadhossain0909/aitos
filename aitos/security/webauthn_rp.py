@@ -379,6 +379,29 @@ class WebAuthnRelyingParty:
         finally:
             db.close()
 
+    def is_credential_active(self, user_id: str, credential_id: str) -> bool:
+        """Return whether a session's authenticating credential is still active."""
+        try:
+            user = self._user_id(user_id)
+        except (TypeError, ValueError):
+            return False
+        if (
+            not isinstance(credential_id, str)
+            or not credential_id
+            or len(credential_id) > 1024
+        ):
+            return False
+        db = self._connect()
+        try:
+            row = db.execute(
+                "SELECT 1 FROM webauthn_credentials "
+                "WHERE user_id=? AND credential_id=?",
+                (user, credential_id),
+            ).fetchone()
+            return row is not None
+        finally:
+            db.close()
+
     def list_credentials(self, *, user_id: str) -> list[dict[str, Any]]:
         """Return non-secret authenticator metadata for one authenticated subject."""
         user = self._user_id(user_id)
