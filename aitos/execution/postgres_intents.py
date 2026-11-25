@@ -32,10 +32,15 @@ def _financial_state_snapshot(
         "fees",
         "funding",
     }
-    if not isinstance(snapshot, dict) or set(snapshot) != required:
+    allowed = required | {"venue_equity"}
+    if (
+        not isinstance(snapshot, dict)
+        or not required.issubset(snapshot)
+        or not set(snapshot).issubset(allowed)
+    ):
         raise ValueError(
             "financial snapshot must contain currency, starting_equity, "
-            "realized_pnl, unrealized_pnl, fees and funding only"
+            "realized_pnl, unrealized_pnl, fees and funding, with optional venue_equity"
         )
     currency = _identifier(str(snapshot.get("currency") or ""), "currency")
     if not 2 <= len(currency) <= 12 or not all(
@@ -67,7 +72,12 @@ def _financial_state_snapshot(
         unrealized = amount("unrealized_pnl")
         fees = amount("fees", nonnegative=True)
         funding = amount("funding")
-        equity = starting + realized + unrealized + funding - fees
+        model_equity = starting + realized + unrealized + funding - fees
+        venue_equity = (
+            amount("venue_equity") if "venue_equity" in snapshot else model_equity
+        )
+        unattributed_adjustments = venue_equity - model_equity
+        equity = venue_equity
         if previous is not None:
             if previous.get("currency") != currency:
                 raise ValueError("financial currency cannot change within an aggregate")
@@ -102,6 +112,8 @@ def _financial_state_snapshot(
         "unrealized_pnl": canonical_amount(unrealized),
         "fees": canonical_amount(fees),
         "funding": canonical_amount(funding),
+        "venue_equity": canonical_amount(venue_equity),
+        "unattributed_adjustments": canonical_amount(unattributed_adjustments),
         "equity": canonical_amount(equity),
         "peak_equity": canonical_amount(peak),
         "drawdown": canonical_amount(drawdown),
@@ -1190,6 +1202,55 @@ class PostgresCanonicalExecutionIntentStore:
             expected_state=str(row["state"]),
             new_state="TERMINAL",
         )
+
+    async def append_financial_snapshot(
+        self, snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Append a scope-fenced, revisioned account valuation and drawdown snapshot."""
+        if not isinstance(snapshot, dict):
+            raise TypeError("financial snapshot must be an object")
+        currency = _identifier(str(snapshot.get("currency") or ""), "currency")
+        if not 2 <= len(currency) <= 12 or not all(
+            "A" <= char <= "Z" or "0" <= char <= "9" for char in currency
+        ):
+            raise ValueError("financial currency must be an uppercase code")
+        aggregate = f"financial:{currency}"
+        await self._assert_fence()
+        events = await self.oms.read_events(self.scope, aggregate)
+        expected_revision = events[-1].revision if events else 0
+        previous_state = None
+        previous_event_id = None
+        if events:
+            prior_payload = events[-1].payload
+            if prior_payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
+                raise OMSConflict("financial aggregate contains a non-snapshot event")
+            previous_state = prior_payload.get("financial_state")
+            if not isinstance(previous_state, dict):
+                raise OMSConflict("canonical financial snapshot is malformed")
+            previous_event_id = events[-1].event_id
+        financial_state = _financial_state_snapshot(snapshot, previous_state)
+        revision = expected_revision + 1
+        event_id = f"financial:{currency}:revision:{revision}"
+        payload = {
+            "event_type": "FINANCIAL_STATE_SNAPSHOT",
+            "account_scope": self.scope,
+            "financial_state": financial_state,
+            "causality": {
+                "causation_id": f"runtime-valuation:{currency}:{revision}",
+                "correlation_id": self.scope,
+                "parent_event_id": previous_event_id,
+            },
+        }
+        event = await self.oms.append(
+            self.fence,
+            aggregate_id=aggregate,
+            event_id=event_id,
+            expected_revision=expected_revision,
+            payload=payload,
+        )
+        if event.revision != revision:
+            raise OMSConflict("financial snapshot committed at an unexpected revision")
+        return financial_state
 
     async def latest_financial_state(self, currency: str) -> dict[str, Any] | None:
         """Read the most recent canonical valuation snapshot for this currency."""
