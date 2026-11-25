@@ -194,6 +194,22 @@ class PostgresLifecycleStateWriter:
                 + ", ".join(sorted(missing_canonical))
             )
         for trade_id in aggregate_ids:
+            events = await self.oms.read_events(self.fence.account_scope, trade_id)
+            event_types = {
+                str(event.payload.get("event_type", "")) for event in events
+            }
+            if "TRADE_SNAPSHOT" not in event_types:
+                # Intent and financial aggregates share the canonical event
+                # journal but are not TradeLifecycle positions.
+                if event_types and all(
+                    event_type.startswith("EXECUTION_INTENT_")
+                    or event_type == "FINANCIAL_STATE_SNAPSHOT"
+                    for event_type in event_types
+                ):
+                    continue
+                raise RuntimeError(
+                    f"canonical OMS aggregate {trade_id} has no recognized trade snapshot"
+                )
             snapshot = await self.latest_snapshot(trade_id)
             if snapshot is None:
                 raise RuntimeError(
