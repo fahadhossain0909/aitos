@@ -11,6 +11,7 @@ type Challenge = {
 
 export default function ApprovalPanel() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [executionScope, setExecutionScope] = useState<string | null>(null);
   const [actionText, setActionText] = useState("");
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [approvalId, setApprovalId] = useState("");
@@ -25,10 +26,16 @@ export default function ApprovalPanel() {
     })
       .then(async (response) => {
         if (!response.ok) throw Error("Approval capabilities unavailable");
-        return (await response.json()) as { enabled?: boolean };
+        return (await response.json()) as {
+          enabled?: boolean;
+          execution_scope?: string | null;
+        };
       })
       .then((value) => {
-        if (active) setEnabled(value.enabled === true);
+        if (active) {
+          setEnabled(value.enabled === true);
+          setExecutionScope(value.execution_scope ?? null);
+        }
       })
       .catch(() => {
         if (active) setEnabled(false);
@@ -107,17 +114,22 @@ export default function ApprovalPanel() {
       </p>
       {enabled === null ? (
         <p className="muted">Checking approval policy…</p>
-      ) : !enabled ? (
+      ) : !enabled || !executionScope ? (
         <div className="empty">
           <LockKeyhole size={24} />
           <h3>Approval service not configured</h3>
           <p>
-            A server-side RBAC authorizer and approval signing key are required.
-            No approval or execution control is exposed.
+            A server-side RBAC authorizer, approval signing key and shared
+            execution account scope are required. No approval or execution
+            control is exposed.
           </p>
         </div>
       ) : (
         <>
+          <p className="muted">
+            Target account scope: <code>{executionScope}</code>. Include this exact
+            value in the action JSON; venue side must be BUY or SELL.
+          </p>
           <label htmlFor="approval-action">Canonical action JSON</label>
           <textarea
             id="approval-action"

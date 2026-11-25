@@ -1041,6 +1041,7 @@ def create_gateway(
             {
                 "enabled": enabled,
                 "requires_webauthn_step_up": enabled,
+                "execution_scope": os.environ.get("AITOS_EXECUTION_SCOPE") or None,
                 "execution": "not_exposed_by_operator_gateway",
             }
         )
@@ -1062,6 +1063,9 @@ def create_gateway(
                 raise ValueError()
             action = body["action"]
             if not isinstance(action, dict) or not action:
+                raise ValueError()
+            expected_scope = os.environ.get("AITOS_EXECUTION_SCOPE", "").strip()
+            if expected_scope and action.get("scope") != expected_scope:
                 raise ValueError()
             options = webauthn_rp.authentication_options(
                 user_id=user_id, now=int(time.time())
@@ -1311,10 +1315,12 @@ def main():
                 )
             shared_webauthn_db = os.environ.get("AITOS_WEBAUTHN_DB", "").strip()
             shared_origin = os.environ.get("AITOS_WEBAUTHN_ORIGIN", "").strip()
+            shared_scope = os.environ.get("AITOS_EXECUTION_SCOPE", "").strip()
             if (
                 not shared_webauthn_db
                 or Path(shared_webauthn_db).expanduser().resolve() != args.webauthn_db
                 or shared_origin != config.public_origin
+                or not shared_scope
             ):
                 parser.exit(
                     2,

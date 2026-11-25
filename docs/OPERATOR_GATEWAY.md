@@ -193,10 +193,18 @@ signing key are never copied into the OMS event.
 
 For gateway/runtime store sharing, both processes must use the same
 `AITOS_WEBAUTHN_DB`, `AITOS_WEBAUTHN_ORIGIN`,
-`AITOS_WEBAUTHN_RP_ID`, `AITOS_APPROVAL_SIGNING_KEY` and
-`AITOS_OPERATOR_ROLE_MAP`. The gateway's `--webauthn-db` and `--origin`
-must exactly match the two shared environment values. Both processes derive
-the same sibling `live-approvals.sqlite` file. If the gateway and executor
+`AITOS_WEBAUTHN_RP_ID`, `AITOS_EXECUTION_SCOPE`,
+`AITOS_APPROVAL_SIGNING_KEY` and `AITOS_OPERATOR_ROLE_MAP`. The gateway's
+`--webauthn-db` and `--origin` must exactly match the shared environment
+values. `AITOS_EXECUTION_SCOPE` must equal the runtime's SHA-256 account scope;
+the approval desk displays it and rejects actions for another scope. For a
+mainnet account, compute the scope without printing the API key:
+
+```bash
+python -c 'import hashlib,os; print(hashlib.sha256(("False:" + os.environ["BINANCE_API_KEY"]).encode()).hexdigest())'
+```
+
+Both processes derive the same sibling `live-approvals.sqlite` file. If the gateway and executor
 run in separate containers, that file must be on one protected, durable,
 shared volume with SQLite-compatible locking; separate ephemeral container
 filesystems do not constitute a shared approval store.

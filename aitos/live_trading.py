@@ -167,6 +167,12 @@ async def prepare_live_executor(
         sys.exit(1)
 
     scope = hashlib.sha256(f"{settings.binance.testnet}:{api_key}".encode()).hexdigest()
+    if not settings.binance.testnet and (
+        os.environ.get("AITOS_EXECUTION_SCOPE", "").strip() != scope
+    ):
+        raise SystemExit(
+            "AITOS_EXECUTION_SCOPE must match the selected Binance account"
+        )
     # PostgreSQL is bound by run_live_trading.py before any strategy or
     # recovery component is initialized. The live executor must not create or
     # consult the legacy SQLite ExecutionIntentStore.

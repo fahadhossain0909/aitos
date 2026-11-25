@@ -197,7 +197,8 @@ async def test_mfa_enrollment_requires_live_password_preauthentication(gateway):
     assert response.status == 401
 
 
-async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path):
+async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path, monkeypatch):
+    monkeypatch.setenv("AITOS_EXECUTION_SCOPE", "live:account-scope-1")
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "index.html").write_text("<html></html>", encoding="utf-8")
@@ -242,11 +243,32 @@ async def test_approval_desk_requires_rbac_and_webauthn_step_up(tmp_path):
         )
         assert verified.status == 200
         capabilities = await client.get("/operator/v1/approval/capabilities")
-        assert (await capabilities.json())["enabled"] is True
+        capability_payload = await capabilities.json()
+        assert capability_payload["enabled"] is True
+        assert capability_payload["execution_scope"] == "live:account-scope-1"
+
+        mismatched = await client.post(
+            "/operator/v1/approval/challenge",
+            json={
+                "action": {
+                    "kind": "risk-limit-change",
+                    "limit": "0.25",
+                    "scope": "live:other-account",
+                }
+            },
+            headers={"Origin": ORIGIN},
+        )
+        assert mismatched.status == 400
 
         requested = await client.post(
             "/operator/v1/approval/challenge",
-            json={"action": {"kind": "risk-limit-change", "limit": "0.25"}},
+            json={
+                "action": {
+                    "kind": "risk-limit-change",
+                    "limit": "0.25",
+                    "scope": "live:account-scope-1",
+                }
+            },
             headers={"Origin": ORIGIN},
         )
         assert requested.status == 200

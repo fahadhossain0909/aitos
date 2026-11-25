@@ -1,4 +1,6 @@
+import hashlib
 import re
+from types import SimpleNamespace
 
 import pytest
 from aioresponses import aioresponses
@@ -92,6 +94,72 @@ def test_live_mainnet_session_gate_requires_explicit_opt_in_and_authority(
         )
         == "operator-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_mainnet_executor_uses_shared_approval_authority_without_connecting(
+    tmp_path, monkeypatch
+):
+    authority = LiveApprovalControlPlane(
+        tmp_path / "live-approvals.sqlite",
+        signing_key=b"shared-mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: True,
+    )
+    settings = SimpleNamespace(
+        binance=SimpleNamespace(
+            testnet=False,
+            execution_credentials=("mainnet-api-key", "mainnet-api-secret"),
+            recv_window_ms=5000,
+            hedge_mode=False,
+        )
+    )
+    expected_scope = hashlib.sha256(b"False:mainnet-api-key").hexdigest()
+    monkeypatch.setenv("AITOS_ENABLE_MAINNET_EXECUTION", "1")
+    monkeypatch.setenv("AITOS_EXECUTION_SCOPE", expected_scope)
+
+    async def no_network(executor, settings, symbols):
+        return executor
+
+    monkeypatch.setattr("aitos.live_trading._prepare_connected_executor", no_network)
+    executor = await prepare_live_executor(
+        settings,
+        ["BTCUSDT"],
+        approval_authority=authority,
+    )
+    assert executor._execution_scope == expected_scope
+    assert executor._live_approval_authority is authority
+    assert executor._live_approval_token_provider == authority.get_unconsumed_token
+
+
+@pytest.mark.asyncio
+async def test_mainnet_executor_rejects_wrong_account_scope_before_connect(
+    tmp_path, monkeypatch
+):
+    authority = LiveApprovalControlPlane(
+        tmp_path / "live-approvals.sqlite",
+        signing_key=b"shared-mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: True,
+    )
+    settings = SimpleNamespace(
+        binance=SimpleNamespace(
+            testnet=False,
+            execution_credentials=("mainnet-api-key", "mainnet-api-secret"),
+            recv_window_ms=5000,
+            hedge_mode=False,
+        )
+    )
+    monkeypatch.setenv("AITOS_ENABLE_MAINNET_EXECUTION", "1")
+    monkeypatch.setenv("AITOS_EXECUTION_SCOPE", "wrong-account-scope")
+    with pytest.raises(SystemExit, match="AITOS_EXECUTION_SCOPE"):
+        await prepare_live_executor(
+            settings,
+            ["BTCUSDT"],
+            approval_authority=authority,
+        )
 
 
 def test_confirm_live_trading_succeeds_with_exact_phrase():
