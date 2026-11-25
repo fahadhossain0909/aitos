@@ -14,7 +14,6 @@ from contextlib import ExitStack
 from aitos.config.paths import get_model_data_dir
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
-from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation
@@ -96,18 +95,17 @@ async def prepare_live_executor(
         sys.exit(1)
 
     scope = hashlib.sha256(f"{settings.binance.testnet}:{api_key}".encode()).hexdigest()
-    intent_store = ExecutionIntentStore(
-        get_model_data_dir() / "execution_intents.sqlite3", scope=scope
-    )
-    # Never infer that an absent runtime position means a submitted order failed.
-    intent_store.assert_ready()
+    # PostgreSQL is bound by run_live_trading.py before any strategy or
+    # recovery component is initialized. The live executor must not create or
+    # consult the legacy SQLite ExecutionIntentStore.
     executor = BinanceFuturesOrderExecutor(
         api_key=api_key,
         api_secret=api_secret,
         testnet=settings.binance.testnet,
         recv_window_ms=settings.binance.recv_window_ms,
         hedge_mode=settings.binance.hedge_mode,
-        intent_store=intent_store,
+        execution_scope=scope,
+        intent_store=None,
     )
     try:
         return await _prepare_connected_executor(executor, settings, symbols)
