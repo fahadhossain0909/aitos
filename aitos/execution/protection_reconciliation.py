@@ -1222,17 +1222,18 @@ async def recover_protection_handovers(
                 intent_store.complete_protection_handover, handover_id
             )
             if intent_state in {"SUBMITTING", "PROTECTED"}:
-                executor.acknowledge_protection(
-                    OrderResult(
-                        order_id=new_id,
-                        symbol=symbol,
-                        side=TradeSide(trade_side),
-                        filled_quantity=0.0,
-                        fill_price=float(request["reference_price"]),
-                        client_order_id=client_id,
-                    ),
-                    trade_id,
+                result = OrderResult(
+                    order_id=new_id,
+                    symbol=symbol,
+                    side=TradeSide(trade_side),
+                    filled_quantity=0.0,
+                    fill_price=float(request["reference_price"]),
+                    client_order_id=client_id,
                 )
+                if getattr(executor, "canonical_intent_store", None) is not None:
+                    await executor.acknowledge_protection_trade(result, trade)
+                else:
+                    executor.acknowledge_protection(result, trade_id)
             recovered.append(handover_id)
 
     return {
