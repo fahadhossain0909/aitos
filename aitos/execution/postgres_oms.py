@@ -632,7 +632,9 @@ class PostgresCanonicalOMS:
         if type(revision) is not int or revision < 1:
             raise ValueError("outbox revision must be positive")
         event_hash = record.get("event_hash")
-        if not isinstance(event_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", event_hash):
+        if not isinstance(event_hash, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", event_hash
+        ):
             raise ValueError("outbox event hash is invalid")
         async with self._pool.acquire() as conn, conn.transaction():
             result = await conn.execute(
@@ -655,7 +657,9 @@ class PostgresCanonicalOMS:
                 event_hash,
             )
             if result != "UPDATE 1":
-                raise OMSConflict("outbox lease is stale, expired, or already acknowledged")
+                raise OMSConflict(
+                    "outbox lease is stale, expired, or already acknowledged"
+                )
 
     async def release_outbox_claim(
         self,
@@ -695,7 +699,9 @@ class PostgresCanonicalOMS:
                 detail,
             )
             if result != "UPDATE 1":
-                raise OMSConflict("cannot release an outbox lease not owned by this worker")
+                raise OMSConflict(
+                    "cannot release an outbox lease not owned by this worker"
+                )
 
     async def claim_outbox(self, *, limit: int = 100) -> list[dict[str, Any]]:
         if type(limit) is not int or not 1 <= limit <= 1000:
