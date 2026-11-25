@@ -15,6 +15,7 @@ class FakeWebAuthn:
     def __init__(self, credentials=0):
         self.credentials = credentials
         self.registration_verified = False
+        self.revoked = False
         self.bootstrap_consumed = set()
 
     def consume_enrollment_bootstrap_token(
@@ -32,6 +33,14 @@ class FakeWebAuthn:
     def credential_count(self, *, user_id):
         assert user_id == "operator-1"
         return self.credentials
+
+    def is_credential_active(self, user_id, credential_id):
+        return (
+            user_id == "operator-1"
+            and credential_id == "credential-id"
+            and self.credentials > 0
+            and not self.revoked
+        )
 
     def list_credentials(self, *, user_id):
         assert user_id == "operator-1"
@@ -81,6 +90,7 @@ class FakeWebAuthn:
             "verified": True,
             "user_id": "operator-1",
             "user_verified": True,
+            "credential_id": "credential-id",
             "origin": ORIGIN,
             "rp_id": self.rp_id,
         }
@@ -463,3 +473,36 @@ async def test_additional_authenticator_requires_existing_webauthn_step_up(gatew
     assert finish.status == 200
     inventory = await client.get("/operator/v1/mfa/credentials")
     assert (await inventory.json())["credentials"]
+
+
+async def test_revoking_authenticating_credential_invalidates_existing_sessions(gateway):
+    client, rp = gateway
+    login = await client.post(
+        "/operator/v1/login",
+        json={"password": PASSWORD},
+        headers={"Origin": ORIGIN},
+    )
+    assert login.status == 200
+    enrollment = await client.post(
+        "/operator/v1/mfa/register",
+        json={"credential": {"id": "credential"}},
+    )
+    assert enrollment.status == 200
+    finish = await client.post(
+        "/operator/v1/mfa/verify",
+        json={
+            "challenge": "assertion-challenge",
+            "assertion": {"id": "credential"},
+        },
+    )
+    assert finish.status == 200
+    assert (await (await client.get("/operator/v1/session")).json())[
+        "authenticated"
+    ] is True
+
+    rp.revoked = True
+    session = await client.get("/operator/v1/session")
+    assert session.status == 200
+    assert (await session.json())["authenticated"] is False
+    protected_proxy = await client.get("/console/v1/snapshot")
+    assert protected_proxy.status == 401
