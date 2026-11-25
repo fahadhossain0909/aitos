@@ -867,9 +867,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     symbol, client_order_id
                 )
             else:
-                recovered = await self.get_order_by_client_id(
-                    symbol, client_order_id
-                )
+                recovered = await self.get_order_by_client_id(symbol, client_order_id)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1105,7 +1103,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
         if self._conditional_orders_api == "algo":
             algo_id = response.get("algoId") if isinstance(response, dict) else None
-            algo_status = response.get("algoStatus") if isinstance(response, dict) else None
+            algo_status = (
+                response.get("algoStatus") if isinstance(response, dict) else None
+            )
             if (
                 isinstance(algo_id, bool)
                 or not str(algo_id or "").isdigit()
