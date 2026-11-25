@@ -3181,21 +3181,16 @@ class TradeLifecycle(AITOSModule):
                         algo_order_id,
                         "triggered child has no unique durable client-algo intent",
                     )
-                if owned_rows[0].get("state") == "PROTECTED":
-                    if delta.delta_quantity > 0 and getattr(
-                        executor := self._order_executor, "canonical_intent_store", None
-                    ) is not None:
-                        applied_intent = await executor.canonical_intent_store.get(client_id)
-                        if applied_intent is None or applied_intent.get("state") != "APPLIED":
-                            raise ExecutionRecoveryRequired(
-                                trade.symbol,
-                                algo_order_id,
-                                "child fill Trade snapshot did not atomically apply its canonical protection intent",
-                            )
-                    elif delta.delta_quantity > 0:
-                        await _call_sync_or_async(
-                            intent_store.mark_applied, client_id, trade_id
+                if owned_rows[0].get("state") == "PROTECTED" and delta.delta_quantity > 0:
+                    if getattr(self._order_executor, "canonical_intent_store", None) is not None:
+                        raise ExecutionRecoveryRequired(
+                            trade.symbol,
+                            algo_order_id,
+                            "child fill Trade snapshot failed to atomically apply its canonical protection intent",
                         )
+                    await _call_sync_or_async(
+                        intent_store.mark_applied, client_id, trade_id
+                    )
                 await asyncio.to_thread(
                     intent_store.mark_protection_child_applied,
                     algo_id=algo_id,
