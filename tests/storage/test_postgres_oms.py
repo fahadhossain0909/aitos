@@ -212,26 +212,27 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
 
         writer = PostgresLifecycleStateWriter(oms, second_fence, projection_writer)
 
-        class TradeSnapshot:
-            trade_id = "trade-1"
-            account_scope = "paper:integration"
+        trade_snapshot = Trade(
+            trade_id="trade-1",
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            entry_price=100.0,
+            quantity=0.1,
+            leverage=2.0,
+            position_size_usd=10.0,
+            risk_amount_usd=1.0,
+            strategy_id="integration",
+            agent_consensus={},
+            explanation="canonical OMS projection fixture",
+            sl_price=95.0,
+            tp_price=110.0,
+            state=TradeLifecycleState.POSITION_OPENED,
+            entry_time="2026-11-24T00:00:00+00:00",
+            account_scope="paper:integration",
+        )
 
-            @staticmethod
-            def to_dict():
-                return {
-                    "trade_id": "trade-1",
-                    "account_scope": "paper:integration",
-                    "state": "POSITION_OPENED",
-                }
-
-        await writer(TradeSnapshot())
-        assert projected == [
-            {
-                "trade_id": "trade-1",
-                "account_scope": "paper:integration",
-                "state": "POSITION_OPENED",
-            }
-        ]
+        await writer(trade_snapshot)
+        assert projected == [trade_snapshot.to_dict()]
         assert (await writer.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
 
         async def broken_projection(_trade):
@@ -239,7 +240,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
 
         broken = PostgresLifecycleStateWriter(oms, second_fence, broken_projection)
         with pytest.raises(RuntimeError, match="projection unavailable"):
-            await broken(TradeSnapshot())
+            await broken(trade_snapshot)
         # Canonical event is committed before the projection callback fails.
         assert (await broken.latest_snapshot("trade-1"))["state"] == "POSITION_OPENED"
         restored_trade = Trade(

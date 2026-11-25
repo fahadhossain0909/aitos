@@ -1308,6 +1308,12 @@ class IdempotentOrderExecutor(OrderExecutor):
 
     def __init__(self, inner: OrderExecutor, state_store: Any | None = None) -> None:
         self._inner = inner
+        self._state_store = state_store
+        self._completed: dict[str, OrderResult] = {}
+        self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
+        self._requests: dict[str, OrderRequest] = {}
+        self._blocked_reason: str | None = None
+        self._blocked_client_order_id: str | None = None
 
     def __getattr__(self, name: str) -> Any:
         """Delegate venue/intent APIs not owned by the idempotency wrapper."""
@@ -1315,12 +1321,6 @@ class IdempotentOrderExecutor(OrderExecutor):
         if inner is None:
             raise AttributeError(name)
         return getattr(inner, name)
-        self._state_store = state_store
-        self._completed: dict[str, OrderResult] = {}
-        self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
-        self._requests: dict[str, OrderRequest] = {}
-        self._blocked_reason: str | None = None
-        self._blocked_client_order_id: str | None = None
 
     @property
     def supports_exchange_side_stops(self) -> bool:
