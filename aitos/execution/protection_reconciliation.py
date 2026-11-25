@@ -1276,7 +1276,7 @@ async def recover_triggered_protection_child_fills(
     ):
         raise ValueError("child-fill recovery query budget must be between 1 and 5000")
 
-    rows = await asyncio.to_thread(intent_store.protection_intents)
+    rows = await _call_sync_or_async(intent_store.protection_intents)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded protective intent history is required")
     by_order_id: dict[str, dict[str, Any]] = {}
