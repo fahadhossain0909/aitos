@@ -89,6 +89,39 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         )
         assert confirmed["state"] == "CONFIRMED"
         assert confirmed["revision"] == 2
+        with pytest.raises(OMSConflict, match="revision CAS failed"):
+            await intents.transition_with_trade_snapshot(
+                "client-001",
+                expected_revision=2,
+                expected_state="CONFIRMED",
+                trade_id="trade-atomic-failure",
+                expected_trade_revision=5,
+                trade_snapshot={
+                    "trade_id": "trade-atomic-failure",
+                    "account_scope": "paper:intent-test",
+                    "symbol": "BTCUSDT",
+                    "state": "POSITION_OPENED",
+                },
+                ledger_entries=[
+                    {
+                        "account_code": "OPEN_POSITION_ASSET",
+                        "currency": "USDT",
+                        "debit": "650",
+                        "credit": "0",
+                    },
+                    {
+                        "account_code": "CASH_CLEARING",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": "650",
+                    },
+                ],
+            )
+        unchanged = await intents.get("client-001")
+        assert unchanged["state"] == "CONFIRMED"
+        assert unchanged["revision"] == 2
+        assert await oms.read_events("paper:intent-test", "trade-atomic-failure") == []
+
         applied = await intents.transition_with_trade_snapshot(
             "client-001",
             expected_revision=2,
