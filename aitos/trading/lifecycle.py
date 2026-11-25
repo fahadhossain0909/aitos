@@ -3231,15 +3231,13 @@ class TradeLifecycle(AITOSModule):
                         "triggered child has no unique durable client-algo intent",
                     )
                 if owned_rows[0].get("state") == "PROTECTED" and delta.delta_quantity > 0:
-                    if getattr(self._order_executor, "canonical_intent_store", None) is not None:
-                        raise ExecutionRecoveryRequired(
-                            trade.symbol,
-                            algo_order_id,
-                            "child fill Trade snapshot failed to atomically apply its canonical protection intent",
+                    if getattr(self._order_executor, "canonical_intent_store", None) is None:
+                        await _call_sync_or_async(
+                            intent_store.mark_applied, client_id, trade_id
                         )
-                    await _call_sync_or_async(
-                        intent_store.mark_applied, client_id, trade_id
-                    )
+                    # PostgreSQL mode preserves PROTECTED for an in-flight algo;
+                    # append_protection_child_fill already committed this child
+                    # delta, Trade snapshot and ledger atomically.
                 await _call_sync_or_async(
                     intent_store.mark_protection_child_applied,
                     algo_id=algo_id,
