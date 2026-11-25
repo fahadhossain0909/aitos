@@ -508,6 +508,8 @@ class PostgresLifecycleStateWriter:
                     or event_type
                     in {
                         "PROTECTION_CHILD_FILL_APPLIED",
+                        "PROTECTION_CHILD_FILL_WATERMARK_UPDATED",
+                        "PROTECTION_HANDOVER_CREATED",
                         "FINANCIAL_STATE_SNAPSHOT",
                     }
                     for event_type in event_types

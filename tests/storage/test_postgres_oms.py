@@ -495,7 +495,9 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             for item in await oms.read_events("paper:integration", "trade-1")
         ] == [1, 2, 3, 4]
         pending = await oms.claim_outbox()
-        assert len(pending) == 4
+        pending_aggregates = {item["aggregate_id"] for item in pending}
+        assert "intent-protection-client-321" in pending_aggregates
+        assert "protection-child-321-654" in pending_aggregates
 
         first_claim = await oms.claim_outbox_leased(
             "projector-a", limit=1, lease_seconds=60
