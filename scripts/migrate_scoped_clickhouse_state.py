@@ -545,7 +545,6 @@ def _verified_cutover(client: Any) -> None:
             )
 
 
-
 def _verified_rollback(
     client: Any, *, writers_quiesced: bool, backup_confirmed: bool
 ) -> dict[str, Any]:
@@ -631,6 +630,7 @@ def _verified_rollback(
         "legacy_tables_restored": True,
         "scoped_tables_retained": [RUNTIME_TARGET, CLOSED_TARGET],
     }
+
 
 def run(
     *,
