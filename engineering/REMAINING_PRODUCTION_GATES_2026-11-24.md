@@ -244,3 +244,13 @@ cutover, or desktop identity integration. Keep Mainnet fail-closed.
 - `PostgresOMSOutboxProjector` verifies each event against the aggregate hash chain, replays trade snapshots into the configured durable projection callback, acknowledges canonical-only intent/financial events, and releases failed projections for retry.
 - The live runner invokes one bounded replay batch before startup reconciliation and on each management cycle; replay failures block fresh-exposure cycles.
 - PostgreSQL integration tests now cover exclusive claims, worker ownership, release/reclaim attempt increments and stale acknowledgement rejection. These tests are awaiting exact-head CI execution. Full ClickHouse/SQLite projection rebuild, repair of missing/out-of-order projection state, and real multi-process crash/restart acceptance remain open.
+
+
+## Additional implementation update — canonical Binance fee/funding postings
+
+- The live income reconciler now writes its adjusted trade snapshot through the PostgreSQL canonical lifecycle writer rather than directly to the SQLite/ClickHouse projection callback.
+- After lifecycle write-through, each uniquely attributed Binance COMMISSION or FUNDING_FEE row is appended to the same scope-fenced trade aggregate as a deterministic TRADE_COST_ADJUSTMENT event.
+- Fee postings debit EXPENSE_FEES and credit CASH; positive funding debits CASH and credits FUNDING_INCOME; negative funding debits FUNDING_EXPENSE and credits CASH. Every posting is balanced, hash-bound and idempotent by Binance income transaction identity.
+- If the canonical posting fails, the existing durable income retry/cursor logic prevents the exchange cursor from advancing past that row. Retrying does not duplicate the lifecycle adjustment or journal posting.
+- Added PostgreSQL integration coverage for duplicate fee events, signed funding expenses, balanced ledger lines and event revisions, plus an income-reconciler callback test. Exact-head CI remains the verification authority.
+- This closes fee/funding journal posting at the trade-event level. A complete account-wide realized/unrealized PnL, equity/peak/drawdown valuation stream and runtime use of the PostgreSQL execution-intent store are still code-level integration work; the financial state snapshot adapter must not be mistaken for those live integrations.
