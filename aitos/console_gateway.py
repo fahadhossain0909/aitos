@@ -1295,7 +1295,7 @@ def main():
         from aitos.security.webauthn_rp import WebAuthnRelyingParty
 
         rp_id = (
-            os.environ.get("AITOS_WEBAUTHN_RP_ID")
+            os.environ.get("AITOS_WEBAUTHN_RP_ID", "").strip()
             or urlsplit(config.public_origin).hostname
         )
         webauthn_rp = WebAuthnRelyingParty(
@@ -1315,12 +1315,14 @@ def main():
                 )
             shared_webauthn_db = os.environ.get("AITOS_WEBAUTHN_DB", "").strip()
             shared_origin = os.environ.get("AITOS_WEBAUTHN_ORIGIN", "").strip()
+            shared_rp_id = os.environ.get("AITOS_WEBAUTHN_RP_ID", "").strip()
             shared_scope = os.environ.get("AITOS_EXECUTION_SCOPE", "").strip()
             if (
                 not shared_webauthn_db
                 or Path(shared_webauthn_db).expanduser().resolve() != args.webauthn_db
                 or shared_origin != config.public_origin
                 or not shared_scope
+                or (shared_rp_id and shared_rp_id != rp_id)
             ):
                 parser.exit(
                     2,
