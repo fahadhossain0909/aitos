@@ -1117,7 +1117,13 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 )
                 recovered = True
                 algo_status = response.get("algoStatus")
-            if recovered or algo_status != "NEW":
+            if not recovered and algo_status != "NEW":
+                response = await self._lookup_protective_post_result(
+                    symbol, client_order_id
+                )
+                recovered = True
+                algo_status = response.get("algoStatus")
+            if recovered:
                 algo_id = self._validate_recovered_algo_protection(
                     response,
                     symbol=symbol,
