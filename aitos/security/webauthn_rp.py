@@ -537,6 +537,7 @@ class WebAuthnRelyingParty:
         expected_origin: set[str] | frozenset[str],
         expected_rp_id: str,
         require_user_verification: bool = True,
+        now: int | None = None,
     ) -> dict[str, Any]:
         if (
             expected_rp_id != self.rp_id
@@ -547,6 +548,9 @@ class WebAuthnRelyingParty:
             or len(assertion) > 65_536
         ):
             raise WebAuthnCredentialError("WebAuthn verifier context mismatch")
+        current_time = int(time.time()) if now is None else now
+        if type(current_time) is not int or current_time < 0:
+            raise WebAuthnCredentialError("invalid assertion verification time")
         try:
             credential = json.loads(assertion)
             if not isinstance(credential, dict):
@@ -566,7 +570,7 @@ class WebAuthnRelyingParty:
                 ).fetchone()
                 if (
                     challenge_row is None
-                    or challenge_row[1] <= int(time.time())
+                    or challenge_row[1] <= current_time
                     or challenge_row[2] is not None
                 ):
                     raise WebAuthnCredentialError(
@@ -597,11 +601,21 @@ class WebAuthnRelyingParty:
                     raise WebAuthnCredentialError(
                         "authenticator did not verify the user"
                     )
+                new_sign_count = int(verified.new_sign_count)
+                if new_sign_count < 0:
+                    raise WebAuthnCredentialError(
+                        "authenticator signature counter is invalid"
+                    )
+                if int(current_count) > 0 and new_sign_count <= int(current_count):
+                    raise WebAuthnCredentialError(
+                        "authenticator signature counter rollback or clone detected"
+                    )
                 changed = db.execute(
-                    "UPDATE webauthn_credentials SET sign_count=?,last_used_at=strftime('%s','now') "
+                    "UPDATE webauthn_credentials SET sign_count=?,last_used_at=? "
                     "WHERE credential_id=? AND sign_count=?",
                     (
-                        int(verified.new_sign_count),
+                        new_sign_count,
+                        current_time,
                         credential_id,
                         int(current_count),
                     ),
@@ -613,7 +627,7 @@ class WebAuthnRelyingParty:
                 consumed = db.execute(
                     "UPDATE webauthn_authentication_challenges SET consumed_at=? "
                     "WHERE challenge=? AND consumed_at IS NULL",
-                    (int(time.time()), challenge),
+                    (current_time, challenge),
                 ).rowcount
                 if consumed != 1:
                     raise WebAuthnCredentialError("authentication challenge replay")
@@ -627,7 +641,7 @@ class WebAuthnRelyingParty:
                     )["origin"],
                     "rp_id": self.rp_id,
                     "credential_id": bytes_to_base64url(verified.credential_id),
-                    "new_sign_count": int(verified.new_sign_count),
+                    "new_sign_count": new_sign_count,
                 }
             except Exception:
                 db.rollback()
