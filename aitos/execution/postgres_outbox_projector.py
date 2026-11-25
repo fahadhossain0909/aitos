@@ -100,7 +100,22 @@ class PostgresOMSOutboxProjector:
             # they require no duplicate mutable projection in the legacy stores.
             return
 
-        snapshot = payload.get("trade")
+        # A delayed/expired worker may be replaying an older snapshot after a
+        # newer revision was already projected. Always materialize the latest
+        # canonical Trade snapshot so a stale worker cannot roll a projection back.
+        latest_trade_event = next(
+            (
+                item
+                for item in reversed(events)
+                if item.payload.get("event_type") == "TRADE_SNAPSHOT"
+            ),
+            None,
+        )
+        snapshot = (
+            latest_trade_event.payload.get("trade")
+            if latest_trade_event is not None
+            else None
+        )
         if not isinstance(snapshot, dict):
             # Imported legacy snapshots are resolved only through immutable
             # source evidence and revalidated by the lifecycle adapter.
