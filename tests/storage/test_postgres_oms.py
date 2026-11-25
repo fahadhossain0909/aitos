@@ -411,6 +411,86 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
 
 
 @pytest.mark.asyncio
+async def test_postgres_outbox_full_rebuild_repairs_missing_projection_drift():
+    dsn = os.getenv("AITOS_POSTGRES_OMS_TEST_DSN")
+    if not dsn:
+        pytest.skip("AITOS_POSTGRES_OMS_TEST_DSN is not configured")
+    import asyncpg
+
+    schema = "aitos_projection_rebuild_" + uuid.uuid4().hex
+    admin = await asyncpg.connect(dsn)
+    await admin.execute(f'CREATE SCHEMA "{schema}"')
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=1,
+        max_size=4,
+        server_settings={"search_path": schema},
+    )
+    projected = []
+    trade = Trade(
+        trade_id="trade-projection-rebuild",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=65000.0,
+        quantity=0.01,
+        leverage=2.0,
+        position_size_usd=650.0,
+        risk_amount_usd=10.0,
+        strategy_id="projection-rebuild",
+        agent_consensus={},
+        explanation="projection rebuild acceptance",
+        sl_price=64000.0,
+        tp_price=67000.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-11-25T00:00:00+00:00",
+        account_scope="paper:projection-rebuild",
+    )
+
+    async def projection_writer(value):
+        projected[:] = [value]
+
+    async def projection_reader():
+        return list(projected)
+
+    try:
+        assert await apply_postgres_migrations(pool) == 7
+        oms = PostgresCanonicalOMS(pool)
+        fence = await oms.acquire_writer(
+            "paper:projection-rebuild",
+            "projection-writer",
+            expected_generation=0,
+        )
+        writer = PostgresLifecycleStateWriter(oms, fence, projection_writer)
+        await writer(trade)
+        projector = PostgresOMSOutboxProjector(
+            oms,
+            writer,
+            worker_id="projection-rebuild-worker",
+            projection_reader=projection_reader,
+        )
+
+        projected[0].quantity = 0.02
+        drift = await projector.audit_scope()
+        assert drift["in_sync"] is False
+        assert drift["mismatched_trade_ids"] == ["trade-projection-rebuild"]
+
+        repaired = await projector.audit_and_repair_scope()
+        assert repaired["repaired"] is True
+        assert repaired["rebuild"]["requeued"] == 1
+        assert repaired["after"]["in_sync"] is True
+        assert repaired["after"]["missing_trade_ids"] == []
+        assert repaired["after"]["mismatched_trade_ids"] == []
+        assert projected[0].quantity == 0.01
+
+        with pytest.raises(ValueError, match="confirmation"):
+            await projector.rebuild_scope(confirm=False)
+    finally:
+        await pool.close()
+        await admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
+        await admin.close()
+
+
+@pytest.mark.asyncio
 async def test_clickhouse_import_streams_lossless_payloads_into_postgres_oms(
     monkeypatch, tmp_path
 ):
