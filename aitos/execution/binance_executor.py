@@ -156,7 +156,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         ):
             raise TypeError("PostgreSQL canonical execution-intent store is required")
         if getattr(store, "scope", None) != self.execution_scope:
-            raise ValueError("PostgreSQL intent scope differs from Binance account scope")
+            raise ValueError(
+                "PostgreSQL intent scope differs from Binance account scope"
+            )
         self._canonical_intent_store = store
 
     async def refresh_canonical_intent_cache(self) -> dict[str, int]:
@@ -174,12 +176,16 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise TypeError("canonical lifecycle writer is required")
         self._canonical_lifecycle_writer = writer
 
-    async def acknowledge_execution_async(self, client_order_id: str, trade_id: str) -> None:
+    async def acknowledge_execution_async(
+        self, client_order_id: str, trade_id: str
+    ) -> None:
         if self._canonical_intent_store is not None:
             row = await self._canonical_intent_store.get(client_order_id)
             if row is None or row["state"] not in {"APPLIED", "TERMINAL"}:
                 raise ExecutionUncertainError(
-                    trade_id, client_order_id, "canonical execution intent is not atomically applied"
+                    trade_id,
+                    client_order_id,
+                    "canonical execution intent is not atomically applied",
                 )
         elif self._intent_store is not None:
             self._intent_store.mark_applied(client_order_id, trade_id)
@@ -470,7 +476,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         # query or depend on a legacy SQLite intent database.
         if self._canonical_intent_store is not None:
             return cached
-        return cached or bool(self._intent_store and self._intent_store.unresolved(symbol))
+        return cached or bool(
+            self._intent_store and self._intent_store.unresolved(symbol)
+        )
 
     def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
         if self._canonical_intent_store is not None:
@@ -549,7 +557,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     "symbol": request.symbol,
                     "side": request.side.value,
                     "quantity": format(Decimal(str(quantity)), "f"),
-                    "reference_price": format(Decimal(str(request.reference_price)), "f"),
+                    "reference_price": format(
+                        Decimal(str(request.reference_price)), "f"
+                    ),
                     "order_type": request.order_type,
                     "reduce_only": request.reduce_only,
                     "owner_trade_id": request.owner_trade_id,
@@ -614,7 +624,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "authoritative terminal fill/rejection not established",
             ) from None
 
-    async def _record_execution(self, client_id: str, result: OrderResult) -> OrderResult:
+    async def _record_execution(
+        self, client_id: str, result: OrderResult
+    ) -> OrderResult:
         payload = {
             "order_id": str(result.order_id),
             "symbol": result.symbol,
@@ -816,7 +828,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
     async def _record_terminal_protection(
         self, symbol: str, order_id: str, evidence: dict[str, Any]
     ) -> None:
-        if (self._canonical_intent_store is None and self._intent_store is None) or evidence.get("status") not in {
+        if (
+            self._canonical_intent_store is None and self._intent_store is None
+        ) or evidence.get("status") not in {
             "CANCELED",
             "FILLED",
             "EXPIRED",
@@ -1147,7 +1161,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             pending_rows = await self._canonical_intent_store.unresolved(symbol)
             for pending in pending_rows:
                 request_payload = pending.get("request") or {}
-                if request_payload.get("order_type") in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+                if request_payload.get("order_type") in {
+                    "STOP_MARKET",
+                    "TAKE_PROFIT_MARKET",
+                }:
                     raise ExecutionUncertainError(
                         symbol,
                         str(pending["client_id"]),
