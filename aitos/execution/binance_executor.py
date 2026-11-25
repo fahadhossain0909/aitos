@@ -1237,7 +1237,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                     "order_type": order_type,
                     "reduce_only": True,
                     "owner_trade_id": owner_trade_id,
-                    "execution_context": dict(protection_request.execution_context or {}),
+                    "execution_context": dict(
+                        protection_request.execution_context or {}
+                    ),
                 }
             )
         elif self._intent_store is not None:

@@ -505,7 +505,11 @@ class PostgresLifecycleStateWriter:
                 # journal but are not TradeLifecycle positions.
                 if event_types and all(
                     event_type.startswith("EXECUTION_INTENT_")
-                    or event_type == "FINANCIAL_STATE_SNAPSHOT"
+                    or event_type
+                    in {
+                        "PROTECTION_CHILD_FILL_APPLIED",
+                        "FINANCIAL_STATE_SNAPSHOT",
+                    }
                     for event_type in event_types
                 ):
                     continue
