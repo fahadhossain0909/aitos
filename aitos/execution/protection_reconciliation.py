@@ -736,7 +736,9 @@ async def recover_accepted_initial_stop_submissions(
             trade.updated_at = datetime.now(timezone.utc).isoformat()
             await persist_trade(trade)
             if row.get("state") == "SUBMITTING":
-                await _call_sync_or_async(intent_store.record_protection, client_id, result)
+                await _call_sync_or_async(
+                    intent_store.record_protection, client_id, result
+                )
             await _call_sync_or_async(
                 intent_store.mark_applied, client_id, owner_trade_id
             )
