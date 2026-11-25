@@ -53,6 +53,7 @@ async def test_postgres_market_and_journal_round_trip():
             (4, "canonical_oms_financial_ledger"),
             (5, "canonical_postgres_execution_intents"),
             (6, "canonical_oms_outbox_leases"),
+            (7, "canonical_postgres_protection_recovery"),
         ]
         assert len(migration_rows[0]["checksum"]) == 64
         initial = Kline(
