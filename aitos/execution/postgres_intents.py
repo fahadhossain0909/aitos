@@ -741,7 +741,20 @@ class PostgresCanonicalExecutionIntentStore:
     async def record_protection(self, client_id: str, result: Any) -> dict[str, Any]:
         """Persist a venue-accepted, currently unfilled protective order."""
         if not isinstance(result, dict):
-            raise TypeError("protective result payload must be an object")
+            if all(hasattr(result, name) for name in (
+                "order_id", "symbol", "side", "filled_quantity", "fill_price"
+            )):
+                result = {
+                    "order_id": str(result.order_id),
+                    "symbol": str(result.symbol),
+                    "side": str(getattr(result.side, "value", result.side)),
+                    "filled_quantity": format(Decimal(str(result.filled_quantity)), "f"),
+                    "fill_price": format(Decimal(str(result.fill_price)), "f"),
+                    "success": bool(getattr(result, "success", True)),
+                    "client_order_id": getattr(result, "client_order_id", client_id),
+                }
+            else:
+                raise TypeError("protective result payload must be an object or OrderResult")
         row = await self.get(client_id)
         if row is None:
             raise OMSConflict("protective execution intent does not exist")
