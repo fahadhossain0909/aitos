@@ -9,8 +9,8 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from aitos.execution.postgres_lifecycle_writer import PostgresLifecycleStateWriter
-from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.execution.postgres_oms import OMSConflict, PostgresCanonicalOMS
+from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.storage.postgres_migrations import apply_postgres_migrations
 from scripts.import_clickhouse_state_to_postgres_oms import (
