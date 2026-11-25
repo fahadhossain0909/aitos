@@ -242,7 +242,5 @@ def test_verified_rollback_refuses_non_atomic_database():
     client = RollbackClient()
     client.engine = "MergeTree"
     with pytest.raises(RuntimeError, match="Atomic"):
-        _verified_rollback(
-            client, writers_quiesced=True, backup_confirmed=True
-        )
+        _verified_rollback(client, writers_quiesced=True, backup_confirmed=True)
     assert client.commands == []
