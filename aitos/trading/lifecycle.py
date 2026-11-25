@@ -1421,7 +1421,12 @@ class TradeLifecycle(AITOSModule):
             return await self._close_trade_unlocked(trade_id, exit_price, reason)
 
     async def _close_trade_unlocked(
-        self, trade_id: str, exit_price: float, reason: str
+        self,
+        trade_id: str,
+        exit_price: float,
+        reason: str,
+        *,
+        execution_intent_client_id: str | None = None,
     ) -> Trade:
         self._require_initialized()
         if not _valid_market_price(exit_price):
@@ -1443,6 +1448,7 @@ class TradeLifecycle(AITOSModule):
                     exit_price,
                     execution.filled_quantity / trade.quantity,
                     execution_result=execution,
+                    execution_intent_client_id=execution_intent_client_id,
                 )
                 trade.state = TradeLifecycleState.POSITION_OPENED
                 return trade
@@ -1512,6 +1518,7 @@ class TradeLifecycle(AITOSModule):
                     execution,
                     f"exit:{self._execution_faults.get(trade.trade_id, trade.trade_id)}",
                 ),
+                client_order_id=execution_intent_client_id,
             )
         await self._resolve_decision_outcomes(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
@@ -3252,6 +3259,7 @@ class TradeLifecycle(AITOSModule):
         execution_result: OrderResult | None = None,
         consume_tp: bool = False,
         refresh_protection: bool = True,
+        execution_intent_client_id: str | None = None,
     ) -> None:
         if not _valid_market_price(price):
             raise ValueError(f"price must be a finite positive number, got {price!r}")
@@ -3322,6 +3330,7 @@ class TradeLifecycle(AITOSModule):
                     execution_result,
                     f"reduction:{reduction_client_id}",
                 ),
+                client_order_id=execution_intent_client_id,
             )
             if (
                 refresh_protection
