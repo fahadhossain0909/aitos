@@ -250,6 +250,8 @@ class PostgresCanonicalExecutionIntentStore:
         """
         client = _identifier(client_id, "client_id")
         trade = _identifier(trade_id, "trade_id")
+        if len(client) > 180:
+            raise ValueError("client_order_id exceeds canonical intent limit")
         if type(expected_revision) is not int or expected_revision < 1:
             raise ValueError("positive expected_revision is required")
         if type(expected_trade_revision) is not int or expected_trade_revision < 0:
@@ -269,6 +271,8 @@ class PostgresCanonicalExecutionIntentStore:
         normalized_entries = PostgresCanonicalOMS._validate_ledger_entries(
             [] if ledger_entries is None else ledger_entries
         )
+        if expected_state == "CONFIRMED" and not normalized_entries:
+            raise ValueError("confirmed execution requires balanced financial ledger entries")
         for entry in normalized_entries:
             reference = entry.get("reference")
             if reference is not None and len(reference) > 256:
@@ -277,6 +281,8 @@ class PostgresCanonicalExecutionIntentStore:
         intent_aggregate = f"intent-{client}"
         intent_event_id = f"intent:{client}:revision:{expected_revision + 1}"
         trade_event_id = f"trade:{trade}:revision:{expected_trade_revision + 1}"
+        if len(intent_event_id) > 192 or len(trade_event_id) > 192:
+            raise ValueError("canonical execution event identity exceeds 192 characters")
         await self._assert_fence()
         async with self.oms._pool.acquire() as conn, conn.transaction():
             await self._lock_fence(conn)
