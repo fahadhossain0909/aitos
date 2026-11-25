@@ -55,6 +55,9 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         )
         assert created["state"] == "SUBMITTING"
         assert created["revision"] == 1
+        stored_intent = await intents.get("client-001")
+        assert stored_intent["request"]["symbol"] == "BTCUSDT"
+        assert isinstance((await intents.unresolved())[0]["request"], dict)
 
         with pytest.raises(OMSConflict, match="already exists"):
             await intents.begin(

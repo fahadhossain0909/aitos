@@ -13,6 +13,7 @@ from typing import Any
 
 from aitos.execution.postgres_oms import (
     OMSConflict,
+    OMSIntegrityError,
     WriterFence,
     _canonical_payload,
     _event_hash,
