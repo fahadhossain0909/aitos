@@ -83,6 +83,7 @@ def test_live_mainnet_session_gate_requires_explicit_opt_in_and_authority(
             input_fn=lambda prompt: "unused",
             approval_authority=authority,
         )
+    monkeypatch.setenv("AITOS_EXECUTION_SCOPE", "live:account-1")
     monkeypatch.setenv("AITOS_ENABLE_MAINNET_EXECUTION", "1")
     inputs = iter(["operator-1", "I APPROVE LIVE TRADING"])
     assert (

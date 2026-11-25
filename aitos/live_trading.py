@@ -99,6 +99,7 @@ def confirm_live_trading(
     """
     if not testnet and (
         os.environ.get("AITOS_ENABLE_MAINNET_EXECUTION") != "1"
+        or not os.environ.get("AITOS_EXECUTION_SCOPE", "").strip()
         or not isinstance(approval_authority, LiveApprovalControlPlane)
     ):
         logger.critical(
