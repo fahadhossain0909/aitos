@@ -240,7 +240,9 @@ async def test_terminal_partial_stop_fill_reprotects_remaining_position(
     assert result["terminal"] is True
     assert trade.quantity == pytest.approx(0.75)
     assert trade.sl_order_id == "algo:999"
-    assert executor.cancelled == ["algo:123"]
+    # The venue reports the triggering algo as FINISHED; do not issue a
+    # redundant cancel against an already-terminal protective order.
+    assert executor.cancelled == []
     assert trade.agent_consensus.get("_pending_stop_cancellations", []) == []
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
     assert (
