@@ -1229,6 +1229,48 @@ class PostgresCanonicalExecutionIntentStore:
                 raise OMSConflict("protective intent has no durable venue acceptance")
             if request_payload.get("owner_trade_id") != trade:
                 raise OMSConflict("protective request owner does not match Trade")
+            if request_payload.get("symbol") != row["symbol"]:
+                raise OMSConflict("protective intent symbol identity is inconsistent")
+            accepted_order_id = str(result_payload.get("order_id") or "")
+            expected_algo_id = accepted_order_id.removeprefix("algo:")
+            if expected_algo_id != algo_id:
+                raise OMSConflict("protective child does not belong to accepted algo")
+            try:
+                original_quantity = Decimal(str(request_payload["quantity"]))
+                delta_quantity = Decimal(str(child_fill["delta_quantity"]))
+                delta_quote = Decimal(str(child_fill["delta_quote"]))
+                cumulative_quantity = Decimal(
+                    str(child_fill["cumulative_quantity"])
+                )
+                cumulative_quote = Decimal(str(child_fill["cumulative_quote"]))
+            except (KeyError, InvalidOperation, TypeError, ValueError):
+                raise ValueError("protective child fill quantities are invalid") from None
+            child_status = str(child_fill["status"]).upper()
+            allowed_child_statuses = {
+                "PARTIALLY_FILLED",
+                "FILLED",
+                "PARTIALLY_FILLED_TERMINAL",
+            }
+            if (
+                not all(
+                    value.is_finite()
+                    for value in (
+                        original_quantity,
+                        delta_quantity,
+                        delta_quote,
+                        cumulative_quantity,
+                        cumulative_quote,
+                    )
+                )
+                or original_quantity <= 0
+                or delta_quantity <= 0
+                or delta_quote <= 0
+                or cumulative_quantity < delta_quantity
+                or cumulative_quote < delta_quote
+                or cumulative_quantity > original_quantity
+                or child_status not in allowed_child_statuses
+            ):
+                raise OMSConflict("protective child fill exceeds or violates intent bounds")
             if len(intent_event_id) > 192 or len(trade_event_id) > 192:
                 raise ValueError("protective child event identity exceeds limit")
             intent_payload = {

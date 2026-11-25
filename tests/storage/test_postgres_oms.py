@@ -453,6 +453,26 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
             cumulative_quote="2",
             status="PARTIALLY_FILLED",
         )
+        with pytest.raises(OMSConflict, match="exceeds or violates intent bounds"):
+            await canonical_intents.append_protection_child_fill(
+                protection_client_id,
+                expected_revision=int(intent_after_replay["revision"]),
+                expected_state=intent_after_replay["state"],
+                trade_id="trade-restore",
+                expected_trade_revision=trade_events_after_replay[-1].revision,
+                trade_snapshot=restored_trade.to_dict(),
+                child_fill={
+                    **child_fill,
+                    "cumulative_quantity": "0.11",
+                    "cumulative_quote": "11",
+                    "delta_quantity": "0.09",
+                    "delta_quote": "9",
+                },
+                ledger_entries=child_ledger,
+            )
+        assert (
+            await canonical_intents.protection_child_watermark("321", "654")
+        )["cumulative_quantity"] == Decimal("0.02")
 
         class LifecycleState:
             _open_trades = {"trade-restore": restored_trade}
