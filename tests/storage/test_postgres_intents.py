@@ -89,15 +89,41 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         )
         assert confirmed["state"] == "CONFIRMED"
         assert confirmed["revision"] == 2
-        applied = await intents.transition(
+        applied = await intents.transition_with_trade_snapshot(
             "client-001",
             expected_revision=2,
             expected_state="CONFIRMED",
-            new_state="APPLIED",
             trade_id="trade-001",
+            expected_trade_revision=0,
+            trade_snapshot={
+                "trade_id": "trade-001",
+                "account_scope": "paper:intent-test",
+                "symbol": "BTCUSDT",
+                "state": "POSITION_OPENED",
+                "quantity": "0.01",
+                "entry_price": "65000",
+            },
+            ledger_entries=[
+                {
+                    "account_code": "OPEN_POSITION_ASSET",
+                    "currency": "USDT",
+                    "debit": "650",
+                    "credit": "0",
+                    "reference": "entry:client-001",
+                },
+                {
+                    "account_code": "CASH_CLEARING",
+                    "currency": "USDT",
+                    "debit": "0",
+                    "credit": "650",
+                    "reference": "entry:client-001",
+                },
+            ],
         )
         assert applied["trade_id"] == "trade-001"
+        assert applied["state"] == "APPLIED"
         assert applied["revision"] == 3
+        assert applied["trade_revision"] == 1
         assert await intents.unresolved() == []
         assert await intents.get("client-001") is not None
 
@@ -108,7 +134,17 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
             "EXECUTION_INTENT_TRANSITIONED",
             "EXECUTION_INTENT_TRANSITIONED",
         ]
-        assert len(await oms.claim_outbox()) == 3
+        trade_events = await oms.read_events("paper:intent-test", "trade-001")
+        assert [event.revision for event in trade_events] == [1]
+        assert trade_events[0].payload["causality"]["causation_id"] == applied[
+            "last_event_id"
+        ]
+        ledger = await oms.financial_trade_ledger("paper:intent-test", "trade-001")
+        assert len(ledger) == 2
+        assert sum(item["debit"] for item in ledger) == sum(
+            item["credit"] for item in ledger
+        ) == 650
+        assert len(await oms.claim_outbox()) == 4
 
         stale_fence = fence
         next_fence = await oms.acquire_writer(
