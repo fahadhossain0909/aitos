@@ -942,7 +942,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 raise
             evidence = await self.get_order_status(symbol, order_id)
         if isinstance(evidence, dict):
-            self._record_terminal_protection(symbol, order_id, evidence)
+            await self._record_terminal_protection(symbol, order_id, evidence)
         if isinstance(evidence, dict) and (
             (
                 "orderId" in evidence
