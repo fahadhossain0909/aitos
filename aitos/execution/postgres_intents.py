@@ -79,7 +79,9 @@ class PostgresCanonicalExecutionIntentStore:
             if existing is not None:
                 if json.loads(existing["request_json"]) != json.loads(payload):
                     raise OMSConflict("client order ID reused with different request")
-                raise OMSConflict("execution intent already exists; reconcile, do not resubmit")
+                raise OMSConflict(
+                    "execution intent already exists; reconcile, do not resubmit"
+                )
             await self._append_event(conn, aggregate, event_id, 0, encoded)
             await conn.execute(
                 """INSERT INTO aitos_oms_execution_intents
@@ -118,7 +120,9 @@ class PostgresCanonicalExecutionIntentStore:
         if type(expected_revision) is not int or expected_revision < 1:
             raise ValueError("positive expected_revision is required")
         if new_state not in _ALLOWED_TRANSITIONS.get(expected_state, set()):
-            raise ValueError(f"invalid execution-intent transition {expected_state}->{new_state}")
+            raise ValueError(
+                f"invalid execution-intent transition {expected_state}->{new_state}"
+            )
         if result is not None and not isinstance(result, dict):
             raise TypeError("execution result must be an object")
         if new_state in {"CONFIRMED", "PROTECTED", "REJECTED"}:
@@ -139,7 +143,9 @@ class PostgresCanonicalExecutionIntentStore:
             if new_state == "CONFIRMED" and (filled <= 0 or fill_price <= 0):
                 raise ValueError("confirmed execution requires positive fill evidence")
             if new_state == "PROTECTED" and (filled != 0 or fill_price <= 0):
-                raise ValueError("protective acceptance must be unfilled with a positive trigger")
+                raise ValueError(
+                    "protective acceptance must be unfilled with a positive trigger"
+                )
             if new_state == "REJECTED" and filled != 0:
                 raise ValueError("rejected execution cannot contain a partial fill")
         if trade_id is not None:
@@ -159,7 +165,10 @@ class PostgresCanonicalExecutionIntentStore:
             )
             if row is None:
                 raise OMSConflict("execution intent does not exist")
-            if int(row["revision"]) != expected_revision or row["state"] != expected_state:
+            if (
+                int(row["revision"]) != expected_revision
+                or row["state"] != expected_state
+            ):
                 raise OMSConflict("execution intent revision/state CAS failed")
             if new_state == "APPLIED" and not trade_id:
                 raise ValueError("APPLIED intent requires durable trade_id")
@@ -172,8 +181,12 @@ class PostgresCanonicalExecutionIntentStore:
                 "from_state": expected_state,
                 "state": new_state,
                 "request": json.loads(row["request_json"]),
-                "result": result if result is not None else (
-                    json.loads(row["result_json"]) if row["result_json"] else None
+                "result": (
+                    result
+                    if result is not None
+                    else (
+                        json.loads(row["result_json"]) if row["result_json"] else None
+                    )
                 ),
                 "trade_id": trade_id if trade_id is not None else row["trade_id"],
                 "causality": {
@@ -183,7 +196,9 @@ class PostgresCanonicalExecutionIntentStore:
                 },
             }
             encoded = _canonical_payload(payload)
-            await self._append_event(conn, aggregate, event_id, expected_revision, encoded)
+            await self._append_event(
+                conn, aggregate, event_id, expected_revision, encoded
+            )
             await conn.execute(
                 """UPDATE aitos_oms_execution_intents
                    SET state=$3,result=COALESCE($4::jsonb,result),
@@ -193,8 +208,13 @@ class PostgresCanonicalExecutionIntentStore:
                 self.scope,
                 client,
                 new_state,
-                json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
-                if result is not None else None,
+                (
+                    json.dumps(
+                        result, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    )
+                    if result is not None
+                    else None
+                ),
                 trade_id,
                 next_revision,
                 event_id,
@@ -258,9 +278,10 @@ class PostgresCanonicalExecutionIntentStore:
                WHERE account_scope=$1""",
             self.scope,
         )
-        if owner is None or (
-            owner["writer_id"], int(owner["generation"])
-        ) != (self.fence.writer_id, self.fence.generation):
+        if owner is None or (owner["writer_id"], int(owner["generation"])) != (
+            self.fence.writer_id,
+            self.fence.generation,
+        ):
             raise OMSConflict("stale writer fencing token")
 
     async def _lock_fence(self, conn: Any) -> None:
@@ -269,25 +290,33 @@ class PostgresCanonicalExecutionIntentStore:
                WHERE account_scope=$1 FOR UPDATE""",
             self.scope,
         )
-        if owner is None or (
-            owner["writer_id"], int(owner["generation"])
-        ) != (self.fence.writer_id, self.fence.generation):
+        if owner is None or (owner["writer_id"], int(owner["generation"])) != (
+            self.fence.writer_id,
+            self.fence.generation,
+        ):
             raise OMSConflict("stale writer fencing token")
 
     async def _append_event(
-        self, conn: Any, aggregate: str, event_id: str,
-        expected_revision: int, encoded: str
+        self,
+        conn: Any,
+        aggregate: str,
+        event_id: str,
+        expected_revision: int,
+        encoded: str,
     ) -> None:
         await conn.execute(
             """INSERT INTO aitos_oms_aggregate_heads
                (account_scope,aggregate_id,revision,event_hash)
                VALUES($1,$2,0,$3) ON CONFLICT DO NOTHING""",
-            self.scope, aggregate, "0" * 64
+            self.scope,
+            aggregate,
+            "0" * 64,
         )
         head = await conn.fetchrow(
             """SELECT revision,event_hash FROM aitos_oms_aggregate_heads
                WHERE account_scope=$1 AND aggregate_id=$2 FOR UPDATE""",
-            self.scope, aggregate
+            self.scope,
+            aggregate,
         )
         actual = int(head["revision"])
         if actual != expected_revision:
@@ -297,24 +326,42 @@ class PostgresCanonicalExecutionIntentStore:
         revision = actual + 1
         previous_hash = head["event_hash"]
         digest = _event_hash(
-            self.scope, aggregate, revision, event_id, self.fence.writer_id,
-            self.fence.generation, previous_hash, encoded
+            self.scope,
+            aggregate,
+            revision,
+            event_id,
+            self.fence.writer_id,
+            self.fence.generation,
+            previous_hash,
+            encoded,
         )
         await conn.execute(
             """INSERT INTO aitos_oms_events
                (account_scope,aggregate_id,revision,event_id,writer_id,generation,
                 payload,previous_hash,event_hash)
                VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)""",
-            self.scope, aggregate, revision, event_id, self.fence.writer_id,
-            self.fence.generation, encoded, previous_hash, digest
+            self.scope,
+            aggregate,
+            revision,
+            event_id,
+            self.fence.writer_id,
+            self.fence.generation,
+            encoded,
+            previous_hash,
+            digest,
         )
         await conn.execute(
             """UPDATE aitos_oms_aggregate_heads SET revision=$3,event_hash=$4
                WHERE account_scope=$1 AND aggregate_id=$2""",
-            self.scope, aggregate, revision, digest
+            self.scope,
+            aggregate,
+            revision,
+            digest,
         )
         await conn.execute(
             """INSERT INTO aitos_oms_outbox(account_scope,aggregate_id,revision)
                VALUES($1,$2,$3)""",
-            self.scope, aggregate, revision
+            self.scope,
+            aggregate,
+            revision,
         )
