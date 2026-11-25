@@ -429,7 +429,8 @@ async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
         lifecycle._closed_trades[-1].exit_reason == "exchange_protective_child_filled"
     )
     assert lifecycle._closed_trades[-1].gross_realized_pnl_usd == pytest.approx(-10.0)
-    assert executor.cancelled == ["algo:123"]
+    # The triggering stop is already terminal; cancellation would be redundant.
+    assert executor.cancelled == []
     assert (
         journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "1.0"
     )
