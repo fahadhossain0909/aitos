@@ -344,6 +344,70 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=7,
+        name="canonical_postgres_protection_recovery",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_protection_handovers (
+                account_scope TEXT NOT NULL,
+                handover_id TEXT NOT NULL,
+                trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                old_order_id TEXT NOT NULL,
+                new_client_id TEXT NOT NULL,
+                new_order_id TEXT,
+                order_type TEXT NOT NULL CHECK (
+                    order_type IN ('STOP_MARKET','TAKE_PROFIT_MARKET')
+                ),
+                state TEXT NOT NULL CHECK (
+                    state IN (
+                        'PREPARED','NEW_ACCEPTED','OLD_CANCEL_REQUESTED',
+                        'OLD_CANCELLED','APPLIED','BLOCKED'
+                    )
+                ),
+                blocked_reason TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, handover_id),
+                UNIQUE (account_scope, new_client_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_protection_handovers_trade
+            ON aitos_oms_protection_handovers
+              (account_scope, trade_id, updated_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_protection_handovers_pending
+            ON aitos_oms_protection_handovers
+              (account_scope, state, updated_at)
+            WHERE state <> 'APPLIED'
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_protection_child_fills (
+                account_scope TEXT NOT NULL,
+                algo_id TEXT NOT NULL,
+                child_order_id TEXT NOT NULL,
+                trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                cumulative_quantity NUMERIC(38,18) NOT NULL
+                    CHECK (cumulative_quantity >= 0),
+                cumulative_quote NUMERIC(38,18) NOT NULL
+                    CHECK (cumulative_quote >= 0),
+                status TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, algo_id, child_order_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_protection_child_trade
+            ON aitos_oms_protection_child_fills
+              (account_scope, trade_id, updated_at)
+            """,
+        ),
+    ),
+)
+ 
 )
 
 
@@ -478,6 +542,30 @@ _REQUIRED_COLUMNS = {
         "trade_id",
         "revision",
         "last_event_id",
+        "updated_at",
+    },
+    "aitos_oms_protection_handovers": {
+        "account_scope",
+        "handover_id",
+        "trade_id",
+        "symbol",
+        "old_order_id",
+        "new_client_id",
+        "new_order_id",
+        "order_type",
+        "state",
+        "blocked_reason",
+        "updated_at",
+    },
+    "aitos_oms_protection_child_fills": {
+        "account_scope",
+        "algo_id",
+        "child_order_id",
+        "trade_id",
+        "symbol",
+        "cumulative_quantity",
+        "cumulative_quote",
+        "status",
         "updated_at",
     },
 }
