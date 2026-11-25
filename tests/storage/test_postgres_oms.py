@@ -322,6 +322,10 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         )
         assert canonical_cost_snapshot["fees_paid_usd"] == 0.05
         assert atomic_fee.payload["event_type"] == "TRADE_COST_ADJUSTMENT"
+        duplicate_atomic_fee = await recovery_writer.apply_cost_adjustment(
+            restored_trade, "binance:income:fee-9003", "fee", "0.05"
+        )
+        assert duplicate_atomic_fee.event_hash == atomic_fee.event_hash
         atomic_fee_lines = await oms.financial_trade_ledger(
             "paper:recovery", "trade-restore"
         )

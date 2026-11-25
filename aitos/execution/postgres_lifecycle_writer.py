@@ -222,42 +222,55 @@ class PostgresLifecycleStateWriter:
             raise ValueError("income event identity exceeds canonical OMS limit")
         lock = self._locks.setdefault(trade_id, asyncio.Lock())
         async with lock:
-            revision = await self._revision(trade_id)
-            parent_event_id = self._last_event_ids.get(trade_id)
-            event = await self.oms.append(
-                self.fence,
-                aggregate_id=trade_id,
-                event_id=event_id,
-                expected_revision=revision,
-                payload={
-                    "event_type": "TRADE_COST_ADJUSTMENT",
-                    "trade_id": trade_id,
-                    "adjustment_id": adjustment,
-                    "kind": kind,
-                    "amount": format(amount, "f"),
-                    "currency": "USDT",
-                    "trade": snapshot,
-                },
-                ledger_entries=[
-                    {
-                        "account_code": debit_account,
+            events = await self.oms.read_events(self.fence.account_scope, trade_id)
+            existing = next((item for item in events if item.event_id == event_id), None)
+            if existing is not None:
+                payload = existing.payload
+                if (
+                    payload.get("event_type") != "TRADE_COST_ADJUSTMENT"
+                    or payload.get("adjustment_id") != adjustment
+                    or payload.get("kind") != kind
+                    or payload.get("amount") != format(amount, "f")
+                ):
+                    raise RuntimeError("canonical income event identity was reused")
+                event = existing
+            else:
+                revision = events[-1].revision if events else 0
+                parent_event_id = events[-1].event_id if events else None
+                event = await self.oms.append(
+                    self.fence,
+                    aggregate_id=trade_id,
+                    event_id=event_id,
+                    expected_revision=revision,
+                    payload={
+                        "event_type": "TRADE_COST_ADJUSTMENT",
+                        "trade_id": trade_id,
+                        "adjustment_id": adjustment,
+                        "kind": kind,
+                        "amount": format(amount, "f"),
                         "currency": "USDT",
-                        "debit": format(absolute, "f"),
-                        "credit": "0",
-                        "reference": adjustment,
+                        "trade": snapshot,
                     },
-                    {
-                        "account_code": credit_account,
-                        "currency": "USDT",
-                        "debit": "0",
-                        "credit": format(absolute, "f"),
-                        "reference": adjustment,
-                    },
-                ],
-                causation_id=adjustment,
-                correlation_id=trade_id,
-                parent_event_id=parent_event_id,
-            )
+                    ledger_entries=[
+                        {
+                            "account_code": debit_account,
+                            "currency": "USDT",
+                            "debit": format(absolute, "f"),
+                            "credit": "0",
+                            "reference": adjustment,
+                        },
+                        {
+                            "account_code": credit_account,
+                            "currency": "USDT",
+                            "debit": "0",
+                            "credit": format(absolute, "f"),
+                            "reference": adjustment,
+                        },
+                    ],
+                    causation_id=adjustment,
+                    correlation_id=trade_id,
+                    parent_event_id=parent_event_id,
+                )
             self._revisions[trade_id] = event.revision
             self._last_event_ids[trade_id] = event.event_id
             async with self.oms._pool.acquire() as conn:
@@ -271,7 +284,13 @@ class PostgresLifecycleStateWriter:
             if outbox_row is None:
                 raise RuntimeError("canonical cost event has no projection outbox row")
             if outbox_row["projected_at"] is None:
-                await self.projection_writer(trade)
+                latest = await self.latest_snapshot(trade_id)
+                if not isinstance(latest, dict):
+                    raise RuntimeError("canonical cost event has no recoverable Trade snapshot")
+                from aitos.trading.persistent_state import _trade_from_dict
+
+                latest_trade = _trade_from_dict(latest)
+                await self.projection_writer(latest_trade)
                 await self.oms.mark_projected(
                     self.fence.account_scope,
                     trade_id,
