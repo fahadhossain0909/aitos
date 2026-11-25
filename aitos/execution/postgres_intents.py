@@ -367,6 +367,8 @@ class PostgresCanonicalExecutionIntentStore:
             reference = entry.get("reference")
             if reference is not None and len(reference) > 256:
                 raise ValueError("financial ledger reference exceeds 256 characters")
+        if financial_snapshot is not None and not isinstance(financial_snapshot, dict):
+            raise TypeError("financial_snapshot must be an object")
         if (financial_snapshot is None) != (expected_financial_revision is None):
             raise ValueError(
                 "financial snapshot and expected financial revision must be supplied together"
