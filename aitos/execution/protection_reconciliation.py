@@ -691,22 +691,39 @@ async def recover_accepted_initial_stop_submissions(
             if order_id not in existing_tp_ids:
                 existing_tp_ids.append(order_id)
 
-        # Write the venue identity to the durable trade snapshot first. If
-        # the process dies before journal acknowledgement, the next pass sees
-        # the same ID and safely completes the journal transition.
-        trade.updated_at = datetime.now(timezone.utc).isoformat()
-        await persist_trade(trade)
-        if row.get("state") == "SUBMITTING":
-            result = OrderResult(
-                order_id=order_id,
-                symbol=symbol,
-                side=TradeSide(trade_side),
-                filled_quantity=0.0,
-                fill_price=float(request["reference_price"]),
-                client_order_id=client_id,
-            )
-            await _call_sync_or_async(intent_store.record_protection, client_id, result)
-        await _call_sync_or_async(intent_store.mark_applied, client_id, owner_trade_id)
+        result = OrderResult(
+            order_id=order_id,
+            symbol=symbol,
+            side=TradeSide(trade_side),
+            filled_quantity=0.0,
+            fill_price=float(request["reference_price"]),
+            client_order_id=client_id,
+        )
+        if getattr(executor, "canonical_intent_store", None) is not None:
+            # The canonical writer commits the PROTECTED -> APPLIED intent
+            # transition and Trade snapshot in one PostgreSQL transaction.
+            if row.get("state") == "SUBMITTING":
+                await intent_store.record_protection(
+                    client_id,
+                    {
+                        "order_id": order_id,
+                        "symbol": symbol,
+                        "side": trade_side,
+                        "filled_quantity": "0",
+                        "fill_price": format(Decimal(str(request["reference_price"])), "f"),
+                        "success": True,
+                        "client_order_id": client_id,
+                    },
+                )
+            await executor.acknowledge_protection_trade(result, trade)
+        else:
+            # Legacy single-host recovery remains available for paper and old
+            # deployments; no live runtime should use this after canonical bind.
+            trade.updated_at = datetime.now(timezone.utc).isoformat()
+            await persist_trade(trade)
+            if row.get("state") == "SUBMITTING":
+                await intent_store.record_protection(client_id, result)
+            await intent_store.mark_applied(client_id, owner_trade_id)
         recovered.append(client_id)
 
     return {
