@@ -703,7 +703,8 @@ async def recover_accepted_initial_stop_submissions(
             # The canonical writer commits the PROTECTED -> APPLIED intent
             # transition and Trade snapshot in one PostgreSQL transaction.
             if row.get("state") == "SUBMITTING":
-                await intent_store.record_protection(
+                await _call_sync_or_async(
+                    intent_store.record_protection,
                     client_id,
                     {
                         "order_id": order_id,
