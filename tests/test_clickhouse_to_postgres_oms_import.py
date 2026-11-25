@@ -43,7 +43,11 @@ def test_runtime_manifest_preserves_raw_payload_and_identity():
 
 def test_duplicate_physical_rows_keep_distinct_occurrence_identity():
     raw = json.dumps(
-        {"trade_id": "trade-duplicate", "symbol": "BTCUSDT", "state": "position_opened"},
+        {
+            "trade_id": "trade-duplicate",
+            "symbol": "BTCUSDT",
+            "state": "position_opened",
+        },
         separators=(",", ":"),
     )
     timestamp = "2026-11-24T10:00:00Z"

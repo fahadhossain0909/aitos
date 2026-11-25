@@ -221,16 +221,18 @@ def _scoped_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
 
 
 
-
 def _write_reconciliation_report(path: Path, report: dict[str, Any]) -> None:
     """Persist a private, immutable reconciliation summary beside the manifest."""
-    encoded = json.dumps(
-        report,
-        sort_keys=True,
-        indent=2,
-        ensure_ascii=False,
-        allow_nan=False,
-    ) + "\n"
+    encoded = (
+        json.dumps(
+            report,
+            sort_keys=True,
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    )
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
         output.write(encoded)
@@ -263,9 +265,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path = Path(args.manifest_out)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     partial_manifest = manifest_path.with_suffix(manifest_path.suffix + ".partial")
-    report_path = manifest_path.with_name(
-        f"{manifest_path.stem}.reconciliation.json"
-    )
+    report_path = manifest_path.with_name(f"{manifest_path.stem}.reconciliation.json")
     if (
         manifest_path.exists()
         or manifest_path.is_symlink()
