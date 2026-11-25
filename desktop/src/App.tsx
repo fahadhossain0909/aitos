@@ -10,62 +10,22 @@ import PersistencePanel from "./PersistencePanel";
 import PerformancePanel from "./PerformancePanel";
 import { parseSnapshot, parseHistory } from "./consoleClient";
 import ReadinessPanel from "./ReadinessPanel";
+import { readSnapshotStream, type StreamEnd } from "./streamClient";
 import { useState, useEffect, useRef } from "react";
-import {
-  Activity,
-  ArrowDownLeft,
-  ArrowDownToLine,
-  ArrowRight,
-  ArrowUpRight,
-  Bell,
-  BookOpen,
-  Box,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CircleHelp,
-  Command,
-  Database,
-  FlaskConical,
-  Globe,
-  Layers3,
-  LayoutDashboard,
-  LockKeyhole,
-  Maximize2,
-  MoreHorizontal,
-  Pause,
-  Play,
-  Plus,
-  Radio,
-  Search,
-  Settings2,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  Terminal,
-  TrendingUp,
-  Wallet,
-  X,
-  Zap,
-} from "lucide-react";
+import { Activity, ArrowDownToLine, ArrowRight, ArrowUpRight, Bell, BookOpen, Box, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Database, Gauge, FlaskConical, Globe, Layers3, LayoutDashboard, LockKeyhole, MoreHorizontal, Plus, Radio, Search, Settings2, ShieldCheck, SlidersHorizontal, TrendingUp, Wallet, X, Zap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import {
-  samplePositions,
-  sampleHistory,
-  sampleStages,
-  markets,
-  money,
-  number,
-  exportCsv,
-  download,
-  checkDraft,
-} from "./data";
+import { samplePositions, sampleHistory, sampleStages, markets, money, number, exportCsv, download, checkDraft } from "./data";
 import type { Position, Snapshot, Stage } from "./data";
+
+import { Icon, Pill, Empty, Sparkline, Coin } from "./components/common";
+import { PositionTable } from "./components/PositionTable";
+import { EquityChart } from "./components/EquityChart";
+import RiskPage from "./pages/RiskPage";
 
 type Page =
   | "overview"
   | "positions"
+  | "risk"
   | "history"
   | "research"
   | "telemetry"
@@ -79,6 +39,7 @@ type Modal = "launch" | "live" | "connection" | "notifications" | "help" | null;
 const navigation: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "positions", label: "Portfolio", icon: Wallet },
+  { id: "risk", label: "Risk", icon: Gauge },
   { id: "history", label: "Trade journal", icon: BookOpen },
   { id: "performance", label: "Performance", icon: TrendingUp },
   { id: "research", label: "Research lab", icon: FlaskConical },
@@ -89,346 +50,6 @@ const navigation: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "persistence", label: "Persistence & recovery", icon: Database },
   { id: "workspaces", label: "Workspace Studio", icon: Layers3 },
 ];
-function Icon({
-  as: Component,
-  ...props
-}: {
-  as: LucideIcon;
-  size?: number;
-  className?: string;
-}) {
-  return <Component size={16} strokeWidth={1.7} {...props} />;
-}
-function Pill({
-  children,
-  tone = "muted",
-}: {
-  children: React.ReactNode;
-  tone?: string;
-}) {
-  return <span className={`pill ${tone}`}>{children}</span>;
-}
-function Empty({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="empty">
-      <Database size={27} />
-      <h3>{title}</h3>
-      <p>{description}</p>
-    </div>
-  );
-}
-function Sparkline({
-  positive = true,
-  seed = 0,
-}: {
-  positive?: boolean;
-  seed?: number;
-}) {
-  const path = Array.from(
-    { length: 24 },
-    (_, i) =>
-      `${i ? "L" : "M"}${i * 3.5},${20 - (Math.sin(i * 0.7 + seed) * 4 + i * 0.45) * (positive ? 1 : -0.6)}`,
-  ).join(" ");
-  return (
-    <svg
-      viewBox="0 0 84 34"
-      className={`sparkline ${positive ? "positive" : "negative"}`}
-      aria-hidden="true"
-    >
-      <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
-function Coin({ symbol }: { symbol: string }) {
-  const base = symbol.replace("USDT", "");
-  return (
-    <span className={`coin coin-${base.toLowerCase()}`}>
-      {base === "BTC"
-        ? "₿"
-        : base === "ETH"
-          ? "Ξ"
-          : base === "SOL"
-            ? "≋"
-            : base[0]}
-    </span>
-  );
-}
-function PositionTable({
-  rows,
-  compact = false,
-  onSelect,
-}: {
-  rows: Position[];
-  compact?: boolean;
-  onSelect: (p: Position) => void;
-}) {
-  return rows.length ? (
-    <div className="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>Instrument</th>
-            <th>Direction</th>
-            <th>Entry price</th>
-            {!compact && <th>Quantity</th>}
-            <th>Position value</th>
-            <th>Recorded P&L</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((p) => (
-            <tr
-              key={p.trade_id}
-              onClick={() => onSelect(p)}
-              tabIndex={0}
-              onKeyDown={(e) => e.key === "Enter" && onSelect(p)}
-              aria-label={`Inspect ${p.symbol} position`}
-            >
-              <td>
-                <div className="instrument">
-                  <Coin symbol={p.symbol} />
-                  <div>
-                    <strong>
-                      {p.symbol.replace("USDT", "")}
-                      <span className="dim"> / USDT</span>
-                    </strong>
-                    <small>Perpetual futures</small>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <span
-                  className={`direction ${p.side === "LONG" ? "positive" : "negative"}`}
-                >
-                  {p.side === "LONG" ? (
-                    <ArrowUpRight size={13} />
-                  ) : (
-                    <ArrowDownLeft size={13} />
-                  )}{" "}
-                  {p.side}
-                </span>
-              </td>
-              <td className="mono">{money(p.entry_price)}</td>
-              {!compact && <td className="mono">{number(p.quantity, 5)}</td>}
-              <td className="mono">{money(p.position_size_usd)}</td>
-              <td
-                className={`mono ${p.pnl != null && p.pnl < 0 ? "negative" : "positive"}`}
-              >
-                {p.pnl != null && p.pnl > 0 ? "+" : ""}
-                {money(p.pnl)}
-              </td>
-              <td>
-                <ChevronRight size={15} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  ) : (
-    <Empty
-      title="No positions to display"
-      description="Attach a running backend to read actual open positions. No positions are inferred from a disconnected runtime."
-    />
-  );
-}
-function EquityChart({
-  demo,
-  range,
-  onRange,
-}: {
-  demo: boolean;
-  range: string;
-  onRange: (s: string) => void;
-}) {
-  const [hover, setHover] = useState<number | null>(null);
-  const start = (
-    {
-      "1D": 127608.25,
-      "1W": 124820,
-      "1M": 119240,
-      "3M": 110310,
-      "1Y": 100000,
-    } as Record<string, number>
-  )[range];
-  const end = 128450.25;
-  const values = Array.from(
-    { length: 85 },
-    (_, i) =>
-      start +
-      (end - start) * (i / 84) +
-      Math.sin(i * 0.34) *
-        (end - start) *
-        0.045 *
-        Math.sin((i / 84) * Math.PI) +
-      Math.sin(i * 0.94) * (end - start) * 0.018 * Math.sin((i / 84) * Math.PI),
-  );
-  const width = 880,
-    height = 224;
-  const pts = values.map((v, i) => [
-    (i / 84) * width,
-    201 - ((v - start) / (end - start)) * 172,
-  ]);
-  const line = pts
-    .map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`)
-    .join(" ");
-  const ix = hover ?? 84;
-  return (
-    <section className="panel equity-panel">
-      <div className="panel-heading">
-        <div className="panel-title">
-          <span className="small-cap">PORTFOLIO VALUE</span>
-          <span className="tiny-tag">
-            {demo ? "SAMPLE SERIES" : "NO EQUITY FEED"}
-          </span>
-        </div>
-        <div className="segmented">
-          {["1D", "1W", "1M", "3M", "1Y"].map((r) => (
-            <button
-              key={r}
-              className={range === r ? "active" : ""}
-              onClick={() => {
-                onRange(r);
-                setHover(null);
-              }}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="equity-number">
-        {demo ? money(values[ix]) : "—"}
-        <span className="unit">USD</span>
-      </div>
-      <div className="equity-context">
-        {demo ? (
-          <>
-            <span className="positive">
-              <ArrowUpRight size={14} /> {money(end - start)} (
-              {((end / start - 1) * 100).toFixed(2)}%)
-            </span>
-            <span>this period · illustrative</span>
-          </>
-        ) : (
-          <span>Historical account-equity feed has not been attached.</span>
-        )}
-      </div>
-      <div className="chart-container">
-        {demo ? (
-          <>
-            <div className="chart-y-labels">
-              {[130000, 125000, 120000, 115000].map((v, i) => (
-                <span key={v}>
-                  {number(start + (end - start) * (1.12 - i * 0.35), 0)}
-                </span>
-              ))}
-            </div>
-            <svg
-              className="equity-chart"
-              viewBox={`-2 0 ${width + 4} ${height}`}
-              preserveAspectRatio="none"
-              onMouseMove={(e) => {
-                const b = e.currentTarget.getBoundingClientRect();
-                setHover(
-                  Math.max(
-                    0,
-                    Math.min(
-                      84,
-                      Math.round(((e.clientX - b.left) / b.width) * 84),
-                    ),
-                  ),
-                );
-              }}
-              onMouseLeave={() => setHover(null)}
-              role="img"
-              aria-label={`Illustrative portfolio value over ${range}`}
-            >
-              <defs>
-                <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#c5ee9c" stopOpacity=".17" />
-                  <stop offset="100%" stopColor="#c5ee9c" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              {[28, 83, 138, 193].map((y) => (
-                <line
-                  key={y}
-                  x1="0"
-                  x2={width}
-                  y1={y}
-                  y2={y}
-                  stroke="#30342c"
-                  strokeDasharray="3 5"
-                />
-              ))}
-              <path d={`${line} L${width},224 L0,224 Z`} fill="url(#area)" />
-              <path
-                d={line}
-                fill="none"
-                stroke="#caeea0"
-                strokeWidth="2.2"
-                vectorEffect="non-scaling-stroke"
-              />
-              {hover != null && (
-                <line
-                  x1={pts[ix][0]}
-                  x2={pts[ix][0]}
-                  y1="10"
-                  y2="224"
-                  stroke="#929986"
-                  strokeDasharray="3 4"
-                />
-              )}
-              <circle
-                cx={pts[ix][0]}
-                cy={pts[ix][1]}
-                r="4"
-                fill="#dbf9bc"
-                stroke="#22291c"
-                strokeWidth="5"
-                vectorEffect="non-scaling-stroke"
-              />
-            </svg>
-            <div className="chart-x-labels">
-              {(range === "1D"
-                ? ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
-                : [
-                    "08 OCT",
-                    "13 OCT",
-                    "18 OCT",
-                    "23 OCT",
-                    "28 OCT",
-                    "02 NOV",
-                    "07 NOV",
-                  ]
-              ).map((v) => (
-                <span key={v}>{v}</span>
-              ))}
-            </div>
-          </>
-        ) : (
-          <Empty
-            title="Equity history not measured"
-            description="The console will not substitute an illustrative curve for a connected account. Trade history is available separately when ClickHouse is attached."
-          />
-        )}
-      </div>
-      <div className="chart-footer">
-        <div>
-          <span className="line-key" /> Portfolio value{" "}
-          <span className="dim">
-            · {demo ? "Sample workspace" : "Unavailable"}
-          </span>
-        </div>
-        <span>
-          Denominated in USD <Icon as={CircleHelp} size={12} />
-        </span>
-      </div>
-    </section>
-  );
-}
-
 export default function App() {
   const [page, setPage] = useState<Page>("overview");
   const [demo, setDemo] = useState(true);
@@ -477,11 +98,14 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const streamHealthy = useRef(false);
   useEffect(() => {
     let stop = false;
     let controller: AbortController;
     let timer: ReturnType<typeof setTimeout>;
+    let inflight = false;
     async function poll() {
+      inflight = true;
       controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
       try {
@@ -511,16 +135,76 @@ export default function App() {
         }
       } finally {
         clearTimeout(timeout);
-        if (!stop) timer = setTimeout(poll, 5000);
+        inflight = false;
+        // Background tabs poll slowly; the console refreshes immediately when it is shown again.
+        if (!stop) timer = setTimeout(poll, document.hidden ? 30000 : streamHealthy.current ? 20000 : 5000);
       }
     }
+    const onVisible = () => {
+      if (document.hidden || inflight || stop) return;
+      clearTimeout(timer);
+      void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     poll();
     return () => {
       stop = true;
+      document.removeEventListener("visibilitychange", onVisible);
       controller?.abort();
       clearTimeout(timer);
     };
   }, []);
+  const streamEligible = !demo && !apiError && !!snapshot?.connected;
+  useEffect(() => {
+    // Optional push updates. Polling above stays the source of truth and fallback:
+    // if streaming is unsupported or keeps failing, the console simply keeps polling.
+    if (!streamEligible) return;
+    let stop = false;
+    let paused = document.hidden;
+    let failures = 0;
+    let controller: AbortController | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    async function run() {
+      controller = new AbortController();
+      let end: StreamEnd = "failed";
+      try {
+        end = await readSnapshotStream(controller.signal, (next) => {
+          if (stop) return;
+          failures = 0;
+          streamHealthy.current = true;
+          setSnapshot((prev) =>
+            prev && Date.parse(next.generated_at) < Date.parse(prev.generated_at) ? prev : next,
+          );
+        });
+      } catch {
+        end = "failed";
+      }
+      streamHealthy.current = false;
+      if (stop || paused || end === "unsupported") return;
+      failures = end === "failed" ? failures + 1 : 0;
+      if (failures >= 3) return;
+      retry = setTimeout(run, end === "ended" ? 250 : 2000 * failures);
+    }
+    const onVisibility = () => {
+      paused = document.hidden;
+      if (paused) {
+        clearTimeout(retry);
+        controller?.abort();
+      } else if (!stop) {
+        failures = 0;
+        void run();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    if (!paused) void run();
+    return () => {
+      stop = true;
+      streamHealthy.current = false;
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearTimeout(retry);
+      controller?.abort();
+    };
+  }, [streamEligible]);
   useEffect(() => {
     if (!modal && !selected) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -618,6 +302,12 @@ export default function App() {
           40,
         );
       }
+      const target = e.target as HTMLElement | null;
+      const typing = !!target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable);
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && searchRef.current) {
+        e.preventDefault();
+        searchRef.current.focus();
+      }
       if (e.key === "Escape") {
         setModal(null);
         setSelected(null);
@@ -656,6 +346,11 @@ export default function App() {
     ["Trade lifecycle", "trade_lifecycle"].includes(s.stage),
   );
   const connected = !apiError && snapshot?.connected;
+  const liveRuntime = !!connected && /live/i.test(String(snapshot?.mode ?? ""));
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-live", liveRuntime);
+    return () => document.documentElement.removeAttribute("data-live");
+  }, [liveRuntime]);
   const realized =
     journal.length && journal.every((p) => p.pnl !== null)
       ? journal.reduce((n, p) => n + (p.pnl ?? 0), 0)
@@ -747,6 +442,11 @@ export default function App() {
   };
   return (
     <div className="app-shell">
+      {liveRuntime && (
+        <div className="live-ribbon" role="alert">
+          <span className="status-dot" /> LIVE RUNTIME ATTACHED · THIS CONSOLE IS READ-ONLY
+        </div>
+      )}
       <aside className={`sidebar ${sidebar ? "mobile-open" : ""}`}>
         <button
           className="brand"
@@ -891,6 +591,7 @@ export default function App() {
                       "Your capital, positions and execution. One considered view.",
                     positions:
                       "Every position. Every boundary. Nothing out of sight.",
+                    risk: "Exposure, measured. Limits, explicit. Unknowns, named.",
                     history:
                       "The decisions behind the outcomes. A journal, not just a ledger.",
                     research: "Challenge the hypothesis. Protect the holdout.",
@@ -994,6 +695,14 @@ export default function App() {
             <PersistencePanel snapshot={apiError ? null : snapshot} />
           )}
           {page === "workspaces" && <WorkspaceStudio onOpenPanel={openWorkspacePanel} /> }
+          {page === "risk" && (
+            <RiskPage
+              positions={rows}
+              configuration={apiError ? {} : (snapshot?.configuration ?? {})}
+              demo={demo}
+              onOpenSettings={() => navigate("settings")}
+            />
+          )}
           {page === "readiness" && (
             <ReadinessPanel snapshot={apiError ? null : snapshot} />
           )}
@@ -1104,14 +813,14 @@ export default function App() {
                       <path
                         d="M25 120 A95 95 0 0 1 215 120"
                         fill="none"
-                        stroke="#34392f"
+                        stroke="var(--c-34392f)"
                         strokeWidth="10"
                         strokeLinecap="round"
                       />
                       <path
                         d="M25 120 A95 95 0 0 1 215 120"
                         fill="none"
-                        stroke="#c8eb9e"
+                        stroke="var(--c-c8eb9e)"
                         strokeWidth="10"
                         strokeLinecap="round"
                         strokeDasharray={demo ? "66 298" : "0 298"}
@@ -1120,12 +829,12 @@ export default function App() {
                         x="120"
                         y="103"
                         textAnchor="middle"
-                        fill="#f0f2e8"
+                        fill="var(--c-f0f2e8)"
                         fontSize="42"
                         fontFamily="Manrope"
                       >
                         {demo ? "22" : "—"}
-                        <tspan fontSize="19" fill="#8d9587">
+                        <tspan fontSize="19" fill="var(--c-8d9587)">
                           %
                         </tspan>
                       </text>
@@ -1133,7 +842,7 @@ export default function App() {
                         x="120"
                         y="129"
                         textAnchor="middle"
-                        fill="#8d9587"
+                        fill="var(--c-8d9587)"
                         fontSize="10"
                         letterSpacing="1.4"
                       >
@@ -1363,7 +1072,7 @@ export default function App() {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                     />
-                    <kbd>⌘ K</kbd>
+                    <kbd>/</kbd>
                   </div>
                   <div className="inline">
                     <select
@@ -1411,7 +1120,13 @@ export default function App() {
                       </thead>
                       <tbody>
                         {journal.map((p) => (
-                          <tr key={p.trade_id} onClick={() => setSelected(p)}>
+                          <tr
+                            key={p.trade_id}
+                            onClick={() => setSelected(p)}
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === "Enter" && setSelected(p)}
+                            aria-label={`Inspect ${p.symbol} trade`}
+                          >
                             <td>
                               <div className="instrument">
                                 <Coin symbol={p.symbol} />
@@ -1519,6 +1234,7 @@ export default function App() {
                   ).map((p, i) => (
                     <button
                       key={p}
+                      aria-pressed={percentile === p}
                       className={percentile === p ? "active" : ""}
                       onClick={() => setPercentile(p)}
                     >
