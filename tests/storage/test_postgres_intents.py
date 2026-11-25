@@ -136,14 +136,17 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         ]
         trade_events = await oms.read_events("paper:intent-test", "trade-001")
         assert [event.revision for event in trade_events] == [1]
-        assert trade_events[0].payload["causality"]["causation_id"] == applied[
-            "last_event_id"
-        ]
+        assert (
+            trade_events[0].payload["causality"]["causation_id"]
+            == applied["last_event_id"]
+        )
         ledger = await oms.financial_trade_ledger("paper:intent-test", "trade-001")
         assert len(ledger) == 2
-        assert sum(item["debit"] for item in ledger) == sum(
-            item["credit"] for item in ledger
-        ) == 650
+        assert (
+            sum(item["debit"] for item in ledger)
+            == sum(item["credit"] for item in ledger)
+            == 650
+        )
         assert len(await oms.claim_outbox()) == 4
 
         stale_fence = fence
