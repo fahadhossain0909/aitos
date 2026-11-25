@@ -14,6 +14,7 @@ from aitos.execution.binance_executor import (
     round_step,
 )
 from aitos.models.trade import TradeSide
+from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.security.live_approval import ApprovalDenied, LiveApprovalControlPlane
 
 
@@ -816,6 +817,124 @@ def test_mainnet_executor_consumes_exact_action_receipt_before_order_submission(
         live_approval_authority=authority,
         live_approval_token_provider=authority.get_unconsumed_token,
     )
-    assert executor._live_approval_consumer(action) == "operator-1"
+    receipt = executor._live_approval_consumer(action)
+    assert receipt["user_id"] == "operator-1"
+    assert receipt["action_digest"] == authority._digest(action)
+    assert receipt["token_id"]
     with pytest.raises(ApprovalDenied, match="no authorized unconsumed approval"):
         executor._live_approval_consumer(action)
+
+
+@pytest.mark.asyncio
+async def test_mainnet_protective_order_requires_exact_approval_and_persists_receipt(
+    tmp_path,
+):
+    scope = "live:account-1"
+    client_id = "approved-stop-1"
+    action = {
+        "environment": "binance-usdm-mainnet",
+        "scope": scope,
+        "client_order_id": client_id,
+        "symbol": "BTCUSDT",
+        "side": "SELL",
+        "quantity": "1.0",
+        "reference_price": "98.0",
+        "order_type": "STOP_MARKET",
+        "reduce_only": True,
+        "owner_trade_id": "trade-1",
+    }
+    authority = LiveApprovalControlPlane(
+        tmp_path / "protective-approvals.sqlite",
+        signing_key=b"mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: user == "operator-1"
+        and role == "live_trader",
+    )
+    challenge = authority.issue_challenge(
+        user_id="operator-1",
+        action=action,
+        webauthn_challenge="server-issued-protective-challenge",
+    )
+    authority.approve(
+        challenge,
+        assertion=b"verified-webauthn-assertion",
+        verifier=lambda **kwargs: {
+            "verified": True,
+            "user_id": "operator-1",
+            "user_verified": True,
+            "origin": "https://console.example",
+            "rp_id": "console.example",
+        },
+    )
+    journal = ExecutionIntentStore(tmp_path / "protective-intents.sqlite", scope=scope)
+    executor = BinanceFuturesOrderExecutor(
+        api_key="mainnet-key",
+        api_secret="mainnet-secret",
+        testnet=False,
+        intent_store=journal,
+        execution_scope=scope,
+        live_approval_authority=authority,
+        live_approval_token_provider=authority.get_unconsumed_token,
+    )
+    calls = []
+
+    async def accepted_post(method, path, params):
+        calls.append((method, path, dict(params)))
+        return {"algoId": 123, "algoStatus": "NEW"}
+
+    executor._signed_request = accepted_post
+    result = await executor.place_stop_loss_order(
+        "BTCUSDT",
+        TradeSide.LONG,
+        1.0,
+        98.0,
+        owner_trade_id="trade-1",
+        client_order_id=client_id,
+    )
+    assert result.success is True
+    assert calls and calls[0][0] == "POST"
+    stored = journal.unresolved()
+    assert len(stored) == 1
+    request = json.loads(stored[0]["request_json"])
+    approval = request["execution_context"]["approval_receipt"]
+    assert approval["user_id"] == "operator-1"
+    assert approval["action_digest"] == authority._digest(action)
+    assert approval["token_id"]
+    assert stored[0]["state"] == "PROTECTED"
+
+
+@pytest.mark.asyncio
+async def test_mainnet_protective_order_without_approval_never_posts(tmp_path):
+    authority = LiveApprovalControlPlane(
+        tmp_path / "empty-approvals.sqlite",
+        signing_key=b"mainnet-approval-signing-key-at-least-32-bytes",
+        allowed_origins={"https://console.example"},
+        rp_id="console.example",
+        role_authorizer=lambda user, role: True,
+    )
+    executor = BinanceFuturesOrderExecutor(
+        api_key="mainnet-key",
+        api_secret="mainnet-secret",
+        testnet=False,
+        execution_scope="live:account-1",
+        live_approval_authority=authority,
+        live_approval_token_provider=authority.get_unconsumed_token,
+    )
+    calls = []
+
+    async def should_not_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("venue POST must not run without approval")
+
+    executor._signed_request = should_not_post
+    with pytest.raises(ApprovalDenied, match="no authorized unconsumed approval"):
+        await executor.place_stop_loss_order(
+            "BTCUSDT",
+            TradeSide.LONG,
+            1.0,
+            98.0,
+            owner_trade_id="trade-1",
+            client_order_id="unapproved-stop-1",
+        )
+    assert calls == []
