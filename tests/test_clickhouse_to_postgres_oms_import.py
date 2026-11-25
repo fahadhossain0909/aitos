@@ -354,3 +354,49 @@ def test_streaming_dry_run_reads_already_scope_keyed_cutover_tables(
         runtime_fp,
         closed_fp,
     }
+
+
+def test_unattributed_source_rows_are_quarantined_and_block_import(
+    tmp_path, monkeypatch
+):
+    raw = json.dumps(
+        {
+            "trade_id": "trade-unattributed",
+            "symbol": "BTCUSDT",
+            "state": "position_opened",
+        },
+        separators=(",", ":"),
+    )
+    module, _ = _fake_clickhouse_module(
+        [
+            (
+                "trade-unattributed",
+                "BTCUSDT",
+                "position_opened",
+                raw,
+                "2026-11-24T10:00:00Z",
+            )
+        ],
+        [],
+    )
+    monkeypatch.setitem(sys.modules, "clickhouse_connect", module)
+    output = tmp_path / "manifest.jsonl"
+    result = asyncio.run(
+        run(
+            SimpleNamespace(
+                apply=False,
+                confirm_writers_stopped=False,
+                confirm_backup_retained=False,
+                scope_map={},
+                manifest_out=output,
+            )
+        )
+    )
+    assert result["mode"] == "quarantined"
+    assert result["import_blocked"] is True
+    assert result["row_errors_quarantined"] == 1
+    assert result["writes"] == 0
+    quarantine = tmp_path / "manifest.quarantine.jsonl"
+    row = json.loads(quarantine.read_text(encoding="utf-8").strip())
+    assert row["reason"].startswith("ValueError:")
+    assert row["raw_payload"] == raw

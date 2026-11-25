@@ -64,6 +64,25 @@ row counts, scope distribution, source table selection and manifest before
 proceeding. The manifest contains raw legacy payload text and must be protected
 as financial data.
 
+## Quarantine and explicit exceptions
+
+The importer writes rejected source rows to a private JSONL quarantine file
+(default: `<manifest-stem>.quarantine.jsonl`; override with
+`--quarantine-out`). It preserves the source table, fingerprint/occurrence
+when available, timestamp, exact raw payload and rejection reason. Rows with
+missing/ambiguous account attribution, source fingerprint/hash mismatch,
+invalid payload identity, duplicate occurrence identity or conflicting
+same-timestamp snapshots are not silently skipped.
+
+If any row is quarantined, the importer writes a reconciliation report with
+`mode: quarantined`, records the accepted/quarantined counts, finalizes the
+partial manifest for forensic review, sets `import_blocked: true`, and exits
+with status 2. It does not connect to PostgreSQL or import any accepted rows
+from that run. Resolve each exception through an explicit source correction
+or reviewed scope mapping, then start a fresh run with new manifest and
+quarantine paths. Never hand-edit the manifest or remove a quarantine entry
+to force a cutover.
+
 ## Apply
 
 Only after the writer freeze and restorable backup have been independently

@@ -265,6 +265,18 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     partial_manifest = manifest_path.with_suffix(manifest_path.suffix + ".partial")
     report_path = manifest_path.with_name(f"{manifest_path.stem}.reconciliation.json")
+    quarantine_path = (
+        Path(args.quarantine_out)
+        if getattr(args, "quarantine_out", None) is not None
+        else manifest_path.with_name(f"{manifest_path.stem}.quarantine.jsonl")
+    )
+    quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+    if quarantine_path.resolve() in {
+        manifest_path.resolve(),
+        partial_manifest.resolve(),
+        report_path.resolve(),
+    }:
+        raise ValueError("quarantine output must be distinct from migration evidence")
     if (
         manifest_path.exists()
         or manifest_path.is_symlink()
@@ -272,6 +284,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         or partial_manifest.is_symlink()
         or report_path.exists()
         or report_path.is_symlink()
+        or quarantine_path.exists()
+        or quarantine_path.is_symlink()
     ):
         raise FileExistsError(
             "manifest or partial manifest already exists; choose a new path "
@@ -361,14 +375,24 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                     0o600,
                 )
+                quarantine_fd = os.open(
+                    quarantine_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+                quarantined_rows = 0
+                source_rows_seen = 0
                 with os.fdopen(
                     manifest_fd, "w", encoding="utf-8", newline="\n"
-                ) as manifest:
+                ) as manifest, os.fdopen(
+                    quarantine_fd, "w", encoding="utf-8", newline="\n"
+                ) as quarantine:
                     for table, (query, scoped) in queries.items():
                         occurrences: Counter[str] = Counter()
                         with ch.query_row_block_stream(query) as blocks:
                             for block in blocks:
                                 for row in block:
+                                    source_rows_seen += 1
                                     if scoped and table == RUNTIME_SOURCE:
                                         (
                                             row_scope,
@@ -417,62 +441,95 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                         stored_payload_hash = None
 
                                     trade_id = str(trade_id)
-                                    fingerprint = source_fingerprint(
-                                        table, trade_id, str(raw), stamp
-                                    )
-                                    if scoped:
-                                        occurrence = int(stored_occurrence)
-                                        if fingerprint != str(stored_fingerprint):
-                                            raise RuntimeError(
-                                                "scoped ClickHouse source fingerprint mismatch"
-                                            )
-                                    else:
-                                        occurrence = occurrences[fingerprint]
-                                        occurrences[fingerprint] += 1
-                                    item = _manifest_row(table, legacy_row, occurrence)
-                                    if scoped:
-                                        scope = _scope(str(row_scope))
-                                        expected_hash = _scoped_payload_hash(
-                                            item["payload"], scope
+                                    fingerprint = ""
+                                    occurrence = -1
+                                    try:
+                                        fingerprint = source_fingerprint(
+                                            table, trade_id, str(raw), stamp
                                         )
-                                        if expected_hash != str(stored_payload_hash):
-                                            raise RuntimeError(
-                                                "scoped ClickHouse canonical payload hash mismatch"
+                                        if scoped:
+                                            occurrence = int(stored_occurrence)
+                                            if fingerprint != str(stored_fingerprint):
+                                                raise RuntimeError(
+                                                    "scoped ClickHouse source fingerprint mismatch"
+                                                )
+                                        else:
+                                            occurrence = occurrences[fingerprint]
+                                            occurrences[fingerprint] += 1
+                                        item = _manifest_row(table, legacy_row, occurrence)
+                                        if scoped:
+                                            scope = _scope(str(row_scope))
+                                            expected_hash = _scoped_payload_hash(
+                                                item["payload"], scope
                                             )
-                                    else:
-                                        mapped = args.scope_map.get(fingerprint)
-                                        embedded = item["payload"].get("account_scope")
-                                        if embedded and mapped and embedded != mapped:
-                                            raise ValueError(
-                                                f"scope map conflicts for {fingerprint}"
-                                            )
-                                        scope = _scope(embedded or mapped)
-                                    item["account_scope"] = scope
-                                    stage.execute(
-                                        """
-                                        INSERT INTO staged_source
-                                            (account_scope,source_table,source_fingerprint,
-                                             source_occurrence,trade_id,updated_at,
-                                             raw_payload,raw_payload_sha256,payload_json)
-                                        VALUES(?,?,?,?,?,?,?,?,?)
-                                        """,
-                                        (
-                                            scope,
-                                            table,
-                                            fingerprint,
-                                            occurrence,
-                                            trade_id,
-                                            item["updated_at"],
-                                            item["raw_payload"],
-                                            item["raw_payload_sha256"],
+                                            if expected_hash != str(stored_payload_hash):
+                                                raise RuntimeError(
+                                                    "scoped ClickHouse canonical payload hash mismatch"
+                                                )
+                                        else:
+                                            mapped = args.scope_map.get(fingerprint)
+                                            embedded = item["payload"].get("account_scope")
+                                            if embedded and mapped and embedded != mapped:
+                                                raise ValueError(
+                                                    f"scope map conflicts for {fingerprint}"
+                                                )
+                                            scope = _scope(embedded or mapped)
+                                        item["account_scope"] = scope
+                                        stage.execute(
+                                            """
+                                            INSERT INTO staged_source
+                                                (account_scope,source_table,source_fingerprint,
+                                                 source_occurrence,trade_id,updated_at,
+                                                 raw_payload,raw_payload_sha256,payload_json)
+                                            VALUES(?,?,?,?,?,?,?,?,?)
+                                            """,
+                                            (
+                                                scope,
+                                                table,
+                                                fingerprint,
+                                                occurrence,
+                                                trade_id,
+                                                item["updated_at"],
+                                                item["raw_payload"],
+                                                item["raw_payload_sha256"],
+                                                json.dumps(
+                                                    item["payload"],
+                                                    separators=(",", ":"),
+                                                    ensure_ascii=False,
+                                                    allow_nan=False,
+                                                ),
+                                            ),
+                                        )
+                                    except (
+                                        ValueError,
+                                        TypeError,
+                                        KeyError,
+                                        RuntimeError,
+                                        sqlite3.IntegrityError,
+                                        IndexError,
+                                    ) as exc:
+                                        quarantine.write(
                                             json.dumps(
-                                                item["payload"],
+                                                {
+                                                    "source_table": table,
+                                                    "trade_id": trade_id,
+                                                    "updated_at": str(stamp),
+                                                    "source_fingerprint": fingerprint,
+                                                    "source_occurrence": occurrence,
+                                                    "reason": (
+                                                        f"{type(exc).__name__}: {exc}"
+                                                    ),
+                                                    "raw_payload": str(raw),
+                                                    "source_row": [str(value) for value in row],
+                                                },
                                                 separators=(",", ":"),
                                                 ensure_ascii=False,
                                                 allow_nan=False,
-                                            ),
-                                        ),
-                                    )
+                                            )
+                                            + "\n"
+                                        )
+                                        quarantined_rows += 1
+                                        continue
                                     manifest_item = {
                                         key: value
                                         for key, value in item.items()
@@ -489,8 +546,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                                     )
                                     counts[table] += 1
                                     scope_counts[scope] += 1
-                    manifest.flush()
+                        manifest.flush()
                     os.fsync(manifest.fileno())
+                    quarantine.flush()
+                    os.fsync(quarantine.fileno())
                 stage.commit()
 
                 ambiguous = stage.execute(
@@ -499,17 +558,77 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     FROM staged_source
                     GROUP BY account_scope,trade_id,updated_at
                     HAVING count(DISTINCT raw_payload_sha256) > 1
-                    LIMIT 1
+                    ORDER BY account_scope,trade_id,updated_at
                     """
-                ).fetchone()
-                if ambiguous:
-                    raise RuntimeError(
-                        "ambiguous same-timestamp legacy snapshots for "
-                        f"scope={ambiguous[0]} trade={ambiguous[1]}; refusing "
-                        "to invent canonical event ordering"
-                    )
+                ).fetchall()
+                ambiguous_rows_quarantined = 0
+                for scope, trade_id, updated_at in ambiguous:
+                    rows = stage.execute(
+                        """
+                        SELECT source_table,source_fingerprint,source_occurrence,
+                               raw_payload,raw_payload_sha256
+                        FROM staged_source
+                        WHERE account_scope=? AND trade_id=? AND updated_at=?
+                        ORDER BY source_table,source_fingerprint,source_occurrence
+                        """,
+                        (scope, trade_id, updated_at),
+                    ).fetchall()
+                    with quarantine_path.open("a", encoding="utf-8") as quarantine:
+                        for row in rows:
+                            quarantine.write(
+                                json.dumps(
+                                    {
+                                        "account_scope": scope,
+                                        "trade_id": trade_id,
+                                        "updated_at": updated_at,
+                                        "source_table": row[0],
+                                        "source_fingerprint": row[1],
+                                        "source_occurrence": int(row[2]),
+                                        "raw_payload_sha256": row[4],
+                                        "reason": "ambiguous_same_timestamp_conflicting_payload",
+                                        "raw_payload": row[3],
+                                    },
+                                    separators=(",", ":"),
+                                    ensure_ascii=False,
+                                    allow_nan=False,
+                                )
+                                + "\n"
+                            )
+                            quarantined_rows += 1
+                            ambiguous_rows_quarantined += 1
 
                 expected_rows = counts[RUNTIME_SOURCE] + counts[CLOSED_SOURCE]
+                row_errors_quarantined = quarantined_rows - ambiguous_rows_quarantined
+                if quarantined_rows:
+                    report = {
+                        "mode": "quarantined",
+                        "source_rows": source_rows_seen,
+                        "accepted_source_rows": (
+                            expected_rows - ambiguous_rows_quarantined
+                        ),
+                        "quarantined_rows": quarantined_rows,
+                        "runtime_rows": counts[RUNTIME_SOURCE],
+                        "closed_rows": counts[CLOSED_SOURCE],
+                        "scope_counts": dict(scope_counts),
+                        "source_fingerprints_verified": row_errors_quarantined == 0,
+                        "occurrence_identity_preserved": True,
+                        "ambiguous_attribution": bool(ambiguous),
+                        "row_errors_quarantined": row_errors_quarantined,
+                        "ambiguous_rows_quarantined": ambiguous_rows_quarantined,
+                        "postgres_connected": False,
+                        "writes": 0,
+                        "quarantine_file": str(quarantine_path),
+                        "import_blocked": True,
+                    }
+                    _write_reconciliation_report(report_path, report)
+                    os.replace(partial_manifest, manifest_path)
+                    return {
+                        **report,
+                        "manifest": str(manifest_path),
+                        "reconciliation_report": str(report_path),
+                    }
+                quarantine_path.unlink()
+
                 if not args.apply:
                     report = {
                         "mode": "dry-run",
@@ -726,6 +845,11 @@ def main() -> int:
         type=Path,
         default=Path("clickhouse-to-postgres-oms-manifest.jsonl"),
     )
+    parser.add_argument(
+        "--quarantine-out",
+        type=Path,
+        help="private JSONL file for source rows rejected from migration",
+    )
     args = parser.parse_args()
     mapping = (
         json.loads(args.scope_map.read_text(encoding="utf-8"))
@@ -737,7 +861,7 @@ def main() -> int:
     args.scope_map = mapping
     result = asyncio.run(run(args))
     print(json.dumps(result, indent=2))
-    return 0
+    return 2 if result.get("import_blocked") else 0
 
 
 if __name__ == "__main__":
