@@ -34,6 +34,17 @@ async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
     return result
 
 
+async def _acknowledge_protection(executor: Any, result: Any, trade: Any) -> Any:
+    """Call the atomic PostgreSQL API or a compatible legacy executor API."""
+    canonical = getattr(executor, "acknowledge_protection_trade", None)
+    if callable(canonical):
+        return await _call_sync_or_async(canonical, result, trade)
+    legacy = getattr(executor, "acknowledge_protection", None)
+    if not callable(legacy):
+        raise RuntimeError("executor has no protective acknowledgement method")
+    return await _call_sync_or_async(legacy, result, trade.trade_id)
+
+
 def _decimal_matches(left: Any, right: Any) -> bool:
     try:
         first, second = Decimal(str(left)), Decimal(str(right))
@@ -718,7 +729,7 @@ async def recover_accepted_initial_stop_submissions(
                         "client_order_id": client_id,
                     },
                 )
-            await executor.acknowledge_protection_trade(result, trade)
+            await _acknowledge_protection(executor, result, trade)
         else:
             # Legacy single-host recovery remains available for paper and old
             # deployments; no live runtime should use this after canonical bind.
@@ -726,7 +737,9 @@ async def recover_accepted_initial_stop_submissions(
             await persist_trade(trade)
             if row.get("state") == "SUBMITTING":
                 await intent_store.record_protection(client_id, result)
-            await intent_store.mark_applied(client_id, owner_trade_id)
+            await _call_sync_or_async(
+                intent_store.mark_applied, client_id, owner_trade_id
+            )
         recovered.append(client_id)
 
     return {
