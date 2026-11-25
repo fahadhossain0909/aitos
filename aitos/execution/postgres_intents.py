@@ -212,7 +212,16 @@ class PostgresCanonicalExecutionIntentStore:
                 trade,
                 order_id,
             )
-        return dict(row) if row else None
+        if row is None:
+            return None
+        decoded = dict(row)
+        decoded["request"] = json.loads(decoded["request_json"])
+        decoded["result"] = (
+            json.loads(decoded["result_json"])
+            if decoded.get("result_json")
+            else None
+        )
+        return decoded
 
     async def mark_protection_terminal(
         self,
