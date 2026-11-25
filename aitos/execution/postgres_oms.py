@@ -579,12 +579,23 @@ class PostgresCanonicalOMS:
                 owner["writer_id"], int(owner["generation"])
             ) != (fence.writer_id, fence.generation):
                 raise OMSConflict("stale writer fencing token")
+            active_claim = await conn.fetchval(
+                """SELECT count(*) FROM aitos_oms_outbox
+                   WHERE account_scope=$1 AND projected_at IS NULL
+                     AND claim_until > now()""",
+                scope,
+            )
+            if int(active_claim or 0):
+                raise OMSConflict(
+                    "projection rebuild is blocked by active outbox worker leases"
+                )
             result = await conn.execute(
                 """UPDATE aitos_oms_outbox
                    SET projected_at=NULL,claim_owner=NULL,claim_token=NULL,
                        claim_until=NULL,last_error='explicit canonical projection rebuild',
                        attempts=attempts+1
-                   WHERE account_scope=$1 AND projected_at IS NOT NULL""",
+                   WHERE account_scope=$1
+                     AND (projected_at IS NOT NULL OR claim_until IS NOT NULL)""",
                 scope,
             )
         try:
