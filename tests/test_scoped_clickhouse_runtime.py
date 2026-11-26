@@ -6,7 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 from aitos.models.trade import TradeLifecycleState
-from aitos.trading.persistent_state import DurableTradingStateStore
+from aitos.trading.persistent_state import (
+    DurableTradingStateStore,
+    _scoped_state_fingerprint,
+    _scoped_state_payload_hash,
+)
+from scripts.migrate_scoped_clickhouse_state import (
+    _scoped_payload_hash,
+    source_fingerprint,
+)
 
 
 class FakeClickHouse:
@@ -200,3 +208,26 @@ async def test_scoped_closed_trade_write_uses_scope_keyed_evidence_columns():
     assert rows[0][2] == rows[0][3]
     assert len(rows[0][5]) == 64
     assert len(rows[0][7]) == 64
+
+
+
+def test_runtime_row_identity_matches_scoped_migration_fingerprints():
+    payload = {
+        "trade_id": "trade-identity",
+        "symbol": "BTCUSDT",
+        "state": "position_opened",
+        "account_scope": "paper:one",
+    }
+    raw = __import__("json").dumps(
+        payload, sort_keys=True, default=str, allow_nan=False
+    )
+    updated_at = datetime(2026, 11, 26, 10, 0, 0, 123000, tzinfo=timezone.utc)
+
+    assert _scoped_state_fingerprint(
+        "trade_runtime_state", "trade-identity", raw, updated_at
+    ) == source_fingerprint(
+        "trade_runtime_state", "trade-identity", raw, updated_at
+    )
+    assert _scoped_state_payload_hash(payload, "paper:one") == _scoped_payload_hash(
+        payload, "paper:one"
+    )
