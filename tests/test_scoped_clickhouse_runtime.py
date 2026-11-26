@@ -70,7 +70,11 @@ class FakeClickHouse:
             return SimpleNamespace(
                 result_rows=[
                     ("trade_runtime_state", "MergeTree", "account_scope, trade_id"),
-                    ("paper_closed_trade_ledger", "MergeTree", "account_scope, trade_id"),
+                    (
+                        "paper_closed_trade_ledger",
+                        "MergeTree",
+                        "account_scope, trade_id",
+                    ),
                 ]
             )
         if "SELECT count()" in query:
@@ -179,7 +183,9 @@ async def test_scoped_delete_requires_archive_and_never_mutates_append_only_hist
     await store.delete_trade("trade-1")
 
     assert not client.inserts
-    assert not any("ALTER TABLE trade_runtime_state DELETE" in q for q, _ in client.commands)
+    assert not any(
+        "ALTER TABLE trade_runtime_state DELETE" in q for q, _ in client.commands
+    )
     assert "paper_closed_trade_ledger" in client.queries[-1][0]
 
 
@@ -257,9 +263,7 @@ def test_runtime_row_identity_matches_scoped_migration_fingerprints():
 
     assert _scoped_state_fingerprint(
         "trade_runtime_state", "trade-identity", raw, updated_at
-    ) == source_fingerprint(
-        "trade_runtime_state", "trade-identity", raw, updated_at
-    )
+    ) == source_fingerprint("trade_runtime_state", "trade-identity", raw, updated_at)
     assert _scoped_state_payload_hash(payload, "paper:one") == _scoped_payload_hash(
         payload, "paper:one"
     )
