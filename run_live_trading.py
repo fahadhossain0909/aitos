@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import os
 import socket
 from contextlib import AsyncExitStack
