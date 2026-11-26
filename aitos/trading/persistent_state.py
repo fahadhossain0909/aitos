@@ -766,25 +766,25 @@ class DurableTradingStateStore:
         client = self._client()
         try:
             if self._scoped_clickhouse_state:
-                # Append a scope-keyed tombstone rather than mutating MergeTree
-                # history. Latest-state readers ignore non-open lifecycle states.
-                payload = {
-                    "trade_id": trade_id,
-                    "symbol": "",
-                    "state": "position_deleted",
-                    "account_scope": self.account_scope,
-                }
-                payload_json = json.dumps(
-                    payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+                # The closed ledger is the durable terminal record. Its
+                # scope-keyed anti-join hides the old runtime snapshot, so do
+                # not mutate or tombstone append-only history.
+                archived = await client.query(
+                    """
+                    SELECT count() FROM paper_closed_trade_ledger
+                    WHERE account_scope={account_scope:String}
+                      AND trade_id={trade_id:String}
+                    """,
+                    parameters={
+                        "account_scope": self.account_scope,
+                        "trade_id": trade_id,
+                    },
                 )
-                await self._insert_scoped_state_row(
-                    "trade_runtime_state",
-                    trade_id,
-                    payload_json,
-                    datetime.now(timezone.utc),
-                    symbol="",
-                    state="position_deleted",
-                )
+                if not archived.result_rows or int(archived.result_rows[0][0]) < 1:
+                    raise RuntimeError(
+                        "scope-keyed runtime deletion requires a durable closed-trade archive"
+                    )
+                return
             else:
                 await client.command(
                     "ALTER TABLE trade_runtime_state DELETE "
