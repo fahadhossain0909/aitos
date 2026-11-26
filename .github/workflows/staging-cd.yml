@@ -276,6 +276,34 @@ jobs:
             DEADLINE=$((START + 5400))
             CYCLE=0
             printf 'AITOS staging paper soak started: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REPORT"
+            echo "=== WAITING FOR PAPER STARTUP (max 300 seconds) ===" | tee -a "$REPORT"
+            READY_DEADLINE=$((SECONDS + 300))
+            PAPER_READY=false
+            while [ "$SECONDS" -lt "$READY_DEADLINE" ]; do
+              PAPER_STATE="$(docker inspect --format '{{.State.Status}}' aitos-paper 2>/dev/null || echo missing)"
+              PAPER_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper 2>/dev/null || echo missing)"
+              printf 'startup_wait elapsed=%ss status=%s health=%s\n' "$((300 - (READY_DEADLINE - SECONDS)))" "$PAPER_STATE" "$PAPER_HEALTH" | tee -a "$REPORT"
+              if [ "$PAPER_STATE" != running ]; then
+                echo "Paper container is not running; collecting startup logs." | tee -a "$REPORT"
+                docker logs --tail 300 --timestamps aitos-paper 2>&1 | tee -a "$REPORT" || true
+                exit 1
+              fi
+              if [ "$PAPER_HEALTH" = healthy ]; then PAPER_READY=true; break; fi
+              if [ "$PAPER_HEALTH" = unhealthy ]; then
+                echo "Paper container healthcheck is unhealthy; collecting startup logs." | tee -a "$REPORT"
+                docker inspect aitos-paper >> "$REPORT" 2>&1 || true
+                docker logs --tail 300 --timestamps aitos-paper 2>&1 | tee -a "$REPORT" || true
+                exit 1
+              fi
+              sleep 10
+            done
+            if [ "$PAPER_READY" != true ]; then
+              echo "Paper container did not become healthy within 300 seconds." | tee -a "$REPORT"
+              docker inspect aitos-paper >> "$REPORT" 2>&1 || true
+              docker logs --tail 300 --timestamps aitos-paper 2>&1 | tee -a "$REPORT" || true
+              exit 1
+            fi
+            echo "Paper health endpoint is ready; beginning 90-minute observation." | tee -a "$REPORT"
             while [ "$(date +%s)" -lt "$DEADLINE" ]; do
               CYCLE=$((CYCLE + 1))
               {
@@ -317,6 +345,36 @@ jobs:
               fi
             done
             printf '\nSOAK_COMPLETE=true cycles=%s elapsed_seconds=%s completed_at=%s\n' "$CYCLE" "$(( $(date +%s) - START ))" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$REPORT"
+
+      - name: Capture staging startup diagnostics
+        if: always()
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: \${{ secrets.DEPLOY_HOST }}
+          username: \${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_staging_key
+          command_timeout: 5m
+          script: |
+            set +e
+            mkdir -p "$HOME/aitos-staging-audit"
+            REPORT="$HOME/aitos-staging-audit/startup-diagnostics.txt"
+            {
+              echo "captured_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              cd /opt/aitos-staging
+              docker compose ps --all 2>&1 || true
+              for container in aitos-paper aitos-learning aitos-redis aitos-clickhouse aitos-neo4j; do
+                echo "=== $container inspect ==="
+                docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "$container" 2>&1 || true
+                echo "=== $container recent logs ==="
+                docker logs --tail 400 --timestamps "$container" 2>&1 || true
+              done
+              echo "=== paper health ==="
+              curl -v --max-time 10 http://127.0.0.1:8090/health 2>&1 || true
+              echo "=== host resources ==="
+              free -h
+              df -h /
+            } > "$REPORT" 2>&1
+            cat "$REPORT"
 
       - name: Run read-only staging runtime audit
         if: always()
@@ -384,12 +442,16 @@ jobs:
           if ! scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/soak.txt" aitos-staging-audit/soak.txt; then
             printf '90-minute soak did not produce a report.\n' > aitos-staging-audit/soak.txt
           fi
+          if ! scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/startup-diagnostics.txt" aitos-staging-audit/startup-diagnostics.txt; then
+            printf 'Startup diagnostics unavailable.\n' > aitos-staging-audit/startup-diagnostics.txt
+          fi
 
       - name: Print staging audit report
         if: always()
         run: |
           cat aitos-staging-audit/report.txt
           cat aitos-staging-audit/soak.txt
+          cat aitos-staging-audit/startup-diagnostics.txt
 
       - name: Upload staging audit artifact
         if: always()
