@@ -863,7 +863,7 @@ class DurableTradingStateStore:
                 payload = json.loads(row[2])
                 if payload.get("trade_id") != row[1]:
                     raise ValueError("runtime payload identity mismatch")
-                if payload.get("account_scope") != str(row[0]):
+                if str(payload.get("account_scope") or "") != str(row[0]):
                     raise ValueError("runtime column/payload account scope mismatch")
                 payload["account_scope"] = str(row[0])
                 if payload.get("state") not in {
@@ -1016,7 +1016,7 @@ class DurableTradingStateStore:
                 if len(row) != 4:
                     raise ValueError("invalid scoped closed-ledger row")
                 payload = _closed_payload(row[1:])
-                if payload.get("account_scope") != str(row[0]):
+                if str(payload.get("account_scope") or "") != str(row[0]):
                     raise ValueError(
                         "closed-ledger column/payload account scope mismatch"
                     )
