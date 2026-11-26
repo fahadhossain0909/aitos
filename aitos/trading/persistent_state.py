@@ -58,7 +58,7 @@ def _scoped_state_fingerprint(
     table: str, trade_id: str, payload_json: str, updated_at: datetime
 ) -> str:
     stamp = updated_at.astimezone(timezone.utc).isoformat(timespec="milliseconds")
-    material = "\\0".join((table, str(trade_id), stamp, payload_json))
+    material = "\0".join((table, str(trade_id), stamp, payload_json))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
