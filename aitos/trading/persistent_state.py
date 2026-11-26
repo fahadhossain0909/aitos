@@ -164,24 +164,7 @@ SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
          max_memory_usage=134217728, read_overflow_mode='throw'
 """
 
-CLOSED_RECOVERY_QUERY = """
-SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
-       trade_id, any(payload_json) AS latest_payload,
-       uniqExact(payload_json) AS payload_versions
-FROM paper_closed_trade_ledger
-WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
-  AND (
-    JSONExtractString(payload_json, 'account_scope'), trade_id, updated_at
-  ) IN (
-    SELECT JSONExtractString(payload_json, 'account_scope'),
-           trade_id, max(updated_at)
-    FROM paper_closed_trade_ledger
-    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
-    GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
-)
-GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
-ORDER BY account_scope, trade_id
-"""
+
 
 
 def _closed_payload(row) -> dict:
