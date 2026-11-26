@@ -158,7 +158,9 @@ jobs:
             AITOS_DATA_DISK_UUID=$AITOS_DATA_DISK_UUID
             AITOS_ALLOW_BOOT_DISK_DATA=true
             AITOS_AUTO_RESET_DISPOSABLE_DATA=false
+            AITOS_MODE=paper
             AITOS_PAPER_ACCOUNT_SCOPE=paper:staging
+            AITOS_EMBEDDED_LEARNING_WORKER_ENABLED=false
             AITOS_UID=1000
             AITOS_GID=1000
             LIVE_TRADING_ENABLED=false
@@ -264,6 +266,8 @@ jobs:
                 clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" \
                 --database aitos "$@"
             }
+            # Ensure the learning worker's keyset cursor column exists before it starts.
+            clickhouse_cmd --query "ALTER TABLE learning_experiences ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp"
             scoped_columns="$(clickhouse_cmd --query "SELECT count() FROM system.columns WHERE database='aitos' AND ((table='trade_runtime_state' AND name IN ('account_scope','trade_id','symbol','state','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')) OR (table='paper_closed_trade_ledger' AND name IN ('account_scope','trade_id','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')))")"
             scoped_engines="$(clickhouse_cmd --query "SELECT count() FROM system.tables WHERE database='aitos' AND name IN ('trade_runtime_state','paper_closed_trade_ledger') AND engine='MergeTree' AND (startsWith(sorting_key, '(account_scope') OR startsWith(sorting_key, 'account_scope'))")"
             if [ "$scoped_columns" = 18 ] && [ "$scoped_engines" = 2 ]; then
