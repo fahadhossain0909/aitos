@@ -19,7 +19,9 @@ def store(rows):
 
 
 async def test_latest_state_is_selected_before_filtering_open_state():
-    value, query = store([("", "t", json.dumps(dict(trade_id="t", state="position_opened")), 1)])
+    value, query = store(
+        [("", "t", json.dumps(dict(trade_id="t", state="position_opened")), 1)]
+    )
     with patch(
         "aitos.trading.persistent_state._trade_from_dict",
         return_value=SimpleNamespace(state=TradeLifecycleState.POSITION_CLOSED),
@@ -44,7 +46,9 @@ async def test_mixed_or_unexpected_account_scope_blocks_recovery():
 
 
 async def test_valid_latest_open_record_is_restored():
-    value, _ = store([("", "t", json.dumps(dict(trade_id="t")), 1)])
+    value, _ = store(
+        [("", "t", json.dumps(dict(trade_id="t", state="position_opened")), 1)]
+    )
     trade = SimpleNamespace(state=TradeLifecycleState.POSITION_OPENED)
     with patch("aitos.trading.persistent_state._trade_from_dict", return_value=trade):
         assert await value.load_open_trades() == [trade]
