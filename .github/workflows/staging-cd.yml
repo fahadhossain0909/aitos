@@ -272,8 +272,8 @@ jobs:
             mkdir -p "$HOME/aitos-staging-audit"
             REPORT="$HOME/aitos-staging-audit/soak.txt"
             REDIS_PASSWORD="$(sed -n 's/^REDIS_PASSWORD=//p' .env | tail -n 1)"
-            START="$(date +%s)"
-            DEADLINE=$((START + 5400))
+            START=0
+            DEADLINE=0
             CYCLE=0
             printf 'AITOS staging paper soak started: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REPORT"
             echo "=== WAITING FOR PAPER STARTUP (max 300 seconds) ===" | tee -a "$REPORT"
@@ -303,6 +303,13 @@ jobs:
               docker logs --tail 300 --timestamps aitos-paper 2>&1 | tee -a "$REPORT" || true
               exit 1
             fi
+            START="$(date +%s)"
+            DEADLINE=$((START + 5400))
+            declare -A BASELINE_RESTARTS
+            for container in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-redis-dlq-retention aitos-redis-stream-archive; do
+              BASELINE_RESTARTS["$container"]="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo 0)"
+              printf 'baseline_restart_count %s=%s\n' "$container" "${BASELINE_RESTARTS[$container]}" | tee -a "$REPORT"
+            done
             echo "Paper health endpoint is ready; beginning 90-minute observation." | tee -a "$REPORT"
             while [ "$(date +%s)" -lt "$DEADLINE" ]; do
               CYCLE=$((CYCLE + 1))
@@ -315,8 +322,9 @@ jobs:
                   restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo 0)"
                   oom="$(docker inspect --format '{{.State.OOMKilled}}' "$container" 2>/dev/null || echo true)"
                   printf '%-34s status=%s health=%s restarts=%s oom=%s\n' "$container" "$status" "$health" "$restarts" "$oom"
-                  if [ "$status" != running ] || [ "$health" = unhealthy ] || [ "$oom" = true ]; then
-                    echo "SOAK BLOCKER: $container is not healthy"
+                  baseline="${BASELINE_RESTARTS[$container]:-0}"
+                  if [ "$status" != running ] || [ "$health" = unhealthy ] || [ "$oom" = true ] || [ "$restarts" -gt "$baseline" ]; then
+                    echo "SOAK BLOCKER: $container is not healthy or restarted during soak (baseline=$baseline current=$restarts)"
                     docker logs --tail 200 --timestamps "$container" 2>&1 || true
                     exit 1
                   fi
