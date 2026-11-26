@@ -37,6 +37,20 @@ async def test_account_equity_uses_total_margin_balance_not_available_margin():
     executor._signed_request.assert_awaited_once_with("GET", "/fapi/v3/account", {})
 
 
+@pytest.mark.asyncio
+async def test_account_equity_decimal_preserves_exchange_precision():
+    executor = BinanceFuturesOrderExecutor(api_key="key", api_secret="secret")
+    executor._signed_request = AsyncMock(
+        return_value={"totalMarginBalance": "1250.123456789123456789"}
+    )
+
+    equity = await executor.get_account_equity_decimal()
+
+    from decimal import Decimal
+
+    assert equity == Decimal("1250.123456789123456789")
+
+
 @pytest.mark.parametrize(
     "response",
     [
