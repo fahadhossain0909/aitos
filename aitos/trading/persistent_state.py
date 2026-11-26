@@ -872,7 +872,11 @@ class DurableTradingStateStore:
                 }:
                     continue
                 trade = _trade_from_dict(payload)
-                trades.append(trade)
+                if trade.state in {
+                    TradeLifecycleState.POSITION_OPENED,
+                    TradeLifecycleState.EXIT_TRIGGERED,
+                }:
+                    trades.append(trade)
             except Exception as exc:
                 logger.error(
                     "runtime recovery blocked by invalid or ambiguous state",
