@@ -451,9 +451,7 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         assert child_watermark["cumulative_quote"] == Decimal("2")
         assert child_commit["trade_revision"] == 7
         assert child_commit["financial_revision"] == 2
-        financial_events = await oms.read_events(
-            "paper:recovery", "financial:USDT"
-        )
+        financial_events = await oms.read_events("paper:recovery", "financial:USDT")
         assert len(financial_events) == 2
         assert (
             financial_events[-1].payload["causality"]["causation_id"]
@@ -594,8 +592,8 @@ async def test_postgres_oms_fencing_cas_idempotency_and_hash_chain():
         )
         await oms.append(
             recovery_fence,
-            aggregate_id="financial:USDT",
-            event_id="financial:USDT:revision:1",
+            aggregate_id="financial:USDT:fixture",
+            event_id="financial:USDT:fixture:revision:1",
             expected_revision=0,
             payload={
                 "event_type": "FINANCIAL_STATE_SNAPSHOT",
