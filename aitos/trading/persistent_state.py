@@ -1009,7 +1009,9 @@ class DurableTradingStateStore:
                     raise ValueError("invalid scoped closed-ledger row")
                 payload = _closed_payload(row[1:])
                 if payload.get("account_scope") != str(row[0]):
-                    raise ValueError("closed-ledger column/payload account scope mismatch")
+                    raise ValueError(
+                        "closed-ledger column/payload account scope mismatch"
+                    )
                 payload["account_scope"] = str(row[0])
                 trades.append(_trade_from_dict(payload))
             return trades
