@@ -44,6 +44,16 @@ if [[ "${AITOS_ALLOW_BOOT_DISK_DATA:-false}" == "true" ]]; then
   # Explicit staging-only mode for a VPS plan with a single root disk.
   # Never mount the root partition inside itself or add a recursive fstab row.
   mkdir -p "$DATA_ROOT"
+  # Restore write access to the staging directory and its structural parents.
+  # Preserve ownership of existing database/runtime child directories.
+  docker run --rm --user 0:0 -v "$DATA_ROOT:/data" \
+    -e HOST_UID="$HOST_UID" -e HOST_GID="$HOST_GID" \
+    alpine:3.20 sh -ec '
+      chown "$HOST_UID:$HOST_GID" /data
+      for directory in databases eventbus research artifacts runtime; do
+        if [ -d "/data/$directory" ]; then chown "$HOST_UID:$HOST_GID" "/data/$directory"; fi
+      done
+    '
   ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
   DATA_UUID="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
   ROOT_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target / | head -n1)")"
