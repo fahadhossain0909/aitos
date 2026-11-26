@@ -53,7 +53,7 @@ jobs:
   deploy-and-audit:
     runs-on: ubuntu-latest
     needs: publish-image
-    timeout-minutes: 30
+    timeout-minutes: 110
     environment: staging
     steps:
       - name: Validate staging environment secrets
@@ -256,7 +256,65 @@ jobs:
             done
             echo "=== STAGING DEPLOYMENT SUCCESS: $COMMIT ==="
 
+      - name: 90-minute staging paper soak
+        id: staging_soak
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: \${{ secrets.DEPLOY_HOST }}
+          username: \${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_staging_key
+          command_timeout: 100m
+          script: |
+            set -Eeuo pipefail
+            cd /opt/aitos-staging
+            mkdir -p "$HOME/aitos-staging-audit"
+            REPORT="$HOME/aitos-staging-audit/soak.txt"
+            REDIS_PASSWORD="$(sed -n 's/^REDIS_PASSWORD=//p' .env | tail -n 1)"
+            START="$(date +%s)"
+            DEADLINE=$((START + 5400))
+            CYCLE=0
+            printf 'AITOS staging paper soak started: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REPORT"
+            while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+              CYCLE=$((CYCLE + 1))
+              {
+                echo
+                echo "=== SOAK CYCLE $CYCLE UTC $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+                for container in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-redis-dlq-retention aitos-redis-stream-archive; do
+                  status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo missing)"
+                  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo missing)"
+                  restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo 0)"
+                  oom="$(docker inspect --format '{{.State.OOMKilled}}' "$container" 2>/dev/null || echo true)"
+                  printf '%-34s status=%s health=%s restarts=%s oom=%s\n' "$container" "$status" "$health" "$restarts" "$oom"
+                  if [ "$status" != running ] || [ "$health" = unhealthy ] || [ "$oom" = true ]; then
+                    echo "SOAK BLOCKER: $container is not healthy"
+                    docker logs --tail 200 --timestamps "$container" 2>&1 || true
+                    exit 1
+                  fi
+                done
+                curl -fsS http://127.0.0.1:8090/health >/dev/null
+                echo "paper_health=ok"
+                curl -fsS http://127.0.0.1:8090/metrics | grep -E '^(process_cpu_seconds_total|process_resident_memory_bytes|python_gc_objects_collected_total)' | head -n 12 || true
+                echo "--- resource usage ---"
+                docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}'
+                echo "--- Redis persistence and market streams ---"
+                docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli INFO memory | grep -E '^(used_memory_human|maxmemory_human|mem_fragmentation_ratio):' || true
+                docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli --raw --scan --pattern 'stream:market.*' | head -n 30 || true
+                echo "--- paper market-data / decision activity (last 5m) ---"
+                docker logs --since 5m --timestamps aitos-paper 2>&1 | grep -Ei 'websocket|market.?data|aggtrade|depth|order.?book|kline|live scanner freshness|paper signal diagnostics|scanner ranking decision|trade candidate' | tail -n 60 || true
+                echo "--- persistent storage ---"
+                df -h /mnt/aitos-staging-data
+              } | tee -a "$REPORT"
+              remaining=$((DEADLINE - $(date +%s)))
+              if [ "$remaining" -gt 0 ]; then
+                sleep_for=300
+                [ "$remaining" -lt "$sleep_for" ] && sleep_for="$remaining"
+                sleep "$sleep_for"
+              fi
+            done
+            printf '\nSOAK_COMPLETE=true cycles=%s elapsed_seconds=%s completed_at=%s\n' "$CYCLE" "$(( $(date +%s) - START ))" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$REPORT"
+
       - name: Run read-only staging runtime audit
+        if: always()
         continue-on-error: true
         uses: appleboy/ssh-action@v1.2.5
         with:
@@ -318,10 +376,15 @@ jobs:
             printf 'Deployment stopped before runtime audit; inspect the SSH deployment step logs.\n' > aitos-staging-audit/report.txt
             printf '99\n' > aitos-staging-audit/exit_code
           fi
+          if ! scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/soak.txt" aitos-staging-audit/soak.txt; then
+            printf '90-minute soak did not produce a report.\n' > aitos-staging-audit/soak.txt
+          fi
 
       - name: Print staging audit report
         if: always()
-        run: cat aitos-staging-audit/report.txt
+        run: |
+          cat aitos-staging-audit/report.txt
+          cat aitos-staging-audit/soak.txt
 
       - name: Upload staging audit artifact
         if: always()
@@ -337,6 +400,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ steps.staging_soak.outcome }}" != "success" ]; then
+            echo "90-minute staging soak did not complete successfully."
+            exit 1
+          fi
           status="$(tr -d '[:space:]' < aitos-staging-audit/exit_code)"
           case "$status" in
             0) echo 'Staging runtime audit PASSED.' ;;
