@@ -67,6 +67,23 @@ def source_fingerprint(
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def _scoped_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
+    canonical = dict(payload)
+    embedded = canonical.get("account_scope")
+    if embedded and embedded != account_scope:
+        raise ValueError("scoped payload hash conflicts with account scope")
+    canonical["account_scope"] = account_scope
+    encoded = json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _scope(value: Any) -> str:
     if type(value) is not str or not value or len(value) > 256 or "\x00" in value:
         raise ValueError(
@@ -119,7 +136,7 @@ def prepare_record(
         allow_nan=False,
         default=str,
     )
-    payload_hash = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+    payload_hash = _scoped_payload_hash(payload, account_scope)
     common = (
         account_scope,
         str(trade_id),
