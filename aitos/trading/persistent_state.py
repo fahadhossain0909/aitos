@@ -81,7 +81,6 @@ def _scoped_state_payload_hash(payload: dict[str, Any], account_scope: str) -> s
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-
 CREATE_EXCHANGE_INCOME_RETRY = """
 CREATE TABLE IF NOT EXISTS exchange_income_sync_retry (
     account LowCardinality(String),
@@ -320,9 +319,9 @@ class DurableTradingStateStore:
                 }
                 for table in ("trade_runtime_state", "paper_closed_trade_ledger"):
                     engine, sorting_key = table_metadata.get(table, ("", ""))
-                    if engine != "MergeTree" or not sorting_key.lstrip(
-                        "("
-                    ).startswith("account_scope"):
+                    if engine != "MergeTree" or not sorting_key.lstrip("(").startswith(
+                        "account_scope"
+                    ):
                         raise RuntimeError(
                             f"{table} must use a scope-first MergeTree sorting key"
                         )
@@ -382,7 +381,9 @@ class DurableTradingStateStore:
                 "source_fingerprint": fingerprint,
             },
         )
-        occurrence = int(occurrences.result_rows[0][0]) if occurrences.result_rows else 0
+        occurrence = (
+            int(occurrences.result_rows[0][0]) if occurrences.result_rows else 0
+        )
         payload_hash = _scoped_state_payload_hash(payload, self.account_scope)
         if table == "trade_runtime_state":
             values = [
@@ -722,9 +723,7 @@ class DurableTradingStateStore:
             payload_json = json.dumps(
                 payload, sort_keys=True, default=str, allow_nan=False
             )
-            updated_at = datetime.fromisoformat(
-                trade.updated_at.replace("Z", "+00:00")
-            )
+            updated_at = datetime.fromisoformat(trade.updated_at.replace("Z", "+00:00"))
             if updated_at.tzinfo is None:
                 updated_at = updated_at.replace(tzinfo=timezone.utc)
             updated_at = updated_at.astimezone(timezone.utc)
@@ -740,7 +739,15 @@ class DurableTradingStateStore:
             else:
                 await client.insert(
                     "trade_runtime_state",
-                    [[trade.trade_id, trade.symbol, trade.state.value, payload_json, updated_at]],
+                    [
+                        [
+                            trade.trade_id,
+                            trade.symbol,
+                            trade.state.value,
+                            payload_json,
+                            updated_at,
+                        ]
+                    ],
                     column_names=[
                         "trade_id",
                         "symbol",
