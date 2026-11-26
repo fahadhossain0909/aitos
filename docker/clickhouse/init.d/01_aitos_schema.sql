@@ -109,7 +109,9 @@ CREATE TABLE IF NOT EXISTS aitos.world_intelligence_cursors (
 ORDER BY source_id;
 
 CREATE TABLE IF NOT EXISTS aitos.learning_experiences (
-    experience_id UUID, timestamp DateTime64(3, 'UTC'), source LowCardinality(String),
+    experience_id UUID, timestamp DateTime64(3, 'UTC'),
+    ingested_at DateTime64(3, 'UTC') DEFAULT timestamp,
+    source LowCardinality(String),
     symbol LowCardinality(String), decision LowCardinality(String), outcome Nullable(String),
     reward Float64, confidence Float64, quantity Float64, price Nullable(Float64),
     features_json String, market_state_json String, risk_state_json String,
