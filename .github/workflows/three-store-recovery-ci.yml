@@ -52,6 +52,15 @@ jobs:
           AITOS_FAULT_CLICKHOUSE_PASSWORD: aitos-integration-password
         run: |
           pytest -q --timeout=120 tests/integration/test_execution_recovery_three_store.py
+      - name: Verify scope-keyed ClickHouse runtime cutover and account isolation
+        env:
+          PYTHONPATH: .
+          AITOS_FAULT_CLICKHOUSE_HOST: 127.0.0.1
+          AITOS_FAULT_CLICKHOUSE_PORT: "8123"
+          AITOS_FAULT_CLICKHOUSE_USER: default
+          AITOS_FAULT_CLICKHOUSE_PASSWORD: aitos-integration-password
+        run: |
+          pytest -q --timeout=120 tests/integration/test_scoped_clickhouse_runtime.py
       - name: Run protection restart and ambiguity regressions
         env:
           PYTHONPATH: .
