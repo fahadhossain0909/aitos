@@ -206,7 +206,7 @@ jobs:
             APP_PORT=8001
             APP_HOST=0.0.0.0
             COMPOSE_PROJECT_NAME=aitos-staging
-            AITOS_IMAGE=$IMAGE
+            AITOS_IMAGE=ghcr.io/${REPO,,}
             AITOS_IMAGE_TAG=staging-sha-${COMMIT}
             AITOS_RUNTIME_IMAGE=$AITOS_RUNTIME_IMAGE
             DATABASE_URL=
@@ -356,7 +356,7 @@ jobs:
               docker logs --since 30m --timestamps aitos-paper 2>&1 | grep -E 'scanner ranking decision|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' | tail -n 200 || true
               echo
               echo '--- Container status ---'
-              docker compose ps --all
+              docker compose ps --all || true
             } >> "$REPORT"
             printf '%s\n' "$status" > "$EXIT_CODE"
             test -s "$REPORT"
