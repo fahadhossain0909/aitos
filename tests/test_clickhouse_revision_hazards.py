@@ -160,7 +160,7 @@ async def test_counterexample_submillisecond_updates_collapse_to_one_version(eng
         await store(engine).load_open_trades()
 
 
-async def test_mixed_account_scopes_block_single_runtime_recovery(engine):
+async def test_account_scope_recovery_isolates_reused_trade_ids(engine):
     for account, symbol, stamp in [
         ("synthetic-paper-a", "BTCUSDT", "2026-11-02 12:00:00.001"),
         ("synthetic-paper-b", "ETHUSDT", "2026-11-02 12:00:00.002"),
@@ -169,8 +169,18 @@ async def test_mixed_account_scopes_block_single_runtime_recovery(engine):
         item["account_scope"] = account
         insert(engine, "trade_runtime_state", item, stamp)
 
-    with pytest.raises(RuntimeError, match="account scope mismatch or mixed scopes"):
-        await store(engine, account_scope="synthetic-paper-a").load_open_trades()
+    restored_a = await store(
+        engine, account_scope="synthetic-paper-a"
+    ).load_open_trades()
+    restored_b = await store(
+        engine, account_scope="synthetic-paper-b"
+    ).load_open_trades()
+    assert [(trade.symbol, trade.account_scope) for trade in restored_a] == [
+        ("BTCUSDT", "synthetic-paper-a")
+    ]
+    assert [(trade.symbol, trade.account_scope) for trade in restored_b] == [
+        ("ETHUSDT", "synthetic-paper-b")
+    ]
 
 
 async def test_legacy_replacing_key_still_collapses_reused_ids_after_merge(engine):
