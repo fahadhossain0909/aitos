@@ -165,6 +165,101 @@ SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
 """
 
 
+SCOPED_LINKED_TRADE_IDS_QUERY = """
+SELECT trade_id FROM trade_runtime_state
+WHERE account_scope = {account_scope:String}
+UNION DISTINCT
+SELECT trade_id FROM paper_closed_trade_ledger
+WHERE account_scope = {account_scope:String}
+"""
+
+LEGACY_LINKED_TRADE_IDS_QUERY = """
+SELECT trade_id FROM trade_runtime_state
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+UNION DISTINCT
+SELECT trade_id FROM paper_closed_trade_ledger
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+"""
+
+SCOPED_OPEN_RECOVERY_QUERY = """
+SELECT account_scope, trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS latest_payload_versions
+FROM trade_runtime_state
+WHERE account_scope = {account_scope:String}
+  AND (account_scope, trade_id, updated_at) IN (
+    SELECT account_scope, trade_id, max(updated_at)
+    FROM trade_runtime_state
+    WHERE account_scope = {account_scope:String}
+    GROUP BY account_scope, trade_id
+  )
+  AND (account_scope, trade_id) NOT IN (
+    SELECT account_scope, trade_id
+    FROM paper_closed_trade_ledger
+    WHERE account_scope = {account_scope:String}
+  )
+GROUP BY account_scope, trade_id
+"""
+
+LEGACY_OPEN_RECOVERY_QUERY = """
+SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
+       trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS latest_payload_versions
+FROM trade_runtime_state
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+  AND (
+    JSONExtractString(payload_json, 'account_scope'), trade_id, updated_at
+  ) IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'),
+           trade_id, max(updated_at)
+    FROM trade_runtime_state
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+    GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+  )
+  AND (
+    JSONExtractString(payload_json, 'account_scope'), trade_id
+  ) NOT IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'), trade_id
+    FROM paper_closed_trade_ledger
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+  )
+GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+"""
+
+SCOPED_CLOSED_RECOVERY_QUERY = """
+SELECT account_scope, trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS payload_versions
+FROM paper_closed_trade_ledger
+WHERE account_scope = {account_scope:String}
+  AND (account_scope, trade_id, updated_at) IN (
+    SELECT account_scope, trade_id, max(updated_at)
+    FROM paper_closed_trade_ledger
+    WHERE account_scope = {account_scope:String}
+    GROUP BY account_scope, trade_id
+  )
+GROUP BY account_scope, trade_id
+ORDER BY account_scope, trade_id
+"""
+
+LEGACY_CLOSED_RECOVERY_QUERY = """
+SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
+       trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS payload_versions
+FROM paper_closed_trade_ledger
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+  AND (
+    JSONExtractString(payload_json, 'account_scope'), trade_id, updated_at
+  ) IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'),
+           trade_id, max(updated_at)
+    FROM paper_closed_trade_ledger
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+    GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+  )
+GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+ORDER BY account_scope, trade_id
+"""
+
+
 def _closed_payload(row) -> dict:
     if len(row) != 3 or row[2] != 1:
         raise ValueError("ambiguous latest closed-ledger payload")
@@ -364,12 +459,17 @@ class DurableTradingStateStore:
             table, trade_id, payload_json, updated_at
         )
         client = self._client()
+        occurrence_query = (
+            "SELECT count() FROM trade_runtime_state "
+            "WHERE account_scope={account_scope:String} "
+            "AND source_fingerprint={source_fingerprint:String}"
+            if table == "trade_runtime_state"
+            else "SELECT count() FROM paper_closed_trade_ledger "
+            "WHERE account_scope={account_scope:String} "
+            "AND source_fingerprint={source_fingerprint:String}"
+        )
         occurrences = await client.query(
-            f"""
-            SELECT count() FROM {table}
-            WHERE account_scope={{account_scope:String}}
-              AND source_fingerprint={{source_fingerprint:String}}
-            """,
+            occurrence_query,
             parameters={
                 "account_scope": self.account_scope,
                 "source_fingerprint": fingerprint,
@@ -647,14 +747,13 @@ class DurableTradingStateStore:
             if self._scoped_clickhouse_state
             else "JSONExtractString(payload_json, 'account_scope')"
         )
+        linkage_query = (
+            SCOPED_LINKED_TRADE_IDS_QUERY
+            if self._scoped_clickhouse_state
+            else LEGACY_LINKED_TRADE_IDS_QUERY
+        )
         trade_rows = await client.query(
-            f"""
-            SELECT trade_id FROM trade_runtime_state
-            WHERE {scope_expression} = {{account_scope:String}}
-            UNION DISTINCT
-            SELECT trade_id FROM paper_closed_trade_ledger
-            WHERE {scope_expression} = {{account_scope:String}}
-            """,
+            linkage_query,
             parameters={"account_scope": self.account_scope},
         )
         known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
@@ -818,31 +917,13 @@ class DurableTradingStateStore:
             # latest-state and terminal-ledger anti-join by the immutable
             # account_scope carried in each payload. Missing legacy scope maps
             # to the empty scope and can only match other missing-scope rows.
-            scope_expression = (
-                "account_scope"
+            recovery_query = (
+                SCOPED_OPEN_RECOVERY_QUERY
                 if self._scoped_clickhouse_state
-                else "JSONExtractString(payload_json, 'account_scope')"
+                else LEGACY_OPEN_RECOVERY_QUERY
             )
             result = await client.query(
-                f"""
-                SELECT {scope_expression} AS account_scope,
-                       trade_id, any(payload_json) AS latest_payload,
-                       uniqExact(payload_json) AS latest_payload_versions
-                FROM trade_runtime_state
-                WHERE {scope_expression} = {{account_scope:String}}
-                  AND ({scope_expression}, trade_id, updated_at) IN (
-                    SELECT {scope_expression}, trade_id, max(updated_at)
-                    FROM trade_runtime_state
-                    WHERE {scope_expression} = {{account_scope:String}}
-                    GROUP BY {scope_expression}, trade_id
-                )
-                AND ({scope_expression}, trade_id) NOT IN (
-                    SELECT {scope_expression}, trade_id
-                    FROM paper_closed_trade_ledger
-                    WHERE {scope_expression} = {{account_scope:String}}
-                )
-                GROUP BY {scope_expression}, trade_id
-                """,
+                recovery_query,
                 parameters={"account_scope": self.account_scope},
             )
         except Exception:
@@ -982,27 +1063,13 @@ class DurableTradingStateStore:
 
     async def load_closed_trades(self) -> list[Trade]:
         """Restore complete realized evidence or fail; never silently lose PnL."""
-        scope_expression = (
-            "account_scope"
+        recovery_query = (
+            SCOPED_CLOSED_RECOVERY_QUERY
             if self._scoped_clickhouse_state
-            else "JSONExtractString(payload_json, 'account_scope')"
+            else LEGACY_CLOSED_RECOVERY_QUERY
         )
         result = await self._client().query(
-            f"""
-            SELECT {scope_expression} AS account_scope,
-                   trade_id, any(payload_json) AS latest_payload,
-                   uniqExact(payload_json) AS payload_versions
-            FROM paper_closed_trade_ledger
-            WHERE {scope_expression} = {{account_scope:String}}
-              AND ({scope_expression}, trade_id, updated_at) IN (
-                SELECT {scope_expression}, trade_id, max(updated_at)
-                FROM paper_closed_trade_ledger
-                WHERE {scope_expression} = {{account_scope:String}}
-                GROUP BY {scope_expression}, trade_id
-              )
-            GROUP BY {scope_expression}, trade_id
-            ORDER BY account_scope, trade_id
-            """,
+            recovery_query,
             parameters={"account_scope": self.account_scope},
         )
         try:
