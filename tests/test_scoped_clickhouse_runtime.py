@@ -18,8 +18,9 @@ from scripts.migrate_scoped_clickhouse_state import (
 
 
 class FakeClickHouse:
-    def __init__(self, *, scoped=True):
+    def __init__(self, *, scoped=True, atomic=True):
         self.scoped = scoped
+        self.atomic = atomic
         self.count_result = 0
         self.commands = []
         self.inserts = []
@@ -30,6 +31,10 @@ class FakeClickHouse:
 
     async def query(self, query, parameters=None):
         self.queries.append((query, parameters or {}))
+        if "FROM system.databases" in query:
+            return SimpleNamespace(
+                result_rows=[("Atomic" if self.atomic else "Ordinary",)]
+            )
         if "FROM system.columns" in query:
             scope_columns = [
                 ("trade_runtime_state", column)
@@ -101,6 +106,19 @@ async def test_live_state_store_requires_scope_keyed_runtime_and_closed_tables()
         "CREATE TABLE IF NOT EXISTS trade_runtime_state (" in query
         for query, _ in client.commands
     )
+
+
+@pytest.mark.asyncio
+async def test_live_state_store_requires_atomic_clickhouse_database():
+    client = FakeClickHouse(atomic=False)
+    store = DurableTradingStateStore(
+        SimpleNamespace(_client=client),
+        account_scope="live:account",
+        require_scoped_schema=True,
+    )
+
+    with pytest.raises(RuntimeError, match="Atomic database"):
+        await store.initialize()
 
 
 @pytest.mark.asyncio
