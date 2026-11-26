@@ -57,6 +57,8 @@ ORDER BY trade_id
 def _scoped_state_fingerprint(
     table: str, trade_id: str, payload_json: str, updated_at: datetime
 ) -> str:
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
     stamp = updated_at.astimezone(timezone.utc).isoformat(timespec="milliseconds")
     material = "\0".join((table, str(trade_id), stamp, payload_json))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -314,9 +316,9 @@ class DurableTradingStateStore:
                 }
                 for table in ("trade_runtime_state", "paper_closed_trade_ledger"):
                     engine, sorting_key = table_metadata.get(table, ("", ""))
-                    if not engine.endswith("MergeTree") or not sorting_key.startswith(
-                        "account_scope"
-                    ):
+                    if engine != "MergeTree" or not sorting_key.lstrip(
+                        "("
+                    ).startswith("account_scope"):
                         raise RuntimeError(
                             f"{table} must use a scope-first MergeTree sorting key"
                         )
