@@ -259,39 +259,37 @@ class DurableTradingStateStore:
             return
         try:
             client = self._repository._client
-            if not self.require_scoped_schema:
+            if self.require_scoped_schema:
+                columns = await client.query(
+                    """
+                    SELECT table,name FROM system.columns
+                    WHERE database=currentDatabase()
+                      AND table IN ('trade_runtime_state','paper_closed_trade_ledger')
+                    """
+                )
+                table_columns: dict[str, set[str]] = {}
+                for table, column in columns.result_rows:
+                    table_columns.setdefault(str(table), set()).add(str(column))
+                runtime_scoped = "account_scope" in table_columns.get(
+                    "trade_runtime_state", set()
+                )
+                closed_scoped = "account_scope" in table_columns.get(
+                    "paper_closed_trade_ledger", set()
+                )
+                if not runtime_scoped or not closed_scoped:
+                    raise RuntimeError(
+                        "runtime requires scope-keyed ClickHouse state tables; "
+                        "run and verify scripts/migrate_scoped_clickhouse_state.py --cutover first"
+                    )
+                self._scoped_clickhouse_state = True
+            else:
                 await client.command(CREATE_RUNTIME_STATE)
                 await client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
+                self._scoped_clickhouse_state = False
             await client.command(CREATE_DRAWDOWN_STATE)
             await client.command(CREATE_EXCHANGE_INCOME_CURSOR)
             await client.command(CREATE_EXCHANGE_INCOME_RETRY)
             await client.command(CREATE_ORDER_EXECUTION_LEDGER)
-            columns = await client.query(
-                """
-                SELECT table,name FROM system.columns
-                WHERE database=currentDatabase()
-                  AND table IN ('trade_runtime_state','paper_closed_trade_ledger')
-                """
-            )
-            table_columns: dict[str, set[str]] = {}
-            for table, column in columns.result_rows:
-                table_columns.setdefault(str(table), set()).add(str(column))
-            runtime_scoped = "account_scope" in table_columns.get(
-                "trade_runtime_state", set()
-            )
-            closed_scoped = "account_scope" in table_columns.get(
-                "paper_closed_trade_ledger", set()
-            )
-            if runtime_scoped != closed_scoped:
-                raise RuntimeError(
-                    "ClickHouse runtime and closed-ledger schemas are at different cutover versions"
-                )
-            self._scoped_clickhouse_state = runtime_scoped and closed_scoped
-            if self.require_scoped_schema and not self._scoped_clickhouse_state:
-                raise RuntimeError(
-                    "live startup requires scope-keyed ClickHouse state tables; "
-                    "run and verify scripts/migrate_scoped_clickhouse_state.py --cutover first"
-                )
             logger.info(
                 "durable trading state tables verified",
                 extra={
