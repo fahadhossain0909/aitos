@@ -676,27 +676,33 @@ class DurableTradingStateStore:
         payload["account_scope"] = self.account_scope
         trade.account_scope = self.account_scope
         try:
-            await client.insert(
-                "trade_runtime_state",
-                [
-                    [
-                        trade.trade_id,
-                        trade.symbol,
-                        trade.state.value,
-                        json.dumps(
-                            payload, sort_keys=True, default=str, allow_nan=False
-                        ),
-                        datetime.fromisoformat(trade.updated_at.replace("Z", "+00:00")),
-                    ]
-                ],
-                column_names=[
-                    "trade_id",
-                    "symbol",
-                    "state",
-                    "payload_json",
-                    "updated_at",
-                ],
+            payload_json = json.dumps(
+                payload, sort_keys=True, default=str, allow_nan=False
             )
+            updated_at = datetime.fromisoformat(
+                trade.updated_at.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            if self._scoped_clickhouse_state:
+                await self._insert_scoped_state_row(
+                    "trade_runtime_state",
+                    trade.trade_id,
+                    payload_json,
+                    updated_at,
+                    symbol=trade.symbol,
+                    state=trade.state.value,
+                )
+            else:
+                await client.insert(
+                    "trade_runtime_state",
+                    [[trade.trade_id, trade.symbol, trade.state.value, payload_json, updated_at]],
+                    column_names=[
+                        "trade_id",
+                        "symbol",
+                        "state",
+                        "payload_json",
+                        "updated_at",
+                    ],
+                )
         except Exception:
             logger.exception(
                 "failed to save trade runtime state",
@@ -713,12 +719,33 @@ class DurableTradingStateStore:
     async def delete_trade(self, trade_id: str) -> None:
         client = self._client()
         try:
-            await client.command(
-                "ALTER TABLE trade_runtime_state DELETE "
-                "WHERE trade_id = {trade_id:String} "
-                "AND JSONExtractString(payload_json, 'account_scope') = {account_scope:String}",
-                parameters={"trade_id": trade_id, "account_scope": self.account_scope},
-            )
+            if self._scoped_clickhouse_state:
+                # Append a scope-keyed tombstone rather than mutating MergeTree
+                # history. Latest-state readers ignore non-open lifecycle states.
+                payload = {
+                    "trade_id": trade_id,
+                    "symbol": "",
+                    "state": "position_deleted",
+                    "account_scope": self.account_scope,
+                }
+                payload_json = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
+                await self._insert_scoped_state_row(
+                    "trade_runtime_state",
+                    trade_id,
+                    payload_json,
+                    datetime.now(timezone.utc),
+                    symbol="",
+                    state="position_deleted",
+                )
+            else:
+                await client.command(
+                    "ALTER TABLE trade_runtime_state DELETE "
+                    "WHERE trade_id = {trade_id:String} "
+                    "AND JSONExtractString(payload_json, 'account_scope') = {account_scope:String}",
+                    parameters={"trade_id": trade_id, "account_scope": self.account_scope},
+                )
         except Exception:
             logger.exception(
                 "failed to delete trade runtime state",
@@ -781,12 +808,13 @@ class DurableTradingStateStore:
                 if payload.get("trade_id") != row[1]:
                     raise ValueError("runtime payload identity mismatch")
                 payload["account_scope"] = str(row[0])
-                trade = _trade_from_dict(payload)
-                if trade.state in {
-                    TradeLifecycleState.POSITION_OPENED,
-                    TradeLifecycleState.EXIT_TRIGGERED,
+                if payload.get("state") not in {
+                    TradeLifecycleState.POSITION_OPENED.value,
+                    TradeLifecycleState.EXIT_TRIGGERED.value,
                 }:
-                    trades.append(trade)
+                    continue
+                trade = _trade_from_dict(payload)
+                trades.append(trade)
             except Exception as exc:
                 logger.error(
                     "runtime recovery blocked by invalid or ambiguous state",
@@ -813,17 +841,20 @@ class DurableTradingStateStore:
             trade.to_dict(), sort_keys=True, default=str, allow_nan=False
         )
         _closed_payload((trade.trade_id, payload_json, 1))
-        await client.insert(
-            "paper_closed_trade_ledger",
-            [
-                [
-                    trade.trade_id,
-                    payload_json,
-                    datetime.now(timezone.utc),
-                ]
-            ],
-            column_names=["trade_id", "payload_json", "updated_at"],
-        )
+        updated_at = datetime.now(timezone.utc)
+        if self._scoped_clickhouse_state:
+            await self._insert_scoped_state_row(
+                "paper_closed_trade_ledger",
+                trade.trade_id,
+                payload_json,
+                updated_at,
+            )
+        else:
+            await client.insert(
+                "paper_closed_trade_ledger",
+                [[trade.trade_id, payload_json, updated_at]],
+                column_names=["trade_id", "payload_json", "updated_at"],
+            )
 
     async def query_closed_history(
         self, *, limit: int, offset: int = 0, symbol: str = ""
