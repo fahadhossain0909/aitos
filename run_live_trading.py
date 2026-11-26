@@ -127,7 +127,12 @@ async def _canonical_financial_snapshot_inputs(
     fees = trade_total("fees_paid_usd")
     funding = trade_total("funding_pnl_usd")
     if reconcile_venue or previous_state is None:
-        raw_equity = await executor.get_account_equity("USDT")
+        equity_reader = getattr(executor, "get_account_equity_decimal", None)
+        raw_equity = await (
+            equity_reader("USDT")
+            if callable(equity_reader)
+            else executor.get_account_equity("USDT")
+        )
         if isinstance(raw_equity, bool):
             raise ValueError("live venue equity is not a finite USDT value")
         venue_equity = Decimal(str(raw_equity))
