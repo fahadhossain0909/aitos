@@ -118,9 +118,7 @@ async def _canonical_financial_snapshot_inputs(
             try:
                 value = Decimal(str(raw or 0))
             except (TypeError, ValueError, ArithmeticError):
-                raise ValueError(
-                    f"canonical trade {attribute} is invalid"
-                ) from None
+                raise ValueError(f"canonical trade {attribute} is invalid") from None
             if not value.is_finite():
                 raise ValueError(f"canonical trade {attribute} is non-finite")
             total += value
@@ -138,9 +136,7 @@ async def _canonical_financial_snapshot_inputs(
             raise ValueError("live venue equity is not a finite USDT value")
         position_rows = await executor.get_position_risk()
         if not isinstance(position_rows, list) or len(position_rows) > 10000:
-            raise ValueError(
-                "bounded authenticated position-risk snapshot is required"
-            )
+            raise ValueError("bounded authenticated position-risk snapshot is required")
         unrealized = Decimal(0)
         for row in position_rows:
             if not isinstance(row, dict):
@@ -157,9 +153,7 @@ async def _canonical_financial_snapshot_inputs(
         unrealized = Decimal(str(previous_state["unrealized_pnl"]))
 
     if previous_state is None:
-        starting_equity = (
-            venue_equity - realized - unrealized - funding + fees
-        )
+        starting_equity = venue_equity - realized - unrealized - funding + fees
     else:
         starting_equity = Decimal(str(previous_state["starting_equity"]))
     snapshot = {
