@@ -88,11 +88,6 @@ jobs:
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
-          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
-          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
-          BINANCE_TESTNET: ${{ secrets.BINANCE_TESTNET || 'true' }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AITOS_ALLOW_BOOT_DISK_DATA: 'true'
@@ -102,7 +97,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_staging_key
           command_timeout: 20m
-          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,GHCR_USERNAME,GHCR_TOKEN,AITOS_ALLOW_BOOT_DISK_DATA,AITOS_RUNTIME_IMAGE
+          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,GHCR_USERNAME,GHCR_TOKEN,AITOS_ALLOW_BOOT_DISK_DATA,AITOS_RUNTIME_IMAGE
           script: |
             set -Eeuo pipefail
             : "${AITOS_DATA_ROOT:=/mnt/aitos-staging-data}"
@@ -135,6 +130,7 @@ jobs:
 
             echo '=== STAGING STORAGE BOOTSTRAP ==='
             export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID AITOS_ALLOW_BOOT_DISK_DATA
+            export AITOS_AUTO_RESET_DISPOSABLE_DATA=false
             export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
             chmod +x scripts/bootstrap_storage.sh
             ./scripts/bootstrap_storage.sh
@@ -161,6 +157,7 @@ jobs:
             AITOS_DATA_ROOT=$AITOS_DATA_ROOT
             AITOS_DATA_DISK_UUID=$AITOS_DATA_DISK_UUID
             AITOS_ALLOW_BOOT_DISK_DATA=true
+            AITOS_AUTO_RESET_DISPOSABLE_DATA=false
             AITOS_PAPER_ACCOUNT_SCOPE=paper:staging
             AITOS_UID=1000
             AITOS_GID=1000
@@ -201,9 +198,9 @@ jobs:
             BOOT_FREE_BUFFER_GB=7.5
             DATA_DISK_MIN_FREE_GB=$DATA_DISK_MIN_FREE_GB
             DATA_DISK_TARGET_FREE_GB=25
-            BINANCE_API_KEY=$BINANCE_API_KEY
-            BINANCE_API_SECRET=$BINANCE_API_SECRET
-            BINANCE_TESTNET=$BINANCE_TESTNET
+            BINANCE_API_KEY=
+            BINANCE_API_SECRET=
+            BINANCE_TESTNET=true
             BINANCE_RECV_WINDOW_MS=5000
             BINANCE_HEDGE_MODE=false
             APP_PORT=8001
@@ -212,8 +209,8 @@ jobs:
             AITOS_IMAGE=$IMAGE
             AITOS_IMAGE_TAG=staging-sha-${COMMIT}
             AITOS_RUNTIME_IMAGE=$AITOS_RUNTIME_IMAGE
-            DATABASE_URL=$DATABASE_URL
-            SENTRY_DSN=$SENTRY_DSN
+            DATABASE_URL=
+            SENTRY_DSN=
             ENVEOF
             chmod 600 .env
 
