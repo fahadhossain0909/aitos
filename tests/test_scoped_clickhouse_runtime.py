@@ -22,14 +22,23 @@ class FakeClickHouse:
     async def query(self, query, parameters=None):
         self.queries.append((query, parameters or {}))
         if "FROM system.columns" in query:
-            scope_columns = [("trade_runtime_state", "account_scope"),
-                             ("paper_closed_trade_ledger", "account_scope")]
+            scope_columns = [
+                ("trade_runtime_state", "account_scope"),
+                ("paper_closed_trade_ledger", "account_scope"),
+            ]
             if self.scoped:
                 return SimpleNamespace(result_rows=scope_columns)
             return SimpleNamespace(
                 result_rows=[
                     ("trade_runtime_state", "trade_id"),
                     ("paper_closed_trade_ledger", "trade_id"),
+                ]
+            )
+        if "FROM system.tables" in query:
+            return SimpleNamespace(
+                result_rows=[
+                    ("trade_runtime_state", "MergeTree", "account_scope, trade_id"),
+                    ("paper_closed_trade_ledger", "MergeTree", "account_scope, trade_id"),
                 ]
             )
         if "SELECT count() FROM" in query:
