@@ -212,12 +212,10 @@ async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
 
 def _embedded_learning_worker_enabled() -> bool:
     """Enable the in-process learner only for explicit single-process deployments."""
-    return os.getenv("AITOS_EMBEDDED_LEARNING_WORKER_ENABLED", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return (
+        os.getenv("AITOS_EMBEDDED_LEARNING_WORKER_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
 
 
 async def _stop_learning_worker(worker, task: asyncio.Task) -> None:
