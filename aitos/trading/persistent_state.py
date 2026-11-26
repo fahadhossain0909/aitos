@@ -742,11 +742,6 @@ class DurableTradingStateStore:
             GROUP BY client_order_id
             """
         )
-        scope_expression = (
-            "account_scope"
-            if self._scoped_clickhouse_state
-            else "JSONExtractString(payload_json, 'account_scope')"
-        )
         linkage_query = (
             SCOPED_LINKED_TRADE_IDS_QUERY
             if self._scoped_clickhouse_state
@@ -914,9 +909,9 @@ class DurableTradingStateStore:
         client = self._client()
         try:
             # Trade IDs are not globally unique across accounts/runs. Scope the
-            # latest-state and terminal-ledger anti-join by the immutable
-            # account_scope carried in each payload. Missing legacy scope maps
-            # to the empty scope and can only match other missing-scope rows.
+            # latest-state and terminal-ledger anti-join by immutable account
+            # scope. Scoped tables use the leading column; legacy tables read
+            # the embedded payload scope. Missing legacy scope maps to empty.
             recovery_query = (
                 SCOPED_OPEN_RECOVERY_QUERY
                 if self._scoped_clickhouse_state
