@@ -152,6 +152,7 @@ if [[ "$ROOT_DISK_MODE" == "true" ]]; then
       chown -R "$NEO4J_UID:$NEO4J_GID" /data/databases/neo4j
       chown -R "$REDIS_UID:$REDIS_GID" /data/eventbus/redis
       chown -R "$AITOS_UID:$AITOS_GID" /data/research /data/artifacts /data/runtime
+      chown -R "$NEO4J_UID:$NEO4J_GID" /data/runtime/logs/neo4j
       chmod 0755 /data /data/databases /data/eventbus /data/research /data/artifacts /data/runtime
       chmod 0750 /data/eventbus/redis /data/eventbus/redis/live /data/eventbus/redis/archive
     '
@@ -161,6 +162,7 @@ else
   ${SUDO[@]} chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/databases/neo4j"
   ${SUDO[@]} chown -R "$REDIS_UID:$REDIS_GID" "$DATA_ROOT/eventbus/redis"
   ${SUDO[@]} chown -R "$AITOS_UID:$AITOS_GID" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
+  ${SUDO[@]} chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/runtime/logs/neo4j"
   ${SUDO[@]} chmod 0755 "$DATA_ROOT" "$DATA_ROOT/databases" "$DATA_ROOT/eventbus" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
   ${SUDO[@]} chmod 0750 "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive"
 fi
