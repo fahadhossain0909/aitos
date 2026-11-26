@@ -40,6 +40,18 @@ else
 
   echo '--- Redis memory / retention diagnostics ---'
   if docker inspect aitos-redis >/dev/null 2>&1; then
+    if [ -z "$REDIS_PASSWORD" ]; then
+      echo 'BLOCKER: REDIS_PASSWORD is missing from the staging environment.'
+      blockers=$((blockers + 1))
+    else
+      redis_ping="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli PING 2>/dev/null || true)"
+      if [ "$redis_ping" != "PONG" ]; then
+        echo 'BLOCKER: Redis authentication/health check failed.'
+        blockers=$((blockers + 1))
+      else
+        echo 'Redis authentication: PASS'
+      fi
+    fi
     redis_info="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli INFO memory 2>/dev/null || true)"
     redis_stats="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli INFO stats 2>/dev/null || true)"
     redis_config="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli CONFIG GET maxmemory maxmemory-policy appendonly appendfsync 2>/dev/null || true)"
