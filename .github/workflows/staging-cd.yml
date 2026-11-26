@@ -259,7 +259,7 @@ jobs:
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
             init_deadline=$((SECONDS + 240))
             while :; do
-              init_id="$(docker compose ps -q clickhouse-init)"
+              init_id="$(docker compose ps --all -q clickhouse-init)"
               if [ -n "$init_id" ]; then
                 init_state="$(docker inspect --format '{{.State.Status}}' "$init_id")"
                 if [ "$init_state" = exited ]; then
