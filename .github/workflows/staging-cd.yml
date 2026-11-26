@@ -7,6 +7,7 @@ on:
       - 'feature/**'
       - 'bugfix/**'
       - 'hotfix/**'
+      - 'fix/production-readiness-hardening-2026-11'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +28,6 @@ jobs:
   publish-image:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch under test
@@ -51,7 +51,6 @@ jobs:
           sbom: true
 
   deploy-and-audit:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     needs: publish-image
     timeout-minutes: 30
@@ -63,13 +62,9 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
-          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
-          NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
         run: |
           set -euo pipefail
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY AITOS_DATA_DISK_UUID REDIS_PASSWORD CLICKHOUSE_PASSWORD NEO4J_PASSWORD; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
             test -n "${!name:-}" || { echo "::error::Missing staging environment secret: $name"; exit 1; }
           done
 
@@ -98,20 +93,24 @@ jobs:
           BINANCE_TESTNET: ${{ secrets.BINANCE_TESTNET || 'true' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AITOS_ALLOW_BOOT_DISK_DATA: 'true'
           AITOS_RUNTIME_IMAGE: ghcr.io/fahadhossain0909/aitos@${{ needs.publish-image.outputs.digest }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_staging_key
           command_timeout: 20m
-          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,AITOS_RUNTIME_IMAGE
+          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,GHCR_USERNAME,GHCR_TOKEN,AITOS_ALLOW_BOOT_DISK_DATA,AITOS_RUNTIME_IMAGE
           script: |
             set -Eeuo pipefail
             : "${AITOS_DATA_ROOT:=/mnt/aitos-staging-data}"
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
-            : "${AITOS_DATA_DISK_UUID:?missing staging data disk UUID}"
-            APP_DIR="$HOME/aitos-staging"
+            : "${AITOS_ALLOW_BOOT_DISK_DATA:=true}"
+            AITOS_DATA_DISK_UUID="${AITOS_DATA_DISK_UUID:-$(findmnt -rn -o UUID --target / | head -n1)}"
+            APP_DIR="/opt/aitos-staging"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
             IMAGE="ghcr.io/${REPO,,}:staging-sha-${COMMIT}"
@@ -135,14 +134,24 @@ jobs:
             cd "$APP_DIR"
 
             echo '=== STAGING STORAGE BOOTSTRAP ==='
-            export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID
+            export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID AITOS_ALLOW_BOOT_DISK_DATA
             export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
             chmod +x scripts/bootstrap_storage.sh
             ./scripts/bootstrap_storage.sh
-            mountpoint -q "$AITOS_DATA_ROOT"
+            test "$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT")" = "$(findmnt -rn -o UUID --target /)"
 
             echo '=== STAGING ENVIRONMENT ==='
             umask 077
+            SECRETS_FILE="$HOME/.aitos-staging-secrets"
+            saved_secret() { test -f "$SECRETS_FILE" && sed -n "s/^$1=//p" "$SECRETS_FILE" | tail -n 1 || true; }
+            REDIS_PASSWORD="${REDIS_PASSWORD:-$(saved_secret REDIS_PASSWORD)}"
+            CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-$(saved_secret CLICKHOUSE_PASSWORD)}"
+            NEO4J_PASSWORD="${NEO4J_PASSWORD:-$(saved_secret NEO4J_PASSWORD)}"
+            REDIS_PASSWORD="${REDIS_PASSWORD:-$(openssl rand -hex 32)}"
+            CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-$(openssl rand -hex 32)}"
+            NEO4J_PASSWORD="${NEO4J_PASSWORD:-$(openssl rand -hex 32)}"
+            printf 'REDIS_PASSWORD=%s\nCLICKHOUSE_PASSWORD=%s\nNEO4J_PASSWORD=%s\n' "$REDIS_PASSWORD" "$CLICKHOUSE_PASSWORD" "$NEO4J_PASSWORD" > "$SECRETS_FILE"
+            chmod 600 "$SECRETS_FILE"
             cat > .env << ENVEOF
             ENVIRONMENT=staging
             LOG_LEVEL=INFO
@@ -151,6 +160,15 @@ jobs:
             TESTING=false
             AITOS_DATA_ROOT=$AITOS_DATA_ROOT
             AITOS_DATA_DISK_UUID=$AITOS_DATA_DISK_UUID
+            AITOS_ALLOW_BOOT_DISK_DATA=true
+            AITOS_PAPER_ACCOUNT_SCOPE=paper:staging
+            AITOS_UID=1000
+            AITOS_GID=1000
+            LIVE_TRADING_ENABLED=false
+            AITOS_LIVE_EXECUTION_ENABLED=false
+            BINANCE_FUTURES_TESTNET_API_KEY=
+            BINANCE_FUTURES_TESTNET_API_SECRET=
+            AITOS_BINANCE_FUTURES_ENVIRONMENT=testnet
             REDIS_HOST=redis
             REDIS_PORT=6379
             REDIS_DB=0
@@ -209,26 +227,30 @@ jobs:
             echo '=== STAGING DOCKER DEPLOYMENT ==='
             docker compose config --format json > /tmp/aitos-staging-compose.json
             AITOS_REQUIRE_DIGEST_IMAGES=true python3 scripts/validate_compose_policy.py /tmp/aitos-staging-compose.json
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
             docker compose pull
+            docker logout ghcr.io || true
+            unset GHCR_TOKEN
             docker compose down --remove-orphans --timeout 30 || true
             docker compose up -d --remove-orphans --force-recreate
 
             echo '=== STAGING HEALTH GATE ==='
             deadline=$((SECONDS + 300))
             while [ "$SECONDS" -lt "$deadline" ]; do
-              redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-staging-redis 2>/dev/null || true)
-              clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-staging-clickhouse 2>/dev/null || true)
-              neo4j_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-staging-neo4j 2>/dev/null || true)
+              redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-redis 2>/dev/null || true)
+              clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-clickhouse 2>/dev/null || true)
+              neo4j_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-neo4j 2>/dev/null || true)
               if [ "$redis_state" = healthy ] && [ "$clickhouse_state" = healthy ] && [ "$neo4j_state" = healthy ]; then break; fi
               sleep 10
             done
-            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-staging-redis)" = healthy ]
-            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-staging-clickhouse)" = healthy ]
-            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-staging-neo4j)" = healthy ]
-            ! docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited'
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-redis)" = healthy ]
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse)" = healthy ]
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
+            bad_containers="$(docker compose ps --all --format '{{.Name}} {{.State}}' | awk '{state=tolower($2); if (state ~ /unhealthy|restarting/ || (state ~ /exited/ && $1 !~ /clickhouse-init/)) print}')"
+            if [ -n "$bad_containers" ]; then printf '%s\n' "$bad_containers"; exit 1; fi
 
             echo '=== STAGING STORAGE GATE ==='
-            mountpoint -q "$AITOS_DATA_ROOT"
+            test "$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT")" = "$(findmnt -rn -o UUID --target /)"
             df -h "$AITOS_DATA_ROOT"
             for path in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
               test -d "$AITOS_DATA_ROOT/$path"
@@ -245,13 +267,13 @@ jobs:
           command_timeout: 10m
           script: |
             set -u
-            cd "$HOME/aitos-staging"
+            cd "/opt/aitos-staging"
             test -f scripts/paper_runtime_audit.sh
             mkdir -p "$HOME/aitos-staging-audit"
             REPORT="$HOME/aitos-staging-audit/report.txt"
             EXIT_CODE="$HOME/aitos-staging-audit/exit_code"
             set +e
-            bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
+            AITOS_DATA_ROOT=/mnt/aitos-staging-data bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
             status=$?
             set -e
             {
