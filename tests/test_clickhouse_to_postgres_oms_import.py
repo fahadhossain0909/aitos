@@ -222,19 +222,33 @@ def test_streaming_import_refuses_ambiguous_same_timestamp_snapshots(
     )
     monkeypatch.setitem(sys.modules, "clickhouse_connect", module)
     output = tmp_path / "manifest.jsonl"
-    with pytest.raises(RuntimeError, match="ambiguous same-timestamp"):
-        asyncio.run(
-            run(
-                SimpleNamespace(
-                    apply=False,
-                    confirm_writers_stopped=False,
-                    confirm_backup_retained=False,
-                    scope_map={},
-                    manifest_out=output,
-                )
+    result = asyncio.run(
+        run(
+            SimpleNamespace(
+                apply=False,
+                confirm_writers_stopped=False,
+                confirm_backup_retained=False,
+                scope_map={},
+                manifest_out=output,
             )
         )
-    assert output.with_suffix(".jsonl.partial").is_file()
+    )
+    # Ambiguous rows are retained in explicit quarantine evidence and the
+    # importer returns a blocked result without connecting to or writing to
+    # PostgreSQL. This is the migration tool's fail-closed contract.
+    assert result["mode"] == "quarantined"
+    assert result["import_blocked"] is True
+    assert result["writes"] == 0
+    assert result["ambiguous_rows_quarantined"] == 2
+    assert output.is_file()
+    assert not output.with_suffix(".jsonl.partial").exists()
+    quarantine = output.with_name("manifest.quarantine.jsonl")
+    quarantined = [json.loads(line) for line in quarantine.read_text().splitlines()]
+    assert len(quarantined) == 2
+    assert all(
+        item["reason"] == "ambiguous_same_timestamp_conflicting_payload"
+        for item in quarantined
+    )
 
 
 def test_streaming_dry_run_reads_already_scope_keyed_cutover_tables(
