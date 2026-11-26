@@ -54,6 +54,32 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+def _scoped_state_fingerprint(
+    table: str, trade_id: str, payload_json: str, updated_at: datetime
+) -> str:
+    stamp = updated_at.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+    material = "\\0".join((table, str(trade_id), stamp, payload_json))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _scoped_state_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
+    canonical = dict(payload)
+    embedded = canonical.get("account_scope")
+    if embedded and embedded != account_scope:
+        raise ValueError("scoped ClickHouse payload conflicts with account scope")
+    canonical["account_scope"] = account_scope
+    encoded = json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+
 CREATE_EXCHANGE_INCOME_RETRY = """
 CREATE TABLE IF NOT EXISTS exchange_income_sync_retry (
     account LowCardinality(String),
@@ -203,17 +229,27 @@ _install_ingestion_registry()
 
 
 class DurableTradingStateStore:
-    """Small ClickHouse-backed state store used by live trading recovery."""
+    """ClickHouse projection store with an explicit scope-keyed cutover mode."""
 
-    def __init__(self, repository: Any, *, account_scope: str = "") -> None:
+    def __init__(
+        self,
+        repository: Any,
+        *,
+        account_scope: str = "",
+        require_scoped_schema: bool = False,
+    ) -> None:
         if (
             type(account_scope) is not str
             or len(account_scope) > 256
             or "\x00" in account_scope
         ):
             raise ValueError("bounded account scope required")
+        if type(require_scoped_schema) is not bool:
+            raise TypeError("require_scoped_schema must be boolean")
         self._repository = repository
         self.account_scope = account_scope
+        self.require_scoped_schema = require_scoped_schema
+        self._scoped_clickhouse_state = False
 
     async def initialize(self) -> None:
         if self._repository is None or self._repository._client is None:
@@ -222,16 +258,136 @@ class DurableTradingStateStore:
             )
             return
         try:
-            await self._repository._client.command(CREATE_RUNTIME_STATE)
-            await self._repository._client.command(CREATE_DRAWDOWN_STATE)
-            await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
-            await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
-            await self._repository._client.command(CREATE_EXCHANGE_INCOME_RETRY)
-            await self._repository._client.command(CREATE_ORDER_EXECUTION_LEDGER)
-            logger.info("durable trading state tables ensured")
+            client = self._repository._client
+            if not self.require_scoped_schema:
+                await client.command(CREATE_RUNTIME_STATE)
+                await client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
+            await client.command(CREATE_DRAWDOWN_STATE)
+            await client.command(CREATE_EXCHANGE_INCOME_CURSOR)
+            await client.command(CREATE_EXCHANGE_INCOME_RETRY)
+            await client.command(CREATE_ORDER_EXECUTION_LEDGER)
+            columns = await client.query(
+                """
+                SELECT table,name FROM system.columns
+                WHERE database=currentDatabase()
+                  AND table IN ('trade_runtime_state','paper_closed_trade_ledger')
+                """
+            )
+            table_columns: dict[str, set[str]] = {}
+            for table, column in columns.result_rows:
+                table_columns.setdefault(str(table), set()).add(str(column))
+            runtime_scoped = "account_scope" in table_columns.get(
+                "trade_runtime_state", set()
+            )
+            closed_scoped = "account_scope" in table_columns.get(
+                "paper_closed_trade_ledger", set()
+            )
+            if runtime_scoped != closed_scoped:
+                raise RuntimeError(
+                    "ClickHouse runtime and closed-ledger schemas are at different cutover versions"
+                )
+            self._scoped_clickhouse_state = runtime_scoped and closed_scoped
+            if self.require_scoped_schema and not self._scoped_clickhouse_state:
+                raise RuntimeError(
+                    "live startup requires scope-keyed ClickHouse state tables; "
+                    "run and verify scripts/migrate_scoped_clickhouse_state.py --cutover first"
+                )
+            logger.info(
+                "durable trading state tables verified",
+                extra={
+                    "aitos_extra": {
+                        "scoped_schema": self._scoped_clickhouse_state,
+                        "account_scope": self.account_scope,
+                    }
+                },
+            )
         except Exception:
-            logger.exception("durable trading state table ensure failed")
+            logger.exception("durable trading state table ensure/verification failed")
             raise
+
+    async def _insert_scoped_state_row(
+        self,
+        table: str,
+        trade_id: str,
+        payload_json: str,
+        updated_at: datetime,
+        *,
+        symbol: str = "",
+        state: str = "",
+    ) -> None:
+        if table not in {"trade_runtime_state", "paper_closed_trade_ledger"}:
+            raise ValueError("unsupported scoped ClickHouse state table")
+        payload = json.loads(payload_json)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("trade_id") != trade_id
+            or payload.get("account_scope") != self.account_scope
+        ):
+            raise ValueError("scoped ClickHouse state payload identity mismatch")
+        fingerprint = _scoped_state_fingerprint(
+            table, trade_id, payload_json, updated_at
+        )
+        client = self._client()
+        occurrences = await client.query(
+            f"""
+            SELECT count() FROM {table}
+            WHERE account_scope={{account_scope:String}}
+              AND source_fingerprint={{source_fingerprint:String}}
+            """,
+            parameters={
+                "account_scope": self.account_scope,
+                "source_fingerprint": fingerprint,
+            },
+        )
+        occurrence = int(occurrences.result_rows[0][0]) if occurrences.result_rows else 0
+        payload_hash = _scoped_state_payload_hash(payload, self.account_scope)
+        if table == "trade_runtime_state":
+            values = [
+                self.account_scope,
+                trade_id,
+                symbol,
+                state,
+                payload_json,
+                payload_json,
+                updated_at,
+                fingerprint,
+                occurrence,
+                payload_hash,
+            ]
+            columns = [
+                "account_scope",
+                "trade_id",
+                "symbol",
+                "state",
+                "payload_json",
+                "legacy_payload_json",
+                "updated_at",
+                "source_fingerprint",
+                "source_occurrence",
+                "payload_sha256",
+            ]
+        else:
+            values = [
+                self.account_scope,
+                trade_id,
+                payload_json,
+                payload_json,
+                updated_at,
+                fingerprint,
+                occurrence,
+                payload_hash,
+            ]
+            columns = [
+                "account_scope",
+                "trade_id",
+                "payload_json",
+                "legacy_payload_json",
+                "updated_at",
+                "source_fingerprint",
+                "source_occurrence",
+                "payload_sha256",
+            ]
+        await client.insert(table, [values], column_names=columns)
 
     async def load_income_cursor(self, account: str = "binance_usdm") -> int | None:
         client = self._client()
