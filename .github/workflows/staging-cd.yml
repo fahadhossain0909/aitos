@@ -350,8 +350,8 @@ jobs:
         if: always()
         uses: appleboy/ssh-action@v1.2.5
         with:
-          host: \${{ secrets.DEPLOY_HOST }}
-          username: \${{ secrets.DEPLOY_USER }}
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_staging_key
           command_timeout: 5m
           script: |
