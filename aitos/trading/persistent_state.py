@@ -255,6 +255,10 @@ class DurableTradingStateStore:
 
     async def initialize(self) -> None:
         if self._repository is None or self._repository._client is None:
+            if self.require_scoped_schema:
+                raise RuntimeError(
+                    "runtime requires ClickHouse projection storage with the scoped cutover schema"
+                )
             logger.warning(
                 "durable trading state store skipped: ClickHouse repository unavailable"
             )
@@ -720,7 +724,10 @@ class DurableTradingStateStore:
             )
             updated_at = datetime.fromisoformat(
                 trade.updated_at.replace("Z", "+00:00")
-            ).astimezone(timezone.utc)
+            )
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            updated_at = updated_at.astimezone(timezone.utc)
             if self._scoped_clickhouse_state:
                 await self._insert_scoped_state_row(
                     "trade_runtime_state",
