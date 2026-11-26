@@ -251,9 +251,11 @@ jobs:
             echo '=== STAGING STORAGE GATE ==='
             test "$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT")" = "$(findmnt -rn -o UUID --target /)"
             df -h "$AITOS_DATA_ROOT"
-            for path in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
-              test -d "$AITOS_DATA_ROOT/$path"
-            done
+            docker run --rm --user 0:0 -v "$AITOS_DATA_ROOT:/data" alpine:3.20 sh -ec '
+              for path in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
+                test -d "/data/$path" || { echo "Missing persistent path: /data/$path"; exit 1; }
+              done
+            '
             echo "=== STAGING DEPLOYMENT SUCCESS: $COMMIT ==="
 
       - name: 90-minute staging paper soak
