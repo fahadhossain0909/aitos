@@ -488,6 +488,7 @@ async def test_revoking_authenticating_credential_invalidates_existing_sessions(
     enrollment = await client.post(
         "/operator/v1/mfa/register",
         json={"credential": {"id": "credential"}},
+        headers={"Origin": ORIGIN},
     )
     assert enrollment.status == 200
     finish = await client.post(
@@ -496,6 +497,7 @@ async def test_revoking_authenticating_credential_invalidates_existing_sessions(
             "challenge": "assertion-challenge",
             "assertion": {"id": "credential"},
         },
+        headers={"Origin": ORIGIN},
     )
     assert finish.status == 200
     assert (await (await client.get("/operator/v1/session")).json())[
