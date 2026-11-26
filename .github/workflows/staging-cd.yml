@@ -225,8 +225,10 @@ jobs:
             docker compose config --format json > /tmp/aitos-staging-compose.json
             AITOS_REQUIRE_DIGEST_IMAGES=true python3 scripts/validate_compose_policy.py /tmp/aitos-staging-compose.json
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true; unset GHCR_TOKEN' EXIT
             docker compose pull
             docker logout ghcr.io || true
+            trap - EXIT
             unset GHCR_TOKEN
             docker compose down --remove-orphans --timeout 30 || true
             docker compose up -d --remove-orphans --force-recreate
@@ -281,7 +283,7 @@ jobs:
               echo "tested_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
               echo
               echo '--- Live scanner freshness diagnostics (last 30m) ---'
-              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'live scanner freshness' | tail -n 200 || true
+              docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'live scanner freshness' | tail -n 200 || true
               echo
               echo '--- Paper signal diagnostics (last 30m) ---'
               docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'paper signal diagnostics' | tail -n 200 || true
@@ -308,10 +310,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p aitos-staging-audit
-          scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/report.txt" aitos-staging-audit/report.txt
-          scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/exit_code" aitos-staging-audit/exit_code
-          test -s aitos-staging-audit/report.txt
-          test -s aitos-staging-audit/exit_code
+          if scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/report.txt" aitos-staging-audit/report.txt \
+            && scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$DEPLOY_USER@$DEPLOY_HOST:aitos-staging-audit/exit_code" aitos-staging-audit/exit_code; then
+            test -s aitos-staging-audit/report.txt
+            test -s aitos-staging-audit/exit_code
+          else
+            printf 'Deployment stopped before runtime audit; inspect the SSH deployment step logs.\n' > aitos-staging-audit/report.txt
+            printf '99\n' > aitos-staging-audit/exit_code
+          fi
 
       - name: Print staging audit report
         if: always()
