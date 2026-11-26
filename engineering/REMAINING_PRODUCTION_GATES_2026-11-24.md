@@ -1,256 +1,116 @@
-# Production-readiness implementation status — 2026-11-24
+# AITOS PR #263 — implementation and production acceptance status
 
-This document records code additions on PR #263 and explicitly distinguishes
-implemented primitives from integrated production capabilities. Nothing here
-authorizes a database cutover, deployment, testnet order or mainnet execution.
+Updated 2026-11-26. This document separates code delivered on the branch from
+actions that require the user's production infrastructure, credentials,
+operator approval, or authenticated venue access. A passing CI run is not a
+production deployment authorization.
 
-## New code on this branch
+## Code implemented on this branch
 
-### ClickHouse → PostgreSQL canonical OMS migration
-- `scripts/migrate_scoped_clickhouse_state.py` creates additive scope-keyed
-  ClickHouse tables with source fingerprints, occurrence numbers and canonical
-  payload hashes.
-- `scripts/import_clickhouse_state_to_postgres_oms.py` now streams legacy or
-  scope-keyed ClickHouse rows, verifies fingerprints/hashes, writes exact raw
-  payloads into the immutable PostgreSQL v3 evidence ledger, and appends
-  deterministic canonical OMS events that reference that evidence.
-- The importer is resumable, refuses conflicting source identities and refuses
-  to append legacy history over an existing non-legacy aggregate. The runbook
-  is `docs/CLICKHOUSE_TO_POSTGRES_OMS_IMPORT.md`.
-- It has not been run against production data. Historical versions already
-  collapsed by ReplacingMergeTree cannot be reconstructed from the current
-  source tables. Source/target per-record reconciliation and application
-  reader/writer routing cutover remain operational acceptance gates.
+### Canonical PostgreSQL OMS and execution authority
 
-### PostgreSQL canonical OMS / lifecycle
-- `aitos/execution/postgres_oms.py` and
-  `aitos/execution/postgres_lifecycle_writer.py` provide scope-keyed event
-  append, writer-generation fencing, revision CAS, deterministic idempotency,
-  hash chaining, outbox projection and startup Trade hydration.
-- `run_live_trading.py` applies/verifies PostgreSQL migrations, acquires a
-  fresh writer fence, binds the PostgreSQL canonical lifecycle writer and
-  restores open/closed trades before component initialization. Missing
-  canonical aggregates fail closed.
-- Migration v3 makes canonical OMS events and imported raw-payload evidence
-  append-only. Legacy imported snapshots are resolved through their immutable
-  evidence reference and re-verified during lifecycle hydration.
-- The broader execution-intent journal, protection handovers, fee/funding
-  accounting and account equity/peak/drawdown ledger are not yet unified into
-  the same PostgreSQL transaction boundary. The SQLite execution-intent store
-  remains a local durable side-effect journal. This is still code-level work,
-  not merely a production acceptance test.
+- Scope-keyed PostgreSQL canonical OMS with aggregate revision CAS, writer
+  generation fencing, idempotent event identities, hash-chain verification,
+  causation/correlation/parent-event metadata, and immutable financial ledger
+  entries.
+- PostgreSQL canonical execution-intent store is bound into the live Binance
+  executor. The live runner does not construct the legacy SQLite intent store.
+- TradeLifecycle is bound to the PostgreSQL-first lifecycle writer. Confirmed
+  entry fills, reductions, partial closes, full exits and protective child fills
+  persist their trade snapshot, execution-intent transition, financial journal
+  entries and financial-state revision through the canonical PostgreSQL path.
+- PostgreSQL financial ledger uses balanced per-currency double-entry postings.
+  Fee/funding reconciliation is idempotent by Binance income transaction ID;
+  startup reconciles realized/unrealized PnL, fees, funding, equity, peak equity
+  and drawdown against authenticated venue state.
+- The live runner fails closed or enters manage-only mode when writer fencing,
+  unresolved intents, position reconciliation, income attribution, financial
+  reconciliation or projection replay is incomplete.
+- The canonical outbox uses leased claims, owner/token fencing, expiry/reclaim,
+  bounded retries, replay, parity audit and explicit rebuild support.
 
+### ClickHouse scoped-state cutover
 
-### Live approval and desktop identity boundary
-- `aitos/security/live_approval.py` implements action-digest binding, server-side
-  role checks, short-lived HMAC-signed approval receipts, one-time durable
-  consumption and append-only audit. PostgreSQL OMS events and imported source
-  evidence are append-only at the database level.
-- `aitos/security/webauthn_rp.py` now supplies a py_webauthn RP with user-bound
-  registration and assertion challenges, exact RP/origin binding, UV-required
-  cryptographic verification, credential counters, one-time challenge
-  consumption, credential inventory and append-only credential audit.
-- `aitos/console_gateway.py` now binds sessions and pending MFA state to
-  configured operator identities, requires WebAuthn for non-loopback login,
-  supports guarded first-device enrollment, step-up enrollment of backup
-  authenticators, session revocation and server-owned RBAC approval routes.
-  Multi-operator password directories and role maps are server-side config.
-- The desktop now contains the WebAuthn login ceremony, authenticator manager
-  and Approval Desk. The desk signs an action digest only; it does not submit
-  orders or execute trading mutations. A server-side exact-action token provider
-  and one-time consumer are implemented in `LiveApprovalControlPlane` and
-  `BinanceFuturesOrderExecutor`. The live runtime remains fail-closed until
-  gateway/executor shared-store deployment wiring is configured and accepted.
-  Physical hardware enrollment and external origin acceptance remain untested.
+- The migration tool creates additive scope-first plain MergeTree tables,
+  fingerprints each source occurrence, retains the exact source payload,
+  verifies payload hashes and supports explicit backup-preserving cutover and
+  verified rollback.
+- Live and paper runtime startup now require both active state tables to have
+  the complete scope-keyed schema, a plain MergeTree engine and
+  `account_scope` as the first sorting-key field. They do not silently create
+  or fall back to the unsafe legacy ReplacingMergeTree layout.
+- Runtime writes to cutover tables include account scope, exact source
+  fingerprint, physical occurrence number and canonical payload hash.
+  Closed-trade archival remains append-only; runtime deletion requires an
+  existing closed archive and does not mutate historical rows.
+- ClickHouse-to-PostgreSQL import compares physical row occurrences rather
+  than ReplacingMergeTree FINAL counts, quarantines ambiguous same-timestamp
+  snapshots, preserves immutable source evidence and is resumable.
+- The migration/import scripts are not executed against production data by
+  this PR. Historical versions already collapsed by an earlier ReplacingMergeTree
+  merge cannot be reconstructed.
 
-### Protective order and three-store recovery
-- The branch already contains durable intent preclaims, protection handover
-  state, algo-to-child linkage validation, cumulative child-fill watermarks,
-  and a read-only CI workflow using real disposable ClickHouse + SQLite and a
-  local signed venue protocol fixture.
-- The fixture is not Binance. It verifies deterministic recovery mechanics
-  and never sends exchange orders. Authenticated demo-testnet read-only
-  acceptance remains a separate opt-in gate and may be blocked by runner
-  egress restrictions.
-- No mainnet order or external testnet write has been executed.
+### Protection and recovery
 
-## Current status by required workstream
+- Durable execution-intent preclaims, deterministic client IDs, POST-to-ID
+  recovery, make-before-break protection handovers, triggered algo-to-child
+  association, cumulative/partial child-fill markers, fee/funding attribution
+  and three-store crash/restart fixture coverage are implemented.
+- The three-store CI fixture uses disposable ClickHouse and SQLite plus a local
+  signed venue protocol fixture. It does not submit Binance orders.
 
-| Workstream | Code status | Production acceptance |
-|---|---|---|
-| ClickHouse → PostgreSQL import | Streaming, resumable evidence-ledger importer + tests | Not run; per-record production parity and routing cutover outstanding |
-| PostgreSQL canonical Trade OMS | CAS/fencing/hash-chain, startup hydration and append-only evidence | Execution-intent/financial-accounting transaction unification and HA acceptance outstanding |
-| Protective POST-to-ID and algo child fill recovery | Durable recovery path + tests | Isolated fixture acceptance pending/current-head CI |
-| Venue + SQLite + ClickHouse restarts | Fault-injection workflow + tests | CI results and authenticated venue proof required |
-| WebAuthn / desktop approval | RP adapter, identity-bound MFA, backup-key management, RBAC and approval UI implemented | Hardware authenticator, external origin and trusted executor receipt-consumer acceptance outstanding |
+### Identity and live approval
 
-## Safety decision
+- WebAuthn relying-party code verifies user-bound registration and assertions,
+  exact origin/RP binding, user verification, challenge expiry/consumption,
+  credential counters, revocation and audit.
+- Operator gateway enforces identity-bound sessions, MFA, server-side RBAC,
+  CSRF/origin boundaries and action-bound approval.
+- Desktop includes WebAuthn ceremonies and an Approval Desk. The executor
+  requires a trusted approval authority and consumes a short-lived, single-use
+  signed receipt bound to the exact order action. Mainnet remains fail-closed
+  unless the shared production authority is configured.
 
-Do not declare AITOS production ready. Do not enable mainnet. Do not run the
-ClickHouse importer until the writer freeze, backup, account attribution
-manifest and pre/post count/hash reconciliation are reviewed. Do not claim
-WebAuthn acceptance until a real relying-party verifier is deployed and
-hardware-authenticator tests pass. Do not switch the active OMS authority until
-the live lifecycle writes and reads through the same transactional store.
+### CI and repository controls
 
+- Compose policy, digest-pinned runtime artifacts, workflow permission
+  inventory, secret-safe automation, Python 3.10 compatibility, lint/security
+  checks, PostgreSQL integration and isolated recovery workflows are present.
+- No historical workflow has been deleted. Static workflow inventory is not
+  human security adjudication.
 
-## Follow-on implementation update — PostgreSQL OMS
+## Production-only acceptance gates — not performed by this branch
 
-A PostgreSQL-native canonical OMS journal is now present in
-`aitos/execution/postgres_oms.py`, with schema migration v2 in
-`aitos/storage/postgres_migrations.py`. It implements scope-level writer
-generation CAS/fencing, aggregate revision CAS, idempotent event IDs,
-canonical-payload hash chaining, and a transactional projection outbox.
-The PostgreSQL storage integration workflow now invokes
-`tests/storage/test_postgres_oms.py` against its disposable PostgreSQL service.
-
-This is a database-backed OMS primitive, not yet the active lifecycle authority.
-TradeLifecycle, ExecutionIntentStore, fee/funding accounting, position/equity
-state and startup hydration have not all been converted into one PostgreSQL
-transaction boundary. Do not switch runtime authority or claim canonical OMS
-acceptance until that integration and multi-process/restart tests pass.
-
-## Workflow adjudication count correction
-
-The checked-out PR head contains **49** workflow YAML files under
-`.github/workflows/`, not 48. The existing registry is the 49-file inventory.
-Static findings are triage signals, not human security approval. No workflow
-has been deleted or disabled in this increment: safe consolidation requires
-per-file review of event trust, permissions, secrets/environments, pinned
-actions, external side effects, destructive commands, required-check names,
-and dispatch/call dependencies. The reset and hard-reset workflows remain
-separate and must not be folded into routine CI.
-
-
-## Follow-on implementation — 2026-11-24
-
-The following code-level increments are now present on this draft branch:
-
-- `aitos/execution/postgres_lifecycle_writer.py` adds a PostgreSQL-first
-  TradeLifecycle state-writer adapter. It commits a scope-fenced aggregate
-  revision before calling the existing SQLite/ClickHouse projection writer,
-  exposes canonical aggregate inventory/snapshot recovery, and hydrates the
-  live lifecycle from verified PostgreSQL snapshots.
-- `run_live_trading.py` now requires `DATABASE_URL`, validates/applies the
-  PostgreSQL migrations, acquires a fresh account-scope writer fence, binds
-  the canonical writer, and replaces projected open/closed lifecycle state
-  with canonical snapshots before startup reconciliation. Legacy projected
-  open trades without a matching canonical aggregate cause startup to fail
-  closed pending controlled import.
-  PostgreSQL integration coverage verifies that projection failure does not
-  roll back the canonical event.
-- `scripts/migrate_scoped_clickhouse_state.py` now has an explicit
-  `--cutover` path. It requires `--apply`, explicit writer-stopped and
-  restorable-backup confirmations, an Atomic database, absent retained-backup
-  names, row-count parity, and retains both legacy tables under
-  `*_legacy_pre_scope_v1`. Unit tests cover the Atomic/backup guards.
-- `aitos/security/webauthn_rp.py` adds a py_webauthn-backed RP implementation:
-  registration options, one-time user-bound registration challenges,
-  cryptographic attestation verification, persistent public-key credentials,
-  authenticator user-verification enforcement, signature verification and
-  sign-counter compare-and-update. `requirements.txt` now declares
-  `webauthn>=2.2.0,<3.0.0`.
-
-These are implementation components, not acceptance claims. In particular:
-
-1. The live entrypoint now requires `DATABASE_URL`, applies and verifies
-   the PostgreSQL schema, acquires a new scope-specific fencing generation,
-   binds the PostgreSQL-first lifecycle writer after the durable projection
-   callback is configured, and hydrates lifecycle state from verified canonical
-   snapshots before module initialization and account reconciliation. The
-   hydration path refuses to start if a projected open trade has no canonical
-   aggregate or if a canonical aggregate is in an unresolved intermediate
-   state. This is runtime code integration, but the PostgreSQL production
-   authority gate remains OPEN until current-head CI, deployment configuration,
-   multi-process fencing, and repeated restart acceptance pass.
-2. The ClickHouse cutover has **not been run against the user's actual
-   production ClickHouse database**. The operator must quiesce all writers,
-   produce and verify a restorable backup, review every manifest scope mapping,
-   run the explicit cutover, then verify active and retained backup tables and
-   application readers. No live database was modified by this code change.
-3. The WebAuthn RP code has **not yet been bound to a trusted desktop identity
-   provider or exercised with an enrolled physical authenticator**. A real
-   credential registration and assertion must be completed in the configured
-   production origin/RP environment; callback-based approval tests are not
-   hardware credential acceptance.
-4. The authenticated desktop MFA and Approval Desk are now implemented.
-   Approval receipts are not connected to a live order-execution route; the
-   console remains read-only. A trusted server-side receipt consumer, physical
-   authenticator acceptance and external HTTPS/RP acceptance remain open.
-5. Protective POST-to-ID and triggered child-fill logic still needs the
-   authenticated Binance Demo/Testnet write-side drill, including response
-   loss after POST, client-ID lookup, triggered algo-to-child association,
-   cumulative partial fills, fee/funding reconciliation, and process restart.
-6. Three-store acceptance remains an opt-in real ClickHouse + SQLite + venue
-   drill. The current read-only CI fixture is not a substitute for repeated
-   restart and injected-failure acceptance against the authorized testnet and
-   persistent stores.
+1. **ClickHouse migration and cutover:** stop every writer, create and restore-
+   test a backup, review every account-scope attribution, run the migration
+   with explicit `--apply --cutover` acknowledgements, verify source/target
+   physical counts and hashes, and confirm active tables and retained backups.
+2. **PostgreSQL production migration:** apply the reviewed migrations to the
+   production database, verify backup/restore, writer-fence behavior and
+   multi-process failover. No production database was modified.
+3. **Authenticated Binance Demo/Testnet drill:** verify entry submit/response
+   loss/client-ID recovery, protection POST-to-ID, algo-child linkage,
+   cumulative and partial fills, partial/full exits, fees/funding and repeated
+   process restarts. The local signed fixture is not venue acceptance.
+4. **WebAuthn deployment acceptance:** configure the external HTTPS origin,
+   RP ID, credential database, signing key and server-owned role map; enroll
+   real hardware authenticators and test revocation, backup credentials and
+   single-use approval receipts through the deployed desktop/gateway/executor.
+5. **Persistent three-store fault injection:** repeat crash/restart and
+   ambiguous-state drills against the authorized persistent services and
+   venue test account; verify no duplicate orders, lost fills or scope bleed.
+6. **Workflow security review:** a human must adjudicate every workflow's
+   triggers, permissions, secrets/environments, external side effects,
+   destructive commands, action pinning and required-check dependencies.
+7. **Production operations:** configure secrets, TLS, backups, alerting,
+   resource limits, retention, monitoring and rollback ownership; complete a
+   supervised canary before enabling any new exposure.
 
 ## Release decision
 
-All seven requested gates remain OPEN until their own acceptance evidence is
-attached. Never treat successful static tests or a passing simulated venue
-fixture as proof of a live exchange, hardware WebAuthn, production database
-cutover, or desktop identity integration. Keep Mainnet fail-closed.
-
-
-## Additional implementation — ClickHouse to PostgreSQL canonical import
-
-- `scripts/import_clickhouse_state_to_postgres_oms.py` now streams both
-  legacy or already scope-keyed ClickHouse source layouts into a bounded local
-  SQLite staging spool. It selects the active v2/cutover table when present,
-  checks companion retained-table counts, verifies source fingerprints and
-  canonical payload hashes, and emits a JSONL manifest without loading the
-  entire source dataset into memory.
-- The PostgreSQL migration v3 creates an immutable import-evidence ledger.
-  Each exact legacy JSON payload is stored as text plus SHA-256; canonical OMS
-  events reference that immutable evidence by source table/fingerprint/
-  occurrence, keeping event payloads bounded. Lifecycle hydration resolves the
-  reference, verifies source trade ID, timestamp and raw SHA-256, then rebuilds
-  the Trade snapshot with its explicit account scope.
-- Apply is resumable and idempotent, requires writer-stop and restorable-backup
-  acknowledgements, refuses ambiguous same-timestamp conflicting snapshots,
-  refuses to append legacy history over an existing non-legacy canonical
-  aggregate, and verifies every canonical source-event reference. It never
-  mutates ClickHouse tables. No production data has been imported or cut over.
-- Tests now cover read-only dry-run, legacy and scope-keyed sources, ambiguity
-  rejection, PostgreSQL evidence immutability, and canonical Trade hydration.
-  The actual database import, source/target per-record reconciliation and
-  application reader/writer cutover remain operational acceptance gates.
-
-## Additional implementation — WebAuthn login challenge lifecycle
-
-- The relying party now issues short-lived, user-bound registration and
-  authentication options, persists one-time challenges, checks credential/
-  challenge ownership, enforces user verification and consumes challenges in
-  the same transaction as authenticator counter updates.
-- The desktop gateway binds pre-authentication and authenticated sessions to
-  operator identity, supports multiple configured identities, requires WebAuthn
-  MFA on non-loopback origins, supports out-of-band first-device bootstrap,
-  backup-authenticator step-up enrollment, and role-gated approval challenge/
-  assertion routes. Credential listing/revocation is scoped to an identity;
-  revocation is intentionally offline-admin only and audited.
-- The Approval Desk creates a signed action-digest receipt after a fresh
-  WebAuthn assertion. It does not submit or execute orders. The executor's
-  server-side receipt consumer still needs a secure service integration, and
-  hardware/external-origin acceptance remains open.
-
-
-## Additional implementation update — durable projection replay
-
-- PostgreSQL migration v6 adds owner/token/expiry leases, attempt counters and bounded failure diagnostics to canonical OMS outbox rows.
-- `PostgresCanonicalOMS.claim_outbox_leased()` uses `FOR UPDATE SKIP LOCKED` plus durable expiry so competing workers do not claim the same active record and abandoned claims can be recovered after process death.
-- Acknowledgement and release are fenced by the exact owner and claim token and verify the canonical event hash. Stale or duplicate acknowledgements fail closed.
-- `PostgresOMSOutboxProjector` verifies each event against the aggregate hash chain, replays trade snapshots into the configured durable projection callback, acknowledges canonical-only intent/financial events, and releases failed projections for retry.
-- The live runner invokes one bounded replay batch before startup reconciliation and on each management cycle; replay failures block fresh-exposure cycles.
-- PostgreSQL integration tests now cover exclusive claims, worker ownership, release/reclaim attempt increments and stale acknowledgement rejection. These tests are awaiting exact-head CI execution. Full ClickHouse/SQLite projection rebuild, repair of missing/out-of-order projection state, and real multi-process crash/restart acceptance remain open.
-
-
-## Additional implementation update — canonical Binance fee/funding postings
-
-- The live income reconciler now writes its adjusted trade snapshot through the PostgreSQL canonical lifecycle writer rather than directly to the SQLite/ClickHouse projection callback.
-- After lifecycle write-through, each uniquely attributed Binance COMMISSION or FUNDING_FEE row is appended to the same scope-fenced trade aggregate as a deterministic TRADE_COST_ADJUSTMENT event.
-- Fee postings debit EXPENSE_FEES and credit CASH; positive funding debits CASH and credits FUNDING_INCOME; negative funding debits FUNDING_EXPENSE and credits CASH. Every posting is balanced, hash-bound and idempotent by Binance income transaction identity.
-- If the canonical posting fails, the existing durable income retry/cursor logic prevents the exchange cursor from advancing past that row. Retrying does not duplicate the lifecycle adjustment or journal posting.
-- Added PostgreSQL integration coverage for duplicate fee events, signed funding expenses, balanced ledger lines and event revisions, plus an income-reconciler callback test. Exact-head CI remains the verification authority.
-- This closes fee/funding journal posting at the trade-event level. A complete account-wide realized/unrealized PnL, equity/peak/drawdown valuation stream and runtime use of the PostgreSQL execution-intent store are still code-level integration work; the financial state snapshot adapter must not be mistaken for those live integrations.
+The branch is a code candidate, not yet an approved production release. Keep
+the PR Draft and Mainnet disabled until exact-head CI passes, the ClickHouse
+cutover is completed and verified, production PostgreSQL migration/restore is
+accepted, authenticated Binance testnet recovery passes, and WebAuthn operator
+approval is proven in the deployed environment. Never infer those outcomes
+from source code or simulated fixtures.
