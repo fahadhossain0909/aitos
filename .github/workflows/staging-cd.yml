@@ -226,7 +226,17 @@ jobs:
             AITOS_REQUIRE_DIGEST_IMAGES=true python3 scripts/validate_compose_policy.py /tmp/aitos-staging-compose.json
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
             trap 'docker logout ghcr.io >/dev/null 2>&1 || true; unset GHCR_TOKEN' EXIT
-            docker compose pull
+            pull_attempt=1
+            until docker compose pull; do
+              if [ "$pull_attempt" -ge 5 ]; then
+                echo "GHCR pull failed after $pull_attempt attempts."
+                exit 1
+              fi
+              sleep_seconds=$((pull_attempt * 15))
+              echo "GHCR pull interrupted; retrying in $sleep_seconds seconds (attempt $((pull_attempt + 1))/5)."
+              sleep "$sleep_seconds"
+              pull_attempt=$((pull_attempt + 1))
+            done
             docker logout ghcr.io || true
             trap - EXIT
             unset GHCR_TOKEN
@@ -245,6 +255,66 @@ jobs:
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-redis)" = healthy ]
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse)" = healthy ]
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
+
+            echo '=== STAGING SCOPED CLICKHOUSE STATE MIGRATION ==='
+            # Quiesce all application writers before the one-time schema cutover.
+            docker compose stop aitos-paper aitos-learning aitos-storage-maintenance || true
+            clickhouse_cmd() {
+              docker exec -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" aitos-clickhouse \
+                clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
+                --database "$CLICKHOUSE_DATABASE" "$@"
+            }
+            scoped_columns="$(clickhouse_cmd --query "SELECT count() FROM system.columns WHERE database='aitos' AND ((table='trade_runtime_state' AND name IN ('account_scope','trade_id','symbol','state','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')) OR (table='paper_closed_trade_ledger' AND name IN ('account_scope','trade_id','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')))")"
+            scoped_engines="$(clickhouse_cmd --query "SELECT count() FROM system.tables WHERE database='aitos' AND name IN ('trade_runtime_state','paper_closed_trade_ledger') AND engine='MergeTree' AND (startsWith(sorting_key, '(account_scope') OR startsWith(sorting_key, 'account_scope'))")"
+            if [ "$scoped_columns" = 18 ] && [ "$scoped_engines" = 2 ]; then
+              echo 'Scoped ClickHouse state schema already verified; migration skipped.'
+            else
+              partial_state="$(clickhouse_cmd --query "SELECT count() FROM system.tables WHERE database='aitos' AND name IN ('trade_runtime_state_v2','paper_closed_trade_ledger_v2','trade_runtime_state_legacy_pre_scope_v1','paper_closed_trade_ledger_legacy_pre_scope_v1')")"
+              if [ "$partial_state" != 0 ]; then
+                echo 'Refusing automatic migration: partial v2 tables or retained backups already exist.'
+                exit 1
+              fi
+              # The staging DB may be fresh and have no closed-trade rows yet.
+              # Create the empty legacy source so the verified migration can cut over both tables.
+              clickhouse_cmd --query "CREATE TABLE IF NOT EXISTS trade_runtime_state (trade_id String, symbol LowCardinality(String), state LowCardinality(String), payload_json String, updated_at DateTime64(3, 'UTC')) ENGINE = ReplacingMergeTree(updated_at) ORDER BY trade_id"
+              clickhouse_cmd --query "CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (trade_id String, payload_json String, updated_at DateTime64(3, 'UTC')) ENGINE = ReplacingMergeTree(updated_at) ORDER BY trade_id"
+              runtime_rows="$(clickhouse_cmd --query 'SELECT count() FROM trade_runtime_state')"
+              closed_rows="$(clickhouse_cmd --query 'SELECT count() FROM paper_closed_trade_ledger')"
+              echo "Legacy state rows: runtime=$runtime_rows closed=$closed_rows"
+              # Stop ClickHouse cleanly and retain a complete filesystem backup of its named volume.
+              docker compose stop clickhouse
+              backup_name="clickhouse-pre-scope-cutover-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+              docker run --rm --user 0:0 \
+                -v aitos-staging_clickhouse-data:/data:ro \
+                -v "$AITOS_DATA_ROOT/artifacts/backups:/backup" \
+                alpine:3.20 sh -ec 'tar -czf "/backup/$1" -C /data . && tar -tzf "/backup/$1" >/dev/null' sh "$backup_name"
+              sha256sum "$AITOS_DATA_ROOT/artifacts/backups/$backup_name" > "$AITOS_DATA_ROOT/artifacts/backups/$backup_name.sha256"
+              test -s "$AITOS_DATA_ROOT/artifacts/backups/$backup_name"
+              echo "ClickHouse volume backup retained: $AITOS_DATA_ROOT/artifacts/backups/$backup_name"
+              docker compose start clickhouse
+              clickhouse_deadline=$((SECONDS + 240))
+              until [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse 2>/dev/null || true)" = healthy ]; do
+                if [ "$SECONDS" -ge "$clickhouse_deadline" ]; then
+                  echo 'ClickHouse did not return healthy after backup.'
+                  docker logs --tail 200 aitos-clickhouse 2>&1 || true
+                  exit 1
+                fi
+                sleep 5
+              done
+              manifest_name="scoped-state-attribution-manifest-$(date -u +%Y%m%dT%H%M%SZ).json"
+              docker compose run --rm --no-deps \
+                -v "$AITOS_DATA_ROOT/artifacts/backups:/backup" \
+                --entrypoint python3 aitos-paper \
+                /app/scripts/migrate_scoped_clickhouse_state.py \
+                --apply --cutover --confirm-writers-stopped --confirm-backup-retained \
+                --manifest-out "/backup/$manifest_name"
+              scoped_columns_after="$(clickhouse_cmd --query "SELECT count() FROM system.columns WHERE database='aitos' AND ((table='trade_runtime_state' AND name IN ('account_scope','trade_id','symbol','state','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')) OR (table='paper_closed_trade_ledger' AND name IN ('account_scope','trade_id','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')))")"
+              scoped_engines_after="$(clickhouse_cmd --query "SELECT count() FROM system.tables WHERE database='aitos' AND name IN ('trade_runtime_state','paper_closed_trade_ledger') AND engine='MergeTree' AND (startsWith(sorting_key, '(account_scope') OR startsWith(sorting_key, 'account_scope'))")"
+              [ "$scoped_columns_after" = 18 ] && [ "$scoped_engines_after" = 2 ]
+              echo 'Scoped ClickHouse state migration and post-cutover verification PASSED.'
+            fi
+            docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
+
             bad_containers="$(docker compose ps --all --format '{{.Name}} {{.State}}' | awk '{state=tolower($2); if (state ~ /unhealthy|restarting/ || (state ~ /exited/ && $1 !~ /clickhouse-init/)) print}')"
             if [ -n "$bad_containers" ]; then printf '%s\n' "$bad_containers"; exit 1; fi
 
