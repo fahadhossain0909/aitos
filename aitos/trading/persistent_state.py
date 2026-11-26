@@ -270,17 +270,56 @@ class DurableTradingStateStore:
                 table_columns: dict[str, set[str]] = {}
                 for table, column in columns.result_rows:
                     table_columns.setdefault(str(table), set()).add(str(column))
-                runtime_scoped = "account_scope" in table_columns.get(
-                    "trade_runtime_state", set()
-                )
-                closed_scoped = "account_scope" in table_columns.get(
-                    "paper_closed_trade_ledger", set()
-                )
-                if not runtime_scoped or not closed_scoped:
+                required_runtime = {
+                    "account_scope",
+                    "trade_id",
+                    "symbol",
+                    "state",
+                    "payload_json",
+                    "legacy_payload_json",
+                    "updated_at",
+                    "source_fingerprint",
+                    "source_occurrence",
+                    "payload_sha256",
+                }
+                required_closed = {
+                    "account_scope",
+                    "trade_id",
+                    "payload_json",
+                    "legacy_payload_json",
+                    "updated_at",
+                    "source_fingerprint",
+                    "source_occurrence",
+                    "payload_sha256",
+                }
+                if not required_runtime.issubset(
+                    table_columns.get("trade_runtime_state", set())
+                ) or not required_closed.issubset(
+                    table_columns.get("paper_closed_trade_ledger", set())
+                ):
                     raise RuntimeError(
-                        "runtime requires scope-keyed ClickHouse state tables; "
+                        "runtime requires fully migrated scope-keyed ClickHouse state tables; "
                         "run and verify scripts/migrate_scoped_clickhouse_state.py --cutover first"
                     )
+                metadata = await client.query(
+                    """
+                    SELECT name,engine,sorting_key FROM system.tables
+                    WHERE database=currentDatabase()
+                      AND name IN ('trade_runtime_state','paper_closed_trade_ledger')
+                    """
+                )
+                table_metadata = {
+                    str(name): (str(engine), str(sorting_key))
+                    for name, engine, sorting_key in metadata.result_rows
+                }
+                for table in ("trade_runtime_state", "paper_closed_trade_ledger"):
+                    engine, sorting_key = table_metadata.get(table, ("", ""))
+                    if not engine.endswith("MergeTree") or not sorting_key.startswith(
+                        "account_scope"
+                    ):
+                        raise RuntimeError(
+                            f"{table} must use a scope-first MergeTree sorting key"
+                        )
                 self._scoped_clickhouse_state = True
             else:
                 await client.command(CREATE_RUNTIME_STATE)
