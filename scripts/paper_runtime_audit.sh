@@ -9,6 +9,8 @@ DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 DIAGNOSTIC_LOG_MINUTES="${AITOS_DIAGNOSTIC_LOG_MINUTES:-30}"
 REDIS_MEMORY_WARN_PCT="${REDIS_MEMORY_WARN_PCT:-85}"
 REDIS_MEMORY_BLOCK_PCT="${REDIS_MEMORY_BLOCK_PCT:-95}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-$(sed -n 's/^REDIS_PASSWORD=//p' .env 2>/dev/null | tail -n 1)}"
+export REDISCLI_AUTH="$REDIS_PASSWORD"
 
 REQUIRED_CONTAINERS=(aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance)
 ALLOWED_EXITED_PATTERNS=(clickhouse-init aitos-backtest aitos-live)
@@ -38,10 +40,10 @@ else
 
   echo '--- Redis memory / retention diagnostics ---'
   if docker inspect aitos-redis >/dev/null 2>&1; then
-    redis_info="$(docker exec aitos-redis redis-cli INFO memory 2>/dev/null || true)"
-    redis_stats="$(docker exec aitos-redis redis-cli INFO stats 2>/dev/null || true)"
-    redis_config="$(docker exec aitos-redis redis-cli CONFIG GET maxmemory maxmemory-policy appendonly appendfsync 2>/dev/null || true)"
-    redis_keyspace="$(docker exec aitos-redis redis-cli INFO keyspace 2>/dev/null || true)"
+    redis_info="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli INFO memory 2>/dev/null || true)"
+    redis_stats="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli INFO stats 2>/dev/null || true)"
+    redis_config="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli CONFIG GET maxmemory maxmemory-policy appendonly appendfsync 2>/dev/null || true)"
+    redis_keyspace="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli INFO keyspace 2>/dev/null || true)"
     printf '%s\n' "$redis_info" | grep -E '^(used_memory:|used_memory_human:|used_memory_rss:|used_memory_rss_human:|used_memory_peak:|used_memory_peak_human:|maxmemory:|maxmemory_human:|mem_fragmentation_ratio:)' || true
     printf '%s\n' "$redis_stats" | grep -E '^(instantaneous_ops_per_sec:|total_commands_processed:|evicted_keys:|expired_keys:|keyspace_hits:|keyspace_misses:)' || true
     printf '%s\n' "$redis_config" || true
@@ -70,32 +72,32 @@ else
       while IFS= read -r key; do
         [ -n "$key" ] || continue
         found=1
-        length="$(docker exec aitos-redis redis-cli XLEN "$key" 2>/dev/null || echo '?')"
+        length="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli XLEN "$key" 2>/dev/null || echo '?')"
         printf '  %-70s XLEN=%s\n' "$key" "$length"
-      done < <(docker exec aitos-redis redis-cli --raw --scan --pattern "$pattern" 2>/dev/null || true)
+      done < <(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --raw --scan --pattern "$pattern" 2>/dev/null || true)
       [ "$found" -eq 1 ] || echo "  pattern=$pattern -> no keys"
     done
 
     echo 'Redis consumer-group pending inventory:'
     while IFS= read -r key; do
       [ -n "$key" ] || continue
-      groups="$(docker exec aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null || true)"
+      groups="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null || true)"
       if [ -n "$groups" ]; then
         echo "  $key"
-        if ! docker exec aitos-redis redis-cli --json XINFO GROUPS "$key" 2>/dev/null; then
-          docker exec aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null | \
+        if ! docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --json XINFO GROUPS "$key" 2>/dev/null; then
+          docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null | \
             awk 'BEGIN{ORS=" "} {printf "%s", $0} END{print ""}'
         fi
       fi
-    done < <(docker exec aitos-redis redis-cli --raw --scan --pattern 'stream:*' 2>/dev/null || true)
+    done < <(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --raw --scan --pattern 'stream:*' 2>/dev/null || true)
 
     echo 'Redis key TTL/large-key sampling:'
     while IFS= read -r key; do
       [ -n "$key" ] || continue
-      type="$(docker exec aitos-redis redis-cli TYPE "$key" 2>/dev/null || echo unknown)"
-      ttl="$(docker exec aitos-redis redis-cli TTL "$key" 2>/dev/null || echo '?')"
+      type="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli TYPE "$key" 2>/dev/null || echo unknown)"
+      ttl="$(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli TTL "$key" 2>/dev/null || echo '?')"
       printf '  type=%-8s ttl=%-8s key=%s\n' "$type" "$ttl" "$key"
-    done < <(docker exec aitos-redis redis-cli --scan 2>/dev/null | head -n 50 || true)
+    done < <(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --scan 2>/dev/null | head -n 50 || true)
     echo 'Redis diagnostic interpretation:'
     echo '  - Streams are bounded by MAXLEN where configured; XLEN shows actual retained entries.'
     echo '  - evicted_keys/expired_keys help distinguish eviction/expiry from simple retention.'
