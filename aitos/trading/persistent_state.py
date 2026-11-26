@@ -252,7 +252,10 @@ class DurableTradingStateStore:
                 database = await client.query(
                     "SELECT engine FROM system.databases WHERE name=currentDatabase()"
                 )
-                if not database.result_rows or str(database.result_rows[0][0]) != "Atomic":
+                if (
+                    not database.result_rows
+                    or str(database.result_rows[0][0]) != "Atomic"
+                ):
                     raise RuntimeError(
                         "scope-keyed ClickHouse cutover requires an Atomic database"
                     )
