@@ -249,7 +249,6 @@ async def test_scoped_closed_trade_write_uses_scope_keyed_evidence_columns():
     assert len(rows[0][7]) == 64
 
 
-
 def test_runtime_row_identity_matches_scoped_migration_fingerprints():
     payload = {
         "trade_id": "trade-identity",
