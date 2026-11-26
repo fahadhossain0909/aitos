@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+
 def _scoped_state_fingerprint(
     table: str, trade_id: str, payload_json: str, updated_at: datetime
 ) -> str:
