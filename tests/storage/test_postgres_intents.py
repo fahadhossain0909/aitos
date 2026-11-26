@@ -68,12 +68,11 @@ async def test_postgres_execution_intent_is_atomic_fenced_and_recoverable():
         stored_intent = await intents.get("client-001")
         assert stored_intent["request"]["symbol"] == "BTCUSDT"
         receipt = stored_intent["request"]["execution_context"]["approval_receipt"]
-        intent_events = await oms.read_events(
-            "paper:intent-test", "intent-client-001"
+        intent_events = await oms.read_events("paper:intent-test", "intent-client-001")
+        assert (
+            intent_events[0].payload["request"]["execution_context"]["approval_receipt"]
+            == receipt
         )
-        assert intent_events[0].payload["request"]["execution_context"][
-            "approval_receipt"
-        ] == receipt
         assert isinstance((await intents.unresolved())[0]["request"], dict)
 
         with pytest.raises(OMSConflict, match="already exists"):
@@ -930,7 +929,6 @@ def test_financial_state_snapshot_keeps_peak_and_max_drawdown_monotonic():
 def test_financial_state_snapshot_rejects_invalid_accounting_inputs(snapshot):
     with pytest.raises(ValueError):
         _financial_state_snapshot(snapshot, None)
-
 
 
 def test_financial_snapshot_without_new_venue_mark_preserves_unattributed_adjustment():
