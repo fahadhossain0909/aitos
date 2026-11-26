@@ -302,7 +302,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         )
     order_executor = IdempotentOrderExecutor(raw_order_executor)
     state_store = DurableTradingStateStore(
-        market_repo, account_scope=raw_order_executor.execution_scope
+        market_repo,
+        account_scope=raw_order_executor.execution_scope,
+        require_scoped_schema=True,
     )
     await state_store.initialize()
     trade_state_persistence = None
