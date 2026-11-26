@@ -267,3 +267,29 @@ def test_runtime_row_identity_matches_scoped_migration_fingerprints():
     assert _scoped_state_payload_hash(payload, "paper:one") == _scoped_payload_hash(
         payload, "paper:one"
     )
+
+
+@pytest.mark.asyncio
+async def test_scoped_recovery_queries_never_mix_other_account_rows():
+    client = FakeClickHouse()
+    store = DurableTradingStateStore(
+        SimpleNamespace(_client=client),
+        account_scope="paper:account-a",
+        require_scoped_schema=True,
+    )
+    store._scoped_clickhouse_state = True
+
+    assert await store.load_open_trades() == []
+    open_query, open_parameters = client.queries[-1]
+    assert "WHERE account_scope = {account_scope:String}" in open_query
+    assert open_parameters == {"account_scope": "paper:account-a"}
+
+    assert await store.load_closed_trades() == []
+    closed_query, closed_parameters = client.queries[-1]
+    assert "WHERE account_scope = {account_scope:String}" in closed_query
+    assert closed_parameters == {"account_scope": "paper:account-a"}
+
+    assert await store.load_unlinked_acknowledged_orders() == []
+    linkage_query, linkage_parameters = client.queries[-1]
+    assert "WHERE account_scope = {account_scope:String}" in linkage_query
+    assert linkage_parameters == {"account_scope": "paper:account-a"}
