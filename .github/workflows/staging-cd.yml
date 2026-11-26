@@ -261,8 +261,8 @@ jobs:
             docker compose stop aitos-paper aitos-learning aitos-storage-maintenance || true
             clickhouse_cmd() {
               docker exec -e CLICKHOUSE_PASSWORD="$CLICKHOUSE_PASSWORD" aitos-clickhouse \
-                clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
-                --database "$CLICKHOUSE_DATABASE" "$@"
+                clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" \
+                --database aitos "$@"
             }
             scoped_columns="$(clickhouse_cmd --query "SELECT count() FROM system.columns WHERE database='aitos' AND ((table='trade_runtime_state' AND name IN ('account_scope','trade_id','symbol','state','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')) OR (table='paper_closed_trade_ledger' AND name IN ('account_scope','trade_id','payload_json','legacy_payload_json','updated_at','source_fingerprint','source_occurrence','payload_sha256')))")"
             scoped_engines="$(clickhouse_cmd --query "SELECT count() FROM system.tables WHERE database='aitos' AND name IN ('trade_runtime_state','paper_closed_trade_ledger') AND engine='MergeTree' AND (startsWith(sorting_key, '(account_scope') OR startsWith(sorting_key, 'account_scope'))")"
