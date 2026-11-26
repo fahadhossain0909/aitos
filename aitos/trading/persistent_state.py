@@ -249,6 +249,13 @@ class DurableTradingStateStore:
         try:
             client = self._repository._client
             if self.require_scoped_schema:
+                database = await client.query(
+                    "SELECT engine FROM system.databases WHERE name=currentDatabase()"
+                )
+                if not database.result_rows or str(database.result_rows[0][0]) != "Atomic":
+                    raise RuntimeError(
+                        "scope-keyed ClickHouse cutover requires an Atomic database"
+                    )
                 columns = await client.query(
                     """
                     SELECT table,name FROM system.columns
