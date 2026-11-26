@@ -176,4 +176,4 @@ else
   ${SUDO[@]} -u "#$AITOS_UID" touch "$AITOS_TEST_FILE" || die "Aitos UID $AITOS_UID cannot write runtime/models"
   ${SUDO[@]} rm -f "$AITOS_TEST_FILE"
 fi
-echo "AITOS canonical storage bootstrap completed successfully."echo "AITOS canonical storage bootstrap completed successfully."
+echo "AITOS canonical storage bootstrap completed successfully."
