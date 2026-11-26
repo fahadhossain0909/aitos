@@ -114,7 +114,14 @@ if [[ "$FREE_GB" =~ ^[0-9]+$ && "$FREE_GB" -lt "$MIN_FREE_GB" ]]; then
 fi
 
 has_entries() {
-  [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
+  if [[ "$ROOT_DISK_MODE" == "true" && "$1" == "$DATA_ROOT/"* ]]; then
+    relative_path="${1#"$DATA_ROOT/"}"
+    docker run --rm --user 0:0 -v "$DATA_ROOT:/data" alpine:3.20 sh -ec '
+      [ -n "$(find "/data/$1" -mindepth 1 -print -quit 2>/dev/null)" ]
+    ' sh "$relative_path"
+  else
+    [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
+  fi
 }
 
 for legacy in clickhouse neo4j redis; do
@@ -154,14 +161,23 @@ else
     "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
 fi
 
-for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
-  ${SUDO[@]} test -d "$DATA_ROOT/$required" || {
-    echo "=== CANONICAL LAYOUT DIAGNOSTICS ===" >&2
-    ${SUDO[@]} ls -ld "$DATA_ROOT" "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" 2>&1 || true
-    ${SUDO[@]} find "$DATA_ROOT/eventbus" -maxdepth 3 -print 2>&1 || true
-    die "Canonical directory creation failed: $DATA_ROOT/$required"
-  }
-done
+REQUIRED_DATA_DIRS=(databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp)
+if [[ "$ROOT_DISK_MODE" == "true" ]]; then
+  docker run --rm --user 0:0 -v "$DATA_ROOT:/data" alpine:3.20 sh -ec '
+    for required in "$@"; do
+      if [ ! -d "/data/$required" ]; then
+        echo "Missing canonical directory: /data/$required"
+        ls -ld /data /data/eventbus /data/eventbus/redis /data/eventbus/redis/live /data/eventbus/redis/archive 2>&1 || true
+        find /data/eventbus -maxdepth 3 -print 2>&1 || true
+        exit 1
+      fi
+    done
+  ' sh "${REQUIRED_DATA_DIRS[@]}" || die "Canonical storage directory verification failed."
+else
+  for required in "${REQUIRED_DATA_DIRS[@]}"; do
+    ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Canonical directory creation failed: $DATA_ROOT/$required"
+  done
+fi
 
 if [[ "$ROOT_DISK_MODE" == "true" ]]; then
   # Use a short-lived root helper container instead of interactive sudo.
@@ -193,7 +209,13 @@ else
 fi
 log "Storage verification"
 df -h "$DATA_ROOT"; findmnt --target "$DATA_ROOT"
-for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Missing required directory: $DATA_ROOT/$required"; done
+if [[ "$ROOT_DISK_MODE" == "true" ]]; then
+  docker run --rm --user 0:0 -v "$DATA_ROOT:/data" alpine:3.20 sh -ec '
+    for required in "$@"; do test -d "/data/$required" || { echo "Missing required directory: /data/$required"; exit 1; }; done
+  ' sh "${REQUIRED_DATA_DIRS[@]}" || die "Required storage directory verification failed."
+else
+  for required in "${REQUIRED_DATA_DIRS[@]}"; do ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Missing required directory: $DATA_ROOT/$required"; done
+fi
 TMP_FILE="$DATA_ROOT/.aitos-storage-write-test"; ${SUDO[@]} touch "$TMP_FILE"; ${SUDO[@]} rm -f "$TMP_FILE"
 # Verify the actual application identity can write its persistent runtime path.
 AITOS_TEST_FILE="$DATA_ROOT/runtime/models/.aitos-runtime-write-test"
