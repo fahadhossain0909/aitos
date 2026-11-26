@@ -298,7 +298,10 @@ jobs:
                 docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}'
                 echo "--- Redis persistence and market streams ---"
                 docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli INFO memory | grep -E '^(used_memory_human|maxmemory_human|mem_fragmentation_ratio):' || true
-                docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli --raw --scan --pattern 'stream:market.*' | head -n 30 || true
+                for key in $(docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli --raw --scan --pattern 'stream:market.*' | head -n 30); do
+                  stream_length="$(docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli XLEN "$key" 2>/dev/null || echo unavailable)"
+                  printf '%s XLEN=%s\n' "$key" "$stream_length"
+                done
                 echo "--- paper market-data / decision activity (last 5m) ---"
                 docker logs --since 5m --timestamps aitos-paper 2>&1 | grep -Ei 'websocket|market.?data|aggtrade|depth|order.?book|kline|live scanner freshness|paper signal diagnostics|scanner ranking decision|trade candidate' | tail -n 60 || true
                 echo "--- persistent storage ---"
@@ -344,13 +347,13 @@ jobs:
               docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'live scanner freshness' | tail -n 200 || true
               echo
               echo '--- Paper signal diagnostics (last 30m) ---'
-              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'paper signal diagnostics' | tail -n 200 || true
+              docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'paper signal diagnostics' | tail -n 200 || true
               echo
               echo '--- Scanner score-breakdown diagnostics (last 30m) ---'
-              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'scanner score breakdown' | tail -n 200 || true
+              docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'scanner score breakdown' | tail -n 200 || true
               echo
               echo '--- Scanner ranking / trade decision diagnostics (last 30m) ---'
-              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep -E 'scanner ranking decision|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' | tail -n 200 || true
+              docker logs --since 30m --timestamps aitos-paper 2>&1 | grep -E 'scanner ranking decision|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' | tail -n 200 || true
               echo
               echo '--- Container status ---'
               docker compose ps --all
