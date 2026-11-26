@@ -189,11 +189,14 @@ def _select_clickhouse_source(client: Any, source: str) -> tuple[str, bool]:
         raise RuntimeError(f"ClickHouse source table {source} has an unknown schema")
 
     if companion is not None:
+        # Compare physical source occurrences, not ReplacingMergeTree FINAL
+        # rows. The scoped MergeTree intentionally preserves every legacy
+        # version that FINAL would otherwise collapse.
         selected_count = int(
-            client.query(f"SELECT count() FROM {selected} FINAL").result_rows[0][0]
+            client.query(f"SELECT count() FROM {selected}").result_rows[0][0]
         )
         companion_count = int(
-            client.query(f"SELECT count() FROM {companion} FINAL").result_rows[0][0]
+            client.query(f"SELECT count() FROM {companion}").result_rows[0][0]
         )
         if selected_count != companion_count:
             raise RuntimeError(
