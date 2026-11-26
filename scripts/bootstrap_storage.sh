@@ -50,8 +50,13 @@ if [[ "${AITOS_ALLOW_BOOT_DISK_DATA:-false}" == "true" ]]; then
     -e HOST_UID="$HOST_UID" -e HOST_GID="$HOST_GID" \
     alpine:3.20 sh -ec '
       chown "$HOST_UID:$HOST_GID" /data
+      mkdir -p /data/databases/clickhouse /data/databases/neo4j \
+        /data/eventbus/redis/live /data/eventbus/redis/archive \
+        /data/research/backtest /data/research/replay \
+        /data/artifacts/backups /data/artifacts/snapshots \
+        /data/runtime/models /data/runtime/logs/neo4j /data/runtime/tmp
       for directory in databases eventbus research artifacts runtime; do
-        if [ -d "/data/$directory" ]; then chown "$HOST_UID:$HOST_GID" "/data/$directory"; fi
+        chown "$HOST_UID:$HOST_GID" "/data/$directory"
       done
     '
   ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
