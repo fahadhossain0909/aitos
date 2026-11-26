@@ -165,8 +165,6 @@ SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
 """
 
 
-
-
 def _closed_payload(row) -> dict:
     if len(row) != 3 or row[2] != 1:
         raise ValueError("ambiguous latest closed-ledger payload")
