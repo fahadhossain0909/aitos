@@ -651,12 +651,20 @@ class DurableTradingStateStore:
             GROUP BY client_order_id
             """
         )
+        scope_expression = (
+            "account_scope"
+            if self._scoped_clickhouse_state
+            else "JSONExtractString(payload_json, 'account_scope')"
+        )
         trade_rows = await client.query(
-            """
+            f"""
             SELECT trade_id FROM trade_runtime_state
+            WHERE {scope_expression} = {{account_scope:String}}
             UNION DISTINCT
             SELECT trade_id FROM paper_closed_trade_ledger
-            """
+            WHERE {scope_expression} = {{account_scope:String}}
+            """,
+            parameters={"account_scope": self.account_scope},
         )
         known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
         unlinked = []
