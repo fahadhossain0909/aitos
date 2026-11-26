@@ -20,6 +20,7 @@ from scripts.migrate_scoped_clickhouse_state import (
 class FakeClickHouse:
     def __init__(self, *, scoped=True):
         self.scoped = scoped
+        self.count_result = 0
         self.commands = []
         self.inserts = []
         self.queries = []
@@ -72,8 +73,8 @@ class FakeClickHouse:
                     ("paper_closed_trade_ledger", "MergeTree", "account_scope, trade_id"),
                 ]
             )
-        if "SELECT count() FROM" in query:
-            return SimpleNamespace(result_rows=[(0,)])
+        if "SELECT count()" in query:
+            return SimpleNamespace(result_rows=[(self.count_result,)])
         return SimpleNamespace(result_rows=[])
 
     async def insert(self, table, rows, column_names=None):
@@ -165,8 +166,9 @@ async def test_scoped_runtime_write_includes_scope_fingerprint_and_payload_hash(
 
 
 @pytest.mark.asyncio
-async def test_scoped_delete_appends_tombstone_instead_of_mutating_history():
+async def test_scoped_delete_requires_archive_and_never_mutates_append_only_history():
     client = FakeClickHouse()
+    client.count_result = 1
     store = DurableTradingStateStore(
         SimpleNamespace(_client=client),
         account_scope="paper:one",
@@ -176,18 +178,25 @@ async def test_scoped_delete_appends_tombstone_instead_of_mutating_history():
 
     await store.delete_trade("trade-1")
 
-    table, rows, columns = client.inserts[-1]
-    assert table == "trade_runtime_state"
-    payload = __import__("json").loads(rows[0][4])
-    assert payload == {
-        "account_scope": "paper:one",
-        "state": "position_deleted",
-        "symbol": "",
-        "trade_id": "trade-1",
-    }
-    assert "source_occurrence" in columns
+    assert not client.inserts
     assert not any("ALTER TABLE trade_runtime_state DELETE" in q for q, _ in client.commands)
+    assert "paper_closed_trade_ledger" in client.queries[-1][0]
 
+
+@pytest.mark.asyncio
+async def test_scoped_delete_refuses_to_hide_trade_without_closed_archive():
+    client = FakeClickHouse()
+    store = DurableTradingStateStore(
+        SimpleNamespace(_client=client),
+        account_scope="paper:one",
+        require_scoped_schema=True,
+    )
+    store._scoped_clickhouse_state = True
+
+    with pytest.raises(RuntimeError, match="durable closed-trade archive"):
+        await store.delete_trade("trade-1")
+
+    assert not client.inserts
 
 @pytest.mark.asyncio
 async def test_scoped_closed_trade_write_uses_scope_keyed_evidence_columns():
