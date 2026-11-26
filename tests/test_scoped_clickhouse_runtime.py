@@ -31,8 +31,31 @@ class FakeClickHouse:
         self.queries.append((query, parameters or {}))
         if "FROM system.columns" in query:
             scope_columns = [
-                ("trade_runtime_state", "account_scope"),
-                ("paper_closed_trade_ledger", "account_scope"),
+                ("trade_runtime_state", column)
+                for column in (
+                    "account_scope",
+                    "trade_id",
+                    "symbol",
+                    "state",
+                    "payload_json",
+                    "legacy_payload_json",
+                    "updated_at",
+                    "source_fingerprint",
+                    "source_occurrence",
+                    "payload_sha256",
+                )
+            ] + [
+                ("paper_closed_trade_ledger", column)
+                for column in (
+                    "account_scope",
+                    "trade_id",
+                    "payload_json",
+                    "legacy_payload_json",
+                    "updated_at",
+                    "source_fingerprint",
+                    "source_occurrence",
+                    "payload_sha256",
+                )
             ]
             if self.scoped:
                 return SimpleNamespace(result_rows=scope_columns)
