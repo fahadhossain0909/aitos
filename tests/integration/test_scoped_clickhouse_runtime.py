@@ -57,7 +57,9 @@ def _trade(scope: str, symbol: str, state: TradeLifecycleState) -> Trade:
 
 @pytest.mark.asyncio
 async def test_scope_keyed_clickhouse_runtime_isolates_same_trade_id_across_accounts():
-    host = os.getenv("AITOS_FAULT_CLICKHOUSE_HOST", "127.0.0.1")
+    host = os.getenv("AITOS_FAULT_CLICKHOUSE_HOST")
+    if not host:
+        pytest.skip("requires the disposable ClickHouse service from three-store CI")
     port = int(os.getenv("AITOS_FAULT_CLICKHOUSE_PORT", "8123"))
     username = os.getenv("AITOS_FAULT_CLICKHOUSE_USER", "default")
     password = os.getenv("AITOS_FAULT_CLICKHOUSE_PASSWORD", "")
