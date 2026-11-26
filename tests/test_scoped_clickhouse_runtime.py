@@ -204,6 +204,7 @@ async def test_scoped_delete_refuses_to_hide_trade_without_closed_archive():
 
     assert not client.inserts
 
+
 @pytest.mark.asyncio
 async def test_scoped_closed_trade_write_uses_scope_keyed_evidence_columns():
     client = FakeClickHouse()
