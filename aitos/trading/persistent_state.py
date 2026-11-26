@@ -985,8 +985,27 @@ class DurableTradingStateStore:
 
     async def load_closed_trades(self) -> list[Trade]:
         """Restore complete realized evidence or fail; never silently lose PnL."""
+        scope_expression = (
+            "account_scope"
+            if self._scoped_clickhouse_state
+            else "JSONExtractString(payload_json, 'account_scope')"
+        )
         result = await self._client().query(
-            CLOSED_RECOVERY_QUERY,
+            f"""
+            SELECT {scope_expression} AS account_scope,
+                   trade_id, any(payload_json) AS latest_payload,
+                   uniqExact(payload_json) AS payload_versions
+            FROM paper_closed_trade_ledger
+            WHERE {scope_expression} = {{account_scope:String}}
+              AND ({scope_expression}, trade_id, updated_at) IN (
+                SELECT {scope_expression}, trade_id, max(updated_at)
+                FROM paper_closed_trade_ledger
+                WHERE {scope_expression} = {{account_scope:String}}
+                GROUP BY {scope_expression}, trade_id
+              )
+            GROUP BY {scope_expression}, trade_id
+            ORDER BY account_scope, trade_id
+            """,
             parameters={"account_scope": self.account_scope},
         )
         try:
