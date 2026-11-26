@@ -276,13 +276,14 @@ jobs:
             DEADLINE=0
             CYCLE=0
             printf 'AITOS staging paper soak started: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REPORT"
-            echo "=== WAITING FOR PAPER STARTUP (max 300 seconds) ===" | tee -a "$REPORT"
-            READY_DEADLINE=$((SECONDS + 300))
+            PAPER_STARTUP_TIMEOUT_SECONDS="${PAPER_STARTUP_TIMEOUT_SECONDS:-300}"
+            echo "=== WAITING FOR PAPER STARTUP (max ${PAPER_STARTUP_TIMEOUT_SECONDS} seconds) ===" | tee -a "$REPORT"
+            READY_DEADLINE=$((SECONDS + PAPER_STARTUP_TIMEOUT_SECONDS))
             PAPER_READY=false
             while [ "$SECONDS" -lt "$READY_DEADLINE" ]; do
               PAPER_STATE="$(docker inspect --format '{{.State.Status}}' aitos-paper 2>/dev/null || echo missing)"
               PAPER_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper 2>/dev/null || echo missing)"
-              printf 'startup_wait elapsed=%ss status=%s health=%s\n' "$((300 - (READY_DEADLINE - SECONDS)))" "$PAPER_STATE" "$PAPER_HEALTH" | tee -a "$REPORT"
+              printf 'startup_wait elapsed=%ss status=%s health=%s\n' "$((PAPER_STARTUP_TIMEOUT_SECONDS - (READY_DEADLINE - SECONDS)))" "$PAPER_STATE" "$PAPER_HEALTH" | tee -a "$REPORT"
               if [ "$PAPER_STATE" != running ]; then
                 echo "Paper container is not running; collecting startup logs." | tee -a "$REPORT"
                 docker logs --tail 300 --timestamps aitos-paper 2>&1 | tee -a "$REPORT" || true
@@ -298,7 +299,7 @@ jobs:
               sleep 10
             done
             if [ "$PAPER_READY" != true ]; then
-              echo "Paper container did not become healthy within 300 seconds." | tee -a "$REPORT"
+              echo "Paper container did not become healthy within $PAPER_STARTUP_TIMEOUT_SECONDS seconds." | tee -a "$REPORT"
               docker inspect aitos-paper >> "$REPORT" 2>&1 || true
               docker logs --tail 300 --timestamps aitos-paper 2>&1 | tee -a "$REPORT" || true
               exit 1
