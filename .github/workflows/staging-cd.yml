@@ -243,7 +243,7 @@ jobs:
             trap - EXIT
             unset GHCR_TOKEN
             docker compose down --remove-orphans --timeout 30 || true
-            docker compose up -d --remove-orphans --force-recreate
+            docker compose up -d --remove-orphans --force-recreate redis clickhouse neo4j clickhouse-init redis-dlq-retention redis-stream-archive
 
             echo '=== STAGING HEALTH GATE ==='
             deadline=$((SECONDS + 300))
@@ -257,6 +257,28 @@ jobs:
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-redis)" = healthy ]
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse)" = healthy ]
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
+            init_deadline=$((SECONDS + 240))
+            while :; do
+              init_id="$(docker compose ps -q clickhouse-init)"
+              if [ -n "$init_id" ]; then
+                init_state="$(docker inspect --format '{{.State.Status}}' "$init_id")"
+                if [ "$init_state" = exited ]; then
+                  init_exit="$(docker inspect --format '{{.State.ExitCode}}' "$init_id")"
+                  if [ "$init_exit" != 0 ]; then
+                    docker logs --tail 200 "$init_id" 2>&1 || true
+                    echo "ClickHouse schema initialization failed with exit code $init_exit."
+                    exit 1
+                  fi
+                  break
+                fi
+              fi
+              if [ "$SECONDS" -ge "$init_deadline" ]; then
+                echo "ClickHouse schema initialization did not complete within 240 seconds."
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "ClickHouse base schema initialization: PASS"
 
             echo '=== STAGING SCOPED CLICKHOUSE STATE MIGRATION ==='
             # Quiesce all application writers before the one-time schema cutover.
