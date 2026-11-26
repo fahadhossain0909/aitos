@@ -798,7 +798,10 @@ class DurableTradingStateStore:
                     "ALTER TABLE trade_runtime_state DELETE "
                     "WHERE trade_id = {trade_id:String} "
                     "AND JSONExtractString(payload_json, 'account_scope') = {account_scope:String}",
-                    parameters={"trade_id": trade_id, "account_scope": self.account_scope},
+                    parameters={
+                        "trade_id": trade_id,
+                        "account_scope": self.account_scope,
+                    },
                 )
         except Exception:
             logger.exception(
