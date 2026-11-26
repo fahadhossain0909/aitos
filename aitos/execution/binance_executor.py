@@ -436,11 +436,12 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             validated.append(dict(row))
         return validated
 
-    async def get_account_equity(self, asset: str = "USDT") -> float:
-        """Return total futures margin equity, including unrealized PnL.
+    async def get_account_equity_decimal(self, asset: str = "USDT") -> Decimal:
+        """Return exact total futures margin equity from Binance's decimal string.
 
-        Available balance is spendable margin, not account equity. Portfolio
-        risk and drawdown must use Binance's totalMarginBalance instead.
+        Available balance is spendable margin, not account equity. Keep the
+        exchange's decimal representation intact for canonical accounting;
+        converting through float can silently round ledger reconciliation.
         """
         if asset != "USDT":
             raise ValueError("USD-M total margin equity is denominated in USDT")
@@ -451,12 +452,16 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         if isinstance(raw_equity, bool):
             raise ValueError("Binance total margin equity is invalid")
         try:
-            equity = float(raw_equity)
-        except (TypeError, ValueError, OverflowError):
+            equity = Decimal(str(raw_equity))
+        except (TypeError, ValueError, ArithmeticError):
             raise ValueError("Binance total margin equity is unavailable") from None
-        if not math.isfinite(equity) or equity < 0:
+        if not equity.is_finite() or equity < 0:
             raise ValueError("Binance total margin equity is non-finite or negative")
         return equity
+
+    async def get_account_equity(self, asset: str = "USDT") -> float:
+        """Compatibility float view; canonical accounting uses the Decimal API."""
+        return float(await self.get_account_equity_decimal(asset))
 
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
