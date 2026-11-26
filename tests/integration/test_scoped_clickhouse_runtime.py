@@ -21,9 +21,7 @@ class AsyncClickHouseAdapter:
         return await asyncio.to_thread(self.client.command, query, **kwargs)
 
     async def query(self, query, parameters=None):
-        return await asyncio.to_thread(
-            self.client.query, query, parameters=parameters
-        )
+        return await asyncio.to_thread(self.client.query, query, parameters=parameters)
 
     async def insert(self, table, rows, column_names=None):
         return await asyncio.to_thread(
@@ -113,12 +111,12 @@ async def test_scope_keyed_clickhouse_runtime_isolates_same_trade_id_across_acco
 
         open_a = await store_a.load_open_trades()
         open_b = await store_b.load_open_trades()
-        assert [(trade.trade_id, trade.symbol, trade.account_scope) for trade in open_a] == [
-            ("shared-trade-id", "BTCUSDT", scope_a)
-        ]
-        assert [(trade.trade_id, trade.symbol, trade.account_scope) for trade in open_b] == [
-            ("shared-trade-id", "ETHUSDT", scope_b)
-        ]
+        assert [
+            (trade.trade_id, trade.symbol, trade.account_scope) for trade in open_a
+        ] == [("shared-trade-id", "BTCUSDT", scope_a)]
+        assert [
+            (trade.trade_id, trade.symbol, trade.account_scope) for trade in open_b
+        ] == [("shared-trade-id", "ETHUSDT", scope_b)]
 
         closed_a = _trade(scope_a, "BTCUSDT", TradeLifecycleState.POSITION_CLOSED)
         await store_a.save_closed_trade(closed_a)
