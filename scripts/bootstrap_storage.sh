@@ -136,13 +136,23 @@ for legacy in others; do
 done
 
 log "Creating canonical AITOS data layout"
-${SUDO[@]} mkdir -p \
-  "$DATA_ROOT/databases/clickhouse" "$DATA_ROOT/databases/neo4j" \
-  "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" \
-  "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" \
-  "$DATA_ROOT/research/backtest" "$DATA_ROOT/research/replay" \
-  "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
-  "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
+if [[ "$ROOT_DISK_MODE" == "true" ]]; then
+  docker run --rm --user 0:0 -v "$DATA_ROOT:/data" alpine:3.20 sh -ec '
+    mkdir -p /data/databases/clickhouse /data/databases/neo4j \
+      /data/eventbus/redis/live /data/eventbus/redis/archive \
+      /data/research/backtest /data/research/replay \
+      /data/artifacts/backups /data/artifacts/snapshots \
+      /data/runtime/models /data/runtime/logs/neo4j /data/runtime/tmp
+  '
+else
+  ${SUDO[@]} mkdir -p \
+    "$DATA_ROOT/databases/clickhouse" "$DATA_ROOT/databases/neo4j" \
+    "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" \
+    "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" \
+    "$DATA_ROOT/research/backtest" "$DATA_ROOT/research/replay" \
+    "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
+    "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
+fi
 
 for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
   ${SUDO[@]} test -d "$DATA_ROOT/$required" || {
