@@ -73,6 +73,8 @@ if [[ "${AITOS_ALLOW_BOOT_DISK_DATA:-false}" == "true" ]]; then
   echo "Data directory: $DATA_ROOT"
 else
   [[ -n "$DISK_UUID" ]] || die "AITOS_DATA_DISK_UUID is required unless staging root-disk mode is explicitly enabled."
+  ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
+  [[ -n "$ROOT_UUID" && "$DISK_UUID" != "$ROOT_UUID" ]] || die "Configured data disk UUID resolves to the root filesystem; refusing boot-disk fallback."
   UUID_LINK="/dev/disk/by-uuid/$DISK_UUID"
   [[ -e "$UUID_LINK" ]] || die "Configured disk UUID was not found: $DISK_UUID"
   DEVICE="$(readlink -f "$UUID_LINK")"
