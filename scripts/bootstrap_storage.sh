@@ -56,12 +56,12 @@ run_sudo() {
 }
 
 if [[ -z "$DISK_UUID" ]]; then
-  ROOT_DISK_MODE=true
   log "Using operating-system root filesystem (no external data UUID configured)"
-  mkdir -p "$DATA_ROOT"
+  if ! mkdir -p "$DATA_ROOT" 2>/dev/null; then run_sudo mkdir -p "$DATA_ROOT"; fi
   DATA_UUID="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
   DATA_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target "$DATA_ROOT" | head -n1)")"
   [[ "$DATA_UUID" == "$ROOT_UUID" && "$DATA_SOURCE" == "$ROOT_SOURCE" ]] || die "AITOS_DATA_ROOT is not on the operating-system root filesystem. Refusing to silently use another mount."
+  ROOT_DISK_MODE=true
   echo "Root filesystem UUID: $ROOT_UUID"
   echo "Data directory: $DATA_ROOT"
   # A short-lived root helper applies container UID/GID ownership without
@@ -132,7 +132,7 @@ has_entries() {
       [ -n "$(find "/data/$1" -mindepth 1 -print -quit 2>/dev/null)" ]
     ' sh "$relative_path"
   else
-    [[ -n "$("run_sudo" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
+    [[ -n "$(run_sudo find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
   fi
 }
 
