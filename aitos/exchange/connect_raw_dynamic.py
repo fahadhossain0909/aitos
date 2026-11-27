@@ -288,8 +288,6 @@ async def connect_raw_dynamic(
                 }.get(termination_class)
                 if counter is not None and termination_class != "lifecycle_rotation":
                     transport[counter] = transport.get(counter, 0) + 1
-                if termination_class == "abnormal_error":
-                    transport["abnormal_close_count"] = transport.get("abnormal_close_count", 0) + 1
         if emit_reconnect:
             yield None, "__reconnect__"
         logger.warning(
