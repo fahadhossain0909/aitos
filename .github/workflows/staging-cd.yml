@@ -7,7 +7,6 @@ on:
       - 'feature/**'
       - 'bugfix/**'
       - 'hotfix/**'
-      - 'fix/production-readiness-hardening-2026-11'
   workflow_dispatch:
 
 permissions:
