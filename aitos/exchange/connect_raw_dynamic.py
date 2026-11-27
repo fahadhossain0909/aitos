@@ -330,7 +330,15 @@ async def connect_raw_dynamic(
                 await asyncio.gather(recv_task, return_exceptions=True)
             if ws is not None:
                 transport = adapter._ws_transport
-                transport["close_count"] = transport.get("close_count", 0) + 1
+                for metric in (
+                    "close_count",
+                    "intentional_close_count",
+                    "normal_close_count",
+                    "abnormal_close_count",
+                    "lifecycle_rotation_count",
+                ):
+                    transport.setdefault(metric, 0)
+                transport["close_count"] = int(transport["close_count"]) + 1
                 transport["last_close_code"] = getattr(ws, "close_code", None)
                 transport["last_close_reason"] = getattr(ws, "close_reason", None)
                 transport["last_disconnect_class"] = termination_class
@@ -369,6 +377,9 @@ async def connect_raw_dynamic(
                         int(stream_stats.get(stream_counter, 0)) + 1
                     )
                 elif termination_class == "lifecycle_rotation":
+                    transport["lifecycle_rotation_count"] = (
+                        int(transport["lifecycle_rotation_count"]) + 1
+                    )
                     stream_stats["lifecycle_rotation_count"] = (
                         int(stream_stats.get("lifecycle_rotation_count", 0)) + 1
                     )
