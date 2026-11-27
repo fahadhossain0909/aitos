@@ -193,6 +193,7 @@ class ManagedStreamSet:
         if self._closed and self._queue.empty():
             raise StopAsyncIteration
         data, stream_name, queued_at = await self._queue.get()
+        self._queue.task_done()
         waited_ms = max(0.0, (time.monotonic() - queued_at) * 1000.0)
         self._queue_stats["dequeued"] += 1
         self._queue_stats["queue_wait_total_ms"] += waited_ms
