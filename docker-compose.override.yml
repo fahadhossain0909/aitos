@@ -1,11 +1,4 @@
 services:
-  # Staging overrides ClickHouse's default Docker named volume so its data
-  # lives on the verified provider data disk. Windows/local users keep the
-  # base named volume because this override is only used by staging.
-  clickhouse:
-    volumes:
-      - "${AITOS_DATA_ROOT:-./data}/databases/clickhouse:/var/lib/clickhouse"
-
   # Do not override Redis command here. Compose replaces (rather than merges)
   # command arrays, which would silently remove requirepass, maxmemory,
   # maxmemory-policy and appendfsync from docker-compose.yml.
