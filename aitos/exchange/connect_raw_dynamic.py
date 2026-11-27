@@ -363,7 +363,7 @@ async def connect_raw_dynamic(
                     "abnormal_error": "abnormal_close_count",
                 }.get(termination_class)
                 if counter is not None:
-                    transport[counter] = transport.get(counter, 0) + 1
+                    transport[counter] = int(transport.get(counter, 0)) + 1
                     stream_counter = counter
                     stream_stats[stream_counter] = (
                         int(stream_stats.get(stream_counter, 0)) + 1
