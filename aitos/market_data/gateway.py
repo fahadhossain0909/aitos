@@ -83,6 +83,12 @@ class MarketDataGateway:
         self.health.record_event()
         age = self._source_freshness_age_seconds(event)
         symbol = self._data_flow_symbol(event)
+        ingest_delay_ms = max(
+            0.0, (event.ingest_time - event.event_time).total_seconds() * 1000.0
+        )
+        post_ingest_age_ms = max(
+            0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds() * 1000.0
+        )
         try:
             from aitos.forensics.data_flow_hooks import note_trace, record_input
             from aitos.forensics.data_flow_schema import PipelineStage
@@ -97,7 +103,12 @@ class MarketDataGateway:
                 stage=PipelineStage.GATEWAY_QUEUE.value,
                 symbol=symbol,
                 event_id=event.event_id,
-                extra={"phase": "ingress", "source_age_ms": age * 1000.0},
+                extra={
+                    "phase": "ingress",
+                    "event_age_ms": age * 1000.0,
+                    "source_to_ingest_ms": ingest_delay_ms,
+                    "ingest_to_gateway_ms": post_ingest_age_ms,
+                },
             )
         except Exception:
             pass
