@@ -67,7 +67,7 @@ jobs:
 
             duration = int(os.environ["DURATION_SECONDS"])
             url = (
-                "wss://fstream.binance.com/stream?streams="
+                "wss://fstream.binance.com/market/stream?streams="
                 "btcusdt@aggTrade/btcusdt@depth@100ms"
             )
 
