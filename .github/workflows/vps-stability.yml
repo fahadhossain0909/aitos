@@ -14,11 +14,21 @@ concurrency:
 
 jobs:
   check:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
-    name: Check Redis and paper runtime
+    name: Check AITOS staging storage and runtime
     runs-on: ubuntu-latest
     environment: papertrade
+    timeout-minutes: 10
     steps:
+      - name: Require staging monitoring to be enabled
+        env:
+          AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$AITOS_VPS_ENABLED" != "true" ]; then
+            echo '::error::Scheduled staging monitoring is disabled. Set repository variable AITOS_VPS_ENABLED=true or the monitoring checks will not execute.'
+            exit 1
+          fi
+
       - name: Check required deployment secrets
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -42,7 +52,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
 
-      - name: Check Redis and paper runtime
+      - name: Check staging storage and runtime
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -50,41 +60,58 @@ jobs:
           key_path: /tmp/deploy_key
           command_timeout: 5m
           script: |
-            set -euo pipefail
+            set -Eeuo pipefail
             exec 9>"$HOME/.aitos-stability.lock"
             flock 9
-            cd "$HOME/aitos"
-            echo '=== Storage ==='
-            df -h / /mnt/aitos-data
-            echo '=== Redis ==='
-            docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} mem={{.HostConfig.Memory}}' aitos-redis
-            docker exec aitos-redis redis-cli ping
-            loading="$(docker exec aitos-redis redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\r')"
-            test "$loading" = 0
-            echo '=== Paper runtime ==='
-            docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} mem={{.HostConfig.Memory}}' aitos-paper
-            paper_health=""
-            for _ in $(seq 1 18); do
-              paper_status="$(docker inspect --format '{{.State.Status}}' aitos-paper)"
-              paper_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-paper)"
-              echo "aitos-paper status=$paper_status health=$paper_health"
-              if [ "$paper_health" = healthy ]; then
-                break
-              fi
-              if [ "$paper_status" = running ] && [ "$paper_health" = starting ]; then
-                sleep 10
-                continue
-              fi
-              break
+            cd /opt/aitos-staging
+
+            DATA_ROOT="$(sed -n 's/^AITOS_DATA_ROOT=//p' .env | tail -n1)"
+            DATA_UUID="$(sed -n 's/^AITOS_DATA_DISK_UUID=//p' .env | tail -n1)"
+            REDIS_PASSWORD="$(sed -n 's/^REDIS_PASSWORD=//p' .env | tail -n1)"
+            CLICKHOUSE_PASSWORD="$(sed -n 's/^CLICKHOUSE_PASSWORD=//p' .env | tail -n1)"
+            [ -n "$DATA_ROOT" ] && [ -n "$DATA_UUID" ] || { echo '::error::Staging storage identity is incomplete.'; exit 1; }
+
+            echo '=== Provider data disk ==='
+            mountpoint -q "$DATA_ROOT" || { echo '::error::Staging data root is not a mountpoint.'; exit 1; }
+            mounted_uuid="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
+            root_uuid="$(findmnt -rn -o UUID --target / | head -n1)"
+            [ "$mounted_uuid" = "$DATA_UUID" ] || { echo "::error::Mounted UUID $mounted_uuid differs from configured $DATA_UUID."; exit 1; }
+            [ "$mounted_uuid" != "$root_uuid" ] || { echo '::error::Staging data is on the boot disk.'; exit 1; }
+            df -h "$DATA_ROOT"
+
+            echo '=== Compose services ==='
+            docker compose ps --all
+
+            echo '=== Required container health ==='
+            for container in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-redis-dlq-retention aitos-redis-stream-archive; do
+              state="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo missing)"
+              health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo missing)"
+              restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo 0)"
+              oom="$(docker inspect --format '{{.State.OOMKilled}}' "$container" 2>/dev/null || echo true)"
+              printf '%-34s status=%s health=%s restarts=%s oom=%s\n' "$container" "$state" "$health" "$restarts" "$oom"
+              [ "$state" = running ] || { echo "::error::$container is not running."; docker logs --tail 120 "$container" 2>&1 || true; exit 1; }
+              [ "$health" != unhealthy ] || { echo "::error::$container is unhealthy."; docker logs --tail 120 "$container" 2>&1 || true; exit 1; }
+              [ "$oom" != true ] || { echo "::error::$container was OOM-killed."; exit 1; }
             done
-            if [ "$paper_health" != healthy ]; then
-              echo '::error::aitos-paper is not healthy.'
-              docker logs --tail 100 aitos-paper || true
-              exit 1
-            fi
-            echo '=== Docker disk ==='
+
+            echo '=== Redis / ClickHouse / Neo4j connectivity ==='
+            docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" aitos-redis redis-cli ping | grep -qx PONG
+            docker exec aitos-clickhouse clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" --query 'SELECT 1' | grep -qx 1
+            curl -fsS --max-time 10 http://127.0.0.1:7474/ >/dev/null
+
+            echo '=== Paper runtime APIs ==='
+            curl -fsS --max-time 10 http://127.0.0.1:8090/health
+            curl -fsS --max-time 10 http://127.0.0.1:8090/metrics >/dev/null
+
+            echo '=== Recent scanner activity (observational) ==='
+            docker logs --since 60m aitos-paper 2>&1 | grep -E 'live scanner freshness|paper signal diagnostics|scanner score breakdown|scanner ranking decision|trade candidate' | tail -n 80 || true
+
+            echo '=== Host resources ==='
+            uptime
+            free -h
+            df -h /
             docker system df
-            echo 'VPS stability check passed.'
+            echo 'VPS staging stability check passed.'
 
       - name: Cleanup SSH key
         if: always()
