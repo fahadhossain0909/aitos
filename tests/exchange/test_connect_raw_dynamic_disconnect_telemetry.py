@@ -161,8 +161,6 @@ async def test_reconnect_backoff_resets_after_stable_connection(monkeypatch):
     assert delays == [1.0, 1.0]
 
 
-
-
 @pytest.mark.asyncio
 async def test_failed_handshake_is_not_counted_as_an_established_socket_close(
     monkeypatch,
