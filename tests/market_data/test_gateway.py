@@ -1,6 +1,6 @@
 import asyncio
-from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -27,7 +27,6 @@ def _event(
         sequence=sequence,
     )
 
-
 @pytest.mark.asyncio
 async def test_gateway_rejects_stale_websocket_events() -> None:
     gateway = MarketDataGateway(
@@ -39,7 +38,6 @@ async def test_gateway_rejects_stale_websocket_events() -> None:
     assert gateway.accept(_event(MarketSource.WEBSOCKET, 20)) is False
     assert gateway.queue.qsize() == 0
     assert gateway.health.last_error is not None
-
 
 @pytest.mark.asyncio
 async def test_gateway_accepts_stale_rest_as_degraded_recovery() -> None:
@@ -55,7 +53,6 @@ async def test_gateway_accepts_stale_rest_as_degraded_recovery() -> None:
     assert gateway.accept(_event(MarketSource.REST, 20)) is True
     assert gateway.state is GatewayState.DEGRADED
     assert gateway.health.degraded is True
-
 
 @pytest.mark.asyncio
 async def test_gateway_publishes_and_exposes_queue_depth() -> None:
@@ -76,7 +73,6 @@ async def test_gateway_publishes_and_exposes_queue_depth() -> None:
     assert len(published) == 1
     assert gateway.snapshot()["queue"]["depth"] == 0
 
-
 @pytest.mark.asyncio
 async def test_gateway_preserves_fifo_order_with_single_drain() -> None:
     published = []
@@ -96,7 +92,6 @@ async def test_gateway_preserves_fifo_order_with_single_drain() -> None:
         await gateway.drain_once()
 
     assert published == [0, 1, 2, 3, 4]
-
 
 @pytest.mark.asyncio
 async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
@@ -121,7 +116,6 @@ async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
     }
     assert stages["publisher"]["count"] == 1
 
-
 @pytest.mark.asyncio
 async def test_gateway_drain_once_returns_false_on_empty_queue() -> None:
     published = []
@@ -135,7 +129,6 @@ async def test_gateway_drain_once_returns_false_on_empty_queue() -> None:
     assert await gateway.drain_once() is False
     assert published == []
     assert gateway.queue.qsize() == 0
-
 
 @pytest.mark.asyncio
 async def test_gateway_never_evicts_queued_orderbook_delta_for_trade_burst() -> None:
@@ -159,7 +152,6 @@ async def test_gateway_never_evicts_queued_orderbook_delta_for_trade_burst() -> 
     assert gateway.queue.qsize() == 1
     assert gateway.queue._queue._queue[0] is delta
 
-
 @pytest.mark.asyncio
 async def test_gateway_admits_book_delta_by_evicting_replaceable_trade() -> None:
     gateway = MarketDataGateway(
@@ -181,7 +173,6 @@ async def test_gateway_admits_book_delta_by_evicting_replaceable_trade() -> None
     assert gateway.accept(delta) is True
     assert gateway.queue._queue._queue[0] is delta
     assert gateway.queue.stats.replaced_oldest == 1
-
 
 @pytest.mark.asyncio
 async def test_gateway_degrades_when_all_queue_slots_are_sequence_critical() -> None:
@@ -209,8 +200,6 @@ async def test_gateway_degrades_when_all_queue_slots_are_sequence_critical() -> 
     assert gateway.queue._queue._queue[0] is first
     assert gateway.state is GatewayState.DEGRADED
     assert gateway.health.degraded is True
-
-
 
 @pytest.mark.asyncio
 async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
