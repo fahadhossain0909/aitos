@@ -170,9 +170,7 @@ async def test_orderbook_sequence_gap_rebootstraps_from_rest_snapshot():
     adapter = BinanceFuturesAdapter(ws_connector=connector)
     bootstraps: list[int] = []
 
-    async def fake_fetch_order_book(
-        symbol: str, limit: int = 50
-    ) -> OrderBookSnapshot:
+    async def fake_fetch_order_book(symbol: str, limit: int = 50) -> OrderBookSnapshot:
         update_id = 1 if not bootstraps else 4
         bootstraps.append(update_id)
         return OrderBookSnapshot(
