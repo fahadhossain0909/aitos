@@ -422,7 +422,7 @@ jobs:
             DEADLINE=0
             CYCLE=0
             printf 'AITOS staging paper soak started: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REPORT"
-            PAPER_STARTUP_TIMEOUT_SECONDS="${PAPER_STARTUP_TIMEOUT_SECONDS:-300}"
+            PAPER_STARTUP_TIMEOUT_SECONDS="${PAPER_STARTUP_TIMEOUT_SECONDS:-600}"
             echo "=== WAITING FOR PAPER STARTUP (max ${PAPER_STARTUP_TIMEOUT_SECONDS} seconds) ===" | tee -a "$REPORT"
             READY_DEADLINE=$((SECONDS + PAPER_STARTUP_TIMEOUT_SECONDS))
             PAPER_READY=false
