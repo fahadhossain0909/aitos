@@ -71,6 +71,7 @@ async def connect_raw_dynamic(
                 label,
                 {
                     "connect_attempts": 0,
+                    "connection_failure_count": 0,
                     "successful_handshakes": 0,
                     "close_count": 0,
                     "intentional_close_count": 0,
