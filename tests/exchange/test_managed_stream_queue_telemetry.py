@@ -35,7 +35,7 @@ async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
     assert stats["max_depth"] == 2
     assert stats["overflow_events"] == 2
     assert stats["dropped_events"] == 4
-    assert stats["enqueued"] == 3
+    assert stats["enqueued"] == 5
 
     data, stream_name = await stream.__anext__()
     assert data == {"event": 4}
