@@ -45,6 +45,7 @@ async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
     assert stats["dequeued"] == 1
     assert stats["depth"] == 0
     assert stats["queue_wait_max_ms"] >= 0
+    await stream._queue.join()
 
     await stream.aclose()
 
