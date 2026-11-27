@@ -6,6 +6,7 @@ on:
       - 'architecture/**'
       - 'feature/**'
       - 'bugfix/**'
+      - 'fix/**'
       - 'hotfix/**'
   workflow_dispatch:
 
@@ -15,7 +16,7 @@ permissions:
 
 concurrency:
   group: aitos-staging
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -25,6 +26,7 @@ env:
 
 jobs:
   publish-image:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     runs-on: ubuntu-latest
@@ -50,6 +52,7 @@ jobs:
           sbom: true
 
   deploy-and-audit:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     needs: publish-image
     timeout-minutes: 110
@@ -302,7 +305,7 @@ jobs:
                 docker logs --tail 250 --timestamps "$container" 2>&1 || true
                 exit 1
               fi
-            done ]
+            done
             init_deadline=$((SECONDS + 240))
             while :; do
               init_id="$(docker compose ps --all -q clickhouse-init)"
