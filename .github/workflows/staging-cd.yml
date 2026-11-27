@@ -90,7 +90,7 @@ jobs:
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AITOS_ALLOW_BOOT_DISK_DATA: 'true'
+          AITOS_ALLOW_BOOT_DISK_DATA: 'false'
           AITOS_RUNTIME_IMAGE: ghcr.io/fahadhossain0909/aitos@${{ needs.publish-image.outputs.digest }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -103,8 +103,8 @@ jobs:
             : "${AITOS_DATA_ROOT:=/mnt/aitos-staging-data}"
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
-            : "${AITOS_ALLOW_BOOT_DISK_DATA:=true}"
-            AITOS_DATA_DISK_UUID="${AITOS_DATA_DISK_UUID:-$(findmnt -rn -o UUID --target / | head -n1)}"
+            : "${AITOS_ALLOW_BOOT_DISK_DATA:=false}"
+            : "${AITOS_DATA_DISK_UUID:?AITOS_DATA_DISK_UUID must be set to the attached provider data disk UUID; boot-disk fallback is disabled.}"
             APP_DIR="/opt/aitos-staging"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
@@ -117,6 +117,20 @@ jobs:
             echo '=== STAGING BOOT DISK PREFLIGHT ==='
             boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
             [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || { echo '::error::Staging boot disk below reserve; refusing destructive cleanup.'; exit 1; }
+
+            echo '=== STAGING PROVIDER DATA DISK PREFLIGHT ==='
+            ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
+            [ -n "$ROOT_UUID" ] || { echo '::error::Unable to identify root filesystem UUID.'; exit 1; }
+            [ "$AITOS_DATA_DISK_UUID" != "$ROOT_UUID" ] || { echo '::error::Configured data disk UUID resolves to the boot disk; refusing fallback.'; exit 1; }
+            DATA_DEVICE="/dev/disk/by-uuid/$AITOS_DATA_DISK_UUID"
+            [ -b "$(readlink -f "$DATA_DEVICE" 2>/dev/null || true)" ] || { echo "::error::Provider data disk UUID is not attached: $AITOS_DATA_DISK_UUID"; lsblk -o NAME,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINTS; exit 1; }
+            if mountpoint -q "$AITOS_DATA_ROOT"; then
+              MOUNTED_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
+              [ "$MOUNTED_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Data root is mounted from UUID $MOUNTED_UUID, expected $AITOS_DATA_DISK_UUID."; exit 1; }
+            elif [ -d "$AITOS_DATA_ROOT" ] && find "$AITOS_DATA_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+              echo '::error::Existing root-disk staging data must be backed up and migrated to the provider disk before mounting over this directory.'
+              exit 1
+            fi
 
             echo '=== STAGING SOURCE DEPLOYMENT ==='
             tmp_dir=$(mktemp -d)
@@ -134,7 +148,10 @@ jobs:
             export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
             chmod +x scripts/bootstrap_storage.sh
             ./scripts/bootstrap_storage.sh
-            test "$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT")" = "$(findmnt -rn -o UUID --target /)"
+            DATA_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
+            ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
+            [ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Mounted data UUID $DATA_UUID does not match configured provider UUID $AITOS_DATA_DISK_UUID."; exit 1; }
+            [ "$DATA_UUID" != "$ROOT_UUID" ] || { echo '::error::Data directory is still on the boot disk.'; exit 1; }
 
             echo '=== STAGING ENVIRONMENT ==='
             umask 077
@@ -156,7 +173,7 @@ jobs:
             TESTING=false
             AITOS_DATA_ROOT=$AITOS_DATA_ROOT
             AITOS_DATA_DISK_UUID=$AITOS_DATA_DISK_UUID
-            AITOS_ALLOW_BOOT_DISK_DATA=true
+            AITOS_ALLOW_BOOT_DISK_DATA=false
             AITOS_AUTO_RESET_DISPOSABLE_DATA=false
             AITOS_MODE=paper
             AITOS_PAPER_ACCOUNT_SCOPE=paper:staging
@@ -246,7 +263,7 @@ jobs:
             docker compose up -d --remove-orphans --force-recreate redis clickhouse neo4j clickhouse-init redis-dlq-retention redis-stream-archive
 
             echo '=== STAGING HEALTH GATE ==='
-            deadline=$((SECONDS + 300))
+            deadline=$((SECONDS + 900))
             while [ "$SECONDS" -lt "$deadline" ]; do
               redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-redis 2>/dev/null || true)
               clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-clickhouse 2>/dev/null || true)
@@ -254,9 +271,15 @@ jobs:
               if [ "$redis_state" = healthy ] && [ "$clickhouse_state" = healthy ] && [ "$neo4j_state" = healthy ]; then break; fi
               sleep 10
             done
-            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-redis)" = healthy ]
-            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse)" = healthy ]
-            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
+            for container in aitos-redis aitos-clickhouse aitos-neo4j; do
+              state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || echo missing)"
+              if [ "$state" != healthy ]; then
+                echo "::error::$container failed readiness gate: $state"
+                docker inspect --format '{{json .State.Health}}' "$container" 2>&1 || true
+                docker logs --tail 250 --timestamps "$container" 2>&1 || true
+                exit 1
+              fi
+            done ]
             init_deadline=$((SECONDS + 240))
             while :; do
               init_id="$(docker compose ps --all -q clickhouse-init)"
@@ -345,7 +368,10 @@ jobs:
             if [ -n "$bad_containers" ]; then printf '%s\n' "$bad_containers"; exit 1; fi
 
             echo '=== STAGING STORAGE GATE ==='
-            test "$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT")" = "$(findmnt -rn -o UUID --target /)"
+            DATA_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
+            ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
+            [ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Final storage gate expected $AITOS_DATA_DISK_UUID, found $DATA_UUID."; exit 1; }
+            [ "$DATA_UUID" != "$ROOT_UUID" ] || { echo '::error::Final storage gate detected boot-disk fallback.'; exit 1; }
             df -h "$AITOS_DATA_ROOT"
             docker run --rm --user 0:0 -v "$AITOS_DATA_ROOT:/data" alpine:3.20 sh -ec '
               for path in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
