@@ -19,6 +19,7 @@ logger = get_logger("aitos.exchange.connect_raw_dynamic")
 
 INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 60.0
+STABLE_CONNECTION_RESET_SECONDS = 60.0
 
 
 def _now_iso() -> str:
@@ -130,7 +131,6 @@ async def connect_raw_dynamic(
                         }
                     },
                 )
-                backoff = INITIAL_BACKOFF_SECONDS
                 sub_request_id = 0
                 first_message = True
                 # Do not clear changed here: a universe update can arrive
@@ -338,6 +338,11 @@ async def connect_raw_dynamic(
                     )
                     transport["last_connection_uptime_seconds"] = round(uptime, 3)
                     stream_stats["last_connection_uptime_seconds"] = round(uptime, 3)
+                    if uptime >= STABLE_CONNECTION_RESET_SECONDS:
+                        backoff = INITIAL_BACKOFF_SECONDS
+                        transport["last_stable_connection_uptime_seconds"] = round(
+                            uptime, 3
+                        )
                 counter = {
                     "intentional_cancel": "intentional_close_count",
                     "remote_clean_close": "normal_close_count",
