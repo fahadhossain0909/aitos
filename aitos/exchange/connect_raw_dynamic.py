@@ -369,9 +369,9 @@ async def connect_raw_dynamic(
                         int(stream_stats.get(stream_counter, 0)) + 1
                     )
                 elif termination_class == "lifecycle_rotation":
-                    stream_stats["lifecycle_rotation_count"] = int(
-                        stream_stats.get("lifecycle_rotation_count", 0)
-                    ) + 1
+                    stream_stats["lifecycle_rotation_count"] = (
+                        int(stream_stats.get("lifecycle_rotation_count", 0)) + 1
+                    )
         if emit_reconnect:
             yield None, "__reconnect__"
         logger.warning(
