@@ -288,7 +288,7 @@ Prepare a dedicated Linux VPS with:
 - Docker Engine and Docker Compose v2 installed.
 - `sudo` access for storage mount/ownership preparation.
 - `flock`, `curl`, `tar`, `mountpoint`, `findmnt`, `lsblk` and standard GNU utilities.
-- A dedicated persistent data disk, mounted at `/mnt/aitos-data`.
+- Writable persistent storage at `/mnt/aitos-data`. An external data disk is optional; when none is configured, AITOS stores its data on the VPS operating-system root filesystem.
 - Enough CPU, RAM and disk capacity for Redis, ClickHouse, Neo4j and the AITOS services. Size this for the expected market-data retention and research workload; do not assume a small/free instance is sufficient.
 - SSH public-key authentication from GitHub Actions.
 
@@ -298,34 +298,29 @@ The production deployment uses:
 - Docker Compose project: `aitos`
 - GitHub Actions environment: `papertrade`
 
-## 2.3 Prepare the persistent data disk
+## 2.3 Choose the persistent storage backend
 
-**Do not format an existing disk.** Formatting destroys data. Device names differ across VPS providers.
+AITOS supports two explicit storage modes. The same data layout is used in both modes; only the backing filesystem changes.
 
-1. Identify disks:
+**Mode A — OS root filesystem (default):** leave the GitHub Environment secret `AITOS_DATA_DISK_UUID` empty or unset. AITOS stores its durable data under `/mnt/aitos-data` on the filesystem that contains `/`. No extra disk, mount or UUID is required. This is the intended mode for a single-disk VPS such as the current staging host.
 
-   ```bash
-   lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS,UUID
-   ```
+**Mode B — external filesystem:** set `AITOS_DATA_DISK_UUID` to the UUID of an already formatted and attached external filesystem. The workflow verifies that the UUID is not the OS root UUID, mounts it at `/mnt/aitos-data` if it is not already mounted, verifies the resulting mount, and persists the UUID mount in `/etc/fstab`.
 
-2. Identify the intended dedicated data disk and record its filesystem UUID:
+**Do not format an existing disk.** Formatting destroys data. Device names differ across VPS providers. To inspect available filesystems:
 
-   ```bash
-   sudo blkid
-   ```
+```bash
+lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS,UUID
+sudo blkid
+```
 
-3. Ensure that disk is mounted at `/mnt/aitos-data` and that the mount persists across reboot using its UUID in `/etc/fstab`. Do not copy an example device name without checking it on your host.
-4. Verify:
+Before switching an existing installation from root storage to an external filesystem, stop the relevant writers, make and verify a restorable backup, migrate the existing data deliberately, and ensure the target mount point is empty before mounting. The bootstrap refuses to hide existing data under an external mount. Do not run hard-reset or formatting workflows as part of ordinary deployment.
 
-   ```bash
-   mountpoint /mnt/aitos-data
-   findmnt --target /mnt/aitos-data
-   df -hT /mnt/aitos-data
-   ```
+Verify the selected storage after deployment:
 
-5. Record the exact filesystem UUID. The deployment uses it as a safety check and fails closed if the configured UUID does not match the mounted device.
-
-The CD workflow runs the legacy-storage migration before its storage bootstrap. Therefore the data disk must already be mounted at `/mnt/aitos-data` before the first deployment. Existing data must be reviewed and migrated deliberately; do not run hard-reset or formatting workflows as part of ordinary installation.
+```bash
+findmnt --target /mnt/aitos-data
+df -hT /mnt/aitos-data
+```
 
 ## 2.4 Prepare SSH access
 
@@ -347,14 +342,15 @@ In the GitHub repository, configure:
 
 **GitHub Actions environment**
 
-Create or use an environment named `papertrade`. Add these secrets:
+For the production workflow, create/use the `papertrade` environment. For the staging workflow, use the `staging` environment. Add the relevant secrets to the environment used by that workflow:
 
 | Secret | Required | Purpose |
 |---|---:|---|
 | `DEPLOY_HOST` | Yes | VPS hostname/IP |
 | `DEPLOY_USER` | Yes | SSH deployment user |
 | `DEPLOY_SSH_KEY` | Yes | Private SSH key for Actions |
-| `AITOS_DATA_DISK_UUID` | Yes | UUID of the mounted persistent data disk |
+| `AITOS_DATA_DISK_UUID` | No | Optional external filesystem UUID. Leave empty/unset to use the OS root filesystem; set only when deliberately using an external disk. |
+| `AITOS_SUDO_PASSWORD` | No | Optional sudo password for the deployment user, used only when non-interactive passwordless sudo is unavailable. Passed to the storage bootstrap over SSH stdin and never written to `.env` or logged. |
 | `REDIS_PASSWORD` | Yes | Redis authentication |
 | `CLICKHOUSE_PASSWORD` | Yes | ClickHouse authentication |
 | `NEO4J_PASSWORD` | Yes | Neo4j authentication |
@@ -452,9 +448,10 @@ A successful container health check is not proof of profitable trading, account 
 | Desktop cannot read runtime | Backend is running, correct origin/port, console token enabled, bearer token matches |
 | VPS desktop connection fails | SSH tunnel is running; use local tunnel origin `http://127.0.0.1:18090`; port 8090 is not public |
 | CD does not start | `AITOS_VPS_ENABLED=true`, correct ref, `papertrade` environment secrets |
-| CD fails storage preflight | Data disk is mounted at `/mnt/aitos-data`; configured UUID matches actual mounted disk |
+| CD fails storage preflight | With no `AITOS_DATA_DISK_UUID`, confirm the data root resolves to `/`; with an external UUID, confirm the filesystem is attached and the UUID matches |
 | Containers unhealthy | Inspect `docker compose ps --all` and service logs; preserve data while diagnosing |
 | Disk space low | Check `df -hT /mnt/aitos-data`; do not delete database files manually |
+| Storage sudo fails | Configure optional GitHub Environment secret `AITOS_SUDO_PASSWORD`, or grant narrowly scoped passwordless sudo to the deploy user; never put the password in `.env` |
 
 ## Related documentation
 
