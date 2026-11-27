@@ -34,6 +34,9 @@ async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
     assert stats["overflow_events"] == 2
     assert stats["dropped_events"] == 4
     assert stats["enqueued"] == 5
+    assert adapter._ws_transport["managed_queue_overflow_total"] == 2
+    assert adapter._ws_transport["managed_queue_dropped_total"] == 4
+    assert adapter._ws_transport["managed_queue_overflow_detected"] is True
 
     data, stream_name = await stream.__anext__()
     assert data == {"event": 4}
