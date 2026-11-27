@@ -63,7 +63,9 @@ def test_container_publication_emits_sbom_and_provenance_without_enabling_deploy
         # Staging uses an environment-scoped gate, then passes its output
         # to the image-publish and deploy jobs.
         gate = content.split("  staging-gate:", 1)[1].split("  publish-image:", 1)[0]
-        publish = content.split("  publish-image:", 1)[1].split("  deploy-and-audit:", 1)[0]
+        publish = content.split("  publish-image:", 1)[1].split(
+            "  deploy-and-audit:", 1
+        )[0]
         deploy = content.split("  deploy-and-audit:", 1)[1]
         assert "environment: staging" in gate
         assert "AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}" in gate
