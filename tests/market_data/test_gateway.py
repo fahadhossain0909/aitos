@@ -231,8 +231,9 @@ async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
     with patch("aitos.forensics.data_flow_hooks.note_trace") as note_trace:
         assert gateway.accept(event) is True
 
-    extra = note_trace.call_args.kwargs["extra"]
-    assert extra["phase"] == "ingress"
-    assert 3900 <= extra["event_age_ms"] <= 4100
-    assert 2900 <= extra["source_to_ingest_ms"] <= 3100
-    assert 900 <= extra["ingest_to_gateway_ms"] <= 1100
+    traces = [call.kwargs["extra"] for call in note_trace.call_args_list]
+    ingress = next(extra for extra in traces if extra.get("phase") == "ingress")
+    assert [extra["phase"] for extra in traces] == ["ingress", "enqueued"]
+    assert 3900 <= ingress["event_age_ms"] <= 4100
+    assert 2900 <= ingress["source_to_ingest_ms"] <= 3100
+    assert 900 <= ingress["ingest_to_gateway_ms"] <= 1100
