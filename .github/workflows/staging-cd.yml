@@ -87,26 +87,25 @@ jobs:
           BOOT_FREE_RESERVE_BYTES: ${{ env.BOOT_FREE_RESERVE_BYTES }}
           DATA_DISK_MIN_FREE_GB: ${{ env.DATA_DISK_MIN_FREE_GB }}
           AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+          AITOS_SUDO_PASSWORD: ${{ secrets.AITOS_SUDO_PASSWORD }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AITOS_ALLOW_BOOT_DISK_DATA: 'false'
           AITOS_RUNTIME_IMAGE: ghcr.io/fahadhossain0909/aitos@${{ needs.publish-image.outputs.digest }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_staging_key
           command_timeout: 20m
-          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,GHCR_USERNAME,GHCR_TOKEN,AITOS_ALLOW_BOOT_DISK_DATA,AITOS_RUNTIME_IMAGE
+          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,AITOS_SUDO_PASSWORD,REDIS_PASSWORD,CLICKHOUSE_PASSWORD,NEO4J_PASSWORD,GHCR_USERNAME,GHCR_TOKEN,AITOS_RUNTIME_IMAGE
           script: |
             set -Eeuo pipefail
             : "${AITOS_DATA_ROOT:=/mnt/aitos-staging-data}"
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
-            : "${AITOS_ALLOW_BOOT_DISK_DATA:=false}"
-            : "${AITOS_DATA_DISK_UUID:?AITOS_DATA_DISK_UUID must be set to the attached provider data disk UUID; boot-disk fallback is disabled.}"
+            : "${AITOS_DATA_DISK_UUID:=}"
             APP_DIR="/opt/aitos-staging"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
@@ -120,18 +119,29 @@ jobs:
             boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
             [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || { echo '::error::Staging boot disk below reserve; refusing destructive cleanup.'; exit 1; }
 
-            echo '=== STAGING PROVIDER DATA DISK PREFLIGHT ==='
+            echo '=== STAGING STORAGE MODE PREFLIGHT ==='
             ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
             [ -n "$ROOT_UUID" ] || { echo '::error::Unable to identify root filesystem UUID.'; exit 1; }
-            [ "$AITOS_DATA_DISK_UUID" != "$ROOT_UUID" ] || { echo '::error::Configured data disk UUID resolves to the boot disk; refusing fallback.'; exit 1; }
-            DATA_DEVICE="/dev/disk/by-uuid/$AITOS_DATA_DISK_UUID"
-            [ -b "$(readlink -f "$DATA_DEVICE" 2>/dev/null || true)" ] || { echo "::error::Provider data disk UUID is not attached: $AITOS_DATA_DISK_UUID"; lsblk -o NAME,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINTS; exit 1; }
-            if mountpoint -q "$AITOS_DATA_ROOT"; then
-              MOUNTED_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
-              [ "$MOUNTED_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Data root is mounted from UUID $MOUNTED_UUID, expected $AITOS_DATA_DISK_UUID."; exit 1; }
-            elif [ -d "$AITOS_DATA_ROOT" ] && find "$AITOS_DATA_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-              echo '::error::Existing root-disk staging data must be backed up and migrated to the provider disk before mounting over this directory.'
-              exit 1
+            if [ -n "$AITOS_DATA_DISK_UUID" ]; then
+              AITOS_STORAGE_MODE=external
+              [ "$AITOS_DATA_DISK_UUID" != "$ROOT_UUID" ] || { echo '::error::External data UUID must differ from the OS root UUID; leave it empty to use root storage.'; exit 1; }
+              DATA_DEVICE="/dev/disk/by-uuid/$AITOS_DATA_DISK_UUID"
+              [ -b "$(readlink -f "$DATA_DEVICE" 2>/dev/null || true)" ] || { echo "::error::Configured external data UUID is not attached: $AITOS_DATA_DISK_UUID"; lsblk -o NAME,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINTS; exit 1; }
+              if mountpoint -q "$AITOS_DATA_ROOT"; then
+                MOUNTED_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
+                [ "$MOUNTED_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Data root is mounted from UUID $MOUNTED_UUID, expected $AITOS_DATA_DISK_UUID."; exit 1; }
+              elif [ -d "$AITOS_DATA_ROOT" ] && find "$AITOS_DATA_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                echo '::error::Uncovered staging data exists at the mount point; refusing to hide it under the external filesystem.'
+                exit 1
+              fi
+              echo "Storage mode: external UUID $AITOS_DATA_DISK_UUID"
+            else
+              AITOS_STORAGE_MODE=root
+              if mountpoint -q "$AITOS_DATA_ROOT"; then
+                DATA_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
+                [ "$DATA_UUID" = "$ROOT_UUID" ] || { echo "::error::No external UUID configured, but data root is mounted from UUID $DATA_UUID."; exit 1; }
+              fi
+              echo "Storage mode: OS root filesystem UUID $ROOT_UUID"
             fi
 
             echo '=== STAGING SOURCE DEPLOYMENT ==='
@@ -145,15 +155,20 @@ jobs:
             cd "$APP_DIR"
 
             echo '=== STAGING STORAGE BOOTSTRAP ==='
-            export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID AITOS_ALLOW_BOOT_DISK_DATA
+            export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID AITOS_STORAGE_MODE
             export AITOS_AUTO_RESET_DISPOSABLE_DATA=false
             export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
             chmod +x scripts/bootstrap_storage.sh
             ./scripts/bootstrap_storage.sh
+            unset AITOS_SUDO_PASSWORD
             DATA_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
             ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
-            [ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Mounted data UUID $DATA_UUID does not match configured provider UUID $AITOS_DATA_DISK_UUID."; exit 1; }
-            [ "$DATA_UUID" != "$ROOT_UUID" ] || { echo '::error::Data directory is still on the boot disk.'; exit 1; }
+            if [ -n "$AITOS_DATA_DISK_UUID" ]; then
+              [ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Mounted data UUID $DATA_UUID does not match configured external UUID $AITOS_DATA_DISK_UUID."; exit 1; }
+              [ "$DATA_UUID" != "$ROOT_UUID" ] || { echo '::error::External storage unexpectedly resolves to the OS root filesystem.'; exit 1; }
+            else
+              [ "$DATA_UUID" = "$ROOT_UUID" ] || { echo "::error::Root storage mode expected UUID $ROOT_UUID, found $DATA_UUID."; exit 1; }
+            fi
 
             echo '=== STAGING ENVIRONMENT ==='
             umask 077
@@ -175,7 +190,7 @@ jobs:
             TESTING=false
             AITOS_DATA_ROOT=$AITOS_DATA_ROOT
             AITOS_DATA_DISK_UUID=$AITOS_DATA_DISK_UUID
-            AITOS_ALLOW_BOOT_DISK_DATA=false
+            AITOS_STORAGE_MODE=$AITOS_STORAGE_MODE
             AITOS_AUTO_RESET_DISPOSABLE_DATA=false
             AITOS_MODE=paper
             AITOS_PAPER_ACCOUNT_SCOPE=paper:staging
@@ -396,8 +411,12 @@ jobs:
             echo '=== STAGING STORAGE GATE ==='
             DATA_UUID="$(findmnt -rn -o UUID --target "$AITOS_DATA_ROOT" | head -n1)"
             ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
-            [ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Final storage gate expected $AITOS_DATA_DISK_UUID, found $DATA_UUID."; exit 1; }
-            [ "$DATA_UUID" != "$ROOT_UUID" ] || { echo '::error::Final storage gate detected boot-disk fallback.'; exit 1; }
+            if [ -n "$AITOS_DATA_DISK_UUID" ]; then
+              [ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ] || { echo "::error::Final storage gate expected external UUID $AITOS_DATA_DISK_UUID, found $DATA_UUID."; exit 1; }
+              [ "$DATA_UUID" != "$ROOT_UUID" ] || { echo '::error::Final storage gate detected external UUID on the OS root filesystem.'; exit 1; }
+            else
+              [ "$DATA_UUID" = "$ROOT_UUID" ] || { echo "::error::Final storage gate expected OS root UUID $ROOT_UUID, found $DATA_UUID."; exit 1; }
+            fi
             df -h "$AITOS_DATA_ROOT"
             docker run --rm --user 0:0 -v "$AITOS_DATA_ROOT:/data" alpine:3.20 sh -ec '
               for path in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
