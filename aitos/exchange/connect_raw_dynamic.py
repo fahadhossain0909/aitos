@@ -281,9 +281,22 @@ async def connect_raw_dynamic(
         except Exception as exc:
             close_code = getattr(ws, "close_code", None)
             termination_class = (
-                "remote_clean_close" if close_code in (1000, 1001) else "abnormal_error"
+                "connect_failure"
+                if ws is None
+                else (
+                    "remote_clean_close"
+                    if close_code in (1000, 1001)
+                    else "abnormal_error"
+                )
             )
-            adapter._ws_transport.update(
+            if ws is None:
+                adapter._ws_transport["connection_failure_count"] = (
+                    adapter._ws_transport.get("connection_failure_count", 0) + 1
+                )
+                stream_stats["connection_failure_count"] = (
+                    int(stream_stats.get("connection_failure_count", 0)) + 1
+                )
+            adapter._ws_transport.update({
                 {
                     "state": (
                         "reconnecting"
