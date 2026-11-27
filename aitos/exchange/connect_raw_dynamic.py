@@ -297,7 +297,7 @@ async def connect_raw_dynamic(
                 stream_stats["connection_failure_count"] = (
                     int(stream_stats.get("connection_failure_count", 0)) + 1
                 )
-            adapter._ws_transport.update({
+            adapter._ws_transport.update(
                 {
                     "state": (
                         "reconnecting"
