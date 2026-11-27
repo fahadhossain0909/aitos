@@ -63,7 +63,9 @@ def test_staging_workflow_accepts_optional_external_uuid_and_sudo_secret() -> No
     assert "AITOS_ALLOW_BOOT_DISK_DATA" not in WORKFLOW
 
 
-def test_staging_enable_switch_is_resolved_from_staging_environment_before_build() -> None:
+def test_staging_enable_switch_is_resolved_from_staging_environment_before_build() -> (
+    None
+):
     gate = WORKFLOW.split("  staging-gate:", 1)[1].split("  publish-image:", 1)[0]
     assert "environment: staging" in gate
     assert "AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}" in gate
@@ -74,7 +76,9 @@ def test_staging_enable_switch_is_resolved_from_staging_environment_before_build
 
 def test_staging_jobs_use_gate_output_not_repository_scope_condition() -> None:
     assert "vars.AITOS_VPS_ENABLED == 'true'" not in WORKFLOW
-    publish = WORKFLOW.split("  publish-image:", 1)[1].split("  deploy-and-audit:", 1)[0]
+    publish = WORKFLOW.split("  publish-image:", 1)[1].split("  deploy-and-audit:", 1)[
+        0
+    ]
     deploy = WORKFLOW.split("  deploy-and-audit:", 1)[1]
     assert "needs: staging-gate" in publish
     assert "needs.staging-gate.outputs.enabled == 'true'" in publish
