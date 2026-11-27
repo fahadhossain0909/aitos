@@ -25,8 +25,33 @@ env:
   DATA_DISK_MIN_FREE_GB: 20
 
 jobs:
+  # Environment-scoped variables are only available after a job declares
+  # its environment. Resolve the staging switch here, then pass it to jobs
+  # that must run before/without their own environment context.
+  staging-gate:
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - name: Resolve staging deployment switch
+        id: gate
+        shell: bash
+        env:
+          AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [[ "${AITOS_VPS_ENABLED:-}" == "true" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Staging deployment is enabled by the staging Environment variable."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Staging deployment is disabled; set staging Environment variable AITOS_VPS_ENABLED=true to enable it."
+          fi
+
   publish-image:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
+    needs: staging-gate
+    if: ${{ needs.staging-gate.outputs.enabled == 'true' }}
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     runs-on: ubuntu-latest
@@ -52,9 +77,9 @@ jobs:
           sbom: true
 
   deploy-and-audit:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
+    needs: [staging-gate, publish-image]
+    if: ${{ needs.staging-gate.outputs.enabled == 'true' }}
     runs-on: ubuntu-latest
-    needs: publish-image
     timeout-minutes: 110
     environment: staging
     steps:
