@@ -41,7 +41,6 @@ class _FakeManagedWebSocketContext:
     async def __aexit__(self, exc_type, exc, tb) -> bool:
         return False
 
-
 @pytest.mark.asyncio
 async def test_update_symbols_sends_incremental_subscribe_without_reconnect():
     ws = _FakeManagedWebSocket()
@@ -91,7 +90,6 @@ async def test_update_symbols_sends_incremental_subscribe_without_reconnect():
     assert connect_calls == 1
 
     await stream.aclose()
-
 
 @pytest.mark.asyncio
 async def test_orderbook_stream_preserves_book_state_across_symbol_updates():
@@ -161,7 +159,6 @@ async def test_orderbook_stream_preserves_book_state_across_symbol_updates():
     assert bootstraps == ["BTCUSDT", "ETHUSDT"]
 
     await book_stream.aclose()
-
 
 @pytest.mark.asyncio
 async def test_orderbook_sequence_gap_rebootstraps_from_rest_snapshot():
