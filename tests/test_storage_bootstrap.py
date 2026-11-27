@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 SCRIPT = Path("scripts/bootstrap_storage.sh").read_text(encoding="utf-8")
 ENV = Path(".env.example").read_text(encoding="utf-8")
@@ -29,7 +30,8 @@ def test_storage_bootstrap_supports_optional_sudo_password_without_persisting_it
     None
 ):
     assert "sudo -n -v" in SCRIPT
-    assert "printf '%s\\n' \"$AITOS_SUDO_PASSWORD\" | sudo -S -p '' -- \"$@\"" in SCRIPT
+    assert "sudo -S -p ''" in SCRIPT
+    assert 'printf \'%s\\n\' "$AITOS_SUDO_PASSWORD"' in SCRIPT
     assert "AITOS_SUDO_PASSWORD" not in ENV
     assert (
         "AITOS_SUDO_PASSWORD"
@@ -59,3 +61,7 @@ def test_staging_workflow_accepts_optional_external_uuid_and_sudo_secret() -> No
     assert '[ "$DATA_UUID" = "$ROOT_UUID" ]' in WORKFLOW
     assert '[ "$DATA_UUID" = "$AITOS_DATA_DISK_UUID" ]' in WORKFLOW
     assert "AITOS_ALLOW_BOOT_DISK_DATA" not in WORKFLOW
+
+
+def test_storage_bootstrap_shell_syntax() -> None:
+    subprocess.run(["bash", "-n", "scripts/bootstrap_storage.sh"], check=True)
