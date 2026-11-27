@@ -31,7 +31,7 @@ def test_storage_bootstrap_supports_optional_sudo_password_without_persisting_it
 ):
     assert "sudo -n -v" in SCRIPT
     assert "sudo -S -p ''" in SCRIPT
-    assert 'printf \'%s\\n\' "$AITOS_SUDO_PASSWORD"' in SCRIPT
+    assert "printf '%s\\n' \"$AITOS_SUDO_PASSWORD\"" in SCRIPT
     assert "AITOS_SUDO_PASSWORD" not in ENV
     assert (
         "AITOS_SUDO_PASSWORD"
