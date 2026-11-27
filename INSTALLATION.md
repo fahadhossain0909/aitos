@@ -300,11 +300,11 @@ The production deployment uses:
 
 ## 2.3 Choose the persistent storage backend
 
-AITOS supports two explicit storage modes. The same data layout is used in both modes; only the backing filesystem changes.
+AITOS staging CD supports two explicit storage modes. The same data layout is used in both modes; only the backing filesystem changes. The separate production `cd.yml` workflow remains UUID-required until its own production rollout is deliberately updated.
 
 **Mode A — OS root filesystem (default):** leave the GitHub Environment secret `AITOS_DATA_DISK_UUID` empty or unset. AITOS stores its durable data under `/mnt/aitos-data` on the filesystem that contains `/`. No extra disk, mount or UUID is required. This is the intended mode for a single-disk VPS such as the current staging host.
 
-**Mode B — external filesystem:** set `AITOS_DATA_DISK_UUID` to the UUID of an already formatted and attached external filesystem. The workflow verifies that the UUID is not the OS root UUID, mounts it at `/mnt/aitos-data` if it is not already mounted, verifies the resulting mount, and persists the UUID mount in `/etc/fstab`.
+**Mode B — external filesystem:** set `AITOS_DATA_DISK_UUID` to the UUID of an already formatted and attached external filesystem. The staging workflow verifies that the UUID is not the OS root UUID, mounts it at `/mnt/aitos-data` if it is not already mounted, verifies the resulting mount, and persists the UUID mount in `/etc/fstab`.
 
 **Do not format an existing disk.** Formatting destroys data. Device names differ across VPS providers. To inspect available filesystems:
 
