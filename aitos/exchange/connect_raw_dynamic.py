@@ -230,9 +230,13 @@ async def connect_raw_dynamic(
                             latency = getattr(ws, "latency", None)
                             if isinstance(latency, (int, float)) and latency >= 0:
                                 rtt_ms = float(latency) * 1000.0
-                                adapter._ws_transport["last_ping_rtt_ms"] = round(rtt_ms, 3)
+                                adapter._ws_transport["last_ping_rtt_ms"] = round(
+                                    rtt_ms, 3
+                                )
                                 adapter._ws_transport["max_ping_rtt_ms"] = max(
-                                    float(adapter._ws_transport.get("max_ping_rtt_ms", 0.0)),
+                                    float(
+                                        adapter._ws_transport.get("max_ping_rtt_ms", 0.0)
+                                    ),
                                     rtt_ms,
                                 )
                             yield payload, stream_name
@@ -263,7 +267,9 @@ async def connect_raw_dynamic(
                     "last_close_reason": getattr(ws, "close_reason", None),
                     "last_disconnect_class": termination_class,
                     "last_close_stream": label,
-                    "lifecycle_rotation_count": adapter._ws_transport.get("lifecycle_rotation_count", 0) + 1,
+                    "lifecycle_rotation_count": (
+                        adapter._ws_transport.get("lifecycle_rotation_count", 0) + 1
+                    ),
                 }
             )
             logger.info(
@@ -277,7 +283,11 @@ async def connect_raw_dynamic(
             )
             adapter._ws_transport.update(
                 {
-                    "state": "reconnecting" if termination_class == "remote_clean_close" else "error",
+                    "state": (
+                        "reconnecting"
+                        if termination_class == "remote_clean_close"
+                        else "error"
+                    ),
                     "last_close_code": getattr(ws, "close_code", None),
                     "last_close_reason": getattr(ws, "close_reason", None),
                     "last_disconnect_class": termination_class,
@@ -309,15 +319,21 @@ async def connect_raw_dynamic(
                 transport["last_close_reason"] = getattr(ws, "close_reason", None)
                 transport["last_disconnect_class"] = termination_class
                 transport["last_close_stream"] = label
-                stream_stats = transport.setdefault("managed_connections", {}).setdefault(
-                    label, {}
+                stream_stats = transport.setdefault(
+                    "managed_connections", {}
+                ).setdefault(label, {})
+                stream_stats["close_count"] = (
+                    int(stream_stats.get("close_count", 0)) + 1
                 )
-                stream_stats["close_count"] = int(stream_stats.get("close_count", 0)) + 1
                 stream_stats["last_close_code"] = transport["last_close_code"]
                 stream_stats["last_close_reason"] = transport["last_close_reason"]
                 stream_stats["last_disconnect_class"] = termination_class
                 if connection_started_monotonic is not None:
-                    uptime = max(0.0, asyncio.get_running_loop().time() - connection_started_monotonic)
+                    uptime = max(
+                        0.0,
+                        asyncio.get_running_loop().time()
+                        - connection_started_monotonic,
+                    )
                     transport["last_connection_uptime_seconds"] = round(uptime, 3)
                     stream_stats["last_connection_uptime_seconds"] = round(uptime, 3)
                 counter = {
@@ -328,7 +344,9 @@ async def connect_raw_dynamic(
                 if counter is not None:
                     transport[counter] = transport.get(counter, 0) + 1
                     stream_counter = counter
-                    stream_stats[stream_counter] = int(stream_stats.get(stream_counter, 0)) + 1
+                    stream_stats[stream_counter] = (
+                        int(stream_stats.get(stream_counter, 0)) + 1
+                    )
                 elif termination_class == "lifecycle_rotation":
                     stream_stats["lifecycle_rotation_count"] = int(
                         stream_stats.get("lifecycle_rotation_count", 0)
