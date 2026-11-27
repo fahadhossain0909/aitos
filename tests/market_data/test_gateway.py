@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -208,3 +209,31 @@ async def test_gateway_degrades_when_all_queue_slots_are_sequence_critical() -> 
     assert gateway.queue._queue._queue[0] is first
     assert gateway.state is GatewayState.DEGRADED
     assert gateway.health.degraded is True
+
+
+
+@pytest.mark.asyncio
+async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
+    now = datetime.now(timezone.utc)
+    event = MarketEvent(
+        event_type=MarketEventType.TRADE,
+        exchange="binance",
+        market="usd_m_futures",
+        symbol="BTCUSDT",
+        event_time=now - timedelta(seconds=4),
+        ingest_time=now - timedelta(seconds=1),
+        payload={"price": 100},
+        source=MarketSource.WEBSOCKET,
+    )
+    gateway = MarketDataGateway("binance", "usd_m_futures", lambda _: None)
+    gateway.begin_connect()
+    gateway.mark_connected()
+
+    with patch("aitos.forensics.data_flow_hooks.note_trace") as note_trace:
+        assert gateway.accept(event) is True
+
+    extra = note_trace.call_args.kwargs["extra"]
+    assert extra["phase"] == "ingress"
+    assert 3900 <= extra["event_age_ms"] <= 4100
+    assert 2900 <= extra["source_to_ingest_ms"] <= 3100
+    assert 900 <= extra["ingest_to_gateway_ms"] <= 1100
