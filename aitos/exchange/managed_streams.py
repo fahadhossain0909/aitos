@@ -101,6 +101,15 @@ class ManagedStreamSet:
             float(stats.get("queue_wait_max_ms", 0.0)), 3
         )
         queues[self._kind] = stats
+        transport["managed_queue_overflow_total"] = sum(
+            int(item.get("overflow_events", 0)) for item in queues.values()
+        )
+        transport["managed_queue_dropped_total"] = sum(
+            int(item.get("dropped_events", 0)) for item in queues.values()
+        )
+        transport["managed_queue_overflow_detected"] = any(
+            int(item.get("overflow_events", 0)) > 0 for item in queues.values()
+        )
 
     async def update_symbols(self, symbols: list[str]) -> bool:
         if self._to_stream is None:
