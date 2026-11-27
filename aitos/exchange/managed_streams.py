@@ -243,7 +243,6 @@ class ManagedOrderBookStream:
         async with self._lock:
             if normalized == self._symbols:
                 return False
-            added = [s for s in normalized if s not in self._symbols]
             removed = [s for s in self._symbols if s not in normalized]
             for symbol in removed:
                 self._books.pop(symbol, None)
@@ -266,6 +265,9 @@ class ManagedOrderBookStream:
                 symbol, limit=self._levels
             )
         except Exception as exc:
+            async with self._lock:
+                if symbol not in self._symbols:
+                    return None
             delay = self._bootstrap_backoff.get(symbol, 1.0)
             self._bootstrap_retry_at[symbol] = now + delay
             self._bootstrap_backoff[symbol] = min(delay * 2.0, 30.0)
