@@ -37,7 +37,10 @@ def test_runtime_audit_script_is_fail_safe_and_does_not_expose_secrets():
 
 def test_runtime_audit_script_does_not_abort_on_redis_diagnostic_scan_failure():
     text = SCRIPT.read_text(encoding="utf-8")
-    assert 'done < <(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --raw --scan' in text
+    assert (
+        'done < <(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --raw --scan'
+        in text
+    )
     assert "2>/dev/null || true)" in text
     assert "Redis maxmemory: unlimited" in text
     assert "=== Audit result ===" in text
