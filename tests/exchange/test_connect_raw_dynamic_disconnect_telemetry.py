@@ -155,3 +155,36 @@ async def test_reconnect_backoff_resets_after_stable_connection(monkeypatch):
     await generator.aclose()
 
     assert delays == [1.0, 1.0]
+
+
+
+@pytest.mark.asyncio
+async def test_failed_handshake_is_not_counted_as_an_established_socket_close(
+    monkeypatch,
+):
+    adapter = _adapter(AsyncMock())
+    adapter._ws_connector.side_effect = OSError("connection refused")
+
+    async def stop_after_first_backoff(_delay):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(dynamic_transport.asyncio, "sleep", stop_after_first_backoff)
+    generator = connect_raw_dynamic(
+        adapter,
+        get_streams=lambda: ["btcusdt@aggTrade"],
+        changed=asyncio.Event(),
+        emit_reconnect=True,
+        label="trades",
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in generator:
+            pass
+    await generator.aclose()
+
+    transport = adapter._ws_transport
+    assert transport["connect_attempts"] == 1
+    assert transport["successful_handshakes"] == 0
+    assert transport["connection_failure_count"] == 1
+    assert transport["close_count"] == 0
+    assert transport["managed_connections"]["trades"]["connection_failure_count"] == 1
