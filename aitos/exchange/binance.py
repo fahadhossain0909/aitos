@@ -161,6 +161,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             "last_close_stream": None,
             "last_connection_uptime_seconds": None,
             "managed_queues": {},
+            "managed_connections": {},
+            "ping_interval_seconds": WS_PING_INTERVAL_SECONDS,
+            "ping_timeout_seconds": WS_PING_TIMEOUT_SECONDS,
+            "last_ping_rtt_ms": None,
+            "max_ping_rtt_ms": 0.0,
             "subscription_mode": "combined_url",
             "last_connect_started_at": None,
             "last_handshake_at": None,
@@ -192,9 +197,17 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         snapshot = dict(self._ws_transport)
         snapshot["streams"] = list(self._ws_transport.get("streams", []))
         queues = self._ws_transport.get("managed_queues", {})
-        snapshot["managed_queues"] = {
-            key: dict(value) for key, value in queues.items()
-        } if isinstance(queues, dict) else {}
+        snapshot["managed_queues"] = (
+            {key: dict(value) for key, value in queues.items()}
+            if isinstance(queues, dict)
+            else {}
+        )
+        connections = self._ws_transport.get("managed_connections", {})
+        snapshot["managed_connections"] = (
+            {key: dict(value) for key, value in connections.items()}
+            if isinstance(connections, dict)
+            else {}
+        )
         return snapshot
 
     async def connect(self) -> None:
