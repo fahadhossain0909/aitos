@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# AITOS host storage bootstrap. Durable data lives only on the configured
-# data disk; the boot disk is reserved for OS/Docker/deployment state.
-# Fail closed: never falls back to the boot disk.
+# AITOS storage bootstrap.
+# If AITOS_DATA_DISK_UUID is set, use that external filesystem. If empty,
+# durable data stays on AITOS_DATA_ROOT on the operating-system root filesystem.
+# The selected filesystem is always verified; no silent fallback is permitted.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${AITOS_ENV_FILE:-$REPO_ROOT/.env}"
@@ -17,9 +18,6 @@ DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 DISK_UUID="${AITOS_DATA_DISK_UUID:-}"
 HOST_UID="${AITOS_HOST_UID:-$(id -u)}"
 HOST_GID="${AITOS_HOST_GID:-$(id -g)}"
-# AITOS application containers use a stable UID/GID because their persistent
-# /models bind mount must remain writable regardless of the SSH/deploy user's
-# host UID. Keep these values aligned with the Dockerfile/compose contract.
 AITOS_UID="${AITOS_UID:-1000}"
 AITOS_GID="${AITOS_GID:-1000}"
 CLICKHOUSE_UID="${CLICKHOUSE_UID:-101}"
@@ -35,17 +33,39 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ "$AITOS_UID" =~ ^[0-9]+$ && "$AITOS_GID" =~ ^[0-9]+$ ]] || die "AITOS_UID/GID must be numeric."
 [[ "$CLICKHOUSE_UID" =~ ^[0-9]+$ && "$CLICKHOUSE_GID" =~ ^[0-9]+$ ]] || die "ClickHouse UID/GID must be numeric."
 [[ "$REDIS_UID" =~ ^[0-9]+$ && "$REDIS_GID" =~ ^[0-9]+$ ]] || die "Redis UID/GID must be numeric."
-[[ "$NEO4J_UID" =~ ^[0-9]+$ && "$NEO4J_GID" =~ ^[0-9]+$ ]] || die "Neo4j UID/GID must be numeric."
-SUDO=(sudo); [[ "$(id -u)" -eq 0 ]] && SUDO=()
+[[ "$NEO4J_UID" =~ ^[0-9]+$ && "$NEO4J_GID" =~ ^[0-9]+$ ]] || die "NEO4J_UID/GID must be numeric."
 for command_name in findmnt mountpoint readlink lsblk; do command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required."; done
 
+ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
+ROOT_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target / | head -n1)")"
+[[ -n "$ROOT_UUID" && -n "$ROOT_SOURCE" ]] || die "Unable to identify the operating system root filesystem."
+
+# Prefer non-interactive sudo. If the host requires a password, consume the
+# optional GitHub Environment secret over stdin only; never persist or log it.
 ROOT_DISK_MODE=false
-if [[ "${AITOS_ALLOW_BOOT_DISK_DATA:-false}" == "true" ]]; then
-  # Explicit staging-only mode for a VPS plan with a single root disk.
-  # Never mount the root partition inside itself or add a recursive fstab row.
+run_sudo() {
+  if [[ "$(id -u)" -eq 0 || "$ROOT_DISK_MODE" == "true" ]]; then
+    "$@"
+  elif sudo -n -v >/dev/null 2>&1; then
+    sudo -n -- "$@"
+  elif [[ -n "${AITOS_SUDO_PASSWORD:-}" ]]; then
+    printf '%s\n' "$AITOS_SUDO_PASSWORD" | sudo -S -p '' -- "$@"
+  else
+    die "This operation requires sudo. Configure the optional GitHub Environment secret AITOS_SUDO_PASSWORD, or grant the deployment user the required passwordless sudo permissions."
+  fi
+}
+
+if [[ -z "$DISK_UUID" ]]; then
+  ROOT_DISK_MODE=true
+  log "Using operating-system root filesystem (no external data UUID configured)"
   mkdir -p "$DATA_ROOT"
-  # Restore write access to the staging directory and its structural parents.
-  # Preserve ownership of existing database/runtime child directories.
+  DATA_UUID="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
+  DATA_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target "$DATA_ROOT" | head -n1)")"
+  [[ "$DATA_UUID" == "$ROOT_UUID" && "$DATA_SOURCE" == "$ROOT_SOURCE" ]] || die "AITOS_DATA_ROOT is not on the operating-system root filesystem. Refusing to silently use another mount."
+  echo "Root filesystem UUID: $ROOT_UUID"
+  echo "Data directory: $DATA_ROOT"
+  # A short-lived root helper applies container UID/GID ownership without
+  # requiring host sudo or changing ownership of existing database children.
   docker run --rm --user 0:0 -v "$DATA_ROOT:/data" \
     -e HOST_UID="$HOST_UID" -e HOST_GID="$HOST_GID" \
     alpine:3.20 sh -ec '
@@ -59,46 +79,36 @@ if [[ "${AITOS_ALLOW_BOOT_DISK_DATA:-false}" == "true" ]]; then
         chown "$HOST_UID:$HOST_GID" "/data/$directory"
       done
     '
-  ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
-  DATA_UUID="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
-  ROOT_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target / | head -n1)")"
-  DATA_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target "$DATA_ROOT" | head -n1)")"
-  [[ -n "$ROOT_UUID" && "$ROOT_UUID" == "$DATA_UUID" && "$ROOT_SOURCE" == "$DATA_SOURCE" ]] || die "Staging data root must resolve to the same filesystem as /."
-  if [[ -n "$DISK_UUID" && "$DISK_UUID" != "$ROOT_UUID" ]]; then die "Configured data UUID does not match the root filesystem UUID."; fi
-  DISK_UUID="$ROOT_UUID"
-  ROOT_DISK_MODE=true
-  SUDO=()
-  log "Staging root-filesystem storage mode"
-  echo "Root filesystem UUID: $ROOT_UUID"
-  echo "Data directory: $DATA_ROOT"
 else
-  [[ -n "$DISK_UUID" ]] || die "AITOS_DATA_DISK_UUID is required unless staging root-disk mode is explicitly enabled."
-  ROOT_UUID="$(findmnt -rn -o UUID --target / | head -n1)"
-  [[ -n "$ROOT_UUID" && "$DISK_UUID" != "$ROOT_UUID" ]] || die "Configured data disk UUID resolves to the root filesystem; refusing boot-disk fallback."
+  ROOT_DISK_MODE=false
+  [[ "$DISK_UUID" != "$ROOT_UUID" ]] || die "AITOS_DATA_DISK_UUID points to the operating-system root filesystem. Leave it empty for root-filesystem storage or configure a different external UUID."
   UUID_LINK="/dev/disk/by-uuid/$DISK_UUID"
-  [[ -e "$UUID_LINK" ]] || die "Configured disk UUID was not found: $DISK_UUID"
+  [[ -e "$UUID_LINK" ]] || die "Configured external data UUID was not found: $DISK_UUID"
   DEVICE="$(readlink -f "$UUID_LINK")"
   [[ -b "$DEVICE" ]] || die "Resolved UUID is not a block device: $DEVICE"
   FSTYPE="$(lsblk -no FSTYPE "$DEVICE" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
   if [[ -z "$FSTYPE" ]] && command -v blkid >/dev/null 2>&1; then FSTYPE="$(blkid -o value -s TYPE "$DEVICE" 2>/dev/null || true)"; fi
   [[ -n "$FSTYPE" ]] || die "No filesystem detected on $DEVICE."
-  log "Data disk preflight"
+  log "Using explicitly configured external data filesystem"
   echo "UUID: $DISK_UUID"; echo "Device: $DEVICE"; echo "Filesystem: $FSTYPE"; echo "Mount: $DATA_ROOT"
-  ${SUDO[@]} mkdir -p "$DATA_ROOT"
+  run_sudo mkdir -p "$DATA_ROOT"
   if mountpoint -q "$DATA_ROOT"; then
-    CURRENT_SOURCE="$(findmnt -rn -o SOURCE --target "$DATA_ROOT" | head -n1)"
-    CURRENT_DEVICE="$(readlink -f "$CURRENT_SOURCE" 2>/dev/null || true)"
-    [[ "$CURRENT_DEVICE" == "$DEVICE" ]] || die "$DATA_ROOT is mounted from $CURRENT_SOURCE, not UUID $DISK_UUID."
+    CURRENT_UUID="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
+    [[ "$CURRENT_UUID" == "$DISK_UUID" ]] || die "$DATA_ROOT is mounted from UUID $CURRENT_UUID, not configured UUID $DISK_UUID."
   else
-    ${SUDO[@]} mount -t "$FSTYPE" "$DEVICE" "$DATA_ROOT"
+    if find "$DATA_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+      die "Unmounted data root contains existing files; back them up and migrate deliberately before mounting the external filesystem."
+    fi
+    run_sudo mount -t "$FSTYPE" "$DEVICE" "$DATA_ROOT"
   fi
-  mountpoint -q "$DATA_ROOT" || die "Data disk did not become a mount point."
-  MOUNT_SOURCE="$(findmnt -rn -o SOURCE --target "$DATA_ROOT" | head -n1)"
-  MOUNT_DEVICE="$(readlink -f "$MOUNT_SOURCE" 2>/dev/null || true)"
-  [[ "$MOUNT_DEVICE" == "$DEVICE" ]] || die "Mounted source verification failed."
-  log "Persisting mount in /etc/fstab"
+  mountpoint -q "$DATA_ROOT" || die "External data filesystem did not become a mount point."
+  MOUNT_UUID="$(findmnt -rn -o UUID --target "$DATA_ROOT" | head -n1)"
+  [[ "$MOUNT_UUID" == "$DISK_UUID" ]] || die "Mounted UUID $MOUNT_UUID does not match configured external UUID $DISK_UUID."
+  log "Persisting external mount in /etc/fstab"
   FSTAB_LINE="UUID=$DISK_UUID $DATA_ROOT $FSTYPE defaults,nofail,x-systemd.device-timeout=30s 0 2"
-  if ! ${SUDO[@]} grep -Eq "^[[:space:]]*UUID=${DISK_UUID}[[:space:]]+" /etc/fstab; then printf '%s\n' "$FSTAB_LINE" | ${SUDO[@]} tee -a /etc/fstab >/dev/null; fi
+  if ! grep -Eq "^[[:space:]]*UUID=$DISK_UUID[[:space:]]+" /etc/fstab; then
+    run_sudo sh -c 'printf "%s\n" "$1" >> /etc/fstab' _ "$FSTAB_LINE"
+  fi
 fi
 
 MIN_FREE_GB="${DATA_DISK_MIN_FREE_GB:-20}"
@@ -122,7 +132,7 @@ has_entries() {
       [ -n "$(find "/data/$1" -mindepth 1 -print -quit 2>/dev/null)" ]
     ' sh "$relative_path"
   else
-    [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
+    [[ -n "$("run_sudo" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
   fi
 }
 
@@ -130,9 +140,9 @@ for legacy in clickhouse neo4j redis; do
   legacy_path="$DATA_ROOT/$legacy"
   if [[ -d "$legacy_path" && ! -L "$legacy_path" ]]; then
     if has_entries "$legacy_path"; then die "Legacy path contains data: $legacy_path; migrate explicitly before deployment."; fi
-    ${SUDO[@]} rmdir -- "$legacy_path" || die "Legacy path changed during inspection; refusing to remove: $legacy_path"
+    run_sudo rmdir -- "$legacy_path" || die "Legacy path changed during inspection; refusing to remove: $legacy_path"
   elif [[ -L "$legacy_path" ]]; then
-    ${SUDO[@]} rm -f -- "$legacy_path"
+    run_sudo rm -f -- "$legacy_path"
   fi
 done
 STORAGE_DIR="$REPO_ROOT/.storage"
@@ -140,8 +150,8 @@ for legacy in others; do
   path="$STORAGE_DIR/$legacy"
   if [[ -d "$path" && ! -L "$path" ]]; then
     if has_entries "$path"; then die "Legacy checkout storage contains data: $path; migrate explicitly."; fi
-    ${SUDO[@]} rmdir -- "$path" || die "Legacy checkout storage changed during inspection; refusing to remove: $path"
-  elif [[ -L "$path" ]]; then ${SUDO[@]} rm -f -- "$path"; fi
+    run_sudo rmdir -- "$path" || die "Legacy checkout storage changed during inspection; refusing to remove: $path"
+  elif [[ -L "$path" ]]; then run_sudo rm -f -- "$path"; fi
 done
 
 log "Creating canonical AITOS data layout"
@@ -154,7 +164,7 @@ if [[ "$ROOT_DISK_MODE" == "true" ]]; then
       /data/runtime/models /data/runtime/logs/neo4j /data/runtime/tmp
   '
 else
-  ${SUDO[@]} mkdir -p \
+  run_sudo mkdir -p \
     "$DATA_ROOT/databases/clickhouse" "$DATA_ROOT/databases/neo4j" \
     "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" \
     "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" \
@@ -177,7 +187,7 @@ if [[ "$ROOT_DISK_MODE" == "true" ]]; then
   ' sh "${REQUIRED_DATA_DIRS[@]}" || die "Canonical storage directory verification failed."
 else
   for required in "${REQUIRED_DATA_DIRS[@]}"; do
-    ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Canonical directory creation failed: $DATA_ROOT/$required"
+    run_sudo test -d "$DATA_ROOT/$required" || die "Canonical directory creation failed: $DATA_ROOT/$required"
   done
 fi
 
@@ -200,14 +210,14 @@ if [[ "$ROOT_DISK_MODE" == "true" ]]; then
       chmod 0750 /data/eventbus/redis /data/eventbus/redis/live /data/eventbus/redis/archive
     '
 else
-  ${SUDO[@]} chown "$HOST_UID:$HOST_GID" "$DATA_ROOT"
-  ${SUDO[@]} chown -R "$CLICKHOUSE_UID:$CLICKHOUSE_GID" "$DATA_ROOT/databases/clickhouse"
-  ${SUDO[@]} chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/databases/neo4j"
-  ${SUDO[@]} chown -R "$REDIS_UID:$REDIS_GID" "$DATA_ROOT/eventbus/redis"
-  ${SUDO[@]} chown -R "$AITOS_UID:$AITOS_GID" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
-  ${SUDO[@]} chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/runtime/logs/neo4j"
-  ${SUDO[@]} chmod 0755 "$DATA_ROOT" "$DATA_ROOT/databases" "$DATA_ROOT/eventbus" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
-  ${SUDO[@]} chmod 0750 "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive"
+  run_sudo chown "$HOST_UID:$HOST_GID" "$DATA_ROOT"
+  run_sudo chown -R "$CLICKHOUSE_UID:$CLICKHOUSE_GID" "$DATA_ROOT/databases/clickhouse"
+  run_sudo chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/databases/neo4j"
+  run_sudo chown -R "$REDIS_UID:$REDIS_GID" "$DATA_ROOT/eventbus/redis"
+  run_sudo chown -R "$AITOS_UID:$AITOS_GID" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
+  run_sudo chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/runtime/logs/neo4j"
+  run_sudo chmod 0755 "$DATA_ROOT" "$DATA_ROOT/databases" "$DATA_ROOT/eventbus" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
+  run_sudo chmod 0750 "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive"
 fi
 log "Storage verification"
 df -h "$DATA_ROOT"; findmnt --target "$DATA_ROOT"
@@ -216,15 +226,15 @@ if [[ "$ROOT_DISK_MODE" == "true" ]]; then
     for required in "$@"; do test -d "/data/$required" || { echo "Missing required directory: /data/$required"; exit 1; }; done
   ' sh "${REQUIRED_DATA_DIRS[@]}" || die "Required storage directory verification failed."
 else
-  for required in "${REQUIRED_DATA_DIRS[@]}"; do ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Missing required directory: $DATA_ROOT/$required"; done
+  for required in "${REQUIRED_DATA_DIRS[@]}"; do run_sudo test -d "$DATA_ROOT/$required" || die "Missing required directory: $DATA_ROOT/$required"; done
 fi
-TMP_FILE="$DATA_ROOT/.aitos-storage-write-test"; ${SUDO[@]} touch "$TMP_FILE"; ${SUDO[@]} rm -f "$TMP_FILE"
+TMP_FILE="$DATA_ROOT/.aitos-storage-write-test"; run_sudo touch "$TMP_FILE"; run_sudo rm -f "$TMP_FILE"
 # Verify the actual application identity can write its persistent runtime path.
 AITOS_TEST_FILE="$DATA_ROOT/runtime/models/.aitos-runtime-write-test"
 if [[ "$ROOT_DISK_MODE" == "true" ]]; then
   docker run --rm --user "$AITOS_UID:$AITOS_GID" -v "$DATA_ROOT/runtime/models:/models" alpine:3.20 sh -ec 'touch /models/.aitos-runtime-write-test && rm -f /models/.aitos-runtime-write-test' || die "Aitos UID $AITOS_UID cannot write runtime/models"
 else
-  ${SUDO[@]} -u "#$AITOS_UID" touch "$AITOS_TEST_FILE" || die "Aitos UID $AITOS_UID cannot write runtime/models"
-  ${SUDO[@]} rm -f "$AITOS_TEST_FILE"
+  run_sudo -u "#$AITOS_UID" touch "$AITOS_TEST_FILE" || die "Aitos UID $AITOS_UID cannot write runtime/models"
+  run_sudo rm -f "$AITOS_TEST_FILE"
 fi
 echo "AITOS canonical storage bootstrap completed successfully."
