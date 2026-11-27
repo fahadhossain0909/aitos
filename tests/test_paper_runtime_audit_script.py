@@ -23,16 +23,22 @@ def test_runtime_audit_script_checks_health_metrics_and_logs():
 
 def test_runtime_audit_script_is_fail_safe_and_does_not_expose_secrets():
     text = SCRIPT.read_text(encoding="utf-8")
-    forbidden = ("PASSWORD", "API_KEY", "API_SECRET")
 
     assert "set -euo pipefail" in text
-    for marker in forbidden:
-        assert marker not in text.upper()
+    assert "set -x" not in text.lower()
+    # Credentials may be read and passed to Redis, but must never be echoed
+    # or printed into the audit artifact/logs.
+    for line in text.splitlines():
+        command = line.lstrip()
+        if command.startswith(("echo ", "printf ")):
+            assert "$REDIS_PASSWORD" not in command
+            assert "$REDISCLI_AUTH" not in command
 
 
 def test_runtime_audit_script_does_not_abort_on_redis_diagnostic_scan_failure():
     text = SCRIPT.read_text(encoding="utf-8")
-    assert "done < <(docker exec aitos-redis redis-cli --scan" in text
+    assert 'done < <(docker exec -e REDISCLI_AUTH="$REDISCLI_AUTH" aitos-redis redis-cli --raw --scan' in text
+    assert "2>/dev/null || true)" in text
     assert "Redis maxmemory: unlimited" in text
     assert "=== Audit result ===" in text
 
