@@ -150,6 +150,7 @@ class ManagedStreamSet:
                     while not self._queue.empty():
                         try:
                             self._queue.get_nowait()
+                            self._queue.task_done()
                             self._queue_stats["dropped_events"] += 1
                         except asyncio.QueueEmpty:
                             break
