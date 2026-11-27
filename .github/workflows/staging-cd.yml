@@ -259,7 +259,31 @@ jobs:
             docker logout ghcr.io || true
             trap - EXIT
             unset GHCR_TOKEN
-            docker compose down --remove-orphans --timeout 30 || true
+            docker compose down --remove-orphans --timeout 30
+            if docker inspect aitos-clickhouse --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+              echo '::error::ClickHouse is still running; refusing to copy its data volume.'
+              exit 1
+            fi
+            mkdir -p "$AITOS_DATA_ROOT/artifacts/backups" "$AITOS_DATA_ROOT/databases/clickhouse"
+            CLICKHOUSE_MIGRATION_MARKER="$AITOS_DATA_ROOT/artifacts/backups/.clickhouse-named-volume-migrated"
+            if docker volume inspect aitos-staging_clickhouse-data >/dev/null 2>&1 && [ ! -f "$CLICKHOUSE_MIGRATION_MARKER" ]; then
+              if find "$AITOS_DATA_ROOT/databases/clickhouse" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                echo '::error::ClickHouse data target is not empty and migration marker is absent; refusing ambiguous volume migration.'
+                exit 1
+              fi
+              clickhouse_backup="clickhouse-named-volume-pre-bind-mount-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+              docker run --rm --user 0:0 \
+                -v aitos-staging_clickhouse-data:/source:ro \
+                -v "$AITOS_DATA_ROOT/artifacts/backups:/backup" \
+                alpine:3.20 sh -ec 'tar -czf "/backup/$1" -C /source . && tar -tzf "/backup/$1" >/dev/null' sh "$clickhouse_backup"
+              sha256sum "$AITOS_DATA_ROOT/artifacts/backups/$clickhouse_backup" > "$AITOS_DATA_ROOT/artifacts/backups/$clickhouse_backup.sha256"
+              docker run --rm --user 0:0 \
+                -v aitos-staging_clickhouse-data:/source:ro \
+                -v "$AITOS_DATA_ROOT/databases/clickhouse:/target" \
+                alpine:3.20 sh -ec 'cp -a /source/. /target/ && chown -R 101:101 /target'
+              touch "$CLICKHOUSE_MIGRATION_MARKER"
+              echo "ClickHouse named-volume data copied to verified provider disk; backup=$clickhouse_backup"
+            fi
             docker compose up -d --remove-orphans --force-recreate redis clickhouse neo4j clickhouse-init redis-dlq-retention redis-stream-archive
 
             echo '=== STAGING HEALTH GATE ==='
@@ -334,7 +358,7 @@ jobs:
               docker compose stop clickhouse
               backup_name="clickhouse-pre-scope-cutover-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
               docker run --rm --user 0:0 \
-                -v aitos-staging_clickhouse-data:/data:ro \
+                -v "$AITOS_DATA_ROOT/databases/clickhouse:/data:ro" \
                 -v "$AITOS_DATA_ROOT/artifacts/backups:/backup" \
                 alpine:3.20 sh -ec 'tar -czf "/backup/$1" -C /data . && tar -tzf "/backup/$1" >/dev/null' sh "$backup_name"
               sha256sum "$AITOS_DATA_ROOT/artifacts/backups/$backup_name" > "$AITOS_DATA_ROOT/artifacts/backups/$backup_name.sha256"
