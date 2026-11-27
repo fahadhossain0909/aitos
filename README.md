@@ -184,7 +184,7 @@ No fixed test count is documented because the suite changes as the project evolv
 
 ## Configuration
 
-The tracked template is `.env.example`. Copy it to `.env` and keep the real file out of Git. On VPS deployments, `AITOS_DATA_DISK_UUID` is optional: leave it empty to store AITOS data under `AITOS_DATA_ROOT` on the operating-system root filesystem, or set it to an attached external filesystem UUID to use that disk. The workflow verifies the selected filesystem and refuses mismatches.
+The tracked template is `.env.example`. Copy it to `.env` and keep the real file out of Git. The staging CD workflow supports two storage modes: leave `AITOS_DATA_DISK_UUID` empty to store AITOS data under `AITOS_DATA_ROOT` on the operating-system root filesystem, or set it to an attached external filesystem UUID to use that disk. The workflow verifies the selected filesystem and refuses mismatches.
 
 Important production values include:
 
