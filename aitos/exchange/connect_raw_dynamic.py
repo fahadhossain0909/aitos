@@ -235,7 +235,9 @@ async def connect_raw_dynamic(
                                 )
                                 adapter._ws_transport["max_ping_rtt_ms"] = max(
                                     float(
-                                        adapter._ws_transport.get("max_ping_rtt_ms", 0.0)
+                                        adapter._ws_transport.get(
+                                            "max_ping_rtt_ms", 0.0
+                                        )
                                     ),
                                     rtt_ms,
                                 )
