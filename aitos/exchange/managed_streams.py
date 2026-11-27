@@ -246,6 +246,8 @@ class ManagedOrderBookStream:
             removed = [s for s in self._symbols if s not in normalized]
             for symbol in removed:
                 self._books.pop(symbol, None)
+                self._bootstrap_retry_at.pop(symbol, None)
+                self._bootstrap_backoff.pop(symbol, None)
             self._symbols = normalized
         if self._to_stream is not None:
             streams = [self._to_stream(s) for s in normalized]
