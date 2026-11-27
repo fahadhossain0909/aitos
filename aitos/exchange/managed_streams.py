@@ -89,9 +89,11 @@ class ManagedStreamSet:
         stats["depth"] = self._queue.qsize()
         stats["capacity"] = self._queue.maxsize
         count = int(stats.get("dequeued", 0))
-        stats["queue_wait_avg_ms"] = round(
-            float(stats.get("queue_wait_total_ms", 0.0)) / count, 3
-        ) if count else 0.0
+        stats["queue_wait_avg_ms"] = (
+            round(float(stats.get("queue_wait_total_ms", 0.0)) / count, 3)
+            if count
+            else 0.0
+        )
         stats["queue_wait_total_ms"] = round(
             float(stats.get("queue_wait_total_ms", 0.0)), 3
         )
@@ -261,9 +263,7 @@ class ManagedOrderBookStream:
         if not force and now < self._bootstrap_retry_at.get(symbol, 0.0):
             return None
         try:
-            snapshot = await self._adapter.fetch_order_book(
-                symbol, limit=self._levels
-            )
+            snapshot = await self._adapter.fetch_order_book(symbol, limit=self._levels)
         except Exception as exc:
             async with self._lock:
                 if symbol not in self._symbols:
