@@ -16,7 +16,6 @@ class _FakeAdapter:
         for item in self._items:
             yield item
 
-
 @pytest.mark.asyncio
 async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
     monkeypatch.setattr(managed_streams, "MANAGED_STREAM_QUEUE_SIZE", 2)
@@ -48,7 +47,6 @@ async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
     await stream._queue.join()
 
     await stream.aclose()
-
 
 @pytest.mark.asyncio
 async def test_managed_queue_metrics_are_isolated_by_stream_kind(monkeypatch):
