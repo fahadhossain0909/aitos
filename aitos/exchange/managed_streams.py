@@ -7,6 +7,7 @@ stay open and only the delta is sent as control frames over the same websocket.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -46,10 +47,21 @@ class ManagedStreamSet:
         self._to_stream = to_stream
         self._streams: list[str] = list(dict.fromkeys(streams))
         self._changed = asyncio.Event()
-        self._queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
+        self._queue: asyncio.Queue[tuple[Any, str, float]] = asyncio.Queue(
             maxsize=MANAGED_STREAM_QUEUE_SIZE
         )
+        self._queue_stats: dict[str, Any] = {
+            "enqueued": 0,
+            "dequeued": 0,
+            "overflow_events": 0,
+            "dropped_events": 0,
+            "max_depth": 0,
+            "queue_wait_total_ms": 0.0,
+            "queue_wait_max_ms": 0.0,
+            "last_overflow_at": None,
+        }
         self._closed = False
+        self._publish_queue_stats()
         self._task = asyncio.create_task(
             self._run(), name=f"aitos-managed-stream-{kind}"
         )
@@ -64,6 +76,29 @@ class ManagedStreamSet:
 
     def current_streams(self) -> list[str]:
         return list(self._streams)
+
+    def _publish_queue_stats(self) -> None:
+        """Publish bounded per-stream queue telemetry into transport health."""
+        transport = getattr(self._adapter, "_ws_transport", None)
+        if not isinstance(transport, dict):
+            return
+        queues = transport.setdefault("managed_queues", {})
+        if not isinstance(queues, dict):
+            return
+        stats = dict(self._queue_stats)
+        stats["depth"] = self._queue.qsize()
+        stats["capacity"] = self._queue.maxsize
+        count = int(stats.get("dequeued", 0))
+        stats["queue_wait_avg_ms"] = round(
+            float(stats.get("queue_wait_total_ms", 0.0)) / count, 3
+        ) if count else 0.0
+        stats["queue_wait_total_ms"] = round(
+            float(stats.get("queue_wait_total_ms", 0.0)), 3
+        )
+        stats["queue_wait_max_ms"] = round(
+            float(stats.get("queue_wait_max_ms", 0.0)), 3
+        )
+        queues[self._kind] = stats
 
     async def update_symbols(self, symbols: list[str]) -> bool:
         if self._to_stream is None:
@@ -98,23 +133,46 @@ class ManagedStreamSet:
                 # Skip None sentinel from reconnects
                 if data is None:
                     continue
+                queued_at = time.monotonic()
                 try:
-                    self._queue.put_nowait((data, stream_name))
+                    self._queue.put_nowait((data, stream_name, queued_at))
+                    self._queue_stats["enqueued"] += 1
+                    self._queue_stats["max_depth"] = max(
+                        int(self._queue_stats["max_depth"]), self._queue.qsize()
+                    )
+                    self._publish_queue_stats()
                 except asyncio.QueueFull:
-                    # Drain oldest entries
+                    # Keep the newest event, but account for every discarded
+                    # event. Order-book sequence gaps are detected downstream
+                    # by LocalOrderBook and trigger snapshot recovery.
+                    self._queue_stats["overflow_events"] += 1
+                    self._queue_stats["last_overflow_at"] = time.time()
                     while not self._queue.empty():
                         try:
                             self._queue.get_nowait()
+                            self._queue_stats["dropped_events"] += 1
                         except asyncio.QueueEmpty:
                             break
-                    # Retry once
+                    # Retry once after the explicit freshness-first drain.
                     try:
-                        self._queue.put_nowait((data, stream_name))
+                        self._queue.put_nowait((data, stream_name, queued_at))
+                        self._queue_stats["enqueued"] += 1
+                        self._queue_stats["max_depth"] = max(
+                            int(self._queue_stats["max_depth"]), self._queue.qsize()
+                        )
                     except asyncio.QueueFull:
+                        self._queue_stats["dropped_events"] += 1
                         logger.warning(
                             "ManagedStreamSet queue full after drain, dropping event",
-                            extra={"aitos_extra": {"kind": self._kind}},
+                            extra={
+                                "aitos_extra": {
+                                    "kind": self._kind,
+                                    "overflow_events": self._queue_stats["overflow_events"],
+                                    "dropped_events": self._queue_stats["dropped_events"],
+                                }
+                            },
                         )
+                    self._publish_queue_stats()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -129,7 +187,15 @@ class ManagedStreamSet:
     async def __anext__(self) -> tuple[Any, str]:
         if self._closed and self._queue.empty():
             raise StopAsyncIteration
-        return await self._queue.get()
+        data, stream_name, queued_at = await self._queue.get()
+        waited_ms = max(0.0, (time.monotonic() - queued_at) * 1000.0)
+        self._queue_stats["dequeued"] += 1
+        self._queue_stats["queue_wait_total_ms"] += waited_ms
+        self._queue_stats["queue_wait_max_ms"] = max(
+            float(self._queue_stats["queue_wait_max_ms"]), waited_ms
+        )
+        self._publish_queue_stats()
+        return data, stream_name
 
     async def aclose(self) -> None:
         self._closed = True
