@@ -102,7 +102,7 @@ services:
     image: neo4j:5.19-community
     container_name: aitos-neo4j
     ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
-    environment: {NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}", NEO4J_dbms_memory_pagecache_size: 1G, NEO4J_dbms_memory_heap_max__size: 1G}
+    environment: {NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}", NEO4J_server_memory_pagecache_size: 1G, NEO4J_server_memory_heap_max__size: 1G}
     volumes:
       - "${NEO4J_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/databases/neo4j}:/data"
       - "${NEO4J_LOG_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/logs/neo4j}:/logs"
