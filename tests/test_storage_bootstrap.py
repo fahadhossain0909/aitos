@@ -1,5 +1,5 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 SCRIPT = Path("scripts/bootstrap_storage.sh").read_text(encoding="utf-8")
 ENV = Path(".env.example").read_text(encoding="utf-8")
