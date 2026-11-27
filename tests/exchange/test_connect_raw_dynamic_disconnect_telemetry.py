@@ -32,6 +32,7 @@ async def _wait_for_state(adapter, expected):
         while adapter._ws_transport["state"] != expected:
             await asyncio.sleep(0.01)
 
+
 @pytest.mark.asyncio
 async def test_abnormal_disconnect_captures_close_reason_and_counts_once():
     ws = AsyncMock()
@@ -70,6 +71,7 @@ async def test_abnormal_disconnect_captures_close_reason_and_counts_once():
         await task
     await generator.aclose()
 
+
 @pytest.mark.asyncio
 async def test_generator_cancellation_is_not_counted_as_abnormal_disconnect():
     ws = AsyncMock()
@@ -96,6 +98,7 @@ async def test_generator_cancellation_is_not_counted_as_abnormal_disconnect():
     assert transport.get("abnormal_close_count", 0) == 0
     assert transport["last_disconnect_class"] == "intentional_cancel"
     assert transport["managed_connections"]["trades"]["intentional_close_count"] == 1
+
 
 @pytest.mark.asyncio
 async def test_short_lived_successful_handshakes_do_not_reset_reconnect_backoff(
@@ -127,6 +130,7 @@ async def test_short_lived_successful_handshakes_do_not_reset_reconnect_backoff(
 
     assert delays == [1.0, 2.0, 4.0]
 
+
 @pytest.mark.asyncio
 async def test_reconnect_backoff_resets_after_stable_connection(monkeypatch):
     ws = AsyncMock()
@@ -155,6 +159,7 @@ async def test_reconnect_backoff_resets_after_stable_connection(monkeypatch):
     await generator.aclose()
 
     assert delays == [1.0, 1.0]
+
 
 
 
