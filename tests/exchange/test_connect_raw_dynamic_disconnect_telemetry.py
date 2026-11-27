@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -61,6 +60,10 @@ async def test_abnormal_disconnect_captures_close_reason_and_counts_once():
     assert transport["last_close_reason"] == "abnormal closure"
     assert transport["last_close_stream"] == "trades"
     assert transport["last_connection_uptime_seconds"] >= 0
+    per_stream = transport["managed_connections"]["trades"]
+    assert per_stream["connect_attempts"] == 1
+    assert per_stream["successful_handshakes"] == 1
+    assert per_stream["abnormal_close_count"] == 1
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -93,3 +96,4 @@ async def test_generator_cancellation_is_not_counted_as_abnormal_disconnect():
     assert transport["intentional_close_count"] == 1
     assert transport.get("abnormal_close_count", 0) == 0
     assert transport["last_disconnect_class"] == "intentional_cancel"
+    assert transport["managed_connections"]["trades"]["intentional_close_count"] == 1
