@@ -22,9 +22,7 @@ async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
     adapter = _FakeAdapter(
         [({"event": index}, "btcusdt@aggTrade") for index in range(5)]
     )
-    stream = managed_streams.ManagedStreamSet(
-        adapter, "trades", ["btcusdt@aggTrade"]
-    )
+    stream = managed_streams.ManagedStreamSet(adapter, "trades", ["btcusdt@aggTrade"])
 
     await asyncio.sleep(0)
 
@@ -52,9 +50,7 @@ async def test_managed_queue_reports_overflow_and_every_discard(monkeypatch):
 async def test_managed_queue_metrics_are_isolated_by_stream_kind(monkeypatch):
     monkeypatch.setattr(managed_streams, "MANAGED_STREAM_QUEUE_SIZE", 4)
     adapter = _FakeAdapter([({"event": 1}, "btcusdt@aggTrade")])
-    trades = managed_streams.ManagedStreamSet(
-        adapter, "trades", ["btcusdt@aggTrade"]
-    )
+    trades = managed_streams.ManagedStreamSet(adapter, "trades", ["btcusdt@aggTrade"])
     books = managed_streams.ManagedStreamSet(
         adapter, "orderbook", ["btcusdt@depth@100ms"]
     )
