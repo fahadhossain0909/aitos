@@ -168,8 +168,12 @@ class ManagedStreamSet:
                             extra={
                                 "aitos_extra": {
                                     "kind": self._kind,
-                                    "overflow_events": self._queue_stats["overflow_events"],
-                                    "dropped_events": self._queue_stats["dropped_events"],
+                                    "overflow_events": self._queue_stats[
+                                        "overflow_events"
+                                    ],
+                                    "dropped_events": self._queue_stats[
+                                        "dropped_events"
+                                    ],
                                 }
                             },
                         )
