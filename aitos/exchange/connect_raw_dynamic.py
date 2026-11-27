@@ -243,10 +243,13 @@ async def connect_raw_dynamic(
                 extra={"aitos_extra": {"stage": "lifecycle_rotation", "label": label}},
             )
         except Exception as exc:
-            termination_class = "abnormal_error"
+            close_code = getattr(ws, "close_code", None)
+            termination_class = (
+                "remote_clean_close" if close_code in (1000, 1001) else "abnormal_error"
+            )
             adapter._ws_transport.update(
                 {
-                    "state": "error",
+                    "state": "reconnecting" if termination_class == "remote_clean_close" else "error",
                     "last_close_code": getattr(ws, "close_code", None),
                     "last_close_reason": getattr(ws, "close_reason", None),
                     "last_disconnect_class": termination_class,
@@ -283,10 +286,10 @@ async def connect_raw_dynamic(
                     transport["last_connection_uptime_seconds"] = round(uptime, 3)
                 counter = {
                     "intentional_cancel": "intentional_close_count",
-                    "lifecycle_rotation": "lifecycle_rotation_count",
+                    "remote_clean_close": "normal_close_count",
                     "abnormal_error": "abnormal_close_count",
                 }.get(termination_class)
-                if counter is not None and termination_class != "lifecycle_rotation":
+                if counter is not None:
                     transport[counter] = transport.get(counter, 0) + 1
         if emit_reconnect:
             yield None, "__reconnect__"
