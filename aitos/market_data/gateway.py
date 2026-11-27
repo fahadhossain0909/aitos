@@ -88,8 +88,7 @@ class MarketDataGateway:
         )
         post_ingest_age_ms = max(
             0.0,
-            (datetime.now(timezone.utc) - event.ingest_time).total_seconds()
-            * 1000.0,
+            (datetime.now(timezone.utc) - event.ingest_time).total_seconds() * 1000.0,
         )
         try:
             from aitos.forensics.data_flow_hooks import note_trace, record_input
