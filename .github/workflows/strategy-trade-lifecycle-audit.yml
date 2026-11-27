@@ -15,12 +15,20 @@ permissions:
 
 jobs:
   audit:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: Canonical strategy and trade lifecycle audit
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
+      - name: Require staging monitoring to be enabled
+        env:
+          AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$AITOS_VPS_ENABLED" != "true" ]; then
+            echo '::error::Scheduled staging audit is disabled. Set repository variable AITOS_VPS_ENABLED=true or this audit will not execute.'
+            exit 1
+          fi
       - name: Checkout audit collector
         uses: actions/checkout@v4
 
@@ -59,7 +67,7 @@ jobs:
           ssh -i /tmp/aitos_strategy_lifecycle_key \
             -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=30 "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd \"\$HOME/aitos\" && chmod +x scripts/strategy_trade_lifecycle_audit.sh && AITOS_STRATEGY_AUDIT_WINDOW_HOURS='$WINDOW_HOURS' AITOS_STRATEGY_AUDIT_DIR=\"\$HOME/aitos-strategy-trade-lifecycle-audit\" bash scripts/strategy_trade_lifecycle_audit.sh"
+            "cd /opt/aitos-staging && chmod +x scripts/strategy_trade_lifecycle_audit.sh && AITOS_STRATEGY_AUDIT_WINDOW_HOURS='$WINDOW_HOURS' AITOS_STRATEGY_AUDIT_DIR=\"\$HOME/aitos-strategy-trade-lifecycle-audit\" bash scripts/strategy_trade_lifecycle_audit.sh"
           rc=$?
           echo "remote_exit_code=$rc" | tee audit_remote_status.txt
           exit "$rc"
