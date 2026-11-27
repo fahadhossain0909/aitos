@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import aitos.exchange.connect_raw_dynamic as dynamic_transport
 from aitos.exchange.connect_raw_dynamic import connect_raw_dynamic
 
 
@@ -97,3 +98,65 @@ async def test_generator_cancellation_is_not_counted_as_abnormal_disconnect():
     assert transport.get("abnormal_close_count", 0) == 0
     assert transport["last_disconnect_class"] == "intentional_cancel"
     assert transport["managed_connections"]["trades"]["intentional_close_count"] == 1
+
+
+
+@pytest.mark.asyncio
+async def test_short_lived_successful_handshakes_do_not_reset_reconnect_backoff(
+    monkeypatch,
+):
+    ws = AsyncMock()
+    ws.recv.side_effect = ConnectionResetError("flapping connection")
+    adapter = _adapter(ws)
+    delays = []
+
+    async def record_sleep(delay):
+        delays.append(delay)
+        if len(delays) == 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(dynamic_transport.asyncio, "sleep", record_sleep)
+    generator = connect_raw_dynamic(
+        adapter,
+        get_streams=lambda: ["btcusdt@aggTrade"],
+        changed=asyncio.Event(),
+        emit_reconnect=True,
+        label="trades",
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in generator:
+            pass
+    await generator.aclose()
+
+    assert delays == [1.0, 2.0, 4.0]
+
+
+@pytest.mark.asyncio
+async def test_reconnect_backoff_resets_after_stable_connection(monkeypatch):
+    ws = AsyncMock()
+    ws.recv.side_effect = ConnectionResetError("connection ended after stable period")
+    adapter = _adapter(ws)
+    delays = []
+    monkeypatch.setattr(dynamic_transport, "STABLE_CONNECTION_RESET_SECONDS", 0.0)
+
+    async def record_sleep(delay):
+        delays.append(delay)
+        if len(delays) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(dynamic_transport.asyncio, "sleep", record_sleep)
+    generator = connect_raw_dynamic(
+        adapter,
+        get_streams=lambda: ["btcusdt@aggTrade"],
+        changed=asyncio.Event(),
+        emit_reconnect=True,
+        label="trades",
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in generator:
+            pass
+    await generator.aclose()
+
+    assert delays == [1.0, 1.0]
