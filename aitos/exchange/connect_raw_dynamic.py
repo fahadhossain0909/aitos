@@ -59,8 +59,11 @@ async def connect_raw_dynamic(
         subscribed = set(streams)
         ws = None
         recv_task: asyncio.Task | None = None
+        termination_class = "unknown"
+        connection_started_monotonic: float | None = None
         try:
             started_at = _now_iso()
+            connection_started_monotonic = asyncio.get_running_loop().time()
             adapter._ws_transport.update(
                 {
                     "state": "connecting",
@@ -206,16 +209,33 @@ async def connect_raw_dynamic(
                             adapter._ws_transport["last_market_event_at"] = _now_iso()
                             yield payload, stream_name
         except asyncio.CancelledError:
+            termination_class = "intentional_cancel"
+            if ws is not None:
+                adapter._ws_transport.update(
+                    {
+                        "last_close_at": _now_iso(),
+                        "last_close_code": getattr(ws, "close_code", None),
+                        "last_close_reason": getattr(ws, "close_reason", None),
+                        "last_disconnect_class": termination_class,
+                        "last_close_stream": label,
+                    }
+                )
             raise
         # Python 3.10 exposes asyncio.TimeoutError separately from the
         # built-in TimeoutError. A websocket recv timeout is therefore a
         # lifecycle timeout and must not fall through to the generic error
         # state, otherwise managed-stream lifecycle rotation never occurs.
         except (TimeoutError, asyncio.TimeoutError):
+            termination_class = "lifecycle_rotation"
             adapter._ws_transport.update(
                 {
                     "state": "lifecycle_rotation",
                     "last_close_at": _now_iso(),
+                    "last_close_code": getattr(ws, "close_code", None),
+                    "last_close_reason": getattr(ws, "close_reason", None),
+                    "last_disconnect_class": termination_class,
+                    "last_close_stream": label,
+                    "lifecycle_rotation_count": adapter._ws_transport.get("lifecycle_rotation_count", 0) + 1,
                 }
             )
             logger.info(
@@ -223,9 +243,14 @@ async def connect_raw_dynamic(
                 extra={"aitos_extra": {"stage": "lifecycle_rotation", "label": label}},
             )
         except Exception as exc:
+            termination_class = "abnormal_error"
             adapter._ws_transport.update(
                 {
                     "state": "error",
+                    "last_close_code": getattr(ws, "close_code", None),
+                    "last_close_reason": getattr(ws, "close_reason", None),
+                    "last_disconnect_class": termination_class,
+                    "last_close_stream": label,
                     "last_error_type": type(exc).__name__,
                     "last_error": str(exc),
                     "last_close_at": _now_iso(),
@@ -247,9 +272,24 @@ async def connect_raw_dynamic(
                 recv_task.cancel()
                 await asyncio.gather(recv_task, return_exceptions=True)
             if ws is not None:
-                adapter._ws_transport["close_count"] = (
-                    adapter._ws_transport.get("close_count", 0) + 1
-                )
+                transport = adapter._ws_transport
+                transport["close_count"] = transport.get("close_count", 0) + 1
+                transport["last_close_code"] = getattr(ws, "close_code", None)
+                transport["last_close_reason"] = getattr(ws, "close_reason", None)
+                transport["last_disconnect_class"] = termination_class
+                transport["last_close_stream"] = label
+                if connection_started_monotonic is not None:
+                    uptime = max(0.0, asyncio.get_running_loop().time() - connection_started_monotonic)
+                    transport["last_connection_uptime_seconds"] = round(uptime, 3)
+                counter = {
+                    "intentional_cancel": "intentional_close_count",
+                    "lifecycle_rotation": "lifecycle_rotation_count",
+                    "abnormal_error": "abnormal_close_count",
+                }.get(termination_class)
+                if counter is not None and termination_class != "lifecycle_rotation":
+                    transport[counter] = transport.get(counter, 0) + 1
+                if termination_class == "abnormal_error":
+                    transport["abnormal_close_count"] = transport.get("abnormal_close_count", 0) + 1
         if emit_reconnect:
             yield None, "__reconnect__"
         logger.warning(
