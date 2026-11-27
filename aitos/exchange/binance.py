@@ -153,6 +153,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             "frames_received": 0,
             "market_events_received": 0,
             "close_count": 0,
+            "connection_failure_count": 0,
             "intentional_close_count": 0,
             "normal_close_count": 0,
             "abnormal_close_count": 0,
