@@ -12,6 +12,10 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
 CH="aitos-clickhouse"
 PAPER="aitos-paper"
+STAGING_ENV_FILE="/opt/aitos-staging/.env"
+CLICKHOUSE_USER="$(sed -n 's/^CLICKHOUSE_USER=//p' "$STAGING_ENV_FILE" 2>/dev/null | tail -n1)"
+CLICKHOUSE_PASSWORD="$(sed -n 's/^CLICKHOUSE_PASSWORD=//p' "$STAGING_ENV_FILE" 2>/dev/null | tail -n1)"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-default}"
 
 if ! docker inspect "$CH" >/dev/null 2>&1; then
   echo "ClickHouse container unavailable." > "$REPORT"
@@ -24,7 +28,7 @@ if ! docker inspect "$PAPER" >/dev/null 2>&1; then
 fi
 
 ch() {
-  docker exec "$CH" clickhouse-client --query "$1" 2>&1
+  docker exec "$CH" clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1" 2>&1
 }
 
 latest_cte="(SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id)"
