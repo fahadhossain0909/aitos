@@ -10,11 +10,19 @@ permissions:
 
 jobs:
   strategy-audit:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
+      - name: Require staging monitoring to be enabled
+        env:
+          AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$AITOS_VPS_ENABLED" != "true" ]; then
+            echo '::error::Scheduled staging audit is disabled. Set repository variable AITOS_VPS_ENABLED=true or this audit will not execute.'
+            exit 1
+          fi
       - name: Check required deployment secrets
         shell: bash
         env:
@@ -53,7 +61,7 @@ jobs:
           command_timeout: 10m
           script: |
             set -u
-            cd "$HOME/aitos"
+            cd /opt/aitos-staging
             mkdir -p "$HOME/aitos-strategy-audit"
             REPORT="$HOME/aitos-strategy-audit/report.txt"
             EXIT_CODE="$HOME/aitos-strategy-audit/exit_code"
