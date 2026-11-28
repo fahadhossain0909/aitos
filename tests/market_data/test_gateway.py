@@ -330,3 +330,33 @@ async def test_gateway_uses_bound_market_bus_batch_publisher_when_available():
     assert publisher.single == []
     assert publisher.batches == [events]
     assert gateway.queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_drain_workers_preserve_fifo_across_publish_batches():
+    class OrderedBatchPublisher:
+        def __init__(self):
+            self.batches = []
+
+        async def publish(self, event):
+            raise AssertionError("single-event path should not be used")
+
+        async def publish_many(self, events):
+            await asyncio.sleep(0.01)
+            self.batches.append([event.sequence for event in events])
+
+    publisher = OrderedBatchPublisher()
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        publisher.publish,
+        GatewayConfig(queue_capacity=8, publish_batch_size=3),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    for sequence in range(8):
+        assert gateway.accept(_event(MarketSource.WEBSOCKET, sequence=sequence))
+
+    await asyncio.gather(*(gateway.drain_once() for _ in range(3)))
+
+    assert publisher.batches == [[0, 1, 2], [3, 4, 5], [6, 7]]

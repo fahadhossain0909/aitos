@@ -54,6 +54,7 @@ class MarketDataGateway:
         self._publisher = publisher
         publisher_owner = getattr(publisher, "__self__", None)
         self._batch_publisher = getattr(publisher_owner, "publish_many", None)
+        self._drain_lock = asyncio.Lock()
         self._transport_snapshot_provider = transport_snapshot_provider
 
     def begin_connect(self) -> None:
@@ -264,6 +265,11 @@ class MarketDataGateway:
                 pass
 
     async def drain_once(self) -> bool:
+        """Serialize bounded queue drains to preserve FIFO publication order."""
+        async with self._drain_lock:
+            return await self._drain_once_locked()
+
+    async def _drain_once_locked(self) -> bool:
         """Publish a bounded event batch, dropping only events that are stale."""
         queue_started = time.perf_counter()
         events: list[MarketEvent] = []
