@@ -65,6 +65,9 @@ class CanonicalMarketDataPersistenceSink:
         self._queue_enqueued_at: dict[int, float] = {}
         self._queue_wait_samples_ms: deque[float] = deque(maxlen=2048)
         self._batch_write_samples_ms: deque[float] = deque(maxlen=2048)
+        self._table_write_samples_ms: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=2048)
+        )
         self._workers_count = max(1, workers)
         self._batch_size = max(1, batch_size)
         self._batch_wait = max(0.0, batch_wait_seconds)
@@ -311,6 +314,15 @@ class CanonicalMarketDataPersistenceSink:
                 for _ in batch:
                     self._queue.task_done()
 
+    async def _record_table_write(self, table: str, writer, payload) -> None:
+        started = time.perf_counter()
+        try:
+            await writer(payload)
+        finally:
+            self._table_write_samples_ms[table].append(
+                (time.perf_counter() - started) * 1000.0
+            )
+
     async def _persist_batch(self, events: list[MarketEvent]) -> None:
         if self._repository is None or not events:
             return
@@ -325,13 +337,17 @@ class CanonicalMarketDataPersistenceSink:
             self._repository, "save_market_event_versioned", None
         )
         if versioned_batch_writer is not None:
-            await versioned_batch_writer(events)
+            await self._record_table_write(
+                "market_event_versions", versioned_batch_writer, events
+            )
             self._versioned_events += len(events)
         elif versioned_writer is not None and len(events) == 1:
             # Compatibility is safe only for a singleton. Falling back to one
             # INSERT per event inside a multi-event batch recreates the
             # ClickHouse N+1 write amplification seen in staging.
-            await versioned_writer(events[0])
+            await self._record_table_write(
+                "market_event_versions", versioned_writer, events[0]
+            )
             self._versioned_events += 1
         elif self._canonical_only or versioned_writer is not None:
             raise RuntimeError(
@@ -346,14 +362,18 @@ class CanonicalMarketDataPersistenceSink:
         else:
             trades = grouped.get(MarketEventType.TRADE, [])
         if trades:
-            await self._repository.save_trade_ticks(
-                [TradeTick.from_dict(dict(event.payload)) for event in trades]
+            await self._record_table_write(
+                "trade_ticks",
+                self._repository.save_trade_ticks,
+                [TradeTick.from_dict(dict(event.payload)) for event in trades],
             )
 
         if not self._canonical_only:
             deltas = grouped.get(MarketEventType.BOOK_DELTA, [])
         if deltas:
-            await self._repository.save_depth_events(
+            await self._record_table_write(
+                "depth_events",
+                self._repository.save_depth_events,
                 [
                     {
                         "symbol": event.symbol,
@@ -361,7 +381,7 @@ class CanonicalMarketDataPersistenceSink:
                         "payload": dict(event.payload),
                     }
                     for event in deltas
-                ]
+                ],
             )
 
         if not self._canonical_only:
@@ -380,7 +400,11 @@ class CanonicalMarketDataPersistenceSink:
                         asks=snapshot.asks[: self._historical_orderbook_levels],
                     )
                 )
-            await self._repository.save_order_book_snapshots(snapshots)
+            await self._record_table_write(
+                "order_book_snapshots",
+                self._repository.save_order_book_snapshots,
+                snapshots,
+            )
 
         try:
             from aitos.forensics.data_flow_hooks import (
@@ -444,6 +468,10 @@ class CanonicalMarketDataPersistenceSink:
             "queue_capacity": self._queue.maxsize,
             "queue_wait": self._latency_summary(self._queue_wait_samples_ms),
             "batch_write": self._latency_summary(self._batch_write_samples_ms),
+            "table_write_latency": {
+                table: self._latency_summary(samples)
+                for table, samples in self._table_write_samples_ms.items()
+            },
             "processed": self._processed,
             "errors": self._errors,
             "rejected": self._rejected,
