@@ -364,6 +364,20 @@ async def test_versioned_events_use_one_bulk_insert_per_persistence_batch():
 
 
 @pytest.mark.asyncio
+async def test_persistence_sink_reports_latency_per_target_table():
+    repo = FakeRepository()
+    sink = make_sink(repo)
+
+    await sink._persist_batch([trade_event(401)])
+
+    table_latency = sink.snapshot()["table_write_latency"]
+    assert table_latency["market_event_versions"]["count"] == 1
+    assert table_latency["trade_ticks"]["count"] == 1
+    assert table_latency["market_event_versions"]["p95_ms"] is not None
+    assert table_latency["trade_ticks"]["p95_ms"] is not None
+
+
+@pytest.mark.asyncio
 async def test_multi_event_batch_refuses_single_event_insert_fallback():
     repo = FakeRepository()
     repo.save_market_events_versioned = None
