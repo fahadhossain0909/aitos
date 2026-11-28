@@ -84,6 +84,7 @@ async def test_event_bus_publish_many_uses_one_redis_pipeline():
     assert publisher["batch_size"]["max"] == 2
     assert publisher["total_latency"]["count"] == 1
     assert publisher["prepare_latency"]["count"] == 1
+    assert publisher["pipeline_enqueue_latency"]["count"] == 1
     assert publisher["redis_execute_latency"]["count"] == 1
     assert publisher["retry_latency"]["count"] == 0
 
