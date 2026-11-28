@@ -125,6 +125,26 @@ async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_records_slow_publisher_calls_separately_from_queue_wait():
+    async def publish(event):
+        await asyncio.sleep(0.11)
+
+    gateway = MarketDataGateway("binance", "usd_m_futures", publish)
+    gateway.begin_connect()
+    gateway.mark_connected()
+    assert gateway.accept(_event(MarketSource.WEBSOCKET))
+
+    await gateway.drain_once()
+
+    publisher = gateway.snapshot()["publisher_latency"]
+    assert publisher["count"] == 1
+    assert publisher["slow_operations_over_100ms"] == 1
+    assert publisher["avg_ms"] >= 100.0
+    assert publisher["max_ms"] >= publisher["avg_ms"]
+    assert publisher["measurement"].startswith("one gateway publish call")
+
+
+@pytest.mark.asyncio
 async def test_gateway_drain_once_returns_false_on_empty_queue() -> None:
     published = []
 
