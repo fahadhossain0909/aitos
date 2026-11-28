@@ -92,6 +92,7 @@ class HealthServer:
     def _build_app(self) -> web.Application:
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
+        app.router.add_get("/ready", self._handle_health)
         app.router.add_get("/metrics", self._handle_metrics)
         app.router.add_get("/data-flow", self._handle_data_flow)
         app.router.add_get("/data-flow/{symbol}", self._handle_data_flow_symbol)
@@ -481,7 +482,8 @@ class HealthServer:
         has_degraded = any(
             item["status"] == ModuleStatus.DEGRADED.value for item in results
         )
-        if has_unhealthy:
+        strict_readiness = request.path == "/ready"
+        if has_unhealthy or (strict_readiness and (has_degraded or not overall_healthy)):
             payload_status = "degraded"
             status_code = 503
         elif has_degraded or not overall_healthy:
