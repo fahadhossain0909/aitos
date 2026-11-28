@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from contextvars import ContextVar
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +18,15 @@ from aitos.logging_setup import get_logger
 from aitos.market_data.endpoints import BINANCE_USDM_WS_MAX_LIFETIME_SECONDS
 
 logger = get_logger("aitos.exchange.connect_raw_dynamic")
+
+_WS_FRAME_TIMING: ContextVar[dict[str, float]] = ContextVar(
+    "aitos_ws_frame_timing", default={}
+)
+
+
+def current_ws_frame_timing() -> dict[str, float]:
+    """Return receive/decode timing for the frame currently yielded to a consumer."""
+    return dict(_WS_FRAME_TIMING.get())
 
 INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 60.0
@@ -203,13 +214,18 @@ async def connect_raw_dynamic(
                                 raw_message = recv_task.result()
                             except Exception:
                                 raise
+                            frame_received_monotonic = time.monotonic()
+                            frame_received_epoch_ms = time.time() * 1000.0
                             adapter._ws_transport["frames_received"] += 1
                             if first_message:
                                 adapter._ws_transport["last_first_frame_at"] = (
                                     _now_iso()
                                 )
                                 first_message = False
+                            decode_started_monotonic = time.monotonic()
                             envelope = json.loads(raw_message)
+                            decode_completed_monotonic = time.monotonic()
+                            decode_completed_epoch_ms = time.time() * 1000.0
                             # Control-frame acks have no "stream" / "data"
                             if (
                                 isinstance(envelope, dict)
@@ -242,7 +258,19 @@ async def connect_raw_dynamic(
                                     ),
                                     rtt_ms,
                                 )
-                            yield payload, stream_name
+                            timing_token = _WS_FRAME_TIMING.set(
+                                {
+                                    "ws_frame_received_monotonic": frame_received_monotonic,
+                                    "ws_frame_received_epoch_ms": frame_received_epoch_ms,
+                                    "ws_decode_started_monotonic": decode_started_monotonic,
+                                    "ws_decode_completed_monotonic": decode_completed_monotonic,
+                                    "ws_decode_completed_epoch_ms": decode_completed_epoch_ms,
+                                }
+                            )
+                            try:
+                                yield payload, stream_name
+                            finally:
+                                _WS_FRAME_TIMING.reset(timing_token)
         except asyncio.CancelledError:
             termination_class = "intentional_cancel"
             if ws is not None:
