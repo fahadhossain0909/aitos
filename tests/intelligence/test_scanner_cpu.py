@@ -9,6 +9,7 @@ from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.scanner_cpu import (
     compute_amt_footprint_features,
+    get_scanner_cpu_executor,
     run_scanner_cpu,
 )
 from aitos.models.market import TradeSide, TradeTick
@@ -58,3 +59,7 @@ async def test_spawned_cpu_worker_matches_inline_feature_results():
     actual = await run_scanner_cpu(compute_amt_footprint_features, *args)
 
     assert actual == expected
+
+
+def test_scanner_cpu_executor_is_bounded_to_one_spawned_worker():
+    assert get_scanner_cpu_executor()._max_workers == 1
