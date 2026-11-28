@@ -70,6 +70,25 @@ from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 
 logger = get_logger("aitos.intelligence.scanner")
+
+
+async def _measure_event_loop_lag(
+    task: asyncio.Task, *, interval_seconds: float = 0.01
+) -> float:
+    """Measure worst scheduling delay while a scanner task is running."""
+    loop = asyncio.get_running_loop()
+    interval = max(0.001, interval_seconds)
+    deadline = loop.time() + interval
+    maximum_lag = 0.0
+    while True:
+        await asyncio.sleep(max(0.0, deadline - loop.time()))
+        now = loop.time()
+        maximum_lag = max(maximum_lag, now - deadline)
+        if task.done():
+            return maximum_lag * 1000.0
+        deadline = now + interval
+
+
 _ACTIVE_SCAN_TRACE_ID: ContextVar[str] = ContextVar("aitos_scan_trace_id", default="")
 TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -821,7 +840,32 @@ class OpportunityScanner(AITOSModule):
         except Exception:
             pass
         try:
-            result = await self._scan_symbol_impl(symbol, reference_klines)
+            scan_task = asyncio.create_task(
+                self._scan_symbol_impl(symbol, reference_klines),
+                name=f"scanner-analysis-{symbol}",
+            )
+            lag_task = asyncio.create_task(
+                _measure_event_loop_lag(scan_task),
+                name=f"scanner-loop-lag-{symbol}",
+            )
+            try:
+                result = await scan_task
+            finally:
+                # Give the lag sampler one turn to observe a synchronous stall
+                # immediately before scan completion.
+                await asyncio.sleep(0)
+                loop_lag_ms = await lag_task
+                if loop_lag_ms >= 50.0:
+                    logger.warning(
+                        "scanner analysis delayed the event loop",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "event_loop_lag_ms": round(loop_lag_ms, 3),
+                                "scan_stage": "symbol_analysis",
+                            }
+                        },
+                    )
         except Exception as exc:
             try:
                 record_error(
