@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from aitos.intelligence.amt.engine import AMTEngine
+from aitos.intelligence.footprint import FootprintEngine
+from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.scanner_cpu import (
     compute_amt_footprint_features,
     run_scanner_cpu,
@@ -29,14 +32,19 @@ def _trades() -> list[TradeTick]:
 
 def test_isolated_feature_function_preserves_amt_and_footprint_outputs():
     trades = _trades()
-    expected = compute_amt_footprint_features(
-        trades, [], None, None, 0.1, 0.70, 60, 0.60, 0.0
+    expected_amt = AMTEngine(0.1, value_area_pct=0.70, ib_minutes=60).analyze(
+        trades, klines=[], book=None, previous_profile=None
     )
+    footprint = FootprintEngine(0.1).build(trades)
+    expected_signals = FootprintSignalEngine(
+        imbalance_threshold=0.60, min_level_volume=0.0
+    ).evaluate(footprint)
+
     actual = compute_amt_footprint_features(
         trades, [], None, None, 0.1, 0.70, 60, 0.60, 0.0
     )
 
-    assert actual == expected
+    assert actual == (expected_amt, expected_signals)
     assert actual[0] is not None
     assert actual[1] is not None
 
