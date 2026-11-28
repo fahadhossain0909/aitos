@@ -48,7 +48,7 @@ jobs:
             echo "Staging deployment is enabled by the staging Environment variable."
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Staging deployment is disabled; set staging Environment variable AITOS_VPS_ENABLED=true to enable it."
+            echo "::notice::Staging deployment requires confirm_deploy=true and staging Environment variable AITOS_VPS_ENABLED=true."
           fi
 
   publish-image:

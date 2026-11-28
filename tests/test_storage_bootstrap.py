@@ -63,13 +63,18 @@ def test_staging_workflow_accepts_optional_external_uuid_and_sudo_secret() -> No
     assert "AITOS_ALLOW_BOOT_DISK_DATA" not in WORKFLOW
 
 
-def test_staging_enable_switch_is_resolved_from_staging_environment_before_build() -> (
-    None
-):
+def test_staging_enable_switch_requires_manual_confirmation() -> None:
+    assert "workflow_dispatch:" in WORKFLOW
+    assert "confirm_deploy:" in WORKFLOW
+    assert "  push:" not in WORKFLOW
     gate = WORKFLOW.split("  staging-gate:", 1)[1].split("  publish-image:", 1)[0]
     assert "environment: staging" in gate
     assert "AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}" in gate
-    assert '[[ "${AITOS_VPS_ENABLED:-}" == "true" ]]' in gate
+    assert "CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}" in gate
+    assert (
+        '[[ "${CONFIRM_DEPLOY:-false}" == "true" && '
+        '"${AITOS_VPS_ENABLED:-}" == "true" ]]'
+    ) in gate
     assert 'echo "enabled=true" >> "$GITHUB_OUTPUT"' in gate
     assert 'echo "enabled=false" >> "$GITHUB_OUTPUT"' in gate
 
