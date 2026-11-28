@@ -4,11 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aitos.intelligence.scanner import _measure_event_loop_lag
-
 from aitos.intelligence.amt.engine import AMTEngine
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
+from aitos.intelligence.scanner import _measure_event_loop_lag
 from aitos.intelligence.scanner_cpu import (
     compute_amt_footprint_features,
     get_scanner_cpu_executor,
