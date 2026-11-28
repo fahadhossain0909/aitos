@@ -131,7 +131,7 @@ services:
     ports: ["127.0.0.1:8090:8090"]
     mem_limit: "${AITOS_TRADING_MEM_LIMIT:-2g}"
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
-    healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
+    healthcheck: {test: ["CMD", "python3", "-c", "import json,urllib.request; response=urllib.request.urlopen('http://localhost:8090/ready', timeout=5); payload=json.load(response); raise SystemExit(0 if payload.get('status') == 'healthy' else 1)"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
     restart: unless-stopped
 
   aitos-learning:
