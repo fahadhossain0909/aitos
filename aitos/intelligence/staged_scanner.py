@@ -356,14 +356,20 @@ async def install_staged_scan(
             top25 = [anchor, *top25[: TOP_25 - 1]]
         await on_subscription_change(top25, "TOP_25")
 
-        # Expensive multi-source analysis is capped at nine ranked non-BTC
-        # symbols plus the permanent BTC anchor.
+        # Subscribe the ranked tiers first, then spend expensive analysis only
+        # on the final Top-2 candidates.
         non_anchor = [symbol for symbol in top25 if symbol != anchor]
-        expensive_symbols = ([anchor] if anchor in top25 else []) + non_anchor[
-            : TOP_10 - 1
+        top10 = ([anchor] if anchor in top25 else []) + non_anchor[
+            : TOP_10 - (1 if anchor in top25 else 0)
         ]
+        top5 = top10[:TOP_5]
+        deep_symbols = top5[:TOP_2]
+        await on_subscription_change(top10, "TOP_10")
+        await on_subscription_change(top5, "TOP_5")
+        await on_subscription_change(deep_symbols, "TOP_2")
+
         expensive: list[Any] = []
-        for symbol in expensive_symbols:
+        for symbol in deep_symbols:
             try:
                 candidate = await scanner.scan_symbol(symbol, reference_klines)
                 if candidate is not None:
@@ -375,19 +381,8 @@ async def install_staged_scan(
                 )
 
         expensive.sort(key=lambda candidate: candidate.composite_score, reverse=True)
-        anchor_candidates = [c for c in expensive if c.symbol == anchor]
-        non_anchor_candidates = [c for c in expensive if c.symbol != anchor]
-        top10 = (
-            anchor_candidates + non_anchor_candidates[: TOP_10 - len(anchor_candidates)]
-        )
-        await on_subscription_change([c.symbol for c in top10], "TOP_10")
-
-        # Top-5/Top-2 are trading-candidate tiers. BTC remains a transport
-        # anchor independently through update_live_deep_orderbooks().
-        top5 = expensive[:TOP_5]
-        await on_subscription_change([c.symbol for c in top5], "TOP_5")
-        top2 = top5[:TOP_2]
-        await on_subscription_change([c.symbol for c in top2], "TOP_2")
+        top2 = expensive[:TOP_2]
+        await on_subscription_change([candidate.symbol for candidate in top2], "TOP_2")
         await _enrich_promoted_candidates(scanner, top2)
 
         scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
@@ -424,23 +419,37 @@ async def install_staged_scan(
 
         async def _rank_and_subscribe(*args: Any, **kwargs: Any) -> list[str]:
             universe = getattr(scanner, "_aitos_universe_market_context", None)
+            anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
             if universe is not None:
                 ranked = await _rank_live_universe(scanner, universe)
-                requested = kwargs.get("limit", args[0] if args else None)
-                if requested is None:
-                    requested = scanner._tuning.analysis.expensive_analysis_limit
-                limit = max(1, min(TOP_50, int(requested)))
-                selected = [symbol for symbol, _score in ranked[:limit]]
-                anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
-                if (
-                    anchor in {symbol for symbol, _score in ranked}
-                    and anchor not in selected
-                ):
-                    selected = [anchor, *selected[: limit - 1]]
+                ranked_symbols = [symbol for symbol, _score in ranked]
+                top50 = ranked_symbols[:TOP_50]
+                if anchor in ranked_symbols and anchor not in top50:
+                    top50 = [anchor, *top50[: TOP_50 - 1]]
             else:
-                selected = await original_lightweight_rank(*args, **kwargs)
-            await on_subscription_change(list(selected), "TOP_50")
-            return selected
+                rank_args = list(args)
+                rank_kwargs = dict(kwargs)
+                if rank_args:
+                    rank_args[0] = TOP_50
+                    rank_kwargs.pop("limit", None)
+                else:
+                    rank_kwargs["limit"] = TOP_50
+                ranked_symbols = await original_lightweight_rank(
+                    *rank_args, **rank_kwargs
+                )
+                top50 = list(ranked_symbols[:TOP_50])
+                if anchor in scanner._symbols and anchor not in top50:
+                    top50 = [anchor, *top50[: TOP_50 - 1]]
+            top25 = top50[:TOP_25]
+            top10 = top25[:TOP_10]
+            top5 = top10[:TOP_5]
+            top2 = top5[:TOP_2]
+            await on_subscription_change(top50, "TOP_50")
+            await on_subscription_change(top25, "TOP_25")
+            await on_subscription_change(top10, "TOP_10")
+            await on_subscription_change(top5, "TOP_5")
+            await on_subscription_change(top2, "TOP_2")
+            return top2
 
         scanner._lightweight_rank_symbols = _rank_and_subscribe
 
@@ -462,13 +471,11 @@ async def install_staged_scan(
                     key=lambda item: float(item.composite_score),
                     reverse=True,
                 )
-                top5 = [item.symbol for item in ranked[:TOP_5]]
                 top2 = ranked[:TOP_2]
                 scanner._last_candidate_count = len(top2)
                 scanner._last_candidate_symbols = tuple(
                     sorted({item.symbol for item in top2})
                 )
-                await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change([item.symbol for item in top2], "TOP_2")
 
                 def candidate_key(item: Any) -> str:
