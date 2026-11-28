@@ -270,7 +270,9 @@ class CanonicalMarketDataPersistenceSink:
                 loop_now = asyncio.get_running_loop().time()
                 for future in completions:
                     queued_at = self._queue_enqueued_at.pop(id(future), loop_now)
-                    self._queue_wait_samples_ms.append(max(0.0, loop_now - queued_at) * 1000.0)
+                    self._queue_wait_samples_ms.append(
+                        max(0.0, loop_now - queued_at) * 1000.0
+                    )
                 write_started = time.perf_counter()
                 try:
                     await self._persist_batch(batch)
@@ -423,7 +425,9 @@ class CanonicalMarketDataPersistenceSink:
         ordered = sorted(samples)
 
         def percentile(fraction: float) -> float:
-            index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5)))
+            index = max(
+                0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5))
+            )
             return round(ordered[index], 3)
 
         return {
