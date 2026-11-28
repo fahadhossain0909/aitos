@@ -1,14 +1,15 @@
 name: Staging CD + Runtime Audit
 
 on:
-  push:
-    branches:
-      - 'architecture/**'
-      - 'feature/**'
-      - 'bugfix/**'
-      - 'fix/**'
-      - 'hotfix/**'
+  # Staging deployment is deliberately manual: pushing a feature/fix branch
+  # must never deploy to the VPS as a side effect of code review or CI.
   workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Explicitly authorize deployment to the AITOS staging VPS"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -39,9 +40,10 @@ jobs:
         shell: bash
         env:
           AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}
+          CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}
         run: |
           set -euo pipefail
-          if [[ "${AITOS_VPS_ENABLED:-}" == "true" ]]; then
+          if [[ "${CONFIRM_DEPLOY:-false}" == "true" && "${AITOS_VPS_ENABLED:-}" == "true" ]]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
             echo "Staging deployment is enabled by the staging Environment variable."
           else
