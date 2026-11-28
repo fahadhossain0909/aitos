@@ -63,7 +63,7 @@ from aitos.intelligence.orderflow_liquidity_interaction import (
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
 from aitos.intelligence.scanner_cpu import (
     compute_amt_footprint_features,
-    get_scanner_cpu_executor,
+    run_scanner_cpu,
 )
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
@@ -1485,9 +1485,7 @@ class OpportunityScanner(AITOSModule):
         amt_context = None
         if tick_size is not None and trades:
             cpu_started = time.perf_counter()
-            loop = asyncio.get_running_loop()
-            amt_context, footprint_signals = await loop.run_in_executor(
-                get_scanner_cpu_executor(),
+            amt_context, footprint_signals = await run_scanner_cpu(
                 compute_amt_footprint_features,
                 trades,
                 klines,
