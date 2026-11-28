@@ -69,6 +69,7 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.3-alpine
+    init: true
     container_name: aitos-clickhouse
     ports: ["127.0.0.1:8123:8123", "127.0.0.1:9000:9000"]
     environment:
@@ -135,6 +136,12 @@ services:
 
   aitos-learning:
     container_name: aitos-learning
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; cmd=open('/proc/1/cmdline','rb').read(); sys.exit(0 if b'run_continual_learning.py' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_continual_learning.py"]
