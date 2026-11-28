@@ -915,6 +915,7 @@ class OpportunityScanner(AITOSModule):
             and bool(live_trades)
             and live_book is not None
         )
+        live_fresh = live_inputs_fresh
         if self._tuning.mode == "live" and not live_inputs_fresh:
             for rejected_side in ("LONG", "SHORT"):
                 await self._record_funnel(
@@ -1472,7 +1473,7 @@ class OpportunityScanner(AITOSModule):
         candle_auction = auction_context_score(klines, direction.value)
         live_auction = (
             live_auction_score(trades, order_book, direction.value)
-            if live_fresh
+            if trades and order_book is not None
             else 5.0
         )
         amt_context = self._analyze_amt(symbol, trades, klines, order_book)
@@ -1506,7 +1507,9 @@ class OpportunityScanner(AITOSModule):
                 2,
             )
         else:
-            amt_score = live_auction if live_fresh else candle_auction
+            amt_score = (
+                live_auction if trades and order_book is not None else candle_auction
+            )
         tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
         liquidity_events = tracker.update(order_book, trades)
         tick_size = self._footprint_tick_size(symbol)
