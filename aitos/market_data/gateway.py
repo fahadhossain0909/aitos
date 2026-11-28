@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -56,6 +57,8 @@ class MarketDataGateway:
         self._batch_publisher = getattr(publisher_owner, "publish_many", None)
         self._drain_lock = asyncio.Lock()
         self._transport_snapshot_provider = transport_snapshot_provider
+        self._publisher_latency_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publisher_slow_operations = 0
 
     def begin_connect(self) -> None:
         self.state = GatewayState.CONNECTING
@@ -403,6 +406,10 @@ class MarketDataGateway:
                 )
                 raise
             finally:
+                publisher_latency_ms = (time.perf_counter() - publish_started) * 1000.0
+                self._publisher_latency_samples_ms.append(publisher_latency_ms)
+                if publisher_latency_ms > 100.0:
+                    self._publisher_slow_operations += 1
                 self._record_drain_stage("publisher", publish_started)
             latency_ms = (time.perf_counter() - queue_started) * 1000.0
             for event in publishable:
@@ -437,9 +444,35 @@ class MarketDataGateway:
                 self.queue.task_done()
             self._record_drain_stage("queue_task_done", task_started)
 
+    @staticmethod
+    def _latency_summary(samples: deque[float]) -> dict[str, float | int | None]:
+        if not samples:
+            return {"count": 0, "p50_ms": None, "p95_ms": None, "avg_ms": None, "max_ms": None}
+        ordered = sorted(samples)
+
+        def percentile(fraction: float) -> float:
+            index = max(
+                0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5))
+            )
+            return ordered[index]
+
+        return {
+            "count": len(ordered),
+            "p50_ms": round(percentile(0.50), 3),
+            "p95_ms": round(percentile(0.95), 3),
+            "avg_ms": round(sum(ordered) / len(ordered), 3),
+            "max_ms": round(ordered[-1], 3),
+        }
+
     def snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {
             "state": self.state.value,
+            "publisher_latency": {
+                **self._latency_summary(self._publisher_latency_samples_ms),
+                "slow_operations_over_100ms": self._publisher_slow_operations,
+                "slow_threshold_ms": 100.0,
+                "measurement": "one gateway publish call; may contain a multi-event batch",
+            },
             "queue": self.queue.snapshot(),
             "health": self.health.snapshot(),
             "freshness_policy": {
