@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import aitos.exchange.connect_raw_dynamic as dynamic_transport
+from aitos.market_data.binance_auxiliary import _event
+from aitos.market_data.contracts import MarketEventType
 from aitos.exchange.connect_raw_dynamic import (
     connect_raw_dynamic,
     current_ws_frame_timing,
@@ -54,9 +57,23 @@ async def test_websocket_frame_exposes_receive_and_decode_monotonic_timestamps()
 
     payload, stream = await generator.__anext__()
     timing = current_ws_frame_timing()
+    normalized_event = _event(
+        MarketEventType.TRADE,
+        "BTCUSDT",
+        payload,
+        datetime.now(timezone.utc),
+    )
 
     assert stream == "btcusdt@aggTrade"
     assert payload["e"] == "aggTrade"
+    assert (
+        normalized_event.stage_timestamps["ws_frame_received_monotonic"]
+        == timing["ws_frame_received_monotonic"]
+    )
+    assert (
+        normalized_event.stage_timestamps["event_normalized_monotonic"]
+        >= timing["ws_decode_completed_monotonic"]
+    )
     assert (
         timing["ws_frame_received_monotonic"] <= timing["ws_decode_started_monotonic"]
     )
