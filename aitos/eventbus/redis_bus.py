@@ -358,6 +358,70 @@ class EventBus(AITOSModule):
             if not fut.done():
                 fut.set_result(event)
 
+
+    async def publish_many(self, events: list[Event]) -> None:
+        """Append a bounded event batch using one Redis pipeline round trip."""
+        self._require_initialized()
+        if not events:
+            return
+        normalized: list[Event] = []
+        now = datetime.now(timezone.utc).isoformat()
+        for event in events:
+            validate_event_schema(event)
+            normalized_event = Event(
+                topic=event.topic,
+                payload=event.payload,
+                event_id=event.event_id,
+                source_module=event.source_module,
+                priority=event.priority,
+                created_at=event.created_at,
+                correlation_id=event.correlation_id,
+                schema_version=event.schema_version,
+            )
+            normalized.append(normalized_event)
+            self._known_topics.add(normalized_event.topic)
+        self._last_event_time = now
+        pipeline_factory = getattr(self._redis, "pipeline", None)
+        if not callable(pipeline_factory):
+            for event in normalized:
+                await self.publish(event)
+            return
+        pipeline = pipeline_factory(transaction=False)
+        for event in normalized:
+            maxlen = _stream_maxlen(event.topic)
+            if maxlen is None:
+                pipeline.xadd(_stream_key(event.topic), event.to_wire())
+            else:
+                pipeline.xadd(
+                    _stream_key(event.topic),
+                    event.to_wire(),
+                    maxlen=maxlen,
+                    approximate=True,
+                )
+        results = await pipeline.execute(raise_on_error=False)
+        if len(results) != len(normalized):
+            raise RuntimeError(
+                "Redis pipeline returned a result count different from the event batch"
+            )
+        failed: list[Event] = []
+        for event, result in zip(normalized, results):
+            if isinstance(result, BaseException):
+                failed.append(event)
+                continue
+            self._published_events += 1
+            if (
+                event.topic.endswith(".reply")
+                and event.correlation_id
+                and event.correlation_id in self._pending_replies
+            ):
+                fut = self._pending_replies.pop(event.correlation_id)
+                if not fut.done():
+                    fut.set_result(event)
+        # Retry only commands Redis reported as failed; successful XADDs are
+        # not repeated, avoiding duplicate stream entries after partial errors.
+        for event in failed:
+            await self.publish(event)
+
     async def subscribe(
         self,
         topic: str,

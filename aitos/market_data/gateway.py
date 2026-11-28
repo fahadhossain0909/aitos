@@ -33,6 +33,7 @@ class GatewayConfig:
     max_queue_age_seconds: float = 10.0
     publish_timeout_seconds: float = 5.0
     backpressure_poll_seconds: float = 0.005
+    publish_batch_size: int = 64
 
 
 class MarketDataGateway:
@@ -51,6 +52,8 @@ class MarketDataGateway:
         self.health = GatewayHealth(venue, market_type)
         self.state = GatewayState.STOPPED
         self._publisher = publisher
+        publisher_owner = getattr(publisher, "__self__", None)
+        self._batch_publisher = getattr(publisher_owner, "publish_many", None)
         self._transport_snapshot_provider = transport_snapshot_provider
 
     def begin_connect(self) -> None:
@@ -261,25 +264,32 @@ class MarketDataGateway:
                 pass
 
     async def drain_once(self) -> bool:
-        """Publish one event, or drop it if doing so would violate freshness."""
+        """Publish a bounded event batch, dropping only events that are stale."""
         queue_started = time.perf_counter()
-        event = None
+        events: list[MarketEvent] = []
         try:
-            event = await asyncio.wait_for(self.queue.get(), timeout=0.01)
+            first = await asyncio.wait_for(self.queue.get(), timeout=0.01)
         except asyncio.TimeoutError:
             return False
         except asyncio.CancelledError:
             raise
+        events.append(first)
+        for _ in range(max(0, self.config.publish_batch_size - 1)):
+            try:
+                events.append(self.queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
         self._record_drain_stage("queue_get", queue_started)
-        symbol = self._data_flow_symbol(event)
-        try:
-            from aitos.forensics.data_flow_hooks import record_input
-            from aitos.forensics.data_flow_schema import PipelineStage
+        publishable: list[MarketEvent] = []
+        for event in events:
+            symbol = self._data_flow_symbol(event)
+            try:
+                from aitos.forensics.data_flow_hooks import record_input
+                from aitos.forensics.data_flow_schema import PipelineStage
 
-            record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
-        except Exception:
-            pass
-        try:
+                record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
+            except Exception:
+                pass
             age_started = time.perf_counter()
             queue_age = self._queue_age_seconds(event)
             self._record_drain_stage("queue_age_check", age_started)
@@ -302,48 +312,60 @@ class MarketDataGateway:
                     )
                 except Exception:
                     pass
+                continue
+            publishable.append(event)
+        try:
+            if not publishable:
                 return False
+            publish_started = time.perf_counter()
             try:
-                publish_started = time.perf_counter()
-                try:
+                if self._batch_publisher is not None and len(publishable) > 1:
                     await asyncio.wait_for(
-                        self._publisher(event),
+                        self._batch_publisher(publishable),
                         timeout=self.config.publish_timeout_seconds,
                     )
-                finally:
-                    self._record_drain_stage("publisher", publish_started)
+                else:
+                    for event in publishable:
+                        await asyncio.wait_for(
+                            self._publisher(event),
+                            timeout=self.config.publish_timeout_seconds,
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.health.record_publish_error(str(exc))
-                self.health.dropped_events += 1
-                self.state = GatewayState.DEGRADED
-                try:
-                    from aitos.forensics.data_flow_hooks import record_error
-                    from aitos.forensics.data_flow_schema import PipelineStage
+                for event in publishable:
+                    symbol = self._data_flow_symbol(event)
+                    self.health.record_publish_error(str(exc))
+                    self.health.dropped_events += 1
+                    try:
+                        from aitos.forensics.data_flow_hooks import record_error
+                        from aitos.forensics.data_flow_schema import PipelineStage
 
-                    record_error(
-                        PipelineStage.REDIS_PUBLISH.value,
-                        symbol=symbol,
-                        issue="publish_error",
-                    )
-                except Exception:
-                    pass
+                        record_error(
+                            PipelineStage.REDIS_PUBLISH.value,
+                            symbol=symbol,
+                            issue="publish_error",
+                        )
+                    except Exception:
+                        pass
+                self.state = GatewayState.DEGRADED
                 logger.warning(
-                    "gateway publish failed",
+                    "gateway batch publish failed",
                     extra={
                         "aitos_extra": {
                             "stage": "gateway_publish_error",
                             "error": str(exc),
                             "error_type": type(exc).__name__,
-                            "symbol": symbol,
+                            "batch_size": len(publishable),
                         }
                     },
                 )
                 raise
-            else:
+            finally:
+                self._record_drain_stage("publisher", publish_started)
+            latency_ms = (time.perf_counter() - queue_started) * 1000.0
+            for event in publishable:
                 self.health.record_publish()
-                latency_ms = (time.perf_counter() - queue_started) * 1000.0
                 try:
                     from aitos.forensics.data_flow_hooks import (
                         note_trace,
@@ -351,6 +373,7 @@ class MarketDataGateway:
                     )
                     from aitos.forensics.data_flow_schema import PipelineStage
 
+                    symbol = self._data_flow_symbol(event)
                     record_output(
                         PipelineStage.REDIS_PUBLISH.value,
                         symbol=symbol,
@@ -366,12 +389,12 @@ class MarketDataGateway:
                     )
                 except Exception:
                     pass
-                return True
+            return True
         finally:
-            if event is not None:
-                task_started = time.perf_counter()
+            task_started = time.perf_counter()
+            for _event in events:
                 self.queue.task_done()
-                self._record_drain_stage("queue_task_done", task_started)
+            self._record_drain_stage("queue_task_done", task_started)
 
     def snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {
@@ -381,6 +404,7 @@ class MarketDataGateway:
             "freshness_policy": {
                 "max_queue_age_seconds": self.config.max_queue_age_seconds,
                 "publish_timeout_seconds": self.config.publish_timeout_seconds,
+                "publish_batch_size": self.config.publish_batch_size,
                 "overflow": "replace_oldest_with_newest",
                 "failed_publish": "drop_failed_event",
             },

@@ -298,3 +298,35 @@ async def test_gateway_does_not_coalesce_tickers_across_symbols():
     assert gateway.accept(eth)
     assert list(gateway.queue._queue._queue) == [btc, eth]
     assert gateway.queue.snapshot()["coalesced"] == 0
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_bound_market_bus_batch_publisher_when_available():
+    class BatchPublisher:
+        def __init__(self):
+            self.single = []
+            self.batches = []
+
+        async def publish(self, event):
+            self.single.append(event)
+
+        async def publish_many(self, events):
+            self.batches.append(list(events))
+
+    publisher = BatchPublisher()
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        publisher.publish,
+        GatewayConfig(queue_capacity=8, publish_batch_size=8),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    events = [_event(MarketSource.WEBSOCKET, sequence=i) for i in range(5)]
+    for event in events:
+        assert gateway.accept(event)
+
+    assert await gateway.drain_once() is True
+    assert publisher.single == []
+    assert publisher.batches == [events]
+    assert gateway.queue.qsize() == 0

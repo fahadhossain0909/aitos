@@ -113,6 +113,11 @@ class BoundedMarketQueue(Generic[T]):
             return True
         return self.put_latest_nowait(item, can_replace=replaceable)
 
+    def get_nowait(self) -> T:
+        item = self._queue.get_nowait()
+        self.stats.depth = self._queue.qsize()
+        return item
+
     async def get(self) -> T:
         item = await self._queue.get()
         self.stats.depth = self._queue.qsize()
