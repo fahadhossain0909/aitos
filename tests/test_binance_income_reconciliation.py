@@ -31,13 +31,30 @@ class FakeStateStore:
         self.cursor = cursor
         self.saved = []
         self.persisted = []
+        self.retries = {}
 
     async def load_income_cursor(self, account):
         return self.cursor
 
     async def save_income_cursor(self, cursor_time_ms, account):
-        self.cursor = cursor_time_ms
+        self.cursor = max(int(self.cursor or 0), int(cursor_time_ms))
         self.saved.append((account, cursor_time_ms))
+
+    async def load_income_retry_floor(self, account):
+        pending = [
+            event_time
+            for event_time, state in self.retries.values()
+            if state == "pending"
+        ]
+        return min(pending) if pending else None
+
+    async def record_income_retry(self, retry_id, event_time_ms, account):
+        self.retries[retry_id] = (event_time_ms, "pending")
+
+    async def resolve_income_retry(self, retry_id, account):
+        if retry_id in self.retries:
+            event_time, _ = self.retries[retry_id]
+            self.retries[retry_id] = (event_time, "resolved")
 
 
 class FakeLifecycle:
@@ -46,7 +63,9 @@ class FakeLifecycle:
         self.closed_trades = list(closed_trades or [])
         self.adjustments = []
 
-    async def apply_cost_adjustment(self, trade_id, *, adjustment_id, kind, amount_usd):
+    async def apply_cost_adjustment(
+        self, trade_id, *, adjustment_id, kind, amount_usd, publish=True
+    ):
         trade = next(
             (
                 item
@@ -85,7 +104,7 @@ def make_trade(
     )
 
 
-def make_service(exchange, lifecycle, bus=None, store=None):
+def make_service(exchange, lifecycle, bus=None, store=None, canonical_posting=None):
     bus = bus or FakeEventBus()
     store = store or FakeStateStore()
 
@@ -93,7 +112,12 @@ def make_service(exchange, lifecycle, bus=None, store=None):
         store.persisted.append(trade.trade_id)
 
     service = BinanceIncomeReconciliationService(
-        exchange, lifecycle, bus, store, persist_trade=persist_trade
+        exchange,
+        lifecycle,
+        bus,
+        store,
+        persist_trade=persist_trade,
+        canonical_posting=canonical_posting,
     )
     return service, bus, store
 
@@ -197,6 +221,46 @@ async def test_run_once_publishes_fee_and_advances_durable_cursor():
 
 
 @pytest.mark.asyncio
+async def test_income_reconciliation_posts_to_canonical_ledger_before_cursor():
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle([make_trade("position-canonical", entry_time=entry)])
+    now = datetime.now(timezone.utc)
+    exchange = FakeExchange(
+        [
+            {
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.03",
+                "tranId": 9010,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": int((now - timedelta(seconds=10)).timestamp() * 1000),
+            }
+        ]
+    )
+    canonical_posts = []
+
+    async def post_canonical(trade_id, adjustment_id, kind, amount):
+        canonical_posts.append((trade_id, adjustment_id, kind, amount))
+
+    service, bus, store = make_service(
+        exchange, lifecycle, canonical_posting=post_canonical
+    )
+    result = await service.run_once()
+
+    assert result == {"rows": 1, "published": 1, "unattributed": 0}
+    assert canonical_posts == [
+        (
+            lifecycle.open_trades[0],
+            "binance:income:9010",
+            "funding",
+            -0.03,
+        )
+    ]
+    assert bus.events[0].payload["adjustment_id"] == "binance:income:9010"
+    assert store.saved
+
+
+@pytest.mark.asyncio
 async def test_unattributed_income_holds_cursor_before_ambiguous_row():
     entry = datetime.now(timezone.utc) - timedelta(hours=1)
     lifecycle = FakeLifecycle(
@@ -224,7 +288,8 @@ async def test_unattributed_income_holds_cursor_before_ambiguous_row():
 
     assert result["unattributed"] == 1
     assert bus.events == []
-    assert store.cursor == row_time - 1
+    assert store.cursor >= row_time
+    assert await store.load_income_retry_floor("binance_usdm") == row_time
 
 
 @pytest.mark.asyncio
@@ -285,13 +350,23 @@ async def test_durable_store_persists_exchange_income_cursor():
 
     await store.initialize()
     assert any("exchange_income_sync_cursor" in query for query in client.commands)
+    assert any("exchange_income_sync_retry" in query for query in client.commands)
     assert await store.load_income_cursor("binance_usdm") == 123456
+    assert "maxOrNull(cursor_time_ms)" in client.last_query[0]
 
     await store.save_income_cursor(123999, "binance_usdm")
     table, rows, columns = client.inserted[-1]
     assert table == "exchange_income_sync_cursor"
     assert rows[0][0:2] == ["binance_usdm", 123999]
     assert columns == ["account", "cursor_time_ms", "updated_at"]
+    assert await store.load_income_retry_floor("binance_usdm") == 123456
+    assert "minOrNull(event_time_ms)" in client.last_query[0]
+    await store.record_income_retry("retry-1", 123400, "binance_usdm")
+    table, rows, columns = client.inserted[-1]
+    assert table == "exchange_income_sync_retry"
+    assert rows[0][0:4] == ["binance_usdm", "retry-1", 123400, "pending"]
+    await store.resolve_income_retry("retry-1", "binance_usdm")
+    assert client.inserted[-1][1][0][1:4] == ["retry-1", 0, "resolved"]
 
 
 @pytest.mark.asyncio
@@ -335,7 +410,8 @@ async def test_startup_reconciliation_blocks_when_income_is_unattributed():
 
     assert service._startup_reconciled is False
     assert service._startup_error is not None
-    assert store.cursor == row_time - 1
+    assert store.cursor >= row_time
+    assert await store.load_income_retry_floor("binance_usdm") == row_time
 
 
 @pytest.mark.asyncio
@@ -406,3 +482,81 @@ async def test_startup_reconciliation_requires_durable_trade_writer():
     assert exchange.calls == []
     assert service._startup_reconciled is False
     assert service._startup_error is not None
+
+
+@pytest.mark.asyncio
+async def test_old_unattributed_row_retries_without_rewinding_high_water_cursor():
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle(
+        [
+            make_trade("position-1", entry_time=entry),
+            make_trade("position-2", entry_time=entry + timedelta(minutes=1)),
+        ]
+    )
+    row_time = int(
+        (datetime.now(timezone.utc) - timedelta(minutes=30)).timestamp() * 1000
+    )
+    row = {
+        "incomeType": "FUNDING_FEE",
+        "income": "-0.03",
+        "tranId": 9901,
+        "asset": "USDT",
+        "symbol": "BTCUSDT",
+        "time": row_time,
+    }
+    exchange = FakeExchange([row])
+    service, bus, store = make_service(
+        exchange, lifecycle, store=FakeStateStore(cursor=500_000)
+    )
+
+    first = await service.run_once()
+
+    assert first["unattributed"] == 1
+    assert store.cursor >= 500_000
+    assert await store.load_income_retry_floor("binance_usdm") == row_time
+
+    lifecycle.open_trades = [lifecycle.open_trades[0]]
+    second = await service.run_once()
+
+    assert second["unattributed"] == 0
+    assert exchange.calls[1]["start_time_ms"] <= row_time
+    assert await store.load_income_retry_floor("binance_usdm") is None
+    assert store.cursor >= 500_000
+    assert len(bus.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_income_retry_write_failure_prevents_cursor_advance():
+    class RetryWriteFailStore(FakeStateStore):
+        async def record_income_retry(self, retry_id, event_time_ms, account):
+            raise RuntimeError("retry ledger unavailable")
+
+    entry = datetime.now(timezone.utc) - timedelta(hours=1)
+    lifecycle = FakeLifecycle(
+        [
+            make_trade("position-1", entry_time=entry),
+            make_trade("position-2", entry_time=entry + timedelta(minutes=1)),
+        ]
+    )
+    row_time = int(datetime.now(timezone.utc).timestamp() * 1000) - 10
+    exchange = FakeExchange(
+        [
+            {
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.03",
+                "tranId": 9902,
+                "asset": "USDT",
+                "symbol": "BTCUSDT",
+                "time": row_time,
+            }
+        ]
+    )
+    service, _, store = make_service(
+        exchange, lifecycle, store=RetryWriteFailStore(cursor=500_000)
+    )
+
+    with pytest.raises(RuntimeError, match="retry ledger unavailable"):
+        await service.run_once()
+
+    assert store.cursor == 500_000
+    assert store.saved == []

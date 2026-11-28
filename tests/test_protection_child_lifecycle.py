@@ -240,7 +240,9 @@ async def test_terminal_partial_stop_fill_reprotects_remaining_position(
     assert result["terminal"] is True
     assert trade.quantity == pytest.approx(0.75)
     assert trade.sl_order_id == "algo:999"
-    assert executor.cancelled == ["algo:123"]
+    # The venue reports the triggering algo as FINISHED; do not issue a
+    # redundant cancel against an already-terminal protective order.
+    assert executor.cancelled == []
     assert trade.agent_consensus.get("_pending_stop_cancellations", []) == []
     assert journal.protection_handovers()[0]["state"] == "APPLIED"
     assert (
@@ -427,7 +429,8 @@ async def test_full_terminal_stop_child_fill_closes_without_second_market_order(
         lifecycle._closed_trades[-1].exit_reason == "exchange_protective_child_filled"
     )
     assert lifecycle._closed_trades[-1].gross_realized_pnl_usd == pytest.approx(-10.0)
-    assert executor.cancelled == ["algo:123"]
+    # The triggering stop is already terminal; cancellation would be redundant.
+    assert executor.cancelled == []
     assert (
         journal.protection_child_watermark("123", "456")["cumulative_quantity"] == "1.0"
     )

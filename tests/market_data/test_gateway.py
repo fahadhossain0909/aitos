@@ -1,5 +1,7 @@
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -12,13 +14,14 @@ def _event(
     age_seconds: float = 0,
     sequence: int = 0,
     event_type: MarketEventType = MarketEventType.TRADE,
+    symbol: str = "BTCUSDT",
 ) -> MarketEvent:
     now = datetime.now(timezone.utc)
     return MarketEvent(
         event_type=event_type,
         exchange="binance",
         market="usd_m_futures",
-        symbol="BTCUSDT",
+        symbol=symbol,
         event_time=now - timedelta(seconds=age_seconds),
         ingest_time=now - timedelta(seconds=age_seconds),
         payload={"price": 100, "sequence": sequence},
@@ -122,6 +125,26 @@ async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_records_slow_publisher_calls_separately_from_queue_wait():
+    async def publish(event):
+        await asyncio.sleep(0.11)
+
+    gateway = MarketDataGateway("binance", "usd_m_futures", publish)
+    gateway.begin_connect()
+    gateway.mark_connected()
+    assert gateway.accept(_event(MarketSource.WEBSOCKET))
+
+    await gateway.drain_once()
+
+    publisher = gateway.snapshot()["publisher_latency"]
+    assert publisher["count"] == 1
+    assert publisher["slow_operations_over_100ms"] == 1
+    assert publisher["avg_ms"] >= 100.0
+    assert publisher["max_ms"] >= publisher["avg_ms"]
+    assert publisher["measurement"].startswith("one gateway publish call")
+
+
+@pytest.mark.asyncio
 async def test_gateway_drain_once_returns_false_on_empty_queue() -> None:
     published = []
 
@@ -208,3 +231,165 @@ async def test_gateway_degrades_when_all_queue_slots_are_sequence_critical() -> 
     assert gateway.queue._queue._queue[0] is first
     assert gateway.state is GatewayState.DEGRADED
     assert gateway.health.degraded is True
+
+
+@pytest.mark.asyncio
+async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
+    now = datetime.now(timezone.utc)
+    event = MarketEvent(
+        event_type=MarketEventType.TRADE,
+        exchange="binance",
+        market="usd_m_futures",
+        symbol="BTCUSDT",
+        event_time=now - timedelta(seconds=4),
+        ingest_time=now - timedelta(seconds=1),
+        payload={"price": 100},
+        source=MarketSource.WEBSOCKET,
+        stage_timestamps={
+            "ws_frame_received_monotonic": time.monotonic() - 1.2,
+            "ws_frame_received_epoch_ms": (now - timedelta(seconds=1.2)).timestamp()
+            * 1000.0,
+            "ws_decode_started_monotonic": time.monotonic() - 1.19,
+            "ws_decode_completed_monotonic": time.monotonic() - 1.18,
+            "event_normalized_monotonic": time.monotonic() - 1.0,
+        },
+    )
+    gateway = MarketDataGateway("binance", "usd_m_futures", lambda _: None)
+    gateway.begin_connect()
+    gateway.mark_connected()
+
+    with patch("aitos.forensics.data_flow_hooks.note_trace") as note_trace:
+        assert gateway.accept(event) is True
+
+    traces = [call.kwargs["extra"] for call in note_trace.call_args_list]
+    ingress = next(extra for extra in traces if extra.get("phase") == "ingress")
+    assert [extra["phase"] for extra in traces] == ["ingress", "enqueued"]
+    assert 3900 <= ingress["event_age_ms"] <= 4100
+    assert 2700 <= ingress["source_to_receive_ms"] <= 2900
+    assert 1000 <= ingress["receive_to_gateway_ms"] <= 1400
+    assert 8 <= ingress["websocket_decode_ms"] <= 12
+    assert 170 <= ingress["decode_to_normalize_ms"] <= 210
+    assert 2900 <= ingress["source_to_ingest_ms"] <= 3100
+    assert 900 <= ingress["ingest_to_gateway_ms"] <= 1100
+
+
+@pytest.mark.asyncio
+async def test_gateway_coalesces_same_symbol_tickers_but_preserves_trades():
+    published = []
+
+    async def publish(event):
+        published.append((event.event_type, event.sequence))
+
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", publish, GatewayConfig(queue_capacity=3)
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    old_ticker = _event(
+        MarketSource.WEBSOCKET, sequence=1, event_type=MarketEventType.TICKER
+    )
+    trade = _event(MarketSource.WEBSOCKET, sequence=2)
+    new_ticker = _event(
+        MarketSource.WEBSOCKET, sequence=3, event_type=MarketEventType.TICKER
+    )
+
+    assert gateway.accept(old_ticker)
+    assert gateway.accept(trade)
+    assert gateway.accept(new_ticker)
+    assert list(gateway.queue._queue._queue) == [trade, new_ticker]
+    assert gateway.queue.snapshot()["coalesced"] == 1
+
+    await gateway.drain_once()
+    await gateway.drain_once()
+    assert published == [
+        (MarketEventType.TRADE, 2),
+        (MarketEventType.TICKER, 3),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_does_not_coalesce_tickers_across_symbols():
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", lambda _: None, GatewayConfig(queue_capacity=2)
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    btc = _event(
+        MarketSource.WEBSOCKET,
+        sequence=1,
+        event_type=MarketEventType.TICKER,
+        symbol="BTCUSDT",
+    )
+    eth = _event(
+        MarketSource.WEBSOCKET,
+        sequence=2,
+        event_type=MarketEventType.TICKER,
+        symbol="ETHUSDT",
+    )
+
+    assert gateway.accept(btc)
+    assert gateway.accept(eth)
+    assert list(gateway.queue._queue._queue) == [btc, eth]
+    assert gateway.queue.snapshot()["coalesced"] == 0
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_bound_market_bus_batch_publisher_when_available():
+    class BatchPublisher:
+        def __init__(self):
+            self.single = []
+            self.batches = []
+
+        async def publish(self, event):
+            self.single.append(event)
+
+        async def publish_many(self, events):
+            self.batches.append(list(events))
+
+    publisher = BatchPublisher()
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        publisher.publish,
+        GatewayConfig(queue_capacity=8, publish_batch_size=8),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    events = [_event(MarketSource.WEBSOCKET, sequence=i) for i in range(5)]
+    for event in events:
+        assert gateway.accept(event)
+
+    assert await gateway.drain_once() is True
+    assert publisher.single == []
+    assert publisher.batches == [events]
+    assert gateway.queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_drain_workers_preserve_fifo_across_publish_batches():
+    class OrderedBatchPublisher:
+        def __init__(self):
+            self.batches = []
+
+        async def publish(self, event):
+            raise AssertionError("single-event path should not be used")
+
+        async def publish_many(self, events):
+            await asyncio.sleep(0.01)
+            self.batches.append([event.sequence for event in events])
+
+    publisher = OrderedBatchPublisher()
+    gateway = MarketDataGateway(
+        "binance",
+        "usd_m_futures",
+        publisher.publish,
+        GatewayConfig(queue_capacity=8, publish_batch_size=3),
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    for sequence in range(8):
+        assert gateway.accept(_event(MarketSource.WEBSOCKET, sequence=sequence))
+
+    await asyncio.gather(*(gateway.drain_once() for _ in range(3)))
+
+    assert publisher.batches == [[0, 1, 2], [3, 4, 5], [6, 7]]

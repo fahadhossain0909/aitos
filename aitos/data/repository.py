@@ -311,31 +311,39 @@ class MarketDataRepository(AITOSModule):
         self._last_event_time = event.event_time.isoformat()
 
     async def save_market_event_versioned(self, event: Any) -> None:
-        """Persist an immutable, revision-aware canonical event envelope."""
+        """Persist one immutable event through the batch insert path."""
+        await self.save_market_events_versioned([event])
+
+    async def save_market_events_versioned(self, events: list[Any]) -> None:
+        """Insert a canonical event batch with one ClickHouse round trip."""
         self._require_initialized()
+        if not events:
+            return
+        rows = [
+            [
+                event.event_time,
+                event.ingest_time,
+                event.event_id,
+                event.event_revision,
+                event.exchange,
+                event.market,
+                event.venue or event.exchange,
+                event.market_type or event.market,
+                event.instrument_id or event.symbol,
+                event.symbol,
+                event.event_type.value,
+                event.source.value,
+                event.sequence,
+                event.schema_version,
+                event.correlation_id or event.event_id,
+                event.trace_id or event.event_id,
+                json.dumps(event.payload, sort_keys=True, default=str),
+            ]
+            for event in events
+        ]
         await self._client.insert(
             "market_event_versions",
-            [
-                [
-                    event.event_time,
-                    event.ingest_time,
-                    event.event_id,
-                    event.event_revision,
-                    event.exchange,
-                    event.market,
-                    event.venue or event.exchange,
-                    event.market_type or event.market,
-                    event.instrument_id or event.symbol,
-                    event.symbol,
-                    event.event_type.value,
-                    event.source.value,
-                    event.sequence,
-                    event.schema_version,
-                    event.correlation_id or event.event_id,
-                    event.trace_id or event.event_id,
-                    json.dumps(event.payload, sort_keys=True, default=str),
-                ]
-            ],
+            rows,
             column_names=[
                 "event_time",
                 "ingest_time",
@@ -356,7 +364,9 @@ class MarketDataRepository(AITOSModule):
                 "payload_json",
             ],
         )
-        self._last_event_time = event.event_time.isoformat()
+        self._last_event_time = max(
+            event.event_time for event in events
+        ).isoformat()
 
     async def save_live_analytics_event(
         self,

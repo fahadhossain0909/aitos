@@ -46,6 +46,7 @@ jobs:
           --health-retries 30
     env:
       AITOS_TEST_POSTGRES_URL: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
+      AITOS_POSTGRES_OMS_TEST_DSN: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
       AITOS_RECONCILE_POSTGRES_URL: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
       CLICKHOUSE_HOST: 127.0.0.1
       CLICKHOUSE_PORT: "8123"
@@ -66,6 +67,8 @@ jobs:
           pip install pytest pytest-asyncio
       - name: Run PostgreSQL adapter and recovery tests
         run: pytest -q tests/storage/test_postgres_integration.py --junitxml=postgres-adapter.xml
+      - name: Verify PostgreSQL canonical OMS CAS, fencing and outbox
+        run: pytest -q tests/storage/test_postgres_oms.py --junitxml=postgres-oms.xml
       - name: Verify PostgreSQL-to-ClickHouse bidirectional reconciliation
         run: pytest -q tests/storage/test_postgres_clickhouse_reconciliation.py --junitxml=postgres-reconciliation.xml
       - name: Preserve isolated PostgreSQL validation evidence

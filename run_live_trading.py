@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 from contextlib import AsyncExitStack
+from decimal import Decimal
 
 from aitos.app import (
     build_system,
@@ -19,6 +21,9 @@ from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
+from aitos.execution.postgres_intents import PostgresCanonicalExecutionIntentStore
+from aitos.execution.postgres_oms import PostgresCanonicalOMS
+from aitos.execution.postgres_outbox_projector import PostgresOMSOutboxProjector
 from aitos.execution.protection_reconciliation import (
     recover_accepted_initial_stop_submissions,
     recover_protection_handovers,
@@ -32,6 +37,7 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.live_trading import (
     confirm_live_trading,
+    create_live_approval_control_plane,
     create_live_capital_gateway,
     prepare_live_executor,
 )
@@ -44,6 +50,10 @@ from aitos.runtime_connections import (
 )
 from aitos.runtime_ownership import RuntimeOwnership
 from aitos.runtime_signals import install_signal_handlers
+from aitos.storage.postgres_migrations import (
+    apply_postgres_migrations,
+    verify_postgres_schema,
+)
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     IdempotentOrderExecutor,
@@ -60,6 +70,131 @@ SCAN_INTERVAL_SECONDS = get_settings().tuning.scanner.refresh_interval_seconds
 KLINE_TIMEFRAME = "15m"
 HEALTH_SERVER_PORT = 8091
 SYMBOL_FILTER_TTL_SECONDS = 300.0
+
+
+async def _canonical_financial_snapshot_inputs(
+    executor,
+    intents: PostgresCanonicalExecutionIntentStore,
+    lifecycle,
+    *,
+    trade=None,
+    reconcile_venue: bool,
+) -> tuple[dict, int]:
+    """Build account totals and pin them to the current financial revision.
+
+    Execution transactions reuse the last venue mark but atomically update
+    realized PnL, fees, funding, equity and drawdown with the fill/ledger.
+    The periodic reconciler refreshes unrealized PnL and venue equity.
+    """
+    events = await intents.oms.read_events(intents.scope, "financial:USDT")
+    previous_state = None
+    expected_revision = 0
+    if events:
+        previous_event = events[-1]
+        if previous_event.payload.get("event_type") != "FINANCIAL_STATE_SNAPSHOT":
+            raise RuntimeError("canonical financial aggregate is not a snapshot")
+        previous_state = previous_event.payload.get("financial_state")
+        if not isinstance(previous_state, dict):
+            raise RuntimeError("canonical financial snapshot is malformed")
+        expected_revision = previous_event.revision
+
+    trades_by_id = {}
+    for item in (
+        *lifecycle.get_open_trades(),
+        *lifecycle.get_closed_trades(),
+        *((trade,) if trade is not None else ()),
+    ):
+        trade_id = str(getattr(item, "trade_id", "") or "")
+        if trade_id:
+            trades_by_id[trade_id] = item
+
+    def trade_total(attribute: str) -> Decimal:
+        total = Decimal(0)
+        for item in trades_by_id.values():
+            raw = getattr(item, attribute, 0.0)
+            if isinstance(raw, bool):
+                raise ValueError(f"canonical trade {attribute} is invalid")
+            try:
+                value = Decimal(str(raw or 0))
+            except (TypeError, ValueError, ArithmeticError):
+                raise ValueError(f"canonical trade {attribute} is invalid") from None
+            if not value.is_finite():
+                raise ValueError(f"canonical trade {attribute} is non-finite")
+            total += value
+        return total
+
+    realized = trade_total("gross_realized_pnl_usd")
+    fees = trade_total("fees_paid_usd")
+    funding = trade_total("funding_pnl_usd")
+    if reconcile_venue or previous_state is None:
+        equity_reader = getattr(executor, "get_account_equity_decimal", None)
+        raw_equity = await (
+            equity_reader("USDT")
+            if callable(equity_reader)
+            else executor.get_account_equity("USDT")
+        )
+        if isinstance(raw_equity, bool):
+            raise ValueError("live venue equity is not a finite USDT value")
+        venue_equity = Decimal(str(raw_equity))
+        if not venue_equity.is_finite():
+            raise ValueError("live venue equity is not a finite USDT value")
+        position_rows = await executor.get_position_risk()
+        if not isinstance(position_rows, list) or len(position_rows) > 10000:
+            raise ValueError("bounded authenticated position-risk snapshot is required")
+        unrealized = Decimal(0)
+        for row in position_rows:
+            if not isinstance(row, dict):
+                raise ValueError("malformed authenticated position-risk row")
+            raw = row.get("unRealizedProfit", "0")
+            if isinstance(raw, bool):
+                raise ValueError("position unrealized PnL is invalid")
+            value = Decimal(str(raw))
+            if not value.is_finite():
+                raise ValueError("position unrealized PnL is non-finite")
+            unrealized += value
+    else:
+        venue_equity = None
+        unrealized = Decimal(str(previous_state["unrealized_pnl"]))
+
+    if previous_state is None:
+        starting_equity = venue_equity - realized - unrealized - funding + fees
+    else:
+        starting_equity = Decimal(str(previous_state["starting_equity"]))
+    snapshot = {
+        "currency": "USDT",
+        "starting_equity": str(starting_equity),
+        "realized_pnl": str(realized),
+        "unrealized_pnl": str(unrealized),
+        "fees": str(fees),
+        "funding": str(funding),
+    }
+    if venue_equity is not None:
+        snapshot["venue_equity"] = str(venue_equity)
+    return snapshot, expected_revision
+
+
+async def _publish_canonical_financial_snapshot(
+    executor,
+    intents: PostgresCanonicalExecutionIntentStore,
+    lifecycle,
+) -> dict:
+    """Reconcile canonical trading PnL components to live USD-M margin equity."""
+    snapshot, _ = await _canonical_financial_snapshot_inputs(
+        executor,
+        intents,
+        lifecycle,
+        reconcile_venue=True,
+    )
+    financial_state = await intents.append_financial_snapshot(snapshot)
+    unexplained = abs(Decimal(str(financial_state["unattributed_adjustments"])))
+    if unexplained > Decimal("0.01"):
+        raise RuntimeError(
+            "venue equity differs from canonical trade PnL/fees/funding by "
+            f"{financial_state['unattributed_adjustments']} USDT; reconcile "
+            "deposit, withdrawal, external execution or missing income before "
+            "authorizing new exposure"
+        )
+    return financial_state
 
 
 async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
@@ -114,14 +249,63 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         dynamic_limit=settings.tuning.scanner.dynamic_universe_limit,
         universe_limit=settings.tuning.scanner.universe_limit,
     )
+    approval_authority = (
+        None if settings.binance.testnet else create_live_approval_control_plane()
+    )
     approved_by = confirm_live_trading(
         symbols,
         testnet=settings.binance.testnet,
+        approval_authority=approval_authority,
     )
-    raw_order_executor = await prepare_live_executor(settings, symbols)
+    raw_order_executor = await prepare_live_executor(
+        settings,
+        symbols,
+        approval_authority=approval_authority,
+    )
     cleanup.push_async_callback(raw_order_executor.close)
+    postgres_dsn = os.getenv("DATABASE_URL", "").strip()
+    if not postgres_dsn:
+        raise RuntimeError(
+            "live trading requires DATABASE_URL for the canonical PostgreSQL OMS"
+        )
+    import asyncpg
+
+    postgres_pool = await asyncpg.create_pool(
+        dsn=postgres_dsn,
+        min_size=1,
+        max_size=5,
+        command_timeout=10,
+    )
+    cleanup.push_async_callback(postgres_pool.close)
+    await apply_postgres_migrations(postgres_pool)
+    await verify_postgres_schema(postgres_pool)
+    postgres_oms = PostgresCanonicalOMS(postgres_pool)
+    writer_id = f"live:{socket.gethostname()}:{os.getpid()}"
+    current_generation = await postgres_oms.writer_generation(
+        raw_order_executor.execution_scope
+    )
+    writer_fence = await postgres_oms.acquire_writer(
+        raw_order_executor.execution_scope,
+        writer_id,
+        expected_generation=current_generation,
+    )
+    canonical_intents = PostgresCanonicalExecutionIntentStore(
+        postgres_oms, writer_fence
+    )
+    raw_order_executor.bind_postgres_intent_store(canonical_intents)
+    intent_recovery = await raw_order_executor.refresh_canonical_intent_cache()
+    if intent_recovery["unresolved"]:
+        logger.critical(
+            "unresolved PostgreSQL execution intents found at startup; "
+            "fresh exposure remains blocked pending venue/trade reconciliation",
+            extra={"aitos_extra": intent_recovery},
+        )
     order_executor = IdempotentOrderExecutor(raw_order_executor)
-    state_store = DurableTradingStateStore(market_repo)
+    state_store = DurableTradingStateStore(
+        market_repo,
+        account_scope=raw_order_executor.execution_scope,
+        require_scoped_schema=True,
+    )
     await state_store.initialize()
     trade_state_persistence = None
     rl_scorer = DeepValueRLScorer()
@@ -142,7 +326,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         graph_driver=graph_driver,
         kernel=AIKernel(
             event_bus=event_bus,
-            require_human_approval_for_prod=True,
+            require_human_approval_for_prod=settings.require_human_approval_for_prod,
         ),
         rl_scorer=rl_scorer,
         outcome_classifier=outcome_classifier,
@@ -166,6 +350,61 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(trade_state_persistence.shutdown)
     restored_count = await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
+    components.trade_lifecycle.bind_postgres_canonical_oms(postgres_oms, writer_fence)
+    canonical_writer = components.trade_lifecycle._postgres_canonical_oms_writer
+    canonical_writer.set_financial_snapshot_provider(
+        lambda trade: _canonical_financial_snapshot_inputs(
+            raw_order_executor,
+            canonical_intents,
+            components.trade_lifecycle,
+            trade=trade,
+            reconcile_venue=False,
+        )
+    )
+
+    async def read_projected_trade_state():
+        projected_open = await state_store.load_open_trades()
+        projected_closed = await state_store.load_closed_trades()
+        return [*projected_open, *projected_closed]
+
+    outbox_projector = PostgresOMSOutboxProjector(
+        postgres_oms,
+        canonical_writer,
+        worker_id=writer_id,
+        batch_size=100,
+        lease_seconds=60,
+        projection_reader=read_projected_trade_state,
+    )
+    # Replay projections left pending by a crash or a previous projection
+    # failure before account reconciliation is allowed to authorize entries.
+    startup_projection = await outbox_projector.run_once()
+    if startup_projection["failed"]:
+        raise RuntimeError(
+            "canonical OMS projection recovery failed; live startup remains blocked"
+        )
+    canonical_restore = await canonical_writer.restore_lifecycle(
+        components.trade_lifecycle
+    )
+    restored_count = canonical_restore["open"]
+    logger.warning(
+        "canonical PostgreSQL OMS restored lifecycle state",
+        extra={"aitos_extra": canonical_restore},
+    )
+    projection_audit = await outbox_projector.audit_and_repair_scope()
+    if projection_audit["after"].get("in_sync") is not True:
+        raise RuntimeError(
+            "canonical PostgreSQL OMS and durable ClickHouse projections are not in sync"
+        )
+    if projection_audit["repaired"]:
+        logger.warning(
+            "repaired durable trade projection drift from canonical PostgreSQL OMS",
+            extra={
+                "aitos_extra": {
+                    "before": projection_audit["before"],
+                    "rebuild": projection_audit["rebuild"],
+                }
+            },
+        )
     await initialize_all(components)
     # First consume already-filled known protective orders, then compare the
     # resulting local ledger against the entire account before any new entry.
@@ -175,7 +414,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         raw_order_executor,
         raw_order_executor.execution_intent_store,
         components.trade_lifecycle.get_open_trades(),
-        trade_state_persistence.persist_execution_state,
+        canonical_writer,
     )
     if protection_recovery["recovered"]:
         logger.warning(
@@ -196,7 +435,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         raw_order_executor,
         raw_order_executor.execution_intent_store,
         components.trade_lifecycle.get_open_trades(),
-        trade_state_persistence.persist_execution_state,
+        canonical_writer,
     )
     if handover_recovery["recovered"]:
         logger.warning(
@@ -293,8 +532,14 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
+    expected_position_symbols = [
+        getattr(trade, "symbol", None)
+        for trade in components.trade_lifecycle.get_open_trades()
+    ]
     position_recovery_ready = restored_position_feeds_ready(
-        restored_count, position_subscription_result
+        restored_count,
+        position_subscription_result,
+        expected_position_symbols,
     )
     if not position_recovery_ready:
         logger.critical(
@@ -312,7 +557,10 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         components.trade_lifecycle,
         event_bus,
         state_store,
-        persist_trade=trade_state_persistence.persist_execution_state,
+        # Cost adjustments are committed as one PostgreSQL event containing
+        # both the updated Trade snapshot and balanced fee/funding ledger lines.
+        persist_trade=canonical_writer,
+        canonical_posting=canonical_writer.apply_cost_adjustment,
     )
     cleanup.push_async_callback(income_reconciler.shutdown)
     income_reconciliation_ready = False
@@ -336,6 +584,61 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 }
             },
         )
+    pending_canonical_intents = await canonical_intents.unresolved()
+    canonical_intents_ready = not pending_canonical_intents
+    if not canonical_intents_ready:
+        account_reconciliation_ready = False
+        components.trade_lifecycle._account_reconciliation_error = True
+        logger.critical(
+            "live startup remains manage-only: PostgreSQL execution intents are unresolved",
+            extra={
+                "aitos_extra": {
+                    "pending_intents": len(pending_canonical_intents),
+                    "client_ids": [
+                        str(row.get("client_id", ""))
+                        for row in pending_canonical_intents[:20]
+                    ],
+                    "new_entries_allowed": False,
+                }
+            },
+        )
+
+    financial_reconciliation_ready = False
+    if account_reconciliation_ready and income_reconciliation_ready:
+        try:
+            async with canonical_writer._financial_lock:
+                financial_state = await _publish_canonical_financial_snapshot(
+                    raw_order_executor,
+                    canonical_intents,
+                    components.trade_lifecycle,
+                )
+            financial_reconciliation_ready = True
+            logger.info(
+                "canonical PostgreSQL financial snapshot reconciled to venue equity",
+                extra={
+                    "aitos_extra": {
+                        "currency": financial_state["currency"],
+                        "equity": financial_state["equity"],
+                        "peak_equity": financial_state["peak_equity"],
+                        "drawdown": financial_state["drawdown"],
+                        "drawdown_pct": financial_state["drawdown_pct"],
+                        "unattributed_adjustments": financial_state[
+                            "unattributed_adjustments"
+                        ],
+                    }
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.critical(
+                "live startup remains manage-only: canonical financial reconciliation failed",
+                extra={
+                    "aitos_extra": {
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "new_entries_allowed": False,
+                    }
+                },
+            )
+
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
@@ -386,6 +689,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         position_recovery_ready
         and income_reconciliation_ready
         and account_reconciliation_ready
+        and financial_reconciliation_ready
     )
     if not new_entries_allowed:
         # Keep market ingestion, lifecycle price management, exchange protection
@@ -398,6 +702,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                     "position_recovery_ready": position_recovery_ready,
                     "income_reconciliation_ready": income_reconciliation_ready,
                     "account_reconciliation_ready": account_reconciliation_ready,
+                    "financial_reconciliation_ready": financial_reconciliation_ready,
                     "new_entries_allowed": False,
                 }
             },
@@ -413,9 +718,49 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(components.trade_lifecycle.drain_live_submissions)
     while not stop_event.is_set():
         try:
+            projection_result = await outbox_projector.run_once()
+            if projection_result["failed"]:
+                raise RuntimeError(
+                    "canonical OMS projection replay failed; refusing fresh-exposure cycle"
+                )
             if components.reconciliation is not None:
                 await components.reconciliation.run_once()
             await trade_state_persistence.verify_execution_positions()
+            if new_entries_allowed:
+                try:
+                    async with canonical_writer._financial_lock:
+                        financial_state = await _publish_canonical_financial_snapshot(
+                            raw_order_executor,
+                            canonical_intents,
+                            components.trade_lifecycle,
+                        )
+                    logger.info(
+                        "canonical account financial snapshot updated",
+                        extra={
+                            "aitos_extra": {
+                                "equity": financial_state["equity"],
+                                "peak_equity": financial_state["peak_equity"],
+                                "drawdown": financial_state["drawdown"],
+                                "drawdown_pct": financial_state["drawdown_pct"],
+                                "unattributed_adjustments": financial_state[
+                                    "unattributed_adjustments"
+                                ],
+                            }
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    new_entries_allowed = False
+                    account_reconciliation_ready = False
+                    components.trade_lifecycle._account_reconciliation_error = True
+                    logger.critical(
+                        "live runtime entering manage-only mode: financial snapshot failed",
+                        extra={
+                            "aitos_extra": {
+                                "error": f"{type(exc).__name__}: {exc}",
+                                "new_entries_allowed": False,
+                            }
+                        },
+                    )
             # Reconcile full account positions, ordinary entry orders and
             # conditional protection before each fresh-exposure scan.
             await require_live_account_exposure_reconciled(
@@ -482,7 +827,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
                 stop_event.wait(),
                 timeout=get_settings().tuning.scanner.refresh_interval_seconds,
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             pass
 
 

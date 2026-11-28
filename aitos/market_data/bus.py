@@ -259,6 +259,135 @@ class MarketDataBus:
         except Exception:
             pass
 
+    async def publish_many(self, events: list[MarketEvent]) -> None:
+        """Validate and publish a gateway batch through the transport pipeline."""
+        if not events:
+            return
+        batch_publisher = getattr(self._event_bus, "publish_many", None)
+        if not callable(batch_publisher):
+            for event in events:
+                await self.publish(event)
+            return
+        started = time.perf_counter()
+        prepared: list[Event] = []
+        for event in events:
+            channel = channel_for(event.event_type, event.market_type)
+            payload = market_event_to_wire(event)
+            symbol = str(event.symbol or "")
+            try:
+                from aitos.forensics.data_contract import (
+                    check_orderbook_payload,
+                    check_trade_payload,
+                )
+                from aitos.forensics.data_flow_hooks import (
+                    note_trace,
+                    record_error,
+                    record_input,
+                    record_output,
+                )
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
+
+                record_input(
+                    PipelineStage.NORMALIZE.value,
+                    symbol=symbol,
+                    source_age_ms=event.source_age_seconds * 1000.0,
+                )
+                record_output(PipelineStage.NORMALIZE.value, symbol=symbol)
+                note_trace(
+                    trace_id=event.trace_id,
+                    stage=PipelineStage.NORMALIZE.value,
+                    symbol=symbol,
+                    event_id=event.event_id,
+                    extra={"event_type": event.event_type.value},
+                )
+                checked_payload = dict(event.payload)
+                checked_payload.setdefault("symbol", event.symbol)
+                result = None
+                if event.event_type == MarketEventType.TRADE:
+                    checked_payload.setdefault(
+                        "T", event.event_time.timestamp() * 1000.0
+                    )
+                    result = check_trade_payload(
+                        checked_payload, now_ms=time.time() * 1000.0
+                    )
+                elif event.event_type in (
+                    MarketEventType.BOOK_SNAPSHOT,
+                    MarketEventType.BOOK_DELTA,
+                ):
+                    result = check_orderbook_payload(checked_payload)
+                if result is not None and not result.ok:
+                    record_error(
+                        PipelineStage.NORMALIZE.value,
+                        symbol=symbol,
+                        issue=result.issue.value,
+                    )
+                    note_trace(
+                        trace_id=event.trace_id,
+                        stage=PipelineStage.NORMALIZE.value,
+                        symbol=symbol,
+                        event_id=event.event_id,
+                        extra={
+                            "contract_ok": False,
+                            "issue": result.issue.value,
+                            "detail": result.detail,
+                        },
+                    )
+                elif result is not None and result.issue != DataIssueClass.NONE:
+                    record_error(
+                        PipelineStage.NORMALIZE.value,
+                        symbol=symbol,
+                        issue=result.issue.value,
+                    )
+            except Exception:
+                pass
+            try:
+                from aitos.forensics.data_flow_hooks import record_input
+                from aitos.forensics.data_flow_schema import PipelineStage
+
+                record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
+            except Exception:
+                pass
+            prepared.append(
+                Event(
+                    topic=channel,
+                    payload=payload,
+                    event_id=event.event_id,
+                    source_module="market-data-gateway",
+                    correlation_id=event.correlation_id,
+                    schema_version=event.schema_version,
+                )
+            )
+        await batch_publisher(prepared)
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        for event in events:
+            try:
+                from aitos.forensics.data_flow_hooks import note_trace, record_output
+                from aitos.forensics.data_flow_schema import PipelineStage
+
+                symbol = str(event.symbol or "")
+                record_output(
+                    PipelineStage.REDIS_PUBLISH.value,
+                    symbol=symbol,
+                    latency_ms=latency_ms,
+                )
+                note_trace(
+                    trace_id=event.trace_id,
+                    stage=PipelineStage.REDIS_PUBLISH.value,
+                    symbol=symbol,
+                    latency_ms=latency_ms,
+                    event_id=event.event_id,
+                    extra={
+                        "event_type": event.event_type.value,
+                        "source": event.source.value,
+                        "batch_size": len(events),
+                    },
+                )
+            except Exception:
+                pass
+
     async def subscribe(
         self,
         event_type: MarketEventType,

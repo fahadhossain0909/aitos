@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -92,6 +94,17 @@ class MarketOSPersistence(AITOSModule):
         self._initialized = False
         self._events_persisted = 0
         self._errors = 0
+        self._failed_tables: set[str] = set()
+        self._retry_attempts = 0
+        self._last_error_type: str | None = None
+        self._last_failed_table: str | None = None
+        self._last_failed_rows = 0
+        self._last_retry_outcome = "none"
+        self._last_retry_at: str | None = None
+        self._last_successful_flush_at: str | None = None
+        self._table_write_samples_ms: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=2048)
+        )
         self._last_event_time: str | None = None
         self._batch_size = max(1, batch_size)
         self._flush_interval_seconds = max(0.05, flush_interval_seconds)
@@ -287,7 +300,7 @@ class MarketOSPersistence(AITOSModule):
             status = ModuleStatus.DEGRADED
         elif self._flush_task is None or self._flush_task.done():
             status = ModuleStatus.UNHEALTHY
-        elif self._errors:
+        elif self._failed_tables:
             status = ModuleStatus.DEGRADED
         else:
             status = ModuleStatus.HEALTHY
@@ -299,7 +312,21 @@ class MarketOSPersistence(AITOSModule):
             details={
                 "events_persisted": self._events_persisted,
                 "errors": self._errors,
-                "pending_batches": sum(len(rows) for rows in self._buffers.values()),
+                "failed_rows_total": self._errors,
+                "failed_tables": sorted(self._failed_tables),
+                "pending_rows": sum(len(rows) for rows in self._buffers.values()),
+                "pending_batches": sum(bool(rows) for rows in self._buffers.values()),
+                "retry_attempts": self._retry_attempts,
+                "last_error_type": self._last_error_type,
+                "last_failed_table": self._last_failed_table,
+                "last_failed_rows": self._last_failed_rows,
+                "last_retry_outcome": self._last_retry_outcome,
+                "last_retry_at": self._last_retry_at,
+                "last_successful_flush_at": self._last_successful_flush_at,
+                "table_write_latency": {
+                    table: self._latency_summary(samples)
+                    for table, samples in self._table_write_samples_ms.items()
+                },
                 "analytics_topics": len(self.LIVE_ANALYTICS_TOPICS),
                 "flush_task_alive": (
                     self._flush_task is not None and not self._flush_task.done()
@@ -487,14 +514,34 @@ class MarketOSPersistence(AITOSModule):
             if not rows:
                 return
             self._buffers[table] = []
+        write_started = time.perf_counter()
         try:
             await self._repository._client.insert(
                 table, rows, column_names=self._column_names[table]
             )
+            self._table_write_samples_ms[table].append(
+                (time.perf_counter() - write_started) * 1000.0
+            )
             self._events_persisted += len(rows)
             self._last_event_time = datetime.now(timezone.utc).isoformat()
-        except Exception:
+            self._last_successful_flush_at = self._last_event_time
+            if table in self._failed_tables:
+                self._failed_tables.discard(table)
+                self._last_retry_outcome = "recovered"
+            else:
+                self._last_retry_outcome = "persisted"
+        except Exception as exc:
+            self._table_write_samples_ms[table].append(
+                (time.perf_counter() - write_started) * 1000.0
+            )
             self._errors += len(rows)
+            self._retry_attempts += 1
+            self._failed_tables.add(table)
+            self._last_error_type = type(exc).__name__
+            self._last_failed_table = table
+            self._last_failed_rows = len(rows)
+            self._last_retry_outcome = "requeued"
+            self._last_retry_at = datetime.now(timezone.utc).isoformat()
             async with self._flush_lock:
                 self._buffers[table][0:0] = rows
             logger.exception(
@@ -502,13 +549,35 @@ class MarketOSPersistence(AITOSModule):
                 extra={
                     "aitos_extra": {
                         "table": table,
+                        "operation": "clickhouse_insert",
                         "rows": len(rows),
+                        "error_type": type(exc).__name__,
+                        "retry_outcome": self._last_retry_outcome,
                         "event_id": getattr(event, "event_id", None),
                     }
                 },
             )
             if event is not None:
                 raise
+
+    @staticmethod
+    def _latency_summary(samples: deque[float]) -> dict[str, float | int | None]:
+        if not samples:
+            return {"count": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+        ordered = sorted(samples)
+
+        def percentile(fraction: float) -> float:
+            index = max(
+                0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5))
+            )
+            return round(ordered[index], 3)
+
+        return {
+            "count": len(ordered),
+            "p50_ms": percentile(0.50),
+            "p95_ms": percentile(0.95),
+            "max_ms": round(ordered[-1], 3),
+        }
 
     def _record_success(self, event: Event) -> None:
         self._last_event_time = datetime.now(timezone.utc).isoformat()

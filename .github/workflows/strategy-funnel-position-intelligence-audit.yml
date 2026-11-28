@@ -10,10 +10,18 @@ permissions:
 
 jobs:
   audit:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Require staging monitoring to be enabled
+        env:
+          AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$AITOS_VPS_ENABLED" != "true" ]; then
+            echo '::error::Scheduled staging audit is disabled. Set repository variable AITOS_VPS_ENABLED=true or this audit will not execute.'
+            exit 1
+          fi
       - name: Check deployment secrets
         shell: bash
         env:
@@ -45,7 +53,8 @@ jobs:
           command_timeout: 10m
           script: |
             set -u
-            cd "$HOME/aitos"
+            cd /opt/aitos-staging
+            CLICKHOUSE_PASSWORD="$(sed -n 's/^CLICKHOUSE_PASSWORD=//p' .env | tail -n1)"
             mkdir -p "$HOME/aitos-strategy-funnel-audit"
             REPORT="$HOME/aitos-strategy-funnel-audit/report.txt"
             : > "$REPORT"
@@ -79,7 +88,7 @@ jobs:
 
               echo '--- 2. CURRENT POSITION INVENTORY ---'
               if docker inspect aitos-clickhouse >/dev/null 2>&1; then
-                docker exec aitos-clickhouse clickhouse-client --query "SELECT trade_id, symbol, side, strategy_id, state, entry_price, sl_price, tp_price, entry_time, recorded_at FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) WHERE state IN ('position_opened','exit_triggered') ORDER BY parseDateTimeBestEffortOrNull(entry_time) ASC FORMAT TSVWithNames" > /tmp/open_positions.tsv 2>/tmp/open_positions.err || status=1
+                docker exec aitos-clickhouse clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" --query "SELECT trade_id, symbol, side, strategy_id, state, entry_price, sl_price, tp_price, entry_time, recorded_at FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) WHERE state IN ('position_opened','exit_triggered') ORDER BY parseDateTimeBestEffortOrNull(entry_time) ASC FORMAT TSVWithNames" > /tmp/open_positions.tsv 2>/tmp/open_positions.err || status=1
                 cat /tmp/open_positions.err || true
                 if [ -s /tmp/open_positions.tsv ]; then
                   cat /tmp/open_positions.tsv
@@ -145,10 +154,10 @@ jobs:
 
               echo '--- 6. POSITION STATE SUMMARY ---'
               if docker inspect aitos-clickhouse >/dev/null 2>&1; then
-                docker exec aitos-clickhouse clickhouse-client --query "SELECT state, countDistinct(trade_id) AS trades FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) GROUP BY state ORDER BY state FORMAT PrettyCompactMonoBlock" 2>&1 || status=1
+                docker exec aitos-clickhouse clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" --query "SELECT state, countDistinct(trade_id) AS trades FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) GROUP BY state ORDER BY state FORMAT PrettyCompactMonoBlock" 2>&1 || status=1
                 echo
                 echo 'Open positions by symbol:'
-                docker exec aitos-clickhouse clickhouse-client --query "SELECT symbol, side, countDistinct(trade_id) AS open_trades FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) WHERE state IN ('position_opened','exit_triggered') GROUP BY symbol, side ORDER BY open_trades DESC, symbol FORMAT PrettyCompactMonoBlock" 2>&1 || status=1
+                docker exec aitos-clickhouse clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD" --query "SELECT symbol, side, countDistinct(trade_id) AS open_trades FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) WHERE state IN ('position_opened','exit_triggered') GROUP BY symbol, side ORDER BY open_trades DESC, symbol FORMAT PrettyCompactMonoBlock" 2>&1 || status=1
               fi
               echo
 

@@ -69,6 +69,7 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.3-alpine
+    init: true
     container_name: aitos-clickhouse
     ports: ["127.0.0.1:8123:8123", "127.0.0.1:9000:9000"]
     environment:
@@ -77,18 +78,15 @@ services:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      # Named volume (ext4 inside the Docker VM) instead of a Windows bind mount.
-      # The 9p/DrvFs bind mount does not support MergeTree's atomic directory
-      # renames: every async insert failed with "rename: Permission denied",
-      # which left tens of thousands of orphaned tmp_insert_* dirs behind and
-      # blocked startup for ~30 min while ClickHouse cleaned them one by one.
-      - clickhouse-data:/var/lib/clickhouse
+      # Keep the Docker named volume by default for Windows/local filesystems.
+      # Staging sets CLICKHOUSE_DATA_DIR to its verified provider-disk path.
+      - "${CLICKHOUSE_DATA_DIR:-clickhouse-data}:/var/lib/clickhouse"
       - ./docker/clickhouse/config.d/aitos.xml:/etc/clickhouse-server/config.d/aitos.xml:ro
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
       - ./docker/clickhouse/init.d/:/docker-entrypoint-initdb.d/:ro
     cpus: "${CLICKHOUSE_CPUS:-0.35}"
     mem_limit: "${CLICKHOUSE_MEM_LIMIT:-2.5g}"
-    healthcheck: {test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"], interval: 10s, timeout: 7s, retries: 12, start_period: 120s}
+    healthcheck: {test: ["CMD-SHELL", "clickhouse-client --user \"$CLICKHOUSE_USER\" --password \"$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' || exit 1"], interval: 10s, timeout: 7s, retries: 12, start_period: 120s}
     restart: unless-stopped
 
   clickhouse-init:
@@ -102,7 +100,7 @@ services:
     image: neo4j:5.19-community
     container_name: aitos-neo4j
     ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
-    environment: {NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}", NEO4J_dbms_memory_pagecache_size: 1G, NEO4J_dbms_memory_heap_max__size: 1G}
+    environment: {NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}", NEO4J_server_memory_pagecache_size: 1G, NEO4J_server_memory_heap_max__size: 1G}
     volumes:
       - "${NEO4J_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/databases/neo4j}:/data"
       - "${NEO4J_LOG_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/logs/neo4j}:/logs"
@@ -112,19 +110,19 @@ services:
     restart: unless-stopped
 
   aitos-paper:
-    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
+    image: "${AITOS_RUNTIME_IMAGE:-${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}}"
     container_name: aitos-paper
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "/app/run_paper_trading.py"]
     env_file: [.env]
     volumes:
-      - "${AITOS_SOURCE_ROOT:-.}:/app:ro"
       - "${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"
     environment:
       REDIS_HOST: redis
       MODEL_DATA_DIR: /models
       REDIS_MAX_CONNECTIONS: "256"
       CLICKHOUSE_HOST: clickhouse
+      AITOS_EMBEDDED_LEARNING_WORKER_ENABLED: "${AITOS_EMBEDDED_LEARNING_WORKER_ENABLED:-false}"
       NEO4J_URI: bolt://neo4j:7687
       REDIS_STREAM_MAXLEN_MARKET_TRADE: "10000"
       REDIS_STREAM_MAXLEN_MARKET_ORDERBOOK: "10000"
@@ -133,11 +131,17 @@ services:
     ports: ["127.0.0.1:8090:8090"]
     mem_limit: "${AITOS_TRADING_MEM_LIMIT:-2g}"
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
-    healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
+    healthcheck: {test: ["CMD", "python3", "-c", "import http.client,json; c=http.client.HTTPConnection('localhost',8090,timeout=5); c.request('GET','/ready'); r=c.getresponse(); p=json.loads(r.read()); raise SystemExit(0 if r.status == 200 and p.get('status') == 'healthy' else 1)"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
     restart: unless-stopped
 
   aitos-learning:
     container_name: aitos-learning
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; cmd=open('/proc/1/cmdline','rb').read(); sys.exit(0 if b'run_continual_learning.py' in cmd else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_continual_learning.py"]
@@ -243,7 +247,7 @@ services:
     restart: unless-stopped
 
   aitos-live:
-    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
+    image: "${AITOS_RUNTIME_IMAGE:-${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}}"
     container_name: aitos-live
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_live_trading.py"]

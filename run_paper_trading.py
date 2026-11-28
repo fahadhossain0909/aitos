@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AITOS paper-trading entrypoint with durable continual-learning experience capture."""
+"""Paper runtime; learning experience capture is consumed by the dedicated worker."""
 
 from __future__ import annotations
 
@@ -208,6 +208,13 @@ async def _cancel_task(task: asyncio.Task) -> None:
 async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
     if not ownership["components"]:
         await event_bus.shutdown()
+
+
+def _embedded_learning_worker_enabled() -> bool:
+    """Enable the in-process learner only for explicit single-process deployments."""
+    return os.getenv(
+        "AITOS_EMBEDDED_LEARNING_WORKER_ENABLED", "false"
+    ).strip().lower() in {"1", "true", "yes", "on"}
 
 
 async def _stop_learning_worker(worker, task: asyncio.Task) -> None:
@@ -529,7 +536,11 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             }
         },
     )
-    state_store = DurableTradingStateStore(market_repo)
+    state_store = DurableTradingStateStore(
+        market_repo,
+        account_scope=os.getenv("AITOS_PAPER_ACCOUNT_SCOPE", "paper:default"),
+        require_scoped_schema=True,
+    )
     # Explicitly opted-in shadow mirror only: legacy recovery remains authoritative.
     from aitos.trading.paper_shadow_runtime import (
         MirroredPaperStateStore,
@@ -592,8 +603,14 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
+    expected_position_symbols = [
+        getattr(trade, "symbol", None)
+        for trade in components.trade_lifecycle.get_open_trades()
+    ]
     position_recovery_ready = restored_position_feeds_ready(
-        restored_count, position_subscription_result
+        restored_count,
+        position_subscription_result,
+        expected_position_symbols,
     )
     if not position_recovery_ready:
         logger.critical(
@@ -740,16 +757,28 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     # Construct and start the blocking worker only after all other startup
     # wiring succeeds. This keeps its ClickHouse client and singleton lock
     # inside the managed main try/finally lifetime as well as its thread.
-    learning_worker = ContinualLearningWorker(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        user=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
-    learning_task.set_name("continual-learning-worker")
-    cleanup.push_async_callback(_stop_learning_worker, learning_worker, learning_task)
+    learning_worker = None
+    learning_task = None
+    if _embedded_learning_worker_enabled():
+        learning_worker = ContinualLearningWorker(
+            host=settings.clickhouse.host,
+            port=settings.clickhouse.port,
+            user=settings.clickhouse.user,
+            password=settings.clickhouse.password,
+            database=settings.clickhouse.database,
+        )
+        learning_task = asyncio.create_task(
+            asyncio.to_thread(learning_worker.run_forever)
+        )
+        learning_task.set_name("continual-learning-worker")
+        cleanup.push_async_callback(
+            _stop_learning_worker, learning_worker, learning_task
+        )
+    else:
+        logger.info(
+            "embedded continual-learning worker disabled; "
+            "dedicated learning service owns training"
+        )
     # Startup succeeded; the existing runtime finally block now owns teardown.
     # If any earlier startup step raises, AsyncExitStack closes acquired resources.
     cleanup.pop_all()
@@ -806,7 +835,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
                     stop_event.wait(),
                     timeout=get_settings().tuning.scanner.refresh_interval_seconds,
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 pass
     finally:
         try:
@@ -817,7 +846,8 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
                     logger.exception("A-Stat drift monitor shutdown failed")
             await _cancel_task(heal_task)
             # Let the worker finish its current ClickHouse batch before joining.
-            await _stop_learning_worker(learning_worker, learning_task)
+            if learning_worker is not None and learning_task is not None:
+                await _stop_learning_worker(learning_worker, learning_task)
             await price_safety_net.stop()
             await _shutdown_agents(agents)
             await tracker.persist_state(components.trade_lifecycle)

@@ -19,11 +19,14 @@ class _Scanner:
         return self._symbols[:limit]
 
     async def iter_candidate_batches(self):
+        selected = await self._lightweight_rank_symbols(limit=10)
         yield [
-            SimpleNamespace(symbol="ETHUSDT", composite_score=8.0),
-            SimpleNamespace(symbol="BTCUSDT", composite_score=7.0),
+            SimpleNamespace(
+                symbol=symbol,
+                composite_score=8.0 if symbol == "ETHUSDT" else 7.0,
+            )
+            for symbol in selected
         ]
-        yield [SimpleNamespace(symbol="SOLUSDT", composite_score=9.0)]
 
 
 def test_staged_subscriptions_follow_the_iterator_used_by_paper_runtime() -> None:
@@ -36,21 +39,20 @@ def test_staged_subscriptions_follow_the_iterator_used_by_paper_runtime() -> Non
 
         await install_staged_scan(scanner, on_subscription_change)
 
-        selected = await scanner._lightweight_rank_symbols(limit=10)
-        assert selected == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-        assert notifications == [(["BTCUSDT", "ETHUSDT", "SOLUSDT"], "TOP_50")]
-
         batches = [batch async for batch in scanner.iter_candidate_batches()]
-        assert len(batches) == 2
+        assert len(batches) == 1
         assert [candidate.symbol for batch in batches for candidate in batch] == [
-            "ETHUSDT",
             "BTCUSDT",
-            "SOLUSDT",
+            "ETHUSDT",
         ]
-        assert notifications[1:] == [
-            (["SOLUSDT", "ETHUSDT", "BTCUSDT"], "TOP_5"),
-            (["SOLUSDT", "ETHUSDT"], "TOP_2"),
+        assert notifications[:5] == [
+            (["BTCUSDT", "ETHUSDT", "SOLUSDT"], "TOP_50"),
+            (["BTCUSDT", "ETHUSDT", "SOLUSDT"], "TOP_25"),
+            (["BTCUSDT", "ETHUSDT", "SOLUSDT"], "TOP_10"),
+            (["BTCUSDT", "ETHUSDT", "SOLUSDT"], "TOP_5"),
+            (["BTCUSDT", "ETHUSDT"], "TOP_2"),
         ]
+        assert notifications[5:] == [(["ETHUSDT", "BTCUSDT"], "TOP_2")]
 
     asyncio.run(run())
 
@@ -65,8 +67,9 @@ def test_staged_subscription_hook_installation_is_idempotent() -> None:
 
         await install_staged_scan(scanner, on_subscription_change)
         await install_staged_scan(scanner, on_subscription_change)
-        await scanner._lightweight_rank_symbols(limit=10)
+        selected = await scanner._lightweight_rank_symbols(limit=10)
 
-        assert calls == ["TOP_50"]
+        assert selected == ["BTCUSDT", "ETHUSDT"]
+        assert calls == ["TOP_50", "TOP_25", "TOP_10", "TOP_5", "TOP_2"]
 
     asyncio.run(run())

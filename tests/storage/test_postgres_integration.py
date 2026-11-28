@@ -47,7 +47,13 @@ async def test_postgres_market_and_journal_round_trip():
                 "ORDER BY version"
             )
         assert [(row["version"], row["name"]) for row in migration_rows] == [
-            (1, "operational_and_market_records")
+            (1, "operational_and_market_records"),
+            (2, "canonical_scope_keyed_oms"),
+            (3, "clickhouse_legacy_import_evidence"),
+            (4, "canonical_oms_financial_ledger"),
+            (5, "canonical_postgres_execution_intents"),
+            (6, "canonical_oms_outbox_leases"),
+            (7, "canonical_postgres_protection_recovery"),
         ]
         assert len(migration_rows[0]["checksum"]) == 64
         initial = Kline(

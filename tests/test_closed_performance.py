@@ -126,18 +126,23 @@ async def test_performance_is_one_bounded_query_with_truncation_evidence():
     store, query = make_store([(r["trade_id"], json.dumps(r), 1) for r in rows])
     report = await store.query_closed_performance(limit=1)
     assert query.await_count == 1
-    assert query.call_args.kwargs["parameters"] == {"limit": 2}
+    assert query.call_args.kwargs["parameters"] == {"limit": 2, "account_scope": ""}
     assert report["truncated"] and report["loaded_trades"] == 1
 
 
 @pytest.mark.parametrize(
     "bad",
     [
-        ("t", "{}", 2),
-        ("t", "{}", 0),
-        ("t", "bad", 1),
-        ("t", json.dumps(dict(trade_id="wrong", state="position_closed", pnl=1)), 1),
-        ("t", json.dumps(dict(trade_id="t", state="position_closed", pnl=None)), 1),
+        ("", "t", "{}", 2),
+        ("", "t", "{}", 0),
+        ("", "t", "bad", 1),
+        (
+            "",
+            "t",
+            json.dumps(dict(trade_id="wrong", state="position_closed", pnl=1)),
+            1,
+        ),
+        ("", "t", json.dumps(dict(trade_id="t", state="position_closed", pnl=None)), 1),
     ],
 )
 async def test_closed_recovery_no_longer_silently_loses_corrupt_realized_pnl(bad):
@@ -150,7 +155,7 @@ async def test_closed_recovery_no_longer_silently_loses_corrupt_realized_pnl(bad
 
 async def test_valid_closed_recovery_preserves_all_records():
     r = row()
-    store, _ = make_store([(r["trade_id"], json.dumps(r), 1)])
+    store, _ = make_store([("", r["trade_id"], json.dumps(r), 1)])
     trade = object()
     with patch("aitos.trading.persistent_state._trade_from_dict", return_value=trade):
         assert await store.load_closed_trades() == [trade]

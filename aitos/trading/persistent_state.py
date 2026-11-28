@@ -54,6 +54,46 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+
+def _scoped_state_fingerprint(
+    table: str, trade_id: str, payload_json: str, updated_at: datetime
+) -> str:
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    stamp = updated_at.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+    material = "\0".join((table, str(trade_id), stamp, payload_json))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _scoped_state_payload_hash(payload: dict[str, Any], account_scope: str) -> str:
+    canonical = dict(payload)
+    embedded = canonical.get("account_scope")
+    if embedded and embedded != account_scope:
+        raise ValueError("scoped ClickHouse payload conflicts with account scope")
+    canonical["account_scope"] = account_scope
+    encoded = json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+CREATE_EXCHANGE_INCOME_RETRY = """
+CREATE TABLE IF NOT EXISTS exchange_income_sync_retry (
+    account LowCardinality(String),
+    retry_id String,
+    event_time_ms UInt64,
+    state LowCardinality(String),
+    updated_at DateTime64(6, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (account, retry_id)
+"""
+
+
 CREATE_ORDER_EXECUTION_LEDGER = """
 CREATE TABLE IF NOT EXISTS order_execution_ledger (
     client_order_id String,
@@ -86,9 +126,11 @@ FROM (
     SELECT trade_id, any(payload_json) AS latest_payload,
            uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
     FROM paper_closed_trade_ledger
-    WHERE (trade_id, updated_at) IN (
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+      AND (trade_id, updated_at) IN (
         SELECT trade_id, max(updated_at)
         FROM paper_closed_trade_ledger
+        WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
         GROUP BY trade_id
     )
     GROUP BY trade_id
@@ -107,9 +149,11 @@ FROM (
     SELECT trade_id, any(payload_json) AS latest_payload,
            uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
     FROM paper_closed_trade_ledger
-    WHERE (trade_id, updated_at) IN (
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+      AND (trade_id, updated_at) IN (
         SELECT trade_id, max(updated_at)
         FROM paper_closed_trade_ledger
+        WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
         GROUP BY trade_id
     )
     GROUP BY trade_id
@@ -120,20 +164,99 @@ SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
          max_memory_usage=134217728, read_overflow_mode='throw'
 """
 
-CLOSED_RECOVERY_QUERY = """
-SELECT trade_id, latest_payload, payload_versions
-FROM (
-    SELECT trade_id, any(payload_json) AS latest_payload,
-           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+
+SCOPED_LINKED_TRADE_IDS_QUERY = """
+SELECT trade_id FROM trade_runtime_state
+WHERE account_scope = {account_scope:String}
+UNION DISTINCT
+SELECT trade_id FROM paper_closed_trade_ledger
+WHERE account_scope = {account_scope:String}
+"""
+
+LEGACY_LINKED_TRADE_IDS_QUERY = """
+SELECT trade_id FROM trade_runtime_state
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+UNION DISTINCT
+SELECT trade_id FROM paper_closed_trade_ledger
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+"""
+
+SCOPED_OPEN_RECOVERY_QUERY = """
+SELECT account_scope, trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS latest_payload_versions
+FROM trade_runtime_state
+WHERE account_scope = {account_scope:String}
+  AND (account_scope, trade_id, updated_at) IN (
+    SELECT account_scope, trade_id, max(updated_at)
+    FROM trade_runtime_state
+    WHERE account_scope = {account_scope:String}
+    GROUP BY account_scope, trade_id
+  )
+  AND (account_scope, trade_id) NOT IN (
+    SELECT account_scope, trade_id
     FROM paper_closed_trade_ledger
-    WHERE (trade_id, updated_at) IN (
-        SELECT trade_id, max(updated_at)
-        FROM paper_closed_trade_ledger
-        GROUP BY trade_id
-    )
-    GROUP BY trade_id
-)
-ORDER BY trade_id
+    WHERE account_scope = {account_scope:String}
+  )
+GROUP BY account_scope, trade_id
+"""
+
+LEGACY_OPEN_RECOVERY_QUERY = """
+SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
+       trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS latest_payload_versions
+FROM trade_runtime_state
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+  AND (
+    JSONExtractString(payload_json, 'account_scope'), trade_id, updated_at
+  ) IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'),
+           trade_id, max(updated_at)
+    FROM trade_runtime_state
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+    GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+  )
+  AND (
+    JSONExtractString(payload_json, 'account_scope'), trade_id
+  ) NOT IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'), trade_id
+    FROM paper_closed_trade_ledger
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+  )
+GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+"""
+
+SCOPED_CLOSED_RECOVERY_QUERY = """
+SELECT account_scope, trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS payload_versions
+FROM paper_closed_trade_ledger
+WHERE account_scope = {account_scope:String}
+  AND (account_scope, trade_id, updated_at) IN (
+    SELECT account_scope, trade_id, max(updated_at)
+    FROM paper_closed_trade_ledger
+    WHERE account_scope = {account_scope:String}
+    GROUP BY account_scope, trade_id
+  )
+GROUP BY account_scope, trade_id
+ORDER BY account_scope, trade_id
+"""
+
+LEGACY_CLOSED_RECOVERY_QUERY = """
+SELECT JSONExtractString(payload_json, 'account_scope') AS account_scope,
+       trade_id, any(payload_json) AS latest_payload,
+       uniqExact(payload_json) AS payload_versions
+FROM paper_closed_trade_ledger
+WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+  AND (
+    JSONExtractString(payload_json, 'account_scope'), trade_id, updated_at
+  ) IN (
+    SELECT JSONExtractString(payload_json, 'account_scope'),
+           trade_id, max(updated_at)
+    FROM paper_closed_trade_ledger
+    WHERE JSONExtractString(payload_json, 'account_scope') = {account_scope:String}
+    GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+  )
+GROUP BY JSONExtractString(payload_json, 'account_scope'), trade_id
+ORDER BY account_scope, trade_id
 """
 
 
@@ -186,33 +309,229 @@ _install_ingestion_registry()
 
 
 class DurableTradingStateStore:
-    """Small ClickHouse-backed state store used by live trading recovery."""
+    """ClickHouse projection store with an explicit scope-keyed cutover mode."""
 
-    def __init__(self, repository: Any) -> None:
+    def __init__(
+        self,
+        repository: Any,
+        *,
+        account_scope: str = "",
+        require_scoped_schema: bool = False,
+    ) -> None:
+        if (
+            type(account_scope) is not str
+            or len(account_scope) > 256
+            or "\x00" in account_scope
+        ):
+            raise ValueError("bounded account scope required")
+        if type(require_scoped_schema) is not bool:
+            raise TypeError("require_scoped_schema must be boolean")
         self._repository = repository
+        self.account_scope = account_scope
+        self.require_scoped_schema = require_scoped_schema
+        self._scoped_clickhouse_state = False
 
     async def initialize(self) -> None:
         if self._repository is None or self._repository._client is None:
+            if self.require_scoped_schema:
+                raise RuntimeError(
+                    "runtime requires ClickHouse projection storage with the scoped cutover schema"
+                )
             logger.warning(
                 "durable trading state store skipped: ClickHouse repository unavailable"
             )
             return
         try:
-            await self._repository._client.command(CREATE_RUNTIME_STATE)
-            await self._repository._client.command(CREATE_DRAWDOWN_STATE)
-            await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
-            await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
-            await self._repository._client.command(CREATE_ORDER_EXECUTION_LEDGER)
-            logger.info("durable trading state tables ensured")
+            client = self._repository._client
+            if self.require_scoped_schema:
+                database = await client.query(
+                    "SELECT engine FROM system.databases WHERE name=currentDatabase()"
+                )
+                if (
+                    not database.result_rows
+                    or str(database.result_rows[0][0]) != "Atomic"
+                ):
+                    raise RuntimeError(
+                        "scope-keyed ClickHouse cutover requires an Atomic database"
+                    )
+                columns = await client.query(
+                    """
+                    SELECT table,name FROM system.columns
+                    WHERE database=currentDatabase()
+                      AND table IN ('trade_runtime_state','paper_closed_trade_ledger')
+                    """
+                )
+                table_columns: dict[str, set[str]] = {}
+                for table, column in columns.result_rows:
+                    table_columns.setdefault(str(table), set()).add(str(column))
+                required_runtime = {
+                    "account_scope",
+                    "trade_id",
+                    "symbol",
+                    "state",
+                    "payload_json",
+                    "legacy_payload_json",
+                    "updated_at",
+                    "source_fingerprint",
+                    "source_occurrence",
+                    "payload_sha256",
+                }
+                required_closed = {
+                    "account_scope",
+                    "trade_id",
+                    "payload_json",
+                    "legacy_payload_json",
+                    "updated_at",
+                    "source_fingerprint",
+                    "source_occurrence",
+                    "payload_sha256",
+                }
+                if not required_runtime.issubset(
+                    table_columns.get("trade_runtime_state", set())
+                ) or not required_closed.issubset(
+                    table_columns.get("paper_closed_trade_ledger", set())
+                ):
+                    raise RuntimeError(
+                        "runtime requires fully migrated scope-keyed ClickHouse state tables; "
+                        "run and verify scripts/migrate_scoped_clickhouse_state.py --cutover first"
+                    )
+                metadata = await client.query(
+                    """
+                    SELECT name,engine,sorting_key FROM system.tables
+                    WHERE database=currentDatabase()
+                      AND name IN ('trade_runtime_state','paper_closed_trade_ledger')
+                    """
+                )
+                table_metadata = {
+                    str(name): (str(engine), str(sorting_key))
+                    for name, engine, sorting_key in metadata.result_rows
+                }
+                for table in ("trade_runtime_state", "paper_closed_trade_ledger"):
+                    engine, sorting_key = table_metadata.get(table, ("", ""))
+                    if engine != "MergeTree" or not sorting_key.lstrip("(").startswith(
+                        "account_scope"
+                    ):
+                        raise RuntimeError(
+                            f"{table} must use a scope-first MergeTree sorting key"
+                        )
+                self._scoped_clickhouse_state = True
+            else:
+                await client.command(CREATE_RUNTIME_STATE)
+                await client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
+                self._scoped_clickhouse_state = False
+            await client.command(CREATE_DRAWDOWN_STATE)
+            await client.command(CREATE_EXCHANGE_INCOME_CURSOR)
+            await client.command(CREATE_EXCHANGE_INCOME_RETRY)
+            await client.command(CREATE_ORDER_EXECUTION_LEDGER)
+            logger.info(
+                "durable trading state tables verified",
+                extra={
+                    "aitos_extra": {
+                        "scoped_schema": self._scoped_clickhouse_state,
+                        "account_scope": self.account_scope,
+                    }
+                },
+            )
         except Exception:
-            logger.exception("durable trading state table ensure failed")
+            logger.exception("durable trading state table ensure/verification failed")
             raise
+
+    async def _insert_scoped_state_row(
+        self,
+        table: str,
+        trade_id: str,
+        payload_json: str,
+        updated_at: datetime,
+        *,
+        symbol: str = "",
+        state: str = "",
+    ) -> None:
+        if table not in {"trade_runtime_state", "paper_closed_trade_ledger"}:
+            raise ValueError("unsupported scoped ClickHouse state table")
+        payload = json.loads(payload_json)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("trade_id") != trade_id
+            or payload.get("account_scope") != self.account_scope
+        ):
+            raise ValueError("scoped ClickHouse state payload identity mismatch")
+        fingerprint = _scoped_state_fingerprint(
+            table, trade_id, payload_json, updated_at
+        )
+        client = self._client()
+        occurrence_query = (
+            "SELECT count() FROM trade_runtime_state "
+            "WHERE account_scope={account_scope:String} "
+            "AND source_fingerprint={source_fingerprint:String}"
+            if table == "trade_runtime_state"
+            else "SELECT count() FROM paper_closed_trade_ledger "
+            "WHERE account_scope={account_scope:String} "
+            "AND source_fingerprint={source_fingerprint:String}"
+        )
+        occurrences = await client.query(
+            occurrence_query,
+            parameters={
+                "account_scope": self.account_scope,
+                "source_fingerprint": fingerprint,
+            },
+        )
+        occurrence = (
+            int(occurrences.result_rows[0][0]) if occurrences.result_rows else 0
+        )
+        payload_hash = _scoped_state_payload_hash(payload, self.account_scope)
+        if table == "trade_runtime_state":
+            values = [
+                self.account_scope,
+                trade_id,
+                symbol,
+                state,
+                payload_json,
+                payload_json,
+                updated_at,
+                fingerprint,
+                occurrence,
+                payload_hash,
+            ]
+            columns = [
+                "account_scope",
+                "trade_id",
+                "symbol",
+                "state",
+                "payload_json",
+                "legacy_payload_json",
+                "updated_at",
+                "source_fingerprint",
+                "source_occurrence",
+                "payload_sha256",
+            ]
+        else:
+            values = [
+                self.account_scope,
+                trade_id,
+                payload_json,
+                payload_json,
+                updated_at,
+                fingerprint,
+                occurrence,
+                payload_hash,
+            ]
+            columns = [
+                "account_scope",
+                "trade_id",
+                "payload_json",
+                "legacy_payload_json",
+                "updated_at",
+                "source_fingerprint",
+                "source_occurrence",
+                "payload_sha256",
+            ]
+        await client.insert(table, [values], column_names=columns)
 
     async def load_income_cursor(self, account: str = "binance_usdm") -> int | None:
         client = self._client()
         result = await client.query(
             """
-            SELECT argMax(cursor_time_ms, updated_at)
+            SELECT maxOrNull(cursor_time_ms)
             FROM exchange_income_sync_cursor
             WHERE account = {account:String}
             """,
@@ -232,6 +551,64 @@ class DurableTradingStateStore:
             "exchange_income_sync_cursor",
             [[account, int(cursor_time_ms), datetime.now(timezone.utc)]],
             column_names=["account", "cursor_time_ms", "updated_at"],
+        )
+
+    async def load_income_retry_floor(
+        self, account: str = "binance_usdm"
+    ) -> int | None:
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT minOrNull(event_time_ms)
+            FROM exchange_income_sync_retry FINAL
+            WHERE account = {account:String} AND state = 'pending'
+            """,
+            parameters={"account": account},
+        )
+        if not result.result_rows or result.result_rows[0][0] is None:
+            return None
+        return int(result.result_rows[0][0])
+
+    async def record_income_retry(
+        self, retry_id: str, event_time_ms: int, account: str = "binance_usdm"
+    ) -> None:
+        if not retry_id or event_time_ms < 0:
+            raise ValueError("income retry identity and non-negative time are required")
+        await self._client().insert(
+            "exchange_income_sync_retry",
+            [
+                [
+                    account,
+                    retry_id,
+                    int(event_time_ms),
+                    "pending",
+                    datetime.now(timezone.utc),
+                ]
+            ],
+            column_names=[
+                "account",
+                "retry_id",
+                "event_time_ms",
+                "state",
+                "updated_at",
+            ],
+        )
+
+    async def resolve_income_retry(
+        self, retry_id: str, account: str = "binance_usdm"
+    ) -> None:
+        if not retry_id:
+            raise ValueError("income retry identity is required")
+        await self._client().insert(
+            "exchange_income_sync_retry",
+            [[account, retry_id, 0, "resolved", datetime.now(timezone.utc)]],
+            column_names=[
+                "account",
+                "retry_id",
+                "event_time_ms",
+                "state",
+                "updated_at",
+            ],
         )
 
     async def save_order_intent(
@@ -365,12 +742,14 @@ class DurableTradingStateStore:
             GROUP BY client_order_id
             """
         )
+        linkage_query = (
+            SCOPED_LINKED_TRADE_IDS_QUERY
+            if self._scoped_clickhouse_state
+            else LEGACY_LINKED_TRADE_IDS_QUERY
+        )
         trade_rows = await client.query(
-            """
-            SELECT trade_id FROM trade_runtime_state
-            UNION DISTINCT
-            SELECT trade_id FROM paper_closed_trade_ledger
-            """
+            linkage_query,
+            parameters={"account_scope": self.account_scope},
         )
         known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
         unlinked = []
@@ -432,28 +811,47 @@ class DurableTradingStateStore:
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
         payload = trade.to_dict()
+        if trade.account_scope and trade.account_scope != self.account_scope:
+            raise ValueError("trade account scope does not match state-store scope")
+        payload["account_scope"] = self.account_scope
+        trade.account_scope = self.account_scope
         try:
-            await client.insert(
-                "trade_runtime_state",
-                [
-                    [
-                        trade.trade_id,
-                        trade.symbol,
-                        trade.state.value,
-                        json.dumps(
-                            payload, sort_keys=True, default=str, allow_nan=False
-                        ),
-                        datetime.fromisoformat(trade.updated_at.replace("Z", "+00:00")),
-                    ]
-                ],
-                column_names=[
-                    "trade_id",
-                    "symbol",
-                    "state",
-                    "payload_json",
-                    "updated_at",
-                ],
+            payload_json = json.dumps(
+                payload, sort_keys=True, default=str, allow_nan=False
             )
+            updated_at = datetime.fromisoformat(trade.updated_at.replace("Z", "+00:00"))
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            updated_at = updated_at.astimezone(timezone.utc)
+            if self._scoped_clickhouse_state:
+                await self._insert_scoped_state_row(
+                    "trade_runtime_state",
+                    trade.trade_id,
+                    payload_json,
+                    updated_at,
+                    symbol=trade.symbol,
+                    state=trade.state.value,
+                )
+            else:
+                await client.insert(
+                    "trade_runtime_state",
+                    [
+                        [
+                            trade.trade_id,
+                            trade.symbol,
+                            trade.state.value,
+                            payload_json,
+                            updated_at,
+                        ]
+                    ],
+                    column_names=[
+                        "trade_id",
+                        "symbol",
+                        "state",
+                        "payload_json",
+                        "updated_at",
+                    ],
+                )
         except Exception:
             logger.exception(
                 "failed to save trade runtime state",
@@ -470,11 +868,36 @@ class DurableTradingStateStore:
     async def delete_trade(self, trade_id: str) -> None:
         client = self._client()
         try:
-            await client.command(
-                "ALTER TABLE trade_runtime_state DELETE "
-                "WHERE trade_id = {trade_id:String}",
-                parameters={"trade_id": trade_id},
-            )
+            if self._scoped_clickhouse_state:
+                # The closed ledger is the durable terminal record. Its
+                # scope-keyed anti-join hides the old runtime snapshot, so do
+                # not mutate or tombstone append-only history.
+                archived = await client.query(
+                    """
+                    SELECT count() FROM paper_closed_trade_ledger
+                    WHERE account_scope={account_scope:String}
+                      AND trade_id={trade_id:String}
+                    """,
+                    parameters={
+                        "account_scope": self.account_scope,
+                        "trade_id": trade_id,
+                    },
+                )
+                if not archived.result_rows or int(archived.result_rows[0][0]) < 1:
+                    raise RuntimeError(
+                        "scope-keyed runtime deletion requires a durable closed-trade archive"
+                    )
+                return
+            else:
+                await client.command(
+                    "ALTER TABLE trade_runtime_state DELETE "
+                    "WHERE trade_id = {trade_id:String} "
+                    "AND JSONExtractString(payload_json, 'account_scope') = {account_scope:String}",
+                    parameters={
+                        "trade_id": trade_id,
+                        "account_scope": self.account_scope,
+                    },
+                )
         except Exception:
             logger.exception(
                 "failed to delete trade runtime state",
@@ -485,31 +908,45 @@ class DurableTradingStateStore:
     async def load_open_trades(self) -> list[Trade]:
         client = self._client()
         try:
+            # Trade IDs are not globally unique across accounts/runs. Scope the
+            # latest-state and terminal-ledger anti-join by immutable account
+            # scope. Scoped tables use the leading column; legacy tables read
+            # the embedded payload scope. Missing legacy scope maps to empty.
+            recovery_query = (
+                SCOPED_OPEN_RECOVERY_QUERY
+                if self._scoped_clickhouse_state
+                else LEGACY_OPEN_RECOVERY_QUERY
+            )
             result = await client.query(
-                """
-                SELECT trade_id, any(payload_json) AS latest_payload,
-                       uniqExact(payload_json) AS latest_payload_versions
-                FROM trade_runtime_state
-                WHERE (trade_id, updated_at) IN (
-                    SELECT trade_id, max(updated_at)
-                    FROM trade_runtime_state GROUP BY trade_id
-                ) AND trade_id NOT IN (
-                    SELECT trade_id FROM paper_closed_trade_ledger
-                )
-                GROUP BY trade_id
-                """
+                recovery_query,
+                parameters={"account_scope": self.account_scope},
             )
         except Exception:
             logger.exception("failed to load open trades from runtime state")
             raise
         trades: list[Trade] = []
+        observed_scopes = {str(row[0]) for row in result.result_rows if len(row) == 4}
+        if len(observed_scopes) > 1 or (
+            observed_scopes and observed_scopes != {self.account_scope}
+        ):
+            raise RuntimeError(
+                "runtime recovery blocked: account scope mismatch or mixed scopes"
+            )
         for row in result.result_rows:
             try:
-                if len(row) != 3 or row[2] != 1:
+                if len(row) != 4 or row[3] != 1:
                     raise ValueError("ambiguous latest runtime payload")
-                payload = json.loads(row[1])
-                if payload.get("trade_id") != row[0]:
+                payload = json.loads(row[2])
+                if payload.get("trade_id") != row[1]:
                     raise ValueError("runtime payload identity mismatch")
+                if str(payload.get("account_scope") or "") != str(row[0]):
+                    raise ValueError("runtime column/payload account scope mismatch")
+                payload["account_scope"] = str(row[0])
+                if payload.get("state") not in {
+                    TradeLifecycleState.POSITION_OPENED.value,
+                    TradeLifecycleState.EXIT_TRIGGERED.value,
+                }:
+                    continue
                 trade = _trade_from_dict(payload)
                 if trade.state in {
                     TradeLifecycleState.POSITION_OPENED,
@@ -519,7 +956,11 @@ class DurableTradingStateStore:
             except Exception as exc:
                 logger.error(
                     "runtime recovery blocked by invalid or ambiguous state",
-                    extra={"aitos_extra": {"trade_id": row[0] if row else None}},
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": row[1] if row and len(row) > 1 else None
+                        }
+                    },
                 )
                 raise RuntimeError(
                     "runtime recovery requires unambiguous valid latest trade state"
@@ -531,22 +972,27 @@ class DurableTradingStateStore:
         if trade.state != TradeLifecycleState.POSITION_CLOSED:
             raise ValueError("only closed trades can be archived")
         client = self._client()
-        _closed_payload(
-            (trade.trade_id, json.dumps(trade.to_dict(), allow_nan=False), 1)
+        if trade.account_scope and trade.account_scope != self.account_scope:
+            raise ValueError("trade account scope does not match state-store scope")
+        trade.account_scope = self.account_scope
+        payload_json = json.dumps(
+            trade.to_dict(), sort_keys=True, default=str, allow_nan=False
         )
-        await client.insert(
-            "paper_closed_trade_ledger",
-            [
-                [
-                    trade.trade_id,
-                    json.dumps(
-                        trade.to_dict(), sort_keys=True, default=str, allow_nan=False
-                    ),
-                    datetime.now(timezone.utc),
-                ]
-            ],
-            column_names=["trade_id", "payload_json", "updated_at"],
-        )
+        _closed_payload((trade.trade_id, payload_json, 1))
+        updated_at = datetime.now(timezone.utc)
+        if self._scoped_clickhouse_state:
+            await self._insert_scoped_state_row(
+                "paper_closed_trade_ledger",
+                trade.trade_id,
+                payload_json,
+                updated_at,
+            )
+        else:
+            await client.insert(
+                "paper_closed_trade_ledger",
+                [[trade.trade_id, payload_json, updated_at]],
+                column_names=["trade_id", "payload_json", "updated_at"],
+            )
 
     async def query_closed_history(
         self, *, limit: int, offset: int = 0, symbol: str = ""
@@ -563,7 +1009,12 @@ class DurableTradingStateStore:
             raise ValueError("invalid bounded history query")
         result = await self._client().query(
             CLOSED_HISTORY_QUERY,
-            parameters={"symbol": symbol, "limit": limit, "offset": offset},
+            parameters={
+                "symbol": symbol,
+                "limit": limit,
+                "offset": offset,
+                "account_scope": self.account_scope,
+            },
         )
         return [_closed_payload(row) for row in result.result_rows]
 
@@ -573,7 +1024,12 @@ class DurableTradingStateStore:
             raise ValueError("invalid bounded snapshot query")
         result = await self._client().query(
             CLOSED_HISTORY_QUERY,
-            parameters={"symbol": "", "limit": limit + 1, "offset": 0},
+            parameters={
+                "symbol": "",
+                "limit": limit + 1,
+                "offset": 0,
+                "account_scope": self.account_scope,
+            },
         )
         # Validate the extra row too; never hide a known revision conflict.
         payloads = [_closed_payload(row) for row in result.result_rows]
@@ -591,7 +1047,7 @@ class DurableTradingStateStore:
             raise ValueError("invalid bounded performance query")
         result = await self._client().query(
             CLOSED_PERFORMANCE_QUERY,
-            parameters={"limit": limit + 1},
+            parameters={"limit": limit + 1, "account_scope": self.account_scope},
         )
         rows = result.result_rows
         # Validate the extra row too: a known conflict must not be hidden.
@@ -602,11 +1058,37 @@ class DurableTradingStateStore:
 
     async def load_closed_trades(self) -> list[Trade]:
         """Restore complete realized evidence or fail; never silently lose PnL."""
-        result = await self._client().query(CLOSED_RECOVERY_QUERY)
+        recovery_query = (
+            SCOPED_CLOSED_RECOVERY_QUERY
+            if self._scoped_clickhouse_state
+            else LEGACY_CLOSED_RECOVERY_QUERY
+        )
+        result = await self._client().query(
+            recovery_query,
+            parameters={"account_scope": self.account_scope},
+        )
         try:
-            return [
-                _trade_from_dict(_closed_payload(row)) for row in result.result_rows
-            ]
+            observed_scopes = {
+                str(row[0]) for row in result.result_rows if len(row) == 4
+            }
+            if len(observed_scopes) > 1 or (
+                observed_scopes and observed_scopes != {self.account_scope}
+            ):
+                raise RuntimeError(
+                    "closed-ledger recovery blocked: account scope mismatch or mixed scopes"
+                )
+            trades = []
+            for row in result.result_rows:
+                if len(row) != 4:
+                    raise ValueError("invalid scoped closed-ledger row")
+                payload = _closed_payload(row[1:])
+                if str(payload.get("account_scope") or "") != str(row[0]):
+                    raise ValueError(
+                        "closed-ledger column/payload account scope mismatch"
+                    )
+                payload["account_scope"] = str(row[0])
+                trades.append(_trade_from_dict(payload))
+            return trades
         except Exception as exc:
             raise RuntimeError(
                 "closed-ledger recovery requires valid unambiguous terminal records"
@@ -757,38 +1239,80 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
             else None
         ),
         updated_at=str(data.get("updated_at") or data["entry_time"]),
+        account_scope=str(data.get("account_scope") or ""),
     )
 
 
 def restored_position_feeds_ready(
-    restored_open_count: int, subscription_result: dict[str, Any] | None
+    restored_open_count: int,
+    subscription_result: dict[str, Any] | None,
+    expected_symbols: list[str] | tuple[str, ...] | None = None,
 ) -> bool:
-    """Fail closed when restored positions are not covered by verified feeds.
+    """Require exact per-ingestion trade and kline coverage for restored trades.
 
-    An empty portfolio needs no position-specific subscriptions. Once at least
-    one persisted position is restored, every registered ingestion instance
-    must confirm both trade and kline coverage before a trading loop may start.
+    The aggregate counters alone are not sufficient evidence: every registered
+    ingestion must report both configured cohorts, and those cohorts must cover
+    the complete expected restored-position symbol set.
     """
+    if type(restored_open_count) is not int or restored_open_count < 0:
+        return False
+    if expected_symbols is None:
+        if restored_open_count == 0:
+            return True
+        return False
+    if not isinstance(expected_symbols, (list, tuple)):
+        return False
+    normalized_expected = []
+    for symbol in expected_symbols:
+        if type(symbol) is not str or not symbol or symbol != symbol.strip():
+            return False
+        normalized = symbol.upper()
+        if not normalized.isalnum() or len(normalized) > 32:
+            return False
+        normalized_expected.append(normalized)
+    expected = set(normalized_expected)
     if restored_open_count == 0:
-        return True
-    if restored_open_count < 0 or not isinstance(subscription_result, dict):
+        return not expected
+    if not expected or not isinstance(subscription_result, dict):
         return False
 
     symbols = subscription_result.get("symbols")
-    try:
-        ingestion_count = int(subscription_result.get("ingestions", 0))
-        verified_count = int(subscription_result.get("verified", 0))
-        failure_count = int(subscription_result.get("failures", 0))
-    except (TypeError, ValueError):
+    if (
+        not isinstance(symbols, list)
+        or any(type(symbol) is not str or not symbol for symbol in symbols)
+        or [symbol.upper() for symbol in symbols] != sorted(expected)
+    ):
         return False
 
-    return bool(
-        isinstance(symbols, list)
-        and symbols
-        and ingestion_count > 0
-        and verified_count == ingestion_count
-        and failure_count == 0
+    counters = (
+        subscription_result.get("ingestions"),
+        subscription_result.get("verified"),
+        subscription_result.get("failures"),
     )
+    malformed_count = subscription_result.get("malformed_trade_symbols")
+    if type(malformed_count) is not int or malformed_count != 0:
+        return False
+    if any(type(value) is not int for value in counters):
+        return False
+    ingestion_count, verified_count, failure_count = counters
+    if ingestion_count <= 0 or verified_count != ingestion_count or failure_count != 0:
+        return False
+
+    evidence = subscription_result.get("ingestion_evidence")
+    if not isinstance(evidence, list) or len(evidence) != ingestion_count:
+        return False
+    for item in evidence:
+        if not isinstance(item, dict) or item.get("verified") is not True:
+            return False
+        for field in ("trade_symbols", "kline_symbols"):
+            values = item.get(field)
+            if (
+                not isinstance(values, list)
+                or any(type(value) is not str or not value for value in values)
+                or not expected.issubset({value.upper() for value in values})
+            ):
+                return False
+    return True
 
 
 class TradeStatePersistence:
@@ -814,13 +1338,13 @@ class TradeStatePersistence:
         """
         load_closed = getattr(self._store, "load_closed_trades", None)
         closed_trades = await load_closed() if callable(load_closed) else []
-        closed_ids = {trade.trade_id for trade in closed_trades}
+        closed_ids = {(trade.account_scope, trade.trade_id) for trade in closed_trades}
         trades = await self._store.load_open_trades()
         restored_open_count = 0
         for trade in trades:
             # A close archive is authoritative if a crash occurred between
             # archiving the close and deleting the stale open-state row.
-            if trade.trade_id not in closed_ids:
+            if (trade.account_scope, trade.trade_id) not in closed_ids:
                 self._lifecycle._open_trades[trade.trade_id] = trade
                 restored_open_count += 1
         if closed_trades and hasattr(self._lifecycle, "_closed_trades"):
@@ -879,34 +1403,69 @@ class TradeStatePersistence:
     async def resubscribe_restored_positions(self) -> dict[str, Any]:
         """Reconcile restored position symbols with initialized live market feeds."""
         trades = list(self._lifecycle.get_open_trades())
-        symbols = list(
-            dict.fromkeys(str(trade.symbol).upper() for trade in trades if trade.symbol)
+        raw_symbols = [getattr(trade, "symbol", None) for trade in trades]
+        malformed_symbols = [
+            value
+            for value in raw_symbols
+            if type(value) is not str
+            or not value.strip()
+            or value != value.strip()
+            or not value.isalnum()
+        ]
+        symbols = sorted(
+            {
+                value.upper()
+                for value in raw_symbols
+                if isinstance(value, str) and value.strip()
+            }
         )
-        if not symbols:
-            return {"symbols": [], "ingestions": 0, "verified": 0, "failures": 0}
+        if not trades:
+            return {
+                "symbols": [],
+                "ingestions": 0,
+                "verified": 0,
+                "failures": 0,
+                "ingestion_evidence": [],
+                "malformed_trade_symbols": 0,
+            }
 
-        ingestion_count = 0
+        ingestions = list(_INGESTIONS)
+        evidence = []
         verified_count = 0
-        failures = 0
-        for ingestion in list(_INGESTIONS):
+        failures = len(malformed_symbols)
+        for index, ingestion in enumerate(ingestions):
+            item = {
+                "ingestion": f"{type(ingestion).__name__}:{index}",
+                "trade_symbols": [],
+                "kline_symbols": [],
+                "verified": False,
+            }
             try:
                 # Install protected-position wrappers before this method is called,
                 # so scanner subscription churn cannot evict restored symbols.
                 await ingestion.update_live_trade_symbols(symbols)
                 await ingestion.update_live_kline_symbols(symbols)
-                ingestion_count += 1
 
-                live_trade_symbols = {
-                    str(s).upper()
-                    for s in getattr(ingestion, "_live_trade_symbols", [])
-                }
-                live_kline_symbols = {
-                    str(s).upper()
-                    for s in getattr(ingestion, "_live_kline_symbols", [])
-                }
-                missing_trade = sorted(set(symbols) - live_trade_symbols)
-                missing_kline = sorted(set(symbols) - live_kline_symbols)
-                if not missing_trade and not missing_kline:
+                item["trade_symbols"] = sorted(
+                    {
+                        str(value).upper()
+                        for value in getattr(ingestion, "_live_trade_symbols", [])
+                        if isinstance(value, str) and value
+                    }
+                )
+                item["kline_symbols"] = sorted(
+                    {
+                        str(value).upper()
+                        for value in getattr(ingestion, "_live_kline_symbols", [])
+                        if isinstance(value, str) and value
+                    }
+                )
+                missing_trade = sorted(set(symbols) - set(item["trade_symbols"]))
+                missing_kline = sorted(set(symbols) - set(item["kline_symbols"]))
+                item["verified"] = (
+                    not malformed_symbols and not missing_trade and not missing_kline
+                )
+                if item["verified"]:
                     verified_count += 1
                 else:
                     failures += 1
@@ -917,11 +1476,13 @@ class TradeStatePersistence:
                                 "symbols": symbols,
                                 "missing_trade_symbols": missing_trade,
                                 "missing_kline_symbols": missing_kline,
+                                "malformed_trade_symbol_count": len(malformed_symbols),
                             }
                         },
                     )
             except Exception as exc:
                 failures += 1
+                item["error"] = type(exc).__name__
                 logger.exception(
                     "failed to resubscribe restored position market data",
                     extra={
@@ -931,24 +1492,26 @@ class TradeStatePersistence:
                         }
                     },
                 )
+            evidence.append(item)
 
+        if not ingestions:
+            failures += 1
+            logger.error(
+                "no DataIngestionService registered for restored position recovery",
+                extra={"aitos_extra": {"symbols": symbols}},
+            )
         result = {
             "symbols": symbols,
-            "ingestions": ingestion_count,
+            "ingestions": len(ingestions),
             "verified": verified_count,
             "failures": failures,
+            "ingestion_evidence": evidence,
+            "malformed_trade_symbols": len(malformed_symbols),
         }
         logger.info(
             "restored position market-data reconciliation complete",
             extra={"aitos_extra": result},
         )
-        if not _INGESTIONS:
-            failures = 1
-            result["failures"] = failures
-            logger.error(
-                "no DataIngestionService registered for restored position recovery",
-                extra={"aitos_extra": {"symbols": symbols}},
-            )
         return result
 
     async def initialize(self) -> None:
@@ -1168,6 +1731,13 @@ class IdempotentOrderExecutor(OrderExecutor):
         self._requests: dict[str, OrderRequest] = {}
         self._blocked_reason: str | None = None
         self._blocked_client_order_id: str | None = None
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate venue/intent APIs not owned by the idempotency wrapper."""
+        inner = self.__dict__.get("_inner")
+        if inner is None:
+            raise AttributeError(name)
+        return getattr(inner, name)
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -1485,6 +2055,8 @@ class IdempotentOrderExecutor(OrderExecutor):
             "order_type": request.order_type,
             "client_order_id": request.client_order_id,
             "reduce_only": request.reduce_only,
+            "owner_trade_id": request.owner_trade_id,
+            "execution_context": dict(request.execution_context or {}),
         }
 
     @staticmethod
@@ -1549,6 +2121,3 @@ class IdempotentOrderExecutor(OrderExecutor):
 
     async def get_resting_order_status(self, *args: Any, **kwargs: Any) -> str | None:
         return await self._inner.get_resting_order_status(*args, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)

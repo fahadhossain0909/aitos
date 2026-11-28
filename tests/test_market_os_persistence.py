@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -228,3 +229,58 @@ async def test_market_os_persistence_can_restart_and_reports_flush_task_health()
     assert second_health.details["flush_task_alive"] is True
 
     await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_market_os_persistence_reports_failure_and_recovers_after_retry():
+    class FlakyClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.fail_next_insert = True
+
+        async def insert(self, table, rows, column_names):
+            if self.fail_next_insert:
+                self.fail_next_insert = False
+                raise RuntimeError("temporary ClickHouse insert failure")
+            await super().insert(table, rows, column_names)
+
+    repository = FakeRepository()
+    repository._client = FlakyClient()
+    service = MarketOSPersistence(None, repository, batch_size=1)
+    service._initialized = True
+    service._flush_task = asyncio.create_task(asyncio.sleep(60.0))
+    event = Event(
+        topic="market.orderflow.BTCUSDT",
+        payload={"trade_count": 1},
+        source_module="test",
+    )
+
+    with pytest.raises(RuntimeError, match="temporary ClickHouse"):
+        await service._handle_orderflow(event)
+
+    failed = await service.health_check()
+    assert failed.status.value == "degraded"
+    assert failed.details["errors"] == 1
+    assert failed.details["pending_rows"] == 1
+    assert failed.details["pending_batches"] == 1
+    assert failed.details["failed_tables"] == ["market_orderflow"]
+    assert failed.details["last_error_type"] == "RuntimeError"
+    assert failed.details["last_failed_table"] == "market_orderflow"
+    assert failed.details["last_retry_outcome"] == "requeued"
+    assert failed.details["retry_attempts"] == 1
+
+    await service._flush_table("market_orderflow", None)
+
+    recovered = await service.health_check()
+    assert recovered.status.value == "healthy"
+    assert recovered.details["errors"] == 1
+    assert recovered.details["failed_tables"] == []
+    assert recovered.details["pending_rows"] == 0
+    assert recovered.details["pending_batches"] == 0
+    assert recovered.details["last_retry_outcome"] == "recovered"
+    assert recovered.details["table_write_latency"]["market_orderflow"]["count"] == 2
+
+    service._flush_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await service._flush_task
+    service._flush_task = None

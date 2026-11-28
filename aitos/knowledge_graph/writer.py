@@ -154,6 +154,7 @@ FOREACH (calibration_id IN CASE WHEN $calibration_id <> '' THEN [$calibration_id
         c.brier = $brier, c.log_loss = $log_loss, c.ece = $ece
     MERGE (e)-[:PART_OF_CALIBRATION]->(c))
 
+WITH e
 OPTIONAL MATCH (decision:Decision {id: $decision_id})
 OPTIONAL MATCH (outcome:Outcome {id: $outcome_id})
 OPTIONAL MATCH (trade:Trade {id: $trade_id})

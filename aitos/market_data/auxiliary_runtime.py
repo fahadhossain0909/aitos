@@ -30,6 +30,9 @@ class BinanceAuxiliaryMarketDataRuntime:
         self._drain_tasks: list[asyncio.Task] = []
         self._stopped = True
         self._lock = asyncio.Lock()
+        self._funding_stream = None
+        self._dynamic_open_interest = False
+        self._dynamic_instrument = False
 
     async def start(self) -> None:
         if not self._stopped:
@@ -40,12 +43,41 @@ class BinanceAuxiliaryMarketDataRuntime:
             asyncio.create_task(self._drain_loop(), name="market-data-auxiliary-drain")
         ]
         self._start("ticker", lambda: self.adapter.stream_all_tickers())
-        self._start("funding", lambda: self.adapter.stream_funding(self.symbols))
-        self._start(
-            "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
-        )
+        managed_funding = getattr(self.adapter, "stream_funding_managed", None)
+        if callable(managed_funding):
+
+            def funding_factory():
+                if self._funding_stream is None or self._funding_stream.closed:
+                    self._funding_stream = managed_funding(self.symbols)
+                return self._funding_stream
+
+            self._funding_stream = managed_funding(self.symbols)
+            self._start("funding", funding_factory)
+        else:
+            self._start("funding", lambda: self.adapter.stream_funding(self.symbols))
+        dynamic_oi = getattr(self.adapter, "stream_open_interest_dynamic", None)
+        self._dynamic_open_interest = callable(dynamic_oi)
+        if self._dynamic_open_interest:
+            self._start(
+                "open_interest",
+                lambda: dynamic_oi(lambda: self.symbols),
+            )
+        else:
+            self._start(
+                "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
+            )
         self._start("liquidation", lambda: self.adapter.stream_liquidations())
-        self._start("instrument", lambda: self.adapter.stream_instruments(self.symbols))
+        dynamic_instruments = getattr(self.adapter, "stream_instruments_dynamic", None)
+        self._dynamic_instrument = callable(dynamic_instruments)
+        if self._dynamic_instrument:
+            self._start(
+                "instrument",
+                lambda: dynamic_instruments(lambda: self.symbols),
+            )
+        else:
+            self._start(
+                "instrument", lambda: self.adapter.stream_instruments(self.symbols)
+            )
         logger.info(
             "Binance auxiliary market-data runtime started",
             extra={"aitos_extra": {"symbols": self.symbols}},
@@ -113,7 +145,13 @@ class BinanceAuxiliaryMarketDataRuntime:
             self.symbols = normalized
             if self._stopped:
                 return True
-            names = {"funding", "open_interest", "instrument"}
+            names = set()
+            if self._funding_stream is None:
+                names.add("funding")
+            if not self._dynamic_open_interest:
+                names.add("open_interest")
+            if not self._dynamic_instrument:
+                names.add("instrument")
             tasks = [
                 t
                 for t in self._tasks
@@ -124,10 +162,27 @@ class BinanceAuxiliaryMarketDataRuntime:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             self._tasks = [t for t in self._tasks if t not in tasks]
-            self._start("funding", lambda: self.adapter.stream_funding(self.symbols))
-            self._start(
-                "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
-            )
+            if self._funding_stream is not None:
+                if self._funding_stream.closed:
+                    self._funding_stream = self.adapter.stream_funding_managed(
+                        self.symbols
+                    )
+                else:
+                    await self._funding_stream.update_symbols(self.symbols)
+            if "funding" in names:
+                self._start(
+                    "funding", lambda: self.adapter.stream_funding(self.symbols)
+                )
+            if "open_interest" in names:
+                self._start(
+                    "open_interest",
+                    lambda: self.adapter.stream_open_interest(self.symbols),
+                )
+            if "instrument" in names:
+                self._start(
+                    "instrument",
+                    lambda: self.adapter.stream_instruments(self.symbols),
+                )
             return True
 
     async def stop(self) -> None:
@@ -137,6 +192,7 @@ class BinanceAuxiliaryMarketDataRuntime:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        self._funding_stream = None
         for task in self._drain_tasks:
             task.cancel()
         if self._drain_tasks:

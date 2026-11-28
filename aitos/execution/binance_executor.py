@@ -39,6 +39,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
+from decimal import Decimal
 from numbers import Real
 from typing import Any
 from urllib.parse import urlencode
@@ -50,6 +51,10 @@ from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertai
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
+from aitos.security.live_approval import (
+    LiveApprovalControlPlane,
+    SignedApproval,
+)
 
 logger = get_logger("aitos.execution.binance")
 
@@ -77,7 +82,12 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         symbol_filters: dict[str, SymbolFilters] | None = None,
         hedge_mode: bool = False,
         intent_store: ExecutionIntentStore | None = None,
+        execution_scope: str | None = None,
         conditional_orders_api: str = "algo",
+        live_approval_authority: LiveApprovalControlPlane | None = None,
+        live_approval_token_provider: (
+            Callable[[dict[str, Any]], SignedApproval] | None
+        ) = None,
     ) -> None:
         if not api_key or not api_secret:
             raise ValueError(
@@ -95,15 +105,129 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             raise ValueError("conditional_orders_api must be algo or legacy")
         self._conditional_orders_api = conditional_orders_api
         self._intent_store = intent_store
+        self._execution_scope = (
+            execution_scope
+            if execution_scope is not None
+            else getattr(intent_store, "scope", None)
+        )
+        self._canonical_intent_store = None
+        self._canonical_lifecycle_writer = None
+        self._live_approval_authority = live_approval_authority
+        self._live_approval_token_provider = live_approval_token_provider
+        if not testnet and (
+            not isinstance(live_approval_authority, LiveApprovalControlPlane)
+            or not callable(live_approval_token_provider)
+        ):
+            raise PermissionError(
+                "mainnet executor requires a trusted approval authority and signed-token provider"
+            )
         self._pending_execution: dict[str, str] = {}
         if not testnet:
             logger.warning(
                 "BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades"
             )
 
+    def _live_approval_consumer(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Consume one exact-action receipt before any mainnet venue side effect."""
+        if (
+            self._live_approval_authority is None
+            or self._live_approval_token_provider is None
+        ):
+            raise PermissionError("mainnet execution approval is unavailable")
+        token = self._live_approval_token_provider(action)
+        if not isinstance(token, SignedApproval):
+            raise PermissionError("approval provider returned no signed receipt")
+        approver = self._live_approval_authority.consume(token, action=action)
+        return {
+            "user_id": approver,
+            "token_id": token.token_id,
+            "action_digest": token.action_digest,
+            "issued_at": token.issued_at,
+            "expires_at": token.expires_at,
+        }
+
     @property
-    def intent_store(self) -> ExecutionIntentStore | None:
-        return self._intent_store
+    def intent_store(self):
+        """Canonical intent authority with legacy protection-handover delegation."""
+        return self._canonical_intent_store or self._intent_store
+
+    @property
+    def canonical_intent_store(self):
+        """PostgreSQL execution-intent authority when bound by the live runtime."""
+        return self._canonical_intent_store
+
+    def bind_postgres_intent_store(self, store: Any) -> None:
+        """Bind the scope-fenced PostgreSQL intent store before live components start."""
+        if not callable(getattr(store, "begin", None)) or not callable(
+            getattr(store, "transition", None)
+        ):
+            raise TypeError("PostgreSQL canonical execution-intent store is required")
+        if getattr(store, "scope", None) != self.execution_scope:
+            raise ValueError(
+                "PostgreSQL intent scope differs from Binance account scope"
+            )
+        self._canonical_intent_store = store
+
+    async def refresh_canonical_intent_cache(self) -> dict[str, int]:
+        """Restore unresolved PostgreSQL submissions into the in-process safety cache."""
+        if self._canonical_intent_store is None:
+            return {"unresolved": 0}
+        rows = await self._canonical_intent_store.unresolved()
+        self._pending_execution = {
+            str(row["client_id"]): str(row["symbol"]) for row in rows
+        }
+        return {"unresolved": len(rows)}
+
+    def bind_canonical_lifecycle_writer(self, writer: Any) -> None:
+        if not callable(getattr(writer, "apply_execution_intent", None)):
+            raise TypeError("canonical lifecycle writer is required")
+        self._canonical_lifecycle_writer = writer
+
+    async def acknowledge_execution_async(
+        self, client_order_id: str, trade_id: str
+    ) -> None:
+        if self._canonical_intent_store is not None:
+            row = await self._canonical_intent_store.get(client_order_id)
+            if row is not None and row["state"] in {"CONFIRMED", "PROTECTED"}:
+                row = await self._canonical_intent_store.mark_applied(
+                    client_order_id, trade_id
+                )
+            if (
+                row is None
+                or row["state"] not in {"APPLIED", "TERMINAL"}
+                or row.get("trade_id") != trade_id
+            ):
+                raise ExecutionUncertainError(
+                    trade_id,
+                    client_order_id,
+                    "canonical execution intent is not atomically applied",
+                )
+        elif self._intent_store is not None:
+            self._intent_store.mark_applied(client_order_id, trade_id)
+        self._pending_execution.pop(client_order_id, None)
+
+    async def acknowledge_protection_trade(
+        self, result: OrderResult, trade: Any
+    ) -> None:
+        client_id = result.client_order_id
+        if not client_id:
+            raise ExecutionUncertainError(
+                trade.symbol,
+                result.order_id,
+                "protective acceptance lacks a client intent ID",
+            )
+        if self._canonical_intent_store is not None:
+            if self._canonical_lifecycle_writer is None:
+                raise RuntimeError("canonical lifecycle writer is not bound")
+            await self._canonical_lifecycle_writer.apply_execution_intent(
+                self._canonical_intent_store,
+                client_id,
+                trade,
+                ledger_entries=[],
+            )
+        elif self._intent_store is not None:
+            self._intent_store.mark_applied(client_id, trade.trade_id)
+        self._pending_execution.pop(client_id, None)
 
     @property
     def hedge_mode(self) -> bool:
@@ -312,11 +436,12 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             validated.append(dict(row))
         return validated
 
-    async def get_account_equity(self, asset: str = "USDT") -> float:
-        """Return total futures margin equity, including unrealized PnL.
+    async def get_account_equity_decimal(self, asset: str = "USDT") -> Decimal:
+        """Return exact total futures margin equity from Binance's decimal string.
 
-        Available balance is spendable margin, not account equity. Portfolio
-        risk and drawdown must use Binance's totalMarginBalance instead.
+        Available balance is spendable margin, not account equity. Keep the
+        exchange's decimal representation intact for canonical accounting;
+        converting through float can silently round ledger reconciliation.
         """
         if asset != "USDT":
             raise ValueError("USD-M total margin equity is denominated in USDT")
@@ -327,12 +452,16 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         if isinstance(raw_equity, bool):
             raise ValueError("Binance total margin equity is invalid")
         try:
-            equity = float(raw_equity)
-        except (TypeError, ValueError, OverflowError):
+            equity = Decimal(str(raw_equity))
+        except (TypeError, ValueError, ArithmeticError):
             raise ValueError("Binance total margin equity is unavailable") from None
-        if not math.isfinite(equity) or equity < 0:
+        if not equity.is_finite() or equity < 0:
             raise ValueError("Binance total margin equity is non-finite or negative")
         return equity
+
+    async def get_account_equity(self, asset: str = "USDT") -> float:
+        """Compatibility float view; canonical accounting uses the Decimal API."""
+        return float(await self.get_account_equity_decimal(asset))
 
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
@@ -346,26 +475,38 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
     @property
     def execution_scope(self) -> str:
-        if self._intent_store is None:
+        if not isinstance(self._execution_scope, str) or not self._execution_scope:
             raise RuntimeError("durable execution scope is not configured")
-        return self._intent_store.scope
+        return self._execution_scope
 
     @property
-    def execution_intent_store(self) -> ExecutionIntentStore | None:
-        """Expose the scoped durable intent journal for read-only diagnostics."""
-        return self._intent_store
+    def execution_intent_store(self):
+        """Expose PostgreSQL canonical intents when the live runtime has bound them."""
+        return self._canonical_intent_store or self._intent_store
 
     @property
     def requires_exchange_execution(self) -> bool:
         return True
 
     def has_unresolved_orders(self, symbol: str | None = None) -> bool:
-        return any(
+        cached = any(
             symbol is None or candidate == symbol
             for candidate in self._pending_execution.values()
-        ) or bool(self._intent_store and self._intent_store.unresolved(symbol))
+        )
+        # In live mode the cache is refreshed from PostgreSQL at startup and
+        # maintained on every preclaim/acknowledgement. Do not synchronously
+        # query or depend on a legacy SQLite intent database.
+        if self._canonical_intent_store is not None:
+            return cached
+        return cached or bool(
+            self._intent_store and self._intent_store.unresolved(symbol)
+        )
 
     def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        if self._canonical_intent_store is not None:
+            raise RuntimeError(
+                "PostgreSQL canonical execution acknowledgements must be awaited"
+            )
         if self._intent_store is not None:
             self._intent_store.mark_applied(client_order_id, trade_id)
         self._pending_execution.pop(client_order_id, None)
@@ -398,6 +539,47 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             )
         client_id = request.client_order_id or f"aitos-{uuid.uuid4().hex[:20]}"
         request = replace(request, client_order_id=client_id)
+        if not self._base_url == TESTNET_URL:
+            if (
+                self._live_approval_authority is None
+                or self._live_approval_token_provider is None
+            ):
+                raise PermissionError("mainnet execution approval is unavailable")
+            if not isinstance(self._execution_scope, str) or not self._execution_scope:
+                raise PermissionError("mainnet execution requires an account scope")
+            venue_side = (
+                ("SELL" if request.side == TradeSide.LONG else "BUY")
+                if request.reduce_only
+                else ("BUY" if request.side == TradeSide.LONG else "SELL")
+            )
+            action = {
+                "environment": "binance-usdm-mainnet",
+                "scope": self._execution_scope,
+                "client_order_id": client_id,
+                "symbol": request.symbol,
+                "side": venue_side,
+                "quantity": format(Decimal(str(quantity)), "f"),
+                "reference_price": format(Decimal(str(request.reference_price)), "f"),
+                "order_type": request.order_type,
+                "reduce_only": bool(request.reduce_only),
+                "owner_trade_id": request.owner_trade_id,
+            }
+            approval_receipt = self._live_approval_consumer(action)
+            if (
+                not isinstance(approval_receipt, dict)
+                or not isinstance(approval_receipt.get("user_id"), str)
+                or not approval_receipt.get("token_id")
+                or approval_receipt.get("action_digest")
+                != self._live_approval_authority._digest(action)
+            ):
+                raise PermissionError(
+                    "approval consumer did not return an authenticated exact-intent receipt"
+                )
+            execution_context = dict(request.execution_context or {})
+            if "approval_receipt" in execution_context:
+                raise ValueError("approval_receipt is reserved for the executor")
+            execution_context["approval_receipt"] = approval_receipt
+            request = replace(request, execution_context=execution_context)
         params = {
             "symbol": request.symbol,
             "type": request.order_type,
@@ -408,7 +590,23 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         params.update(
             self._position_params(request.side, is_closing_order=request.reduce_only)
         )
-        if self._intent_store is not None:
+        if self._canonical_intent_store is not None:
+            await self._canonical_intent_store.begin(
+                {
+                    "client_order_id": client_id,
+                    "symbol": request.symbol,
+                    "side": request.side.value,
+                    "quantity": format(Decimal(str(quantity)), "f"),
+                    "reference_price": format(
+                        Decimal(str(request.reference_price)), "f"
+                    ),
+                    "order_type": request.order_type,
+                    "reduce_only": request.reduce_only,
+                    "owner_trade_id": request.owner_trade_id,
+                    "execution_context": dict(request.execution_context or {}),
+                }
+            )
+        elif self._intent_store is not None:
             self._intent_store.begin(request)
         self._pending_execution[client_id] = request.symbol
         try:
@@ -427,7 +625,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         success=False,
                         error=str(exc),
                     )
-                    return self._record_execution(client_id, result)
+                    return await self._record_execution(client_id, result)
                 response = await self.get_order_by_client_id(request.symbol, client_id)
             except asyncio.CancelledError:
                 raise
@@ -456,7 +654,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         request.symbol, client_id
                     )
             result = self._confirmed_result(request, quantity, response, params["side"])
-            return self._record_execution(client_id, result)
+            return await self._record_execution(client_id, result)
         except asyncio.CancelledError:
             # The committed SUBMITTING intent survives cancellation/restart.
             raise
@@ -467,8 +665,22 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "authoritative terminal fill/rejection not established",
             ) from None
 
-    def _record_execution(self, client_id: str, result: OrderResult) -> OrderResult:
-        if self._intent_store is not None:
+    async def _record_execution(
+        self, client_id: str, result: OrderResult
+    ) -> OrderResult:
+        payload = {
+            "order_id": str(result.order_id),
+            "symbol": result.symbol,
+            "side": result.side.value,
+            "filled_quantity": format(Decimal(str(result.filled_quantity)), "f"),
+            "fill_price": format(Decimal(str(result.fill_price)), "f"),
+            "filled_at": result.filled_at,
+            "success": bool(result.success),
+            "error": result.error,
+        }
+        if self._canonical_intent_store is not None:
+            await self._canonical_intent_store.record_result(client_id, payload)
+        elif self._intent_store is not None:
             self._intent_store.record_result(client_id, result)
         if not result.success:
             self._pending_execution.pop(client_id, None)
@@ -654,10 +866,12 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             )
         return dict(response)
 
-    def _record_terminal_protection(
+    async def _record_terminal_protection(
         self, symbol: str, order_id: str, evidence: dict[str, Any]
     ) -> None:
-        if self._intent_store is None or evidence.get("status") not in {
+        if (
+            self._canonical_intent_store is None and self._intent_store is None
+        ) or evidence.get("status") not in {
             "CANCELED",
             "FILLED",
             "EXPIRED",
@@ -677,12 +891,20 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 symbol, order_id, "terminal protective fill quantity is invalid"
             ) from None
         try:
-            self._intent_store.mark_protection_terminal(
-                order_id,
-                symbol=symbol,
-                status=str(evidence["status"]),
-                executed_quantity=executed_quantity,
-            )
+            if self._canonical_intent_store is not None:
+                await self._canonical_intent_store.mark_protection_terminal(
+                    order_id,
+                    symbol=symbol,
+                    status=str(evidence["status"]),
+                    executed_quantity=executed_quantity,
+                )
+            elif self._intent_store is not None:
+                self._intent_store.mark_protection_terminal(
+                    order_id,
+                    symbol=symbol,
+                    status=str(evidence["status"]),
+                    executed_quantity=executed_quantity,
+                )
         except (TypeError, ValueError, OverflowError) as exc:
             raise ExecutionUncertainError(
                 symbol, order_id, "terminal protective journal update failed"
@@ -702,7 +924,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
             )
         if isinstance(evidence, dict):
-            self._record_terminal_protection(symbol, order_id, evidence)
+            await self._record_terminal_protection(symbol, order_id, evidence)
         return evidence
 
     @property
@@ -759,7 +981,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 raise
             evidence = await self.get_order_status(symbol, order_id)
         if isinstance(evidence, dict):
-            self._record_terminal_protection(symbol, order_id, evidence)
+            await self._record_terminal_protection(symbol, order_id, evidence)
         if isinstance(evidence, dict) and (
             (
                 "orderId" in evidence
@@ -799,6 +1021,145 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 return "PARTIALLY_FILLED_TERMINAL"
         return status
 
+    async def _lookup_protective_post_result(
+        self, symbol: str, client_order_id: str
+    ) -> dict[str, Any]:
+        """Resolve an ambiguous protective POST by its stable client identity.
+
+        This is read-only recovery. A missing lookup result is not proof that
+        the venue rejected the POST, so the caller must retain the unresolved
+        preclaim and must never issue a second submission automatically.
+        """
+        try:
+            if self._conditional_orders_api == "algo":
+                recovered = await self.get_algo_order_by_client_id(
+                    symbol, client_order_id
+                )
+            else:
+                recovered = await self.get_order_by_client_id(symbol, client_order_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "protective POST outcome and client-ID recovery lookup are uncertain",
+            ) from None
+        if not isinstance(recovered, dict):
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "protective POST acknowledgement is missing; no resubmission is safe",
+            )
+        return recovered
+
+    def _validate_recovered_algo_protection(
+        self,
+        response: dict[str, Any],
+        *,
+        symbol: str,
+        position_side: TradeSide,
+        quantity: float,
+        trigger_price: float,
+        order_type: str,
+        client_order_id: str,
+    ) -> str:
+        """Validate every durable request identity against authenticated lookup."""
+        algo_id = response.get("algoId")
+        expected_side = "SELL" if position_side == TradeSide.LONG else "BUY"
+        expected_position_side = position_side.value if self._hedge_mode else "BOTH"
+        expected_reduce_only = not self._hedge_mode
+
+        def decimal_equal(actual: Any, expected: Any) -> bool:
+            if isinstance(actual, bool):
+                return False
+            try:
+                left, right = Decimal(str(actual)), Decimal(str(expected))
+            except (ArithmeticError, TypeError, ValueError):
+                return False
+            return left.is_finite() and right.is_finite() and left == right
+
+        def flag_equal(actual: Any, expected: bool) -> bool:
+            return (type(actual) is bool and actual is expected) or (
+                isinstance(actual, str) and actual == str(expected).lower()
+            )
+
+        if (
+            isinstance(algo_id, bool)
+            or not str(algo_id or "").isdigit()
+            or int(algo_id) <= 0
+            or response.get("clientAlgoId") != client_order_id
+            or response.get("symbol") != symbol
+            or response.get("algoType") != "CONDITIONAL"
+            or response.get("orderType") != order_type
+            or response.get("side") != expected_side
+            or response.get("positionSide") != expected_position_side
+            or not flag_equal(response.get("reduceOnly"), expected_reduce_only)
+            or not flag_equal(response.get("closePosition"), False)
+            or not decimal_equal(response.get("quantity"), quantity)
+            or not decimal_equal(response.get("triggerPrice"), trigger_price)
+            or response.get("algoStatus") not in {"NEW", "TRIGGERED", "FINISHED"}
+        ):
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "recovered protective algo does not match its durable request",
+            )
+        return str(int(algo_id))
+
+    def _validate_recovered_legacy_protection(
+        self,
+        response: dict[str, Any],
+        *,
+        symbol: str,
+        position_side: TradeSide,
+        quantity: float,
+        trigger_price: float,
+        order_type: str,
+        client_order_id: str,
+    ) -> str:
+        """Validate a legacy conditional order found by origClientOrderId."""
+        expected_side = "SELL" if position_side == TradeSide.LONG else "BUY"
+        expected_position_side = position_side.value if self._hedge_mode else "BOTH"
+        expected_reduce_only = not self._hedge_mode
+        order_id = response.get("orderId")
+
+        def decimal_equal(actual: Any, expected: Any) -> bool:
+            if isinstance(actual, bool):
+                return False
+            try:
+                left, right = Decimal(str(actual)), Decimal(str(expected))
+            except (ArithmeticError, TypeError, ValueError):
+                return False
+            return left.is_finite() and right.is_finite() and left == right
+
+        def flag_equal(actual: Any, expected: bool) -> bool:
+            return (type(actual) is bool and actual is expected) or (
+                isinstance(actual, str) and actual == str(expected).lower()
+            )
+
+        if (
+            isinstance(order_id, bool)
+            or not str(order_id or "").isdigit()
+            or int(order_id) <= 0
+            or response.get("clientOrderId") != client_order_id
+            or response.get("symbol") != symbol
+            or response.get("type") != order_type
+            or response.get("side") != expected_side
+            or response.get("positionSide") != expected_position_side
+            or not flag_equal(response.get("reduceOnly"), expected_reduce_only)
+            or not flag_equal(response.get("closePosition"), False)
+            or not decimal_equal(response.get("origQty"), quantity)
+            or not decimal_equal(response.get("stopPrice"), trigger_price)
+            or response.get("status") != "NEW"
+        ):
+            raise ExecutionUncertainError(
+                symbol,
+                client_order_id,
+                "recovered legacy protection does not match its durable request",
+            )
+        return str(int(order_id))
+
     async def _place_reduce_only_stop(
         self,
         symbol: str,
@@ -827,7 +1188,74 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         client_order_id = client_order_id or f"aitos-{label}-{uuid.uuid4().hex[:16]}"
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,36}", client_order_id):
             raise ValueError("invalid protective client order ID")
-        if self._intent_store is not None:
+        execution_context = {}
+        if self._base_url != TESTNET_URL:
+            if not isinstance(self._execution_scope, str) or not self._execution_scope:
+                raise PermissionError("mainnet execution requires an account scope")
+            action = {
+                "environment": "binance-usdm-mainnet",
+                "scope": self._execution_scope,
+                "client_order_id": client_order_id,
+                "symbol": symbol,
+                "side": "SELL" if position_side == TradeSide.LONG else "BUY",
+                "quantity": format(Decimal(str(quantity)), "f"),
+                "reference_price": format(Decimal(str(trigger_price)), "f"),
+                "order_type": order_type,
+                "reduce_only": True,
+                "owner_trade_id": owner_trade_id,
+            }
+            approval_receipt = self._live_approval_consumer(action)
+            if (
+                not isinstance(approval_receipt, dict)
+                or not isinstance(approval_receipt.get("user_id"), str)
+                or not approval_receipt.get("token_id")
+                or approval_receipt.get("action_digest")
+                != self._live_approval_authority._digest(action)
+            ):
+                raise PermissionError(
+                    "approval consumer did not return an authenticated exact-intent receipt"
+                )
+            execution_context["approval_receipt"] = approval_receipt
+        protection_request = OrderRequest(
+            symbol=symbol,
+            side=position_side,
+            quantity=quantity,
+            reference_price=trigger_price,
+            order_type=order_type,
+            client_order_id=client_order_id,
+            reduce_only=True,
+            owner_trade_id=owner_trade_id,
+            execution_context=execution_context,
+        )
+        if self._canonical_intent_store is not None:
+            pending_rows = await self._canonical_intent_store.unresolved(symbol)
+            for pending in pending_rows:
+                request_payload = pending.get("request") or {}
+                if request_payload.get("order_type") in {
+                    "STOP_MARKET",
+                    "TAKE_PROFIT_MARKET",
+                }:
+                    raise ExecutionUncertainError(
+                        symbol,
+                        str(pending["client_id"]),
+                        "prior protective intent requires reconciliation",
+                    )
+            await self._canonical_intent_store.begin(
+                {
+                    "client_order_id": client_order_id,
+                    "symbol": symbol,
+                    "side": position_side.value,
+                    "quantity": format(Decimal(str(quantity)), "f"),
+                    "reference_price": format(Decimal(str(trigger_price)), "f"),
+                    "order_type": order_type,
+                    "reduce_only": True,
+                    "owner_trade_id": owner_trade_id,
+                    "execution_context": dict(
+                        protection_request.execution_context or {}
+                    ),
+                }
+            )
+        elif self._intent_store is not None:
             for pending in self._intent_store.unresolved(symbol):
                 if json.loads(pending["request_json"])["order_type"] in {
                     "STOP_MARKET",
@@ -838,18 +1266,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         pending["client_id"],
                         "prior protective intent requires reconciliation",
                     )
-            self._intent_store.begin(
-                OrderRequest(
-                    symbol=symbol,
-                    side=position_side,
-                    quantity=quantity,
-                    reference_price=trigger_price,
-                    order_type=order_type,
-                    client_order_id=client_order_id,
-                    reduce_only=True,
-                    owner_trade_id=owner_trade_id,
-                )
-            )
+            self._intent_store.begin(protection_request)
         self._pending_execution[client_order_id] = symbol
         params = {
             "symbol": symbol,
@@ -866,56 +1283,171 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             params["algoType"] = "CONDITIONAL"
             params["triggerPrice"] = params.pop("stopPrice")
             params["clientAlgoId"] = params.pop("newClientOrderId")
+        recovered = False
         try:
             response = await self._signed_request("POST", endpoint, params)
+        except asyncio.CancelledError:
+            # Keep the committed preclaim. Startup reconciliation owns recovery.
+            raise
         except BinanceAPIError as exc:
-            logger.error(
-                f"{label} order placement failed",
-                extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+            definitive_rejections = {
+                -2019,
+                -2021,
+                -2022,
+                -1013,
+                -1111,
+                -1100,
+                -1102,
+                -1121,
+            }
+            if exc.code in definitive_rejections:
+                logger.warning(
+                    f"{label} order was definitively rejected",
+                    extra={"aitos_extra": {"symbol": symbol, "code": exc.code}},
+                )
+                rejected = OrderResult(
+                    order_id=client_order_id,
+                    symbol=symbol,
+                    side=position_side,
+                    filled_quantity=0.0,
+                    fill_price=0.0,
+                    success=False,
+                    error=str(exc),
+                    client_order_id=client_order_id,
+                )
+                return await self._record_execution(client_order_id, rejected)
+            response = await self._lookup_protective_post_result(
+                symbol, client_order_id
             )
-            return OrderResult(
-                order_id=client_order_id,
+            recovered = True
+        except Exception:
+            response = await self._lookup_protective_post_result(
+                symbol, client_order_id
+            )
+            recovered = True
+
+        if self._conditional_orders_api == "algo":
+            algo_id = response.get("algoId") if isinstance(response, dict) else None
+            algo_status = (
+                response.get("algoStatus") if isinstance(response, dict) else None
+            )
+            if (
+                isinstance(algo_id, bool)
+                or not str(algo_id or "").isdigit()
+                or int(algo_id) <= 0
+                or algo_status not in {"NEW", "TRIGGERED", "FINISHED"}
+            ):
+                response = await self._lookup_protective_post_result(
+                    symbol, client_order_id
+                )
+                recovered = True
+                algo_status = response.get("algoStatus")
+            if not recovered and algo_status != "NEW":
+                response = await self._lookup_protective_post_result(
+                    symbol, client_order_id
+                )
+                recovered = True
+                algo_status = response.get("algoStatus")
+            if recovered:
+                algo_id = self._validate_recovered_algo_protection(
+                    response,
+                    symbol=symbol,
+                    position_side=position_side,
+                    quantity=quantity,
+                    trigger_price=trigger_price,
+                    order_type=order_type,
+                    client_order_id=client_order_id,
+                )
+            else:
+                algo_id = str(int(algo_id))
+            if algo_status in {"TRIGGERED", "FINISHED"}:
+                try:
+                    child = await self.get_order_status(symbol, f"algo:{algo_id}")
+                    from aitos.execution.protection_child_reconciliation import (
+                        calculate_protection_child_fill_delta,
+                    )
+
+                    calculate_protection_child_fill_delta(
+                        dict(response),
+                        dict(child),
+                        expected_symbol=symbol,
+                        expected_side=(
+                            "SELL" if position_side == TradeSide.LONG else "BUY"
+                        ),
+                        expected_algo_id=algo_id,
+                        previously_applied_quantity="0",
+                        previously_applied_quote="0",
+                        expected_position_side=(
+                            position_side.value if self._hedge_mode else "BOTH"
+                        ),
+                        expected_reduce_only=not self._hedge_mode,
+                        expected_original_quantity=quantity,
+                    )
+                except Exception:
+                    raise ExecutionUncertainError(
+                        symbol,
+                        client_order_id,
+                        "triggered protective algo child requires reconciliation",
+                    ) from None
+            result = OrderResult(
+                order_id=f"algo:{algo_id}",
                 symbol=symbol,
                 side=position_side,
                 filled_quantity=0.0,
-                fill_price=0.0,
-                success=False,
-                error=str(exc),
-            )
-
-        if self._conditional_orders_api == "algo":
-            if not response.get("algoId") or response.get("algoStatus") != "NEW":
-                raise ExecutionUncertainError(
-                    symbol,
-                    client_order_id,
-                    "algo protection acceptance not established",
-                )
-            result = OrderResult(
-                order_id=f"algo:{response['algoId']}",
-                symbol=symbol,
-                side=position_side,
-                filled_quantity=0,
-                fill_price=trigger_price,
-                client_order_id=client_order_id,
-            )
-        else:
-            if not response.get("orderId") or response.get("status") != "NEW":
-                raise ExecutionUncertainError(
-                    symbol,
-                    client_order_id,
-                    "legacy protection acceptance not established",
-                )
-            result = OrderResult(
-                order_id=str(response["orderId"]),
-                symbol=symbol,
-                side=position_side,
-                filled_quantity=0,
                 fill_price=trigger_price,
                 success=True,
                 client_order_id=client_order_id,
             )
-        if result.success and self._intent_store is not None:
-            self._intent_store.record_protection(client_order_id, result)
+        else:
+            order_id = response.get("orderId") if isinstance(response, dict) else None
+            status = response.get("status") if isinstance(response, dict) else None
+            if (
+                isinstance(order_id, bool)
+                or not str(order_id or "").isdigit()
+                or int(order_id) <= 0
+                or status != "NEW"
+            ):
+                response = await self._lookup_protective_post_result(
+                    symbol, client_order_id
+                )
+                recovered = True
+            if recovered:
+                order_id = self._validate_recovered_legacy_protection(
+                    response,
+                    symbol=symbol,
+                    position_side=position_side,
+                    quantity=quantity,
+                    trigger_price=trigger_price,
+                    order_type=order_type,
+                    client_order_id=client_order_id,
+                )
+            else:
+                order_id = str(int(order_id))
+            result = OrderResult(
+                order_id=str(order_id),
+                symbol=symbol,
+                side=position_side,
+                filled_quantity=0.0,
+                fill_price=trigger_price,
+                success=True,
+                client_order_id=client_order_id,
+            )
+        if result.success:
+            if self._canonical_intent_store is not None:
+                await self._canonical_intent_store.record_protection(
+                    client_order_id,
+                    {
+                        "order_id": result.order_id,
+                        "symbol": result.symbol,
+                        "side": result.side.value,
+                        "filled_quantity": "0",
+                        "fill_price": format(Decimal(str(result.fill_price)), "f"),
+                        "success": True,
+                        "client_order_id": client_order_id,
+                    },
+                )
+            elif self._intent_store is not None:
+                self._intent_store.record_protection(client_order_id, result)
         return result
 
     # -- Internals --------------------------------------------------------------

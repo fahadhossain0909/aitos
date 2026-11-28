@@ -17,6 +17,7 @@ class QueueStats:
     dropped: int = 0
     depth: int = 0
     replaced_oldest: int = 0
+    coalesced: int = 0
 
 
 class BoundedMarketQueue(Generic[T]):
@@ -78,6 +79,45 @@ class BoundedMarketQueue(Generic[T]):
         self.stats.depth = self._queue.qsize()
         return True
 
+    def put_coalesced_nowait(
+        self,
+        item: T,
+        *,
+        key: Callable[[T], object],
+        can_replace: Callable[[T], bool] | None = None,
+    ) -> bool:
+        """Replace a queued item with the same key before considering overflow.
+
+        Intended for latest-value context feeds such as tickers. Callers must
+        exclude sequence-sensitive events from can_replace.
+        """
+        item_key = key(item)
+        replaceable = can_replace or (lambda _queued: True)
+        queue_items = self._queue._queue
+        victim = next(
+            (
+                queued
+                for queued in queue_items
+                if replaceable(queued) and key(queued) == item_key
+            ),
+            None,
+        )
+        if victim is not None:
+            queue_items.remove(victim)
+            self._queue.task_done()
+            self.stats.dropped += 1
+            self.stats.coalesced += 1
+            self._queue.put_nowait(item)
+            self.stats.accepted += 1
+            self.stats.depth = self._queue.qsize()
+            return True
+        return self.put_latest_nowait(item, can_replace=replaceable)
+
+    def get_nowait(self) -> T:
+        item = self._queue.get_nowait()
+        self.stats.depth = self._queue.qsize()
+        return item
+
     async def get(self) -> T:
         item = await self._queue.get()
         self.stats.depth = self._queue.qsize()
@@ -100,4 +140,5 @@ class BoundedMarketQueue(Generic[T]):
             "accepted": self.stats.accepted,
             "dropped": self.stats.dropped,
             "replaced_oldest": self.stats.replaced_oldest,
+            "coalesced": self.stats.coalesced,
         }

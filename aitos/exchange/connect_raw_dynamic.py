@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator, Callable
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,8 +19,19 @@ from aitos.market_data.endpoints import BINANCE_USDM_WS_MAX_LIFETIME_SECONDS
 
 logger = get_logger("aitos.exchange.connect_raw_dynamic")
 
+_WS_FRAME_TIMING: ContextVar[dict[str, float]] = ContextVar(
+    "aitos_ws_frame_timing", default={}
+)
+
+
+def current_ws_frame_timing() -> dict[str, float]:
+    """Return receive/decode timing for the frame currently yielded to a consumer."""
+    return dict(_WS_FRAME_TIMING.get())
+
+
 INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 60.0
+STABLE_CONNECTION_RESET_SECONDS = 60.0
 
 
 def _now_iso() -> str:
@@ -59,9 +72,32 @@ async def connect_raw_dynamic(
         subscribed = set(streams)
         ws = None
         recv_task: asyncio.Task | None = None
+        termination_class = "unknown"
+        connection_started_monotonic: float | None = None
         try:
             started_at = _now_iso()
-            adapter._ws_transport.update(
+            connection_started_monotonic = asyncio.get_running_loop().time()
+            transport = adapter._ws_transport
+            connection_stats = transport.setdefault("managed_connections", {})
+            stream_stats = connection_stats.setdefault(
+                label,
+                {
+                    "connect_attempts": 0,
+                    "connection_failure_count": 0,
+                    "successful_handshakes": 0,
+                    "close_count": 0,
+                    "intentional_close_count": 0,
+                    "normal_close_count": 0,
+                    "abnormal_close_count": 0,
+                    "lifecycle_rotation_count": 0,
+                    "last_close_code": None,
+                    "last_close_reason": None,
+                    "last_disconnect_class": None,
+                    "last_connection_uptime_seconds": None,
+                },
+            )
+            stream_stats["connect_attempts"] += 1
+            transport.update(
                 {
                     "state": "connecting",
                     "current_url": url,
@@ -86,6 +122,7 @@ async def connect_raw_dynamic(
             )
             async with adapter._ws_connector(url) as ws:
                 handshake_at = _now_iso()
+                stream_stats["successful_handshakes"] += 1
                 adapter._ws_transport.update(
                     {
                         "state": "connected",
@@ -107,7 +144,6 @@ async def connect_raw_dynamic(
                         }
                     },
                 )
-                backoff = INITIAL_BACKOFF_SECONDS
                 sub_request_id = 0
                 first_message = True
                 # Do not clear changed here: a universe update can arrive
@@ -179,13 +215,18 @@ async def connect_raw_dynamic(
                                 raw_message = recv_task.result()
                             except Exception:
                                 raise
+                            frame_received_monotonic = time.monotonic()
+                            frame_received_epoch_ms = time.time() * 1000.0
                             adapter._ws_transport["frames_received"] += 1
                             if first_message:
                                 adapter._ws_transport["last_first_frame_at"] = (
                                     _now_iso()
                                 )
                                 first_message = False
+                            decode_started_monotonic = time.monotonic()
                             envelope = json.loads(raw_message)
+                            decode_completed_monotonic = time.monotonic()
+                            decode_completed_epoch_ms = time.time() * 1000.0
                             # Control-frame acks have no "stream" / "data"
                             if (
                                 isinstance(envelope, dict)
@@ -204,18 +245,72 @@ async def connect_raw_dynamic(
                                 payload, stream_name = envelope, ""
                             adapter._ws_transport["market_events_received"] += 1
                             adapter._ws_transport["last_market_event_at"] = _now_iso()
-                            yield payload, stream_name
+                            latency = getattr(ws, "latency", None)
+                            if isinstance(latency, (int, float)) and latency >= 0:
+                                rtt_ms = float(latency) * 1000.0
+                                adapter._ws_transport["last_ping_rtt_ms"] = round(
+                                    rtt_ms, 3
+                                )
+                                adapter._ws_transport["max_ping_rtt_ms"] = max(
+                                    float(
+                                        adapter._ws_transport.get(
+                                            "max_ping_rtt_ms", 0.0
+                                        )
+                                    ),
+                                    rtt_ms,
+                                )
+                            timing_token = _WS_FRAME_TIMING.set(
+                                {
+                                    "ws_frame_received_monotonic": frame_received_monotonic,
+                                    "ws_frame_received_epoch_ms": frame_received_epoch_ms,
+                                    "ws_decode_started_monotonic": decode_started_monotonic,
+                                    "ws_decode_completed_monotonic": decode_completed_monotonic,
+                                    "ws_decode_completed_epoch_ms": decode_completed_epoch_ms,
+                                }
+                            )
+                            try:
+                                yield payload, stream_name
+                            finally:
+                                try:
+                                    _WS_FRAME_TIMING.reset(timing_token)
+                                except ValueError:
+                                    # Async generators may be closed from a different
+                                    # task/context than the one that first advanced
+                                    # them. ContextVar tokens are context-bound; on
+                                    # cross-context close, clear the timing snapshot
+                                    # in the closing context instead of treating
+                                    # cleanup as a transport failure and reconnecting.
+                                    _WS_FRAME_TIMING.set({})
         except asyncio.CancelledError:
+            termination_class = "intentional_cancel"
+            if ws is not None:
+                adapter._ws_transport.update(
+                    {
+                        "last_close_at": _now_iso(),
+                        "last_close_code": getattr(ws, "close_code", None),
+                        "last_close_reason": getattr(ws, "close_reason", None),
+                        "last_disconnect_class": termination_class,
+                        "last_close_stream": label,
+                    }
+                )
             raise
         # Python 3.10 exposes asyncio.TimeoutError separately from the
         # built-in TimeoutError. A websocket recv timeout is therefore a
         # lifecycle timeout and must not fall through to the generic error
         # state, otherwise managed-stream lifecycle rotation never occurs.
         except (TimeoutError, asyncio.TimeoutError):
+            termination_class = "lifecycle_rotation"
             adapter._ws_transport.update(
                 {
                     "state": "lifecycle_rotation",
                     "last_close_at": _now_iso(),
+                    "last_close_code": getattr(ws, "close_code", None),
+                    "last_close_reason": getattr(ws, "close_reason", None),
+                    "last_disconnect_class": termination_class,
+                    "last_close_stream": label,
+                    "lifecycle_rotation_count": (
+                        adapter._ws_transport.get("lifecycle_rotation_count", 0) + 1
+                    ),
                 }
             )
             logger.info(
@@ -223,9 +318,34 @@ async def connect_raw_dynamic(
                 extra={"aitos_extra": {"stage": "lifecycle_rotation", "label": label}},
             )
         except Exception as exc:
+            close_code = getattr(ws, "close_code", None)
+            termination_class = (
+                "connect_failure"
+                if ws is None
+                else (
+                    "remote_clean_close"
+                    if close_code in (1000, 1001)
+                    else "abnormal_error"
+                )
+            )
+            if ws is None:
+                adapter._ws_transport["connection_failure_count"] = (
+                    adapter._ws_transport.get("connection_failure_count", 0) + 1
+                )
+                stream_stats["connection_failure_count"] = (
+                    int(stream_stats.get("connection_failure_count", 0)) + 1
+                )
             adapter._ws_transport.update(
                 {
-                    "state": "error",
+                    "state": (
+                        "reconnecting"
+                        if termination_class == "remote_clean_close"
+                        else "error"
+                    ),
+                    "last_close_code": getattr(ws, "close_code", None),
+                    "last_close_reason": getattr(ws, "close_reason", None),
+                    "last_disconnect_class": termination_class,
+                    "last_close_stream": label,
                     "last_error_type": type(exc).__name__,
                     "last_error": str(exc),
                     "last_close_at": _now_iso(),
@@ -247,9 +367,60 @@ async def connect_raw_dynamic(
                 recv_task.cancel()
                 await asyncio.gather(recv_task, return_exceptions=True)
             if ws is not None:
-                adapter._ws_transport["close_count"] = (
-                    adapter._ws_transport.get("close_count", 0) + 1
+                transport = adapter._ws_transport
+                for metric in (
+                    "close_count",
+                    "intentional_close_count",
+                    "normal_close_count",
+                    "abnormal_close_count",
+                    "lifecycle_rotation_count",
+                ):
+                    transport.setdefault(metric, 0)
+                transport["close_count"] = int(transport["close_count"]) + 1
+                transport["last_close_code"] = getattr(ws, "close_code", None)
+                transport["last_close_reason"] = getattr(ws, "close_reason", None)
+                transport["last_disconnect_class"] = termination_class
+                transport["last_close_stream"] = label
+                stream_stats = transport.setdefault(
+                    "managed_connections", {}
+                ).setdefault(label, {})
+                stream_stats["close_count"] = (
+                    int(stream_stats.get("close_count", 0)) + 1
                 )
+                stream_stats["last_close_code"] = transport["last_close_code"]
+                stream_stats["last_close_reason"] = transport["last_close_reason"]
+                stream_stats["last_disconnect_class"] = termination_class
+                if connection_started_monotonic is not None:
+                    uptime = max(
+                        0.0,
+                        asyncio.get_running_loop().time()
+                        - connection_started_monotonic,
+                    )
+                    transport["last_connection_uptime_seconds"] = round(uptime, 3)
+                    stream_stats["last_connection_uptime_seconds"] = round(uptime, 3)
+                    if uptime >= STABLE_CONNECTION_RESET_SECONDS:
+                        backoff = INITIAL_BACKOFF_SECONDS
+                        transport["last_stable_connection_uptime_seconds"] = round(
+                            uptime, 3
+                        )
+                counter = {
+                    "intentional_cancel": "intentional_close_count",
+                    "remote_clean_close": "normal_close_count",
+                    "abnormal_error": "abnormal_close_count",
+                }.get(termination_class)
+                if counter is not None:
+                    transport[counter] = int(transport.get(counter, 0)) + 1
+                    stream_counter = counter
+                    stream_stats[stream_counter] = (
+                        int(stream_stats.get(stream_counter, 0)) + 1
+                    )
+                elif termination_class == "lifecycle_rotation":
+                    transport["lifecycle_rotation_count"] = (
+                        int(transport["lifecycle_rotation_count"]) + 1
+                    )
+                    stream_stats["lifecycle_rotation_count"] = (
+                        int(stream_stats.get("lifecycle_rotation_count", 0)) + 1
+                    )
         if emit_reconnect:
             yield None, "__reconnect__"
         logger.warning(

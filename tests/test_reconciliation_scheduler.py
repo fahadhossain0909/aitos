@@ -448,3 +448,33 @@ async def test_live_algo_trade_never_falls_through_to_generic_reconcile_between_
         recover.assert_awaited_once()
     finally:
         await scheduler.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_loop_backoff_and_fail_closed_gate(monkeypatch):
+    lifecycle = _SchedulerLifecycle(FakeExchangeCapableExecutor(), trade_ids=())
+    bus = SimpleNamespace(publish=AsyncMock())
+    scheduler = ReconciliationScheduler(lifecycle, bus, interval_seconds=0.25)
+    scheduler._initialized = True
+    delays = []
+
+    async def controlled_sleep(delay):
+        delays.append(delay)
+        if len(delays) == 4:
+            raise asyncio.CancelledError
+
+    async def fail_once():
+        raise OSError("reconciliation store unavailable")
+
+    monkeypatch.setattr(asyncio, "sleep", controlled_sleep)
+    monkeypatch.setattr(scheduler, "run_once", fail_once)
+
+    await scheduler._run_loop()
+
+    assert delays == [0.25, 0.5, 1.0, 2.0]
+    assert scheduler._consecutive_failures == 3
+    assert lifecycle._account_reconciliation_error is True
+    assert scheduler._last_failure_at is not None
+    health = await scheduler.health_check()
+    assert health.details["consecutive_failures"] == 3
+    assert health.status.value == "unhealthy"

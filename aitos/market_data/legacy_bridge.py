@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from aitos.exchange.orderbook import DepthUpdate
-from aitos.models.market import Kline, TradeTick
+from aitos.models.market import Kline
 from aitos.models.market import OrderBookSnapshot as LegacyBook
+from aitos.models.market import TradeTick
 
 from .contracts import MarketEvent, MarketEventType, MarketSource
 

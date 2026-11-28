@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
@@ -154,6 +156,28 @@ async def test_restart_does_not_create_duplicate_open_trade(event_bus, paper_tra
     assert await persistence.restore() == 1
     assert await persistence.restore() == 1
     assert len(lifecycle._open_trades) == 1
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_in_other_account_scope_does_not_suppress_open_trade(
+    event_bus, paper_trade
+):
+    open_trade = copy.deepcopy(paper_trade)
+    closed_trade = copy.deepcopy(paper_trade)
+    open_trade.account_scope = "paper-account-b"
+    closed_trade.account_scope = "paper-account-a"
+    closed_trade.state = TradeLifecycleState.POSITION_CLOSED
+    closed_trade.pnl = 3.5
+
+    store = FakeStateStore([open_trade])
+    store.closed_trades = [closed_trade]
+    lifecycle = FakeLifecycle()
+    persistence = TradeStatePersistence(event_bus, lifecycle, store)
+
+    assert await persistence.restore() == 1
+    assert (
+        lifecycle._open_trades[open_trade.trade_id].account_scope == "paper-account-b"
+    )
 
 
 @pytest.mark.asyncio

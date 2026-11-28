@@ -15,7 +15,7 @@ BINANCE_USDM_WS_BASE = os.getenv(
 # Binance's current USDⓈ-M WebSocket Streams SDK connects to the market
 # routing path and then sends SUBSCRIBE requests over that connection.
 BINANCE_USDM_WS_COMBINED = os.getenv(
-    "AITOS_BINANCE_FUTURES_WS_COMBINED_URL", f"{BINANCE_USDM_WS_BASE}/stream"
+    "AITOS_BINANCE_FUTURES_WS_COMBINED_URL", f"{BINANCE_USDM_WS_BASE}/market/stream"
 ).rstrip("/")
 # Kept for compatibility with callers/tests that use the raw-stream constant.
 BINANCE_USDM_WS_RAW = os.getenv(

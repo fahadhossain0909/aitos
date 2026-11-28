@@ -64,6 +64,348 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=2,
+        name="canonical_scope_keyed_oms",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_writer_fences (
+                account_scope TEXT PRIMARY KEY,
+                writer_id TEXT NOT NULL,
+                generation BIGINT NOT NULL CHECK (generation > 0),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_aggregate_heads (
+                account_scope TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                revision BIGINT NOT NULL CHECK (revision >= 0),
+                event_hash CHAR(64) NOT NULL,
+                PRIMARY KEY (account_scope, aggregate_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_events (
+                account_scope TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                revision BIGINT NOT NULL CHECK (revision > 0),
+                event_id TEXT NOT NULL,
+                writer_id TEXT NOT NULL,
+                generation BIGINT NOT NULL CHECK (generation > 0),
+                payload JSONB NOT NULL,
+                previous_hash CHAR(64) NOT NULL,
+                event_hash CHAR(64) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, aggregate_id, revision),
+                UNIQUE (account_scope, event_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_outbox (
+                account_scope TEXT NOT NULL,
+                aggregate_id TEXT NOT NULL,
+                revision BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                projected_at TIMESTAMPTZ,
+                PRIMARY KEY (account_scope, aggregate_id, revision),
+                FOREIGN KEY (account_scope, aggregate_id, revision)
+                  REFERENCES aitos_oms_events(account_scope, aggregate_id, revision)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_outbox_pending
+            ON aitos_oms_outbox (created_at, account_scope, aggregate_id, revision)
+            WHERE projected_at IS NULL
+            """,
+        ),
+    ),
+    Migration(
+        version=3,
+        name="clickhouse_legacy_import_evidence",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_legacy_imports (
+                account_scope TEXT NOT NULL,
+                source_table TEXT NOT NULL,
+                source_fingerprint CHAR(64) NOT NULL,
+                source_occurrence BIGINT NOT NULL CHECK (source_occurrence >= 0),
+                trade_id TEXT NOT NULL,
+                source_updated_at TIMESTAMPTZ NOT NULL,
+                raw_payload TEXT NOT NULL,
+                raw_payload_sha256 CHAR(64) NOT NULL,
+                imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (
+                    account_scope, source_table, source_fingerprint, source_occurrence
+                )
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_legacy_trade
+            ON aitos_oms_legacy_imports (account_scope, trade_id, source_updated_at)
+            """,
+            """
+            CREATE OR REPLACE FUNCTION aitos_reject_oms_event_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'canonical OMS event journal is append-only';
+            END;
+            $$
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_events_no_update ON aitos_oms_events
+            """,
+            """
+            CREATE TRIGGER aitos_oms_events_no_update
+            BEFORE UPDATE ON aitos_oms_events
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_event_mutation()
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_events_no_delete ON aitos_oms_events
+            """,
+            """
+            CREATE TRIGGER aitos_oms_events_no_delete
+            BEFORE DELETE ON aitos_oms_events
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_event_mutation()
+            """,
+            """
+            CREATE OR REPLACE FUNCTION aitos_reject_legacy_import_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'canonical legacy import evidence is append-only';
+            END;
+            $$
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_legacy_imports_no_update
+            ON aitos_oms_legacy_imports
+            """,
+            """
+            CREATE TRIGGER aitos_oms_legacy_imports_no_update
+            BEFORE UPDATE ON aitos_oms_legacy_imports
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_legacy_import_mutation()
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_legacy_imports_no_delete
+            ON aitos_oms_legacy_imports
+            """,
+            """
+            CREATE TRIGGER aitos_oms_legacy_imports_no_delete
+            BEFORE DELETE ON aitos_oms_legacy_imports
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_legacy_import_mutation()
+            """,
+        ),
+    ),
+    Migration(
+        version=4,
+        name="canonical_oms_financial_ledger",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_financial_ledger (
+                account_scope TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                line_no INTEGER NOT NULL CHECK (line_no >= 0),
+                trade_id TEXT NOT NULL,
+                account_code TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                debit NUMERIC(38, 18) NOT NULL DEFAULT 0 CHECK (debit >= 0),
+                credit NUMERIC(38, 18) NOT NULL DEFAULT 0 CHECK (credit >= 0),
+                reference TEXT,
+                recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, event_id, line_no),
+                FOREIGN KEY (account_scope, event_id)
+                  REFERENCES aitos_oms_events(account_scope, event_id),
+                CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_financial_trade
+            ON aitos_oms_financial_ledger
+              (account_scope, trade_id, currency, recorded_at)
+            """,
+            """
+            CREATE OR REPLACE FUNCTION aitos_validate_oms_financial_balance()
+            RETURNS trigger LANGUAGE plpgsql AS $aitos$
+            BEGIN
+                IF EXISTS (
+                    SELECT currency
+                    FROM aitos_oms_financial_ledger
+                    WHERE account_scope = NEW.account_scope
+                      AND event_id = NEW.event_id
+                    GROUP BY currency
+                    HAVING SUM(debit) <> SUM(credit)
+                ) THEN
+                    RAISE EXCEPTION 'canonical OMS financial event is not balanced';
+                END IF;
+                RETURN NULL;
+            END;
+            $aitos$
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_financial_balanced
+            ON aitos_oms_financial_ledger
+            """,
+            """
+            CREATE CONSTRAINT TRIGGER aitos_oms_financial_balanced
+            AFTER INSERT ON aitos_oms_financial_ledger
+            DEFERRABLE INITIALLY DEFERRED
+            FOR EACH ROW EXECUTE FUNCTION aitos_validate_oms_financial_balance()
+            """,
+            """
+            CREATE OR REPLACE FUNCTION aitos_reject_oms_financial_mutation()
+            RETURNS trigger LANGUAGE plpgsql AS $aitos$
+            BEGIN
+                RAISE EXCEPTION 'canonical OMS financial ledger is append-only';
+            END;
+            $aitos$
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_financial_no_update
+            ON aitos_oms_financial_ledger
+            """,
+            """
+            CREATE TRIGGER aitos_oms_financial_no_update
+            BEFORE UPDATE ON aitos_oms_financial_ledger
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_financial_mutation()
+            """,
+            """
+            DROP TRIGGER IF EXISTS aitos_oms_financial_no_delete
+            ON aitos_oms_financial_ledger
+            """,
+            """
+            CREATE TRIGGER aitos_oms_financial_no_delete
+            BEFORE DELETE ON aitos_oms_financial_ledger
+            FOR EACH ROW EXECUTE FUNCTION aitos_reject_oms_financial_mutation()
+            """,
+        ),
+    ),
+    Migration(
+        version=5,
+        name="canonical_postgres_execution_intents",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_execution_intents (
+                account_scope TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN (
+                    'SUBMITTING','CONFIRMED','REJECTED','PROTECTED',
+                    'APPLIED','TERMINAL'
+                )),
+                request JSONB NOT NULL,
+                result JSONB,
+                trade_id TEXT,
+                revision BIGINT NOT NULL CHECK (revision > 0),
+                last_event_id TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, client_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_execution_intents_unresolved
+            ON aitos_oms_execution_intents (account_scope, state, updated_at)
+            WHERE state NOT IN ('APPLIED','REJECTED','TERMINAL')
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_execution_intents_trade
+            ON aitos_oms_execution_intents (account_scope, trade_id)
+            WHERE trade_id IS NOT NULL
+            """,
+        ),
+    ),
+    Migration(
+        version=6,
+        name="canonical_oms_outbox_leases",
+        statements=(
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS claim_owner TEXT
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS claim_token UUID
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS claim_until TIMESTAMPTZ
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0
+            """,
+            """
+            ALTER TABLE aitos_oms_outbox
+            ADD COLUMN IF NOT EXISTS last_error TEXT
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_outbox_lease
+            ON aitos_oms_outbox (claim_until, created_at)
+            WHERE projected_at IS NULL
+            """,
+        ),
+    ),
+    Migration(
+        version=7,
+        name="canonical_postgres_protection_recovery",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_protection_handovers (
+                account_scope TEXT NOT NULL,
+                handover_id TEXT NOT NULL,
+                trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                old_order_id TEXT NOT NULL,
+                new_client_id TEXT NOT NULL,
+                new_order_id TEXT,
+                order_type TEXT NOT NULL CHECK (
+                    order_type IN ('STOP_MARKET','TAKE_PROFIT_MARKET')
+                ),
+                state TEXT NOT NULL CHECK (
+                    state IN (
+                        'PREPARED','NEW_ACCEPTED','OLD_CANCEL_REQUESTED',
+                        'OLD_CANCELLED','APPLIED','BLOCKED'
+                    )
+                ),
+                blocked_reason TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, handover_id),
+                UNIQUE (account_scope, new_client_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_protection_handovers_trade
+            ON aitos_oms_protection_handovers
+              (account_scope, trade_id, updated_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_protection_handovers_pending
+            ON aitos_oms_protection_handovers
+              (account_scope, state, updated_at)
+            WHERE state <> 'APPLIED'
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS aitos_oms_protection_child_fills (
+                account_scope TEXT NOT NULL,
+                algo_id TEXT NOT NULL,
+                child_order_id TEXT NOT NULL,
+                trade_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                cumulative_quantity NUMERIC(38,18) NOT NULL
+                    CHECK (cumulative_quantity >= 0),
+                cumulative_quote NUMERIC(38,18) NOT NULL
+                    CHECK (cumulative_quote >= 0),
+                status TEXT NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (account_scope, algo_id, child_order_id)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_aitos_oms_protection_child_trade
+            ON aitos_oms_protection_child_fills
+              (account_scope, trade_id, updated_at)
+            """,
+        ),
+    ),
 )
 
 
@@ -136,6 +478,93 @@ _REQUIRED_COLUMNS = {
         "idempotency_key",
         "recorded_at",
         "payload",
+    },
+    "aitos_oms_writer_fences": {"account_scope", "writer_id", "generation"},
+    "aitos_oms_aggregate_heads": {
+        "account_scope",
+        "aggregate_id",
+        "revision",
+        "event_hash",
+    },
+    "aitos_oms_events": {
+        "account_scope",
+        "aggregate_id",
+        "revision",
+        "event_id",
+        "writer_id",
+        "generation",
+        "payload",
+        "previous_hash",
+        "event_hash",
+    },
+    "aitos_oms_outbox": {
+        "account_scope",
+        "aggregate_id",
+        "revision",
+        "projected_at",
+        "claim_owner",
+        "claim_token",
+        "claim_until",
+        "attempts",
+        "last_error",
+    },
+    "aitos_oms_financial_ledger": {
+        "account_scope",
+        "event_id",
+        "line_no",
+        "trade_id",
+        "account_code",
+        "currency",
+        "debit",
+        "credit",
+        "recorded_at",
+    },
+    "aitos_oms_legacy_imports": {
+        "account_scope",
+        "source_table",
+        "source_fingerprint",
+        "source_occurrence",
+        "trade_id",
+        "source_updated_at",
+        "raw_payload",
+        "raw_payload_sha256",
+        "imported_at",
+    },
+    "aitos_oms_execution_intents": {
+        "account_scope",
+        "client_id",
+        "symbol",
+        "state",
+        "request",
+        "result",
+        "trade_id",
+        "revision",
+        "last_event_id",
+        "updated_at",
+    },
+    "aitos_oms_protection_handovers": {
+        "account_scope",
+        "handover_id",
+        "trade_id",
+        "symbol",
+        "old_order_id",
+        "new_client_id",
+        "new_order_id",
+        "order_type",
+        "state",
+        "blocked_reason",
+        "updated_at",
+    },
+    "aitos_oms_protection_child_fills": {
+        "account_scope",
+        "algo_id",
+        "child_order_id",
+        "trade_id",
+        "symbol",
+        "cumulative_quantity",
+        "cumulative_quote",
+        "status",
+        "updated_at",
     },
 }
 

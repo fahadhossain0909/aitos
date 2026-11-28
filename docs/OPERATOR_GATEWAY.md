@@ -4,11 +4,12 @@ Status: implemented and locally tested; **not deployed or production-certified**
 
 ## Purpose and trust boundary
 
-The built operator console can now be served through
-`python -m aitos.console_gateway`. A single operator password establishes a
-bounded HttpOnly session before any console financial API is proxied. The browser
-never receives the backend bearer. There are no order, live activation,
-configuration-application, account-switch, credential-vault or job-launch routes.
+The built operator console is served through
+`python -m aitos.console_gateway`. A configured operator identity and password
+establish a short-lived pre-authentication state; a server-issued, user-bound
+WebAuthn assertion is required before an authenticated HttpOnly session exists.
+The browser never receives the backend bearer. There are no order, live
+activation, configuration-application, credential-vault or job-launch routes.
 
 This is not an exchange login. Never reuse an exchange credential as the operator
 password. Do not paste passwords/tokens into chat, source files or command history.
@@ -81,10 +82,22 @@ sandbox. Server-side financial authorization remains mandatory regardless of UI.
 - Exact canonical public host and browser Origin checks; forwarded host/proto/IP
   headers do not establish trust. Cross-origin/same-site-other-origin browser
   access is denied. Non-loopback public/upstream origins require HTTPS.
-- JSON-only sign-in, maximum 4 KiB request body and bounded password length.
-  Global maximum ten sign-in attempts per minute and serialized scrypt work.
-- scrypt verifier with a random 16-byte salt, N=16384/r=8/p=1, constant-time digest
-  comparison. No plaintext operator password is kept as gateway state.
+- JSON-only sign-in with bounded bodies; WebAuthn ceremony bodies have a
+  separate 96 KiB cap. Login, MFA and approval operations share a bounded
+  per-process attempt limiter and serialized scrypt work.
+- Per-identity scrypt verifiers with random 16-byte salts, N=16384/r=8/p=1 and
+  constant-time digest comparison. Unknown identities execute a dummy KDF.
+  No plaintext operator password is kept as gateway state.
+- Password verification creates only a 180-second hash-only pending cookie.
+  Session issuance occurs only after the user-bound WebAuthn assertion verifies;
+  the pending cookie is consumed on success and process restart revokes all state.
+- First authenticator enrollment on a non-loopback origin requires a
+  per-identity, persistent one-time out-of-band bootstrap token. Additional
+  authenticators require a fresh assertion from an
+  already-registered authenticator. Credential inventory is user-scoped.
+- Lost-key recovery is an offline host-administrator operation through
+  `scripts/manage_webauthn_credentials.py`; no browser credential-delete route
+  exists. Revoking the final key re-enters the guarded first-enrollment process.
 - 256-bit random session tokens; only SHA-256 token hashes are stored server-side.
   Four sessions maximum by default; issuing beyond the cap revokes the oldest.
 - Absolute 15-minute lifetime by default (configuration allows 60–3600 seconds).
@@ -156,6 +169,54 @@ execution, without deployment or real credentials. Treat each result as specific
 to its exact commit SHA. The workflow does not certify external TLS termination,
 hostile-network security or production account reconciliation.
 
+## Approval control plane
+
+The Approval Desk is enabled only when both `AITOS_APPROVAL_SIGNING_KEY` and
+`AITOS_OPERATOR_ROLE_MAP` are configured on the gateway. The role map is a
+server-owned JSON object mapping identities to role arrays; the default live
+approval role is `live_trader`. A challenge binds the canonical action digest
+to the authenticated identity and a WebAuthn authentication challenge. A fresh
+user-verified assertion issues a short-lived, single-use signed approval receipt.
+Audit rows are append-only. The browser displays the receipt ID, not the signing
+secret.
+
+The gateway deliberately does not execute or submit orders. A trusted
+server-side receipt provider and exact-action, single-use consumer are
+implemented in `LiveApprovalControlPlane` and
+`BinanceFuturesOrderExecutor`. Entry and protective STOP/TP orders bind the
+approval digest to the actual venue side, exact quantity, reference/trigger
+price, client order ID, account scope and trade owner. The executor persists
+the receipt ID, approver, digest and expiry in the durable execution-intent
+request before the venue POST; the canonical OMS intent event then provides
+the causal parent for the resulting Trade transition. The token itself and
+signing key are never copied into the OMS event.
+
+For gateway/runtime store sharing, both processes must use the same
+`AITOS_WEBAUTHN_DB`, `AITOS_WEBAUTHN_ORIGIN`,
+`AITOS_WEBAUTHN_RP_ID`, `AITOS_EXECUTION_SCOPE`,
+`AITOS_APPROVAL_SIGNING_KEY` and `AITOS_OPERATOR_ROLE_MAP`. The gateway's
+`--webauthn-db` and `--origin` must exactly match the shared environment
+values. `AITOS_EXECUTION_SCOPE` must equal the runtime's SHA-256 account scope;
+the approval desk displays it and rejects actions for another scope. For a
+mainnet account, compute the scope without printing the API key:
+
+```bash
+python -c 'import hashlib,os; print(hashlib.sha256(("False:" + os.environ["BINANCE_API_KEY"]).encode()).hexdigest())'
+```
+
+Both processes derive the same sibling `live-approvals.sqlite` file. If the gateway and executor
+run in separate containers, that file must be on one protected, durable,
+shared volume with SQLite-compatible locking; separate ephemeral container
+filesystems do not constitute a shared approval store.
+
+Mainnet execution remains disabled by default. It requires
+`AITOS_ENABLE_MAINNET_EXECUTION=1`, the shared approval configuration, the
+interactive session confirmation, and a fresh single-use WebAuthn receipt
+for every entry or protective order. The code does not set this flag or
+perform live execution as part of CI. An issued receipt is not execution
+confirmation; external account reconciliation and independent production
+acceptance remain mandatory.
+
 ## Limits and nonlocal deployment gate
 
 - No built-in TLS listener: external HTTPS termination must preserve the exact
@@ -163,8 +224,10 @@ hostile-network security or production account reconciliation.
   A configured HTTPS origin alone is **not proof** of deployed TLS correctness.
 - Local HTTP is loopback-only and uses a non-Secure cookie. Never expose it as an
   Internet login. Do not reuse operator credentials across environments.
-- Single-process, single-operator sessions; no MFA/OIDC, RBAC, distributed
-  revocation, password-reset service, persistent/tamper-evident audit or OS vault.
+- Sessions and pending MFA state are single-process and volatile; no OIDC,
+  distributed session revocation, self-service password reset, distributed
+  identity federation or OS vault is included. The identity directory and role
+  map are server configuration, not an external enterprise IdP.
 - Global attempt limiting may temporarily block a legitimate operator under
   abuse; public deployments need independently reviewed edge protection.
 - Secure flags were tested, and the real built browser flow ran locally over

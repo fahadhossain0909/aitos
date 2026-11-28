@@ -145,6 +145,8 @@ class Trade:
     # Last completed candle identity counted by adaptive stagnation logic.
     adaptive_exit_last_bar_id: str | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
+    # Logical account/runtime partition for durable recovery; empty means legacy/unscoped.
+    account_scope: str = ""
 
     def __post_init__(self) -> None:
         if self.pnl is not None and self.gross_realized_pnl_usd == 0.0:
@@ -186,6 +188,7 @@ class Trade:
     def to_dict(self) -> dict[str, Any]:
         return {
             "trade_id": self.trade_id,
+            "account_scope": self.account_scope,
             "symbol": self.symbol,
             "side": self.side.value,
             "entry_price": self.entry_price,

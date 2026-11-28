@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -33,6 +34,7 @@ class GatewayConfig:
     max_queue_age_seconds: float = 10.0
     publish_timeout_seconds: float = 5.0
     backpressure_poll_seconds: float = 0.005
+    publish_batch_size: int = 64
 
 
 class MarketDataGateway:
@@ -51,7 +53,12 @@ class MarketDataGateway:
         self.health = GatewayHealth(venue, market_type)
         self.state = GatewayState.STOPPED
         self._publisher = publisher
+        publisher_owner = getattr(publisher, "__self__", None)
+        self._batch_publisher = getattr(publisher_owner, "publish_many", None)
+        self._drain_lock = asyncio.Lock()
         self._transport_snapshot_provider = transport_snapshot_provider
+        self._publisher_latency_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publisher_slow_operations = 0
 
     def begin_connect(self) -> None:
         self.state = GatewayState.CONNECTING
@@ -83,6 +90,44 @@ class MarketDataGateway:
         self.health.record_event()
         age = self._source_freshness_age_seconds(event)
         symbol = self._data_flow_symbol(event)
+        ingest_delay_ms = max(
+            0.0, (event.ingest_time - event.event_time).total_seconds() * 1000.0
+        )
+        post_ingest_age_ms = max(
+            0.0,
+            (datetime.now(timezone.utc) - event.ingest_time).total_seconds() * 1000.0,
+        )
+        stage_timestamps = dict(event.stage_timestamps or {})
+        frame_received_monotonic = stage_timestamps.get("ws_frame_received_monotonic")
+        decode_started_monotonic = stage_timestamps.get("ws_decode_started_monotonic")
+        decode_completed_monotonic = stage_timestamps.get(
+            "ws_decode_completed_monotonic"
+        )
+        normalized_monotonic = stage_timestamps.get("event_normalized_monotonic")
+        frame_received_epoch_ms = stage_timestamps.get("ws_frame_received_epoch_ms")
+        now_monotonic = time.monotonic()
+        source_to_receive_ms = (
+            frame_received_epoch_ms - event.event_time.timestamp() * 1000.0
+            if isinstance(frame_received_epoch_ms, (int, float))
+            else None
+        )
+        receive_to_gateway_ms = (
+            max(0.0, now_monotonic - frame_received_monotonic) * 1000.0
+            if isinstance(frame_received_monotonic, (int, float))
+            else None
+        )
+        decode_duration_ms = (
+            max(0.0, decode_completed_monotonic - decode_started_monotonic) * 1000.0
+            if isinstance(decode_started_monotonic, (int, float))
+            and isinstance(decode_completed_monotonic, (int, float))
+            else None
+        )
+        normalize_duration_ms = (
+            max(0.0, normalized_monotonic - decode_completed_monotonic) * 1000.0
+            if isinstance(normalized_monotonic, (int, float))
+            and isinstance(decode_completed_monotonic, (int, float))
+            else None
+        )
         try:
             from aitos.forensics.data_flow_hooks import note_trace, record_input
             from aitos.forensics.data_flow_schema import PipelineStage
@@ -97,7 +142,16 @@ class MarketDataGateway:
                 stage=PipelineStage.GATEWAY_QUEUE.value,
                 symbol=symbol,
                 event_id=event.event_id,
-                extra={"phase": "ingress", "source_age_ms": age * 1000.0},
+                extra={
+                    "phase": "ingress",
+                    "event_age_ms": age * 1000.0,
+                    "source_to_receive_ms": source_to_receive_ms,
+                    "receive_to_gateway_ms": receive_to_gateway_ms,
+                    "websocket_decode_ms": decode_duration_ms,
+                    "decode_to_normalize_ms": normalize_duration_ms,
+                    "source_to_ingest_ms": ingest_delay_ms,
+                    "ingest_to_gateway_ms": post_ingest_age_ms,
+                },
             )
         except Exception:
             pass
@@ -136,11 +190,24 @@ class MarketDataGateway:
             MarketEventType.BOOK_DELTA,
             MarketEventType.BOOK_SNAPSHOT,
         }
-        if self.queue.put_latest_nowait(
-            event,
-            can_replace=lambda queued: queued.event_type
-            not in {MarketEventType.BOOK_DELTA, MarketEventType.BOOK_SNAPSHOT},
-        ):
+        can_replace = lambda queued: queued.event_type not in {
+            MarketEventType.BOOK_DELTA,
+            MarketEventType.BOOK_SNAPSHOT,
+        }
+        if event.event_type == MarketEventType.TICKER:
+            accepted = self.queue.put_coalesced_nowait(
+                event,
+                key=lambda queued: str(queued.symbol or "").upper(),
+                can_replace=lambda queued: queued.event_type
+                not in {
+                    MarketEventType.BOOK_DELTA,
+                    MarketEventType.BOOK_SNAPSHOT,
+                    MarketEventType.TRADE,
+                },
+            )
+        else:
+            accepted = self.queue.put_latest_nowait(event, can_replace=can_replace)
+        if accepted:
             self.health.record_accept()
             symbol = self._data_flow_symbol(event)
             try:
@@ -236,25 +303,37 @@ class MarketDataGateway:
                 pass
 
     async def drain_once(self) -> bool:
-        """Publish one event, or drop it if doing so would violate freshness."""
+        """Serialize bounded queue drains to preserve FIFO publication order."""
+        async with self._drain_lock:
+            return await self._drain_once_locked()
+
+    async def _drain_once_locked(self) -> bool:
+        """Publish a bounded event batch, dropping only events that are stale."""
         queue_started = time.perf_counter()
-        event = None
+        events: list[MarketEvent] = []
         try:
-            event = await asyncio.wait_for(self.queue.get(), timeout=0.01)
+            first = await asyncio.wait_for(self.queue.get(), timeout=0.01)
         except asyncio.TimeoutError:
             return False
         except asyncio.CancelledError:
             raise
+        events.append(first)
+        for _ in range(max(0, self.config.publish_batch_size - 1)):
+            try:
+                events.append(self.queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
         self._record_drain_stage("queue_get", queue_started)
-        symbol = self._data_flow_symbol(event)
-        try:
-            from aitos.forensics.data_flow_hooks import record_input
-            from aitos.forensics.data_flow_schema import PipelineStage
+        publishable: list[MarketEvent] = []
+        for event in events:
+            symbol = self._data_flow_symbol(event)
+            try:
+                from aitos.forensics.data_flow_hooks import record_input
+                from aitos.forensics.data_flow_schema import PipelineStage
 
-            record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
-        except Exception:
-            pass
-        try:
+                record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
+            except Exception:
+                pass
             age_started = time.perf_counter()
             queue_age = self._queue_age_seconds(event)
             self._record_drain_stage("queue_age_check", age_started)
@@ -277,48 +356,64 @@ class MarketDataGateway:
                     )
                 except Exception:
                     pass
+                continue
+            publishable.append(event)
+        try:
+            if not publishable:
                 return False
+            publish_started = time.perf_counter()
             try:
-                publish_started = time.perf_counter()
-                try:
+                if self._batch_publisher is not None and len(publishable) > 1:
                     await asyncio.wait_for(
-                        self._publisher(event),
+                        self._batch_publisher(publishable),
                         timeout=self.config.publish_timeout_seconds,
                     )
-                finally:
-                    self._record_drain_stage("publisher", publish_started)
+                else:
+                    for event in publishable:
+                        await asyncio.wait_for(
+                            self._publisher(event),
+                            timeout=self.config.publish_timeout_seconds,
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.health.record_publish_error(str(exc))
-                self.health.dropped_events += 1
-                self.state = GatewayState.DEGRADED
-                try:
-                    from aitos.forensics.data_flow_hooks import record_error
-                    from aitos.forensics.data_flow_schema import PipelineStage
+                for event in publishable:
+                    symbol = self._data_flow_symbol(event)
+                    self.health.record_publish_error(str(exc))
+                    self.health.dropped_events += 1
+                    try:
+                        from aitos.forensics.data_flow_hooks import record_error
+                        from aitos.forensics.data_flow_schema import PipelineStage
 
-                    record_error(
-                        PipelineStage.REDIS_PUBLISH.value,
-                        symbol=symbol,
-                        issue="publish_error",
-                    )
-                except Exception:
-                    pass
+                        record_error(
+                            PipelineStage.REDIS_PUBLISH.value,
+                            symbol=symbol,
+                            issue="publish_error",
+                        )
+                    except Exception:
+                        pass
+                self.state = GatewayState.DEGRADED
                 logger.warning(
-                    "gateway publish failed",
+                    "gateway batch publish failed",
                     extra={
                         "aitos_extra": {
                             "stage": "gateway_publish_error",
                             "error": str(exc),
                             "error_type": type(exc).__name__,
-                            "symbol": symbol,
+                            "batch_size": len(publishable),
                         }
                     },
                 )
                 raise
-            else:
+            finally:
+                publisher_latency_ms = (time.perf_counter() - publish_started) * 1000.0
+                self._publisher_latency_samples_ms.append(publisher_latency_ms)
+                if publisher_latency_ms > 100.0:
+                    self._publisher_slow_operations += 1
+                self._record_drain_stage("publisher", publish_started)
+            latency_ms = (time.perf_counter() - queue_started) * 1000.0
+            for event in publishable:
                 self.health.record_publish()
-                latency_ms = (time.perf_counter() - queue_started) * 1000.0
                 try:
                     from aitos.forensics.data_flow_hooks import (
                         note_trace,
@@ -326,6 +421,7 @@ class MarketDataGateway:
                     )
                     from aitos.forensics.data_flow_schema import PipelineStage
 
+                    symbol = self._data_flow_symbol(event)
                     record_output(
                         PipelineStage.REDIS_PUBLISH.value,
                         symbol=symbol,
@@ -341,21 +437,54 @@ class MarketDataGateway:
                     )
                 except Exception:
                     pass
-                return True
+            return True
         finally:
-            if event is not None:
-                task_started = time.perf_counter()
+            task_started = time.perf_counter()
+            for _event in events:
                 self.queue.task_done()
-                self._record_drain_stage("queue_task_done", task_started)
+            self._record_drain_stage("queue_task_done", task_started)
+
+    @staticmethod
+    def _latency_summary(samples: deque[float]) -> dict[str, float | int | None]:
+        if not samples:
+            return {
+                "count": 0,
+                "p50_ms": None,
+                "p95_ms": None,
+                "avg_ms": None,
+                "max_ms": None,
+            }
+        ordered = sorted(samples)
+
+        def percentile(fraction: float) -> float:
+            index = max(
+                0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5))
+            )
+            return ordered[index]
+
+        return {
+            "count": len(ordered),
+            "p50_ms": round(percentile(0.50), 3),
+            "p95_ms": round(percentile(0.95), 3),
+            "avg_ms": round(sum(ordered) / len(ordered), 3),
+            "max_ms": round(ordered[-1], 3),
+        }
 
     def snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {
             "state": self.state.value,
+            "publisher_latency": {
+                **self._latency_summary(self._publisher_latency_samples_ms),
+                "slow_operations_over_100ms": self._publisher_slow_operations,
+                "slow_threshold_ms": 100.0,
+                "measurement": "one gateway publish call; may contain a multi-event batch",
+            },
             "queue": self.queue.snapshot(),
             "health": self.health.snapshot(),
             "freshness_policy": {
                 "max_queue_age_seconds": self.config.max_queue_age_seconds,
                 "publish_timeout_seconds": self.config.publish_timeout_seconds,
+                "publish_batch_size": self.config.publish_batch_size,
                 "overflow": "replace_oldest_with_newest",
                 "failed_publish": "drop_failed_event",
             },

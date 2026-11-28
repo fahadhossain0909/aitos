@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import os
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -145,6 +146,12 @@ class EventBus(AITOSModule):
         self._retry_events = 0
         self._dlq_events = 0
         self._group_create_busy = 0
+        self._publish_latency_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publish_prepare_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publish_enqueue_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publish_execute_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publish_retry_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publish_batch_sizes: deque[int] = deque(maxlen=2048)
 
     @property
     def module_id(self) -> str:
@@ -190,6 +197,27 @@ class EventBus(AITOSModule):
                 "last_consumed_at": self._last_consumed_at,
                 "last_acked_at": self._last_acked_at,
                 "last_error": self._last_error,
+                "publisher": {
+                    "pipeline_supported": callable(
+                        getattr(self._redis, "pipeline", None)
+                    ),
+                    "batch_size": self._sample_summary(self._publish_batch_sizes),
+                    "total_latency": self._sample_summary(
+                        self._publish_latency_samples_ms
+                    ),
+                    "prepare_latency": self._sample_summary(
+                        self._publish_prepare_samples_ms
+                    ),
+                    "pipeline_enqueue_latency": self._sample_summary(
+                        self._publish_enqueue_samples_ms
+                    ),
+                    "redis_execute_latency": self._sample_summary(
+                        self._publish_execute_samples_ms
+                    ),
+                    "retry_latency": self._sample_summary(
+                        self._publish_retry_samples_ms
+                    ),
+                },
             },
         )
 
@@ -357,6 +385,122 @@ class EventBus(AITOSModule):
             fut = self._pending_replies.pop(event.correlation_id)
             if not fut.done():
                 fut.set_result(event)
+
+    @staticmethod
+    def _sample_summary(
+        samples: deque[float] | deque[int],
+    ) -> dict[str, float | int | None]:
+        if not samples:
+            return {"count": 0, "p50": None, "p95": None, "max": None}
+        ordered = sorted(samples)
+
+        def percentile(fraction: float) -> float | int:
+            index = max(
+                0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5))
+            )
+            return ordered[index]
+
+        return {
+            "count": len(ordered),
+            "p50": round(float(percentile(0.50)), 3),
+            "p95": round(float(percentile(0.95)), 3),
+            "max": round(float(ordered[-1]), 3),
+        }
+
+    async def publish_many(self, events: list[Event]) -> None:
+        """Append a bounded event batch and expose Redis publisher phase timings."""
+        self._require_initialized()
+        if not events:
+            return
+        total_started = time.perf_counter()
+        prepare_started = total_started
+        normalized: list[Event] = []
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            for event in events:
+                validate_event_schema(event)
+                normalized_event = Event(
+                    topic=event.topic,
+                    payload=event.payload,
+                    event_id=event.event_id,
+                    source_module=event.source_module,
+                    priority=event.priority,
+                    created_at=event.created_at,
+                    correlation_id=event.correlation_id,
+                    schema_version=event.schema_version,
+                )
+                normalized.append(normalized_event)
+                self._known_topics.add(normalized_event.topic)
+            self._last_event_time = now
+            self._publish_prepare_samples_ms.append(
+                (time.perf_counter() - prepare_started) * 1000.0
+            )
+            self._publish_batch_sizes.append(len(normalized))
+            pipeline_factory = getattr(self._redis, "pipeline", None)
+            if not callable(pipeline_factory):
+                execute_started = time.perf_counter()
+                try:
+                    for event in normalized:
+                        await self.publish(event)
+                finally:
+                    self._publish_execute_samples_ms.append(
+                        (time.perf_counter() - execute_started) * 1000.0
+                    )
+                return
+            enqueue_started = time.perf_counter()
+            pipeline = pipeline_factory(transaction=False)
+            for event in normalized:
+                maxlen = _stream_maxlen(event.topic)
+                if maxlen is None:
+                    pipeline.xadd(_stream_key(event.topic), event.to_wire())
+                else:
+                    pipeline.xadd(
+                        _stream_key(event.topic),
+                        event.to_wire(),
+                        maxlen=maxlen,
+                        approximate=True,
+                    )
+            self._publish_enqueue_samples_ms.append(
+                (time.perf_counter() - enqueue_started) * 1000.0
+            )
+            execute_started = time.perf_counter()
+            results = await pipeline.execute(raise_on_error=False)
+            self._publish_execute_samples_ms.append(
+                (time.perf_counter() - execute_started) * 1000.0
+            )
+            if len(results) != len(normalized):
+                raise RuntimeError(
+                    "Redis pipeline returned a result count different from the event batch"
+                )
+            failed: list[Event] = []
+            for event, result in zip(normalized, results):
+                if isinstance(result, BaseException):
+                    failed.append(event)
+                    continue
+                self._published_events += 1
+                if (
+                    event.topic.endswith(".reply")
+                    and event.correlation_id
+                    and event.correlation_id in self._pending_replies
+                ):
+                    fut = self._pending_replies.pop(event.correlation_id)
+                    if not fut.done():
+                        fut.set_result(event)
+            if failed:
+                retry_started = time.perf_counter()
+                try:
+                    # Retry only commands Redis reported as failed; successful
+                    # XADDs are not repeated after partial pipeline errors.
+                    for event in failed:
+                        await self.publish(event)
+                finally:
+                    self._publish_retry_samples_ms.append(
+                        (time.perf_counter() - retry_started) * 1000.0
+                    )
+        finally:
+            self._publish_latency_samples_ms.append(
+                (time.perf_counter() - total_started) * 1000.0
+            )
 
     async def subscribe(
         self,

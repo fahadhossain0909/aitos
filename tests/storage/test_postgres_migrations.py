@@ -80,7 +80,7 @@ def test_schema_verification_uses_read_only_transaction_and_no_ddl():
 
     version = asyncio.run(verify_postgres_schema(_Pool(connection)))
 
-    assert version == 1
+    assert version == max(migration.version for migration in MIGRATIONS)
     assert connection.read_only_transaction is True
 
 

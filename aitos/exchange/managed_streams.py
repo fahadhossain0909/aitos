@@ -7,6 +7,7 @@ stay open and only the delta is sent as control frames over the same websocket.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -46,10 +47,21 @@ class ManagedStreamSet:
         self._to_stream = to_stream
         self._streams: list[str] = list(dict.fromkeys(streams))
         self._changed = asyncio.Event()
-        self._queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
+        self._queue: asyncio.Queue[tuple[Any, str, float]] = asyncio.Queue(
             maxsize=MANAGED_STREAM_QUEUE_SIZE
         )
+        self._queue_stats: dict[str, Any] = {
+            "enqueued": 0,
+            "dequeued": 0,
+            "overflow_events": 0,
+            "dropped_events": 0,
+            "max_depth": 0,
+            "queue_wait_total_ms": 0.0,
+            "queue_wait_max_ms": 0.0,
+            "last_overflow_at": None,
+        }
         self._closed = False
+        self._publish_queue_stats()
         self._task = asyncio.create_task(
             self._run(), name=f"aitos-managed-stream-{kind}"
         )
@@ -64,6 +76,40 @@ class ManagedStreamSet:
 
     def current_streams(self) -> list[str]:
         return list(self._streams)
+
+    def _publish_queue_stats(self) -> None:
+        """Publish bounded per-stream queue telemetry into transport health."""
+        transport = getattr(self._adapter, "_ws_transport", None)
+        if not isinstance(transport, dict):
+            return
+        queues = transport.setdefault("managed_queues", {})
+        if not isinstance(queues, dict):
+            return
+        stats = dict(self._queue_stats)
+        stats["depth"] = self._queue.qsize()
+        stats["capacity"] = self._queue.maxsize
+        count = int(stats.get("dequeued", 0))
+        stats["queue_wait_avg_ms"] = (
+            round(float(stats.get("queue_wait_total_ms", 0.0)) / count, 3)
+            if count
+            else 0.0
+        )
+        stats["queue_wait_total_ms"] = round(
+            float(stats.get("queue_wait_total_ms", 0.0)), 3
+        )
+        stats["queue_wait_max_ms"] = round(
+            float(stats.get("queue_wait_max_ms", 0.0)), 3
+        )
+        queues[self._kind] = stats
+        transport["managed_queue_overflow_total"] = sum(
+            int(item.get("overflow_events", 0)) for item in queues.values()
+        )
+        transport["managed_queue_dropped_total"] = sum(
+            int(item.get("dropped_events", 0)) for item in queues.values()
+        )
+        transport["managed_queue_overflow_detected"] = any(
+            int(item.get("overflow_events", 0)) > 0 for item in queues.values()
+        )
 
     async def update_symbols(self, symbols: list[str]) -> bool:
         if self._to_stream is None:
@@ -98,23 +144,51 @@ class ManagedStreamSet:
                 # Skip None sentinel from reconnects
                 if data is None:
                     continue
+                queued_at = time.monotonic()
                 try:
-                    self._queue.put_nowait((data, stream_name))
+                    self._queue.put_nowait((data, stream_name, queued_at))
+                    self._queue_stats["enqueued"] += 1
+                    self._queue_stats["max_depth"] = max(
+                        int(self._queue_stats["max_depth"]), self._queue.qsize()
+                    )
+                    self._publish_queue_stats()
                 except asyncio.QueueFull:
-                    # Drain oldest entries
+                    # Keep the newest event, but account for every discarded
+                    # event. Order-book sequence gaps are detected downstream
+                    # by LocalOrderBook and trigger snapshot recovery.
+                    self._queue_stats["overflow_events"] += 1
+                    self._queue_stats["last_overflow_at"] = time.time()
                     while not self._queue.empty():
                         try:
                             self._queue.get_nowait()
+                            self._queue.task_done()
+                            self._queue_stats["dropped_events"] += 1
                         except asyncio.QueueEmpty:
                             break
-                    # Retry once
+                    # Retry once after the explicit freshness-first drain.
                     try:
-                        self._queue.put_nowait((data, stream_name))
+                        self._queue.put_nowait((data, stream_name, queued_at))
+                        self._queue_stats["enqueued"] += 1
+                        self._queue_stats["max_depth"] = max(
+                            int(self._queue_stats["max_depth"]), self._queue.qsize()
+                        )
                     except asyncio.QueueFull:
+                        self._queue_stats["dropped_events"] += 1
                         logger.warning(
                             "ManagedStreamSet queue full after drain, dropping event",
-                            extra={"aitos_extra": {"kind": self._kind}},
+                            extra={
+                                "aitos_extra": {
+                                    "kind": self._kind,
+                                    "overflow_events": self._queue_stats[
+                                        "overflow_events"
+                                    ],
+                                    "dropped_events": self._queue_stats[
+                                        "dropped_events"
+                                    ],
+                                }
+                            },
                         )
+                    self._publish_queue_stats()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -129,7 +203,16 @@ class ManagedStreamSet:
     async def __anext__(self) -> tuple[Any, str]:
         if self._closed and self._queue.empty():
             raise StopAsyncIteration
-        return await self._queue.get()
+        data, stream_name, queued_at = await self._queue.get()
+        self._queue.task_done()
+        waited_ms = max(0.0, (time.monotonic() - queued_at) * 1000.0)
+        self._queue_stats["dequeued"] += 1
+        self._queue_stats["queue_wait_total_ms"] += waited_ms
+        self._queue_stats["queue_wait_max_ms"] = max(
+            float(self._queue_stats["queue_wait_max_ms"]), waited_ms
+        )
+        self._publish_queue_stats()
+        return data, stream_name
 
     async def aclose(self) -> None:
         self._closed = True
@@ -155,6 +238,8 @@ class ManagedOrderBookStream:
         self._levels = levels
         self._symbols: list[str] = list(dict.fromkeys(s.upper() for s in symbols))
         self._books: dict[str, LocalOrderBook] = {}
+        self._bootstrap_retry_at: dict[str, float] = {}
+        self._bootstrap_backoff: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
         def to_stream(symbol: str) -> str:
@@ -169,15 +254,59 @@ class ManagedOrderBookStream:
         async with self._lock:
             if normalized == self._symbols:
                 return False
-            added = [s for s in normalized if s not in self._symbols]
             removed = [s for s in self._symbols if s not in normalized]
             for symbol in removed:
                 self._books.pop(symbol, None)
+                self._bootstrap_retry_at.pop(symbol, None)
+                self._bootstrap_backoff.pop(symbol, None)
             self._symbols = normalized
         if self._to_stream is not None:
             streams = [self._to_stream(s) for s in normalized]
             await self._stream_set.update_streams(streams)
         return True
+
+    async def _bootstrap_book(
+        self, symbol: str, *, force: bool = False
+    ) -> LocalOrderBook | None:
+        now = time.monotonic()
+        if not force and now < self._bootstrap_retry_at.get(symbol, 0.0):
+            return None
+        try:
+            snapshot = await self._adapter.fetch_order_book(symbol, limit=self._levels)
+        except Exception as exc:
+            async with self._lock:
+                if symbol not in self._symbols:
+                    return None
+            delay = self._bootstrap_backoff.get(symbol, 1.0)
+            self._bootstrap_retry_at[symbol] = now + delay
+            self._bootstrap_backoff[symbol] = min(delay * 2.0, 30.0)
+            logger.warning(
+                "managed order-book REST bootstrap failed",
+                extra={
+                    "aitos_extra": {
+                        "stage": "orderbook_rest_bootstrap_failed",
+                        "symbol": symbol,
+                        "retry_in_seconds": delay,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:300],
+                    }
+                },
+            )
+            return None
+
+        book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
+        book.seed(snapshot)
+        async with self._lock:
+            if symbol not in self._symbols:
+                return None
+            self._books[symbol] = book
+        self._bootstrap_retry_at.pop(symbol, None)
+        self._bootstrap_backoff.pop(symbol, None)
+        return book
+
+    async def _invalidate_book(self, symbol: str) -> None:
+        async with self._lock:
+            self._books.pop(symbol, None)
 
     async def __aiter__(self) -> ManagedOrderBookStream:
         return self
@@ -189,24 +318,44 @@ class ManagedOrderBookStream:
                 continue
             symbol = stream_name.split("@", 1)[0].upper()
             async with self._lock:
+                if symbol not in self._symbols:
+                    continue
                 book = self._books.get(symbol)
+
+            diff = parse_depth_diff_ws(data)
+            if book is None:
+                book = await self._bootstrap_book(symbol)
                 if book is None:
-                    if symbol not in self._symbols:
-                        continue
-                    diff = parse_depth_diff_ws(data)
-                    book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
-                    book.seed_from_diff(diff)
-                    self._books[symbol] = book
-                    return book.snapshot(diff.event_time_ms)
+                    continue
+
             try:
-                snapshot = book.apply(parse_depth_diff_ws(data))
-            except OrderBookSequenceError:
-                diff = parse_depth_diff_ws(data)
-                book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
-                book.seed_from_diff(diff)
-                async with self._lock:
-                    self._books[symbol] = book
-                return book.snapshot(diff.event_time_ms)
+                snapshot = book.apply(diff)
+            except OrderBookSequenceError as exc:
+                logger.warning(
+                    "managed order-book sequence gap; re-bootstrap from REST",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "orderbook_sequence_rebootstrap",
+                            "symbol": symbol,
+                            "first_update_id": diff.first_update_id,
+                            "final_update_id": diff.final_update_id,
+                            "previous_update_id": diff.previous_update_id,
+                            "error": str(exc)[:300],
+                        }
+                    },
+                )
+                await self._invalidate_book(symbol)
+                book = await self._bootstrap_book(symbol, force=True)
+                if book is None:
+                    continue
+                try:
+                    snapshot = book.apply(diff)
+                except OrderBookSequenceError:
+                    await self._invalidate_book(symbol)
+                    delay = self._bootstrap_backoff.get(symbol, 1.0)
+                    self._bootstrap_retry_at[symbol] = time.monotonic() + delay
+                    self._bootstrap_backoff[symbol] = min(delay * 2.0, 30.0)
+                    continue
             if snapshot is not None:
                 return snapshot
 

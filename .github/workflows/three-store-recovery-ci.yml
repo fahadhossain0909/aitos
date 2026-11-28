@@ -1,0 +1,73 @@
+name: Three-Store Recovery CI (Read Only)
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: three-store-recovery-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clickhouse-sqlite-venue-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: aitos-integration-password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user default --password aitos-integration-password --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Install project and integration dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-asyncio pytest-timeout clickhouse-connect aiohttp
+      - name: Run real ClickHouse + SQLite + signed local venue-adapter fault matrix
+        env:
+          PYTHONPATH: .
+          AITOS_ENABLE_THREE_STORE_FAULT_TESTS: "1"
+          AITOS_FAULT_CLICKHOUSE_HOST: 127.0.0.1
+          AITOS_FAULT_CLICKHOUSE_PORT: "8123"
+          AITOS_FAULT_CLICKHOUSE_USER: default
+          AITOS_FAULT_CLICKHOUSE_PASSWORD: aitos-integration-password
+        run: |
+          pytest -q --timeout=120 tests/integration/test_execution_recovery_three_store.py
+      - name: Verify scope-keyed ClickHouse runtime cutover and account isolation
+        env:
+          PYTHONPATH: .
+          AITOS_FAULT_CLICKHOUSE_HOST: 127.0.0.1
+          AITOS_FAULT_CLICKHOUSE_PORT: "8123"
+          AITOS_FAULT_CLICKHOUSE_USER: default
+          AITOS_FAULT_CLICKHOUSE_PASSWORD: aitos-integration-password
+        run: |
+          pytest -q --timeout=120 tests/integration/test_scoped_clickhouse_runtime.py
+      - name: Run protection restart and ambiguity regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q --timeout=120 \
+            tests/test_protection_child_lifecycle.py \
+            tests/test_protection_child_reconciliation.py \
+            tests/test_protection_reconciliation.py \
+            tests/test_strategy_opportunity_bridge.py \
+            tests/test_reconciliation_scheduler.py

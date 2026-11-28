@@ -328,11 +328,17 @@ def _install_persistence_sink() -> None:
         self._root_cause_persist_batch_min = None
         self._root_cause_persist_batch_max = 0
 
-    async def enqueue(self: Any, event: Any) -> None:
+    async def enqueue(self: Any, event: Any) -> Any:
         _ensure_persistence_state(self)
         before_queue = _queue_depth(self)
         before_rejected = int(getattr(self, "_rejected", 0))
-        await original_enqueue(self, event)
+        try:
+            completion = await original_enqueue(self, event)
+        except Exception:
+            after_rejected = int(getattr(self, "_rejected", 0))
+            if after_rejected > before_rejected:
+                self._root_cause_persist_rejected += after_rejected - before_rejected
+            raise
         after = _queue_depth(self)
         self._root_cause_persist_max_queue_depth = max(
             self._root_cause_persist_max_queue_depth, after
@@ -340,7 +346,7 @@ def _install_persistence_sink() -> None:
         after_rejected = int(getattr(self, "_rejected", 0))
         if after_rejected > before_rejected:
             self._root_cause_persist_rejected += after_rejected - before_rejected
-            return
+            return completion
         # The queue transition identifies an admitted event without copying
         # the sink's historical filtering rules into the forensic layer.
         if after > before_queue:
@@ -358,6 +364,7 @@ def _install_persistence_sink() -> None:
                     "at_ms": round(time.time() * 1000, 3),
                 }
             )
+        return completion
 
     async def persist_batch(self: Any, events: list[Any]) -> Any:
         _ensure_persistence_state(self)

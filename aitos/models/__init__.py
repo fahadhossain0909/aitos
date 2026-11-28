@@ -1,11 +1,6 @@
-from .market import (
-    FundingRate,
-    Kline,
-    OpenInterest,
-    OrderBookSnapshot,
-    TradeTick,
-)
+from .market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
 from .market import TradeSide as MarketTradeSide
+from .market import TradeTick
 from .trade import (
     Opportunity,
     PartialExit,

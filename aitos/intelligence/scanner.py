@@ -33,7 +33,6 @@ from aitos.intelligence.entry_quality import (
     breakout_acceptance_score,
     relative_strength_score,
 )
-from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
 from aitos.intelligence.htf_cache import HigherTimeframeCandleCache
@@ -61,12 +60,35 @@ from aitos.intelligence.orderflow_liquidity_interaction import (
     FlowLiquidityInteractionEngine,
 )
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
+from aitos.intelligence.scanner_cpu import (
+    compute_amt_footprint_features,
+    run_scanner_cpu,
+)
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 
 logger = get_logger("aitos.intelligence.scanner")
+
+
+async def _measure_event_loop_lag(
+    task: asyncio.Task, *, interval_seconds: float = 0.01
+) -> float:
+    """Measure worst scheduling delay while a scanner task is running."""
+    loop = asyncio.get_running_loop()
+    interval = max(0.001, interval_seconds)
+    deadline = loop.time() + interval
+    maximum_lag = 0.0
+    while True:
+        await asyncio.sleep(max(0.0, deadline - loop.time()))
+        now = loop.time()
+        maximum_lag = max(maximum_lag, now - deadline)
+        if task.done():
+            return maximum_lag * 1000.0
+        deadline = now + interval
+
+
 _ACTIVE_SCAN_TRACE_ID: ContextVar[str] = ContextVar("aitos_scan_trace_id", default="")
 TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
 DEFAULT_WEIGHTS: dict[str, float] = {
@@ -724,18 +746,28 @@ class OpportunityScanner(AITOSModule):
         tick = self._footprint_tick_sizes.get(symbol)
         return tick if tick is not None and tick > 0 else None
 
-    def _live_market_data(self, symbol: str) -> tuple[list, Any, bool]:
+    def _live_market_data(self, symbol: str) -> tuple[list, Any, bool, bool]:
+        """Return independently fresh trade and order-book cache state."""
         state = self._live_cache.snapshot(symbol)
-        if state is None or state.last_trade_at is None or state.last_book_at is None:
-            return [], None, False
+        if state is None:
+            return [], None, False, False
         now = datetime.now(timezone.utc)
-        return (
-            list(state.trades),
-            state.order_book,
-            (now - state.last_trade_at).total_seconds()
+        trade_fresh = (
+            state.last_trade_at is not None
+            and (now - state.last_trade_at).total_seconds()
             <= self._live_state_stale_seconds
+        )
+        book_fresh = (
+            state.last_book_at is not None
+            and state.order_book is not None
             and (now - state.last_book_at).total_seconds()
-            <= self._live_state_stale_seconds,
+            <= self._live_state_stale_seconds
+        )
+        return (
+            list(state.trades) if trade_fresh else [],
+            state.order_book if book_fresh else None,
+            trade_fresh,
+            book_fresh,
         )
 
     def _analyze_amt(
@@ -808,7 +840,32 @@ class OpportunityScanner(AITOSModule):
         except Exception:
             pass
         try:
-            result = await self._scan_symbol_impl(symbol, reference_klines)
+            scan_task = asyncio.create_task(
+                self._scan_symbol_impl(symbol, reference_klines),
+                name=f"scanner-analysis-{symbol}",
+            )
+            lag_task = asyncio.create_task(
+                _measure_event_loop_lag(scan_task),
+                name=f"scanner-loop-lag-{symbol}",
+            )
+            try:
+                result = await scan_task
+            finally:
+                # Give the lag sampler one turn to observe a synchronous stall
+                # immediately before scan completion.
+                await asyncio.sleep(0)
+                loop_lag_ms = await lag_task
+                if loop_lag_ms >= 50.0:
+                    logger.warning(
+                        "scanner analysis delayed the event loop",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "event_loop_lag_ms": round(loop_lag_ms, 3),
+                                "scan_stage": "symbol_analysis",
+                            }
+                        },
+                    )
         except Exception as exc:
             try:
                 record_error(
@@ -893,8 +950,20 @@ class OpportunityScanner(AITOSModule):
                 },
             )
             return None
-        live_trades, live_book, live_fresh = self._live_market_data(symbol)
-        if self._tuning.mode == "live" and not live_fresh:
+        (
+            live_trades,
+            live_book,
+            live_trade_fresh,
+            live_book_fresh,
+        ) = self._live_market_data(symbol)
+        live_inputs_fresh = (
+            live_trade_fresh
+            and live_book_fresh
+            and bool(live_trades)
+            and live_book is not None
+        )
+        live_fresh = live_inputs_fresh
+        if self._tuning.mode == "live" and not live_inputs_fresh:
             for rejected_side in ("LONG", "SHORT"):
                 await self._record_funnel(
                     symbol=symbol,
@@ -910,20 +979,24 @@ class OpportunityScanner(AITOSModule):
                 },
             )
             return None
-        if live_fresh and live_trades and live_book is not None:
-            trades, order_book, market_source = (
-                live_trades[-self._trade_lookback :],
-                live_book,
-                "websocket_live_state",
-            )
+        if live_trade_fresh and live_trades:
+            trades = live_trades[-self._trade_lookback :]
+            if live_book_fresh and live_book is not None:
+                order_book = live_book
+                market_source = "websocket_live_state"
+            else:
+                order_book = await self._exchange.fetch_order_book(symbol, limit=20)
+                market_source = "websocket_trades_rest_book"
         else:
-            order_book, trades, market_source = (
-                await self._exchange.fetch_order_book(symbol, limit=20),
-                await self._exchange.fetch_recent_trades(
-                    symbol, limit=self._trade_lookback
-                ),
-                "rest_fallback",
+            trades = await self._exchange.fetch_recent_trades(
+                symbol, limit=self._trade_lookback
             )
+            if live_book_fresh and live_book is not None:
+                order_book = live_book
+                market_source = "rest_trades_websocket_book"
+            else:
+                order_book = await self._exchange.fetch_order_book(symbol, limit=20)
+                market_source = "rest_fallback"
         funding = await self._exchange.fetch_funding_rate(symbol)
         oi_current = await self._exchange.fetch_open_interest(symbol)
         oi_previous = self._last_oi.get(symbol)
@@ -1450,7 +1523,37 @@ class OpportunityScanner(AITOSModule):
             if live_fresh
             else 5.0
         )
-        amt_context = self._analyze_amt(symbol, trades, klines, order_book)
+        tick_size = self._footprint_tick_size(symbol)
+        footprint_signals = None
+        amt_context = None
+        if tick_size is not None and trades:
+            cpu_started = time.perf_counter()
+            amt_context, footprint_signals = await run_scanner_cpu(
+                compute_amt_footprint_features,
+                trades,
+                klines,
+                order_book,
+                self._last_amt_profile.get(symbol),
+                tick_size,
+                self._amt_value_area_pct,
+                self._amt_ib_minutes,
+                self._footprint_signal_engine.imbalance_threshold,
+                self._footprint_signal_engine.min_level_volume,
+            )
+            self._last_amt_profile[symbol] = amt_context.profile
+            self._last_amt_context[symbol] = amt_context
+            cpu_latency_ms = (time.perf_counter() - cpu_started) * 1000.0
+            logger.info(
+                "scanner CPU features computed in isolated worker",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "stage": "amt_footprint",
+                        "latency_ms": round(cpu_latency_ms, 3),
+                        "worker": "process_pool",
+                    }
+                },
+            )
         if amt_context is not None:
             location_score = (
                 5.0 + (amt_context.price_location - 0.5) * 4.0
@@ -1484,13 +1587,8 @@ class OpportunityScanner(AITOSModule):
             amt_score = live_auction if live_fresh else candle_auction
         tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
         liquidity_events = tracker.update(order_book, trades)
-        tick_size = self._footprint_tick_size(symbol)
         footprint_available = False
-        if tick_size is not None and trades:
-            footprint = self._footprint_engines.setdefault(
-                symbol, FootprintEngine(tick_size)
-            ).build(trades)
-            footprint_signals = self._footprint_signal_engine.evaluate(footprint)
+        if tick_size is not None and trades and footprint_signals is not None:
             interaction = self._interaction_engine.evaluate(
                 footprint_signals, liquidity_events
             )

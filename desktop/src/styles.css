@@ -1600,6 +1600,39 @@ pre {
   background: #3f2921;
   margin-bottom: 13px;
 }
+.validation-info,
+.validation-success {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+  padding: 12px;
+  border: 1px solid #52613e;
+  border-radius: 4px;
+  background: #202b19;
+  color: #c5d6b4;
+  font-size: 10px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.validation-info code,
+.validation-success code {
+  color: #d5e6bd;
+  font-family: "IBM Plex Mono", monospace;
+  overflow-wrap: anywhere;
+}
+#approval-action {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  margin: 10px 0 14px;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid #52613e;
+  border-radius: 4px;
+  background: #11180e;
+  color: #dce8d1;
+  font: 11px/1.7 "IBM Plex Mono", monospace;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;

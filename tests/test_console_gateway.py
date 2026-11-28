@@ -548,17 +548,40 @@ def test_origin_normalization():
 
 async def test_https_cookie_is_secure_host_only_and_hsts_is_set(harness):
     config = replace(harness.config, public_origin="https://operator.example")
-    app = create_gateway(config, password=PASSWORD)
+
+    class FakeWebAuthn:
+        rp_id = "operator.example"
+        origins = frozenset({"https://operator.example"})
+
+        def credential_count(self, *, user_id):
+            return 0
+
+        def registration_options(self, *, user_id, now):
+            return {"challenge": "server-issued-registration-challenge"}
+
+        def consume_enrollment_bootstrap_token(
+            self, *, user_id, configured_token, supplied_token, now
+        ):
+            return configured_token == supplied_token and len(supplied_token) >= 32
+
+    bootstrap = "https-bootstrap-token-with-at-least-256-bits"
+    app = create_gateway(
+        config,
+        password=PASSWORD,
+        webauthn_rp=FakeWebAuthn(),
+        webauthn_enrollment_token=bootstrap,
+    )
     async with TestClient(
         TestServer(app), headers={"Host": "operator.example"}
     ) as client:
         response = await client.post(
             "/operator/v1/login",
-            json={"password": PASSWORD},
+            json={"password": PASSWORD, "enrollment_token": bootstrap},
             headers={"Origin": "https://operator.example"},
         )
         assert response.status == 200
-        cookie = response.cookies["__Host-aitos_operator"]
+        assert (await response.json())["mfa_enrollment_required"] is True
+        cookie = response.cookies["__Host-aitos_operator_pending"]
         assert (
             cookie["secure"] and cookie["httponly"] and cookie["samesite"] == "Strict"
         )

@@ -276,12 +276,14 @@ async def test_protective_post_is_preclaimed_and_uncertain_post_stays_blocked(tm
         raise TimeoutError("offline response lost")
 
     value._signed_request = AsyncMock(side_effect=uncertain_post)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(
+        ExecutionUncertainError, match="outcome and client-ID recovery lookup"
+    ):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
     assert store(tmp_path).unresolved()[0]["state"] == "SUBMITTING"
     with pytest.raises(ExecutionUncertainError):
         await value.place_stop_loss_order("BTCUSDT", TradeSide.LONG, 1, 90)
-    assert value._signed_request.await_count == 1
+    assert value._signed_request.await_count == 2
 
 
 async def test_protection_acknowledgement_clears_only_after_durable_application(
@@ -715,3 +717,66 @@ def test_protection_child_watermark_is_monotonic_and_identity_scoped(tmp_path):
             cumulative_quote="45",
             status="FILLED",
         )
+
+
+def test_execution_transitions_are_append_only_and_use_transaction_sequence(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(request())
+    journal.record_result("intent-one", result())
+    journal.mark_applied("intent-one", "durable-trade-one")
+
+    first_page = journal.read_transition_events(limit=2)
+    second_page = journal.read_transition_events(
+        after_sequence=first_page[-1]["sequence"], limit=2
+    )
+    assert [event["event_type"] for event in first_page] == [
+        "INTENT_CREATED",
+        "INTENT_STATE_CHANGED",
+    ]
+    assert [event["event_type"] for event in second_page] == ["INTENT_STATE_CHANGED"]
+    assert [event["sequence"] for event in first_page + second_page] == sorted(
+        event["sequence"] for event in first_page + second_page
+    )
+    assert second_page[0]["before_json"]
+    assert '"state":"CONFIRMED"' in second_page[0]["before_json"]
+    assert '"state":"APPLIED"' in second_page[0]["after_json"]
+
+    import sqlite3
+
+    with sqlite3.connect(journal.path) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute(
+                "UPDATE execution_transition_events SET event_type='ERASED' "
+                "WHERE sequence=1"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            conn.execute("DELETE FROM execution_transition_events WHERE sequence=1")
+
+
+def test_execution_transition_sequence_is_scoped_and_survives_reopen(tmp_path):
+    journal = store(tmp_path, scope="account-A")
+    journal.begin(request())
+    last = journal.read_transition_events()[-1]["sequence"]
+
+    other = store(tmp_path, scope="account-B")
+    assert other.read_transition_events() == []
+    other.begin(request(client_order_id="other-scope"))
+    assert other.read_transition_events()[0]["sequence"] > 0
+
+    reopened = store(tmp_path, scope="account-A")
+    assert reopened.read_transition_events()[0]["sequence"] == last
+
+
+def test_repeated_applied_acknowledgement_is_idempotent_and_trade_scoped(tmp_path):
+    journal = store(tmp_path)
+    journal.begin(request())
+    journal.record_result("intent-one", result())
+    journal.mark_applied("intent-one", "durable-trade-one")
+
+    # Cumulative protective child fills can re-enter the acknowledgement path.
+    journal.mark_applied("intent-one", "durable-trade-one")
+    assert journal.get("intent-one")["state"] == "APPLIED"
+    assert journal.get("intent-one")["trade_id"] == "durable-trade-one"
+
+    with pytest.raises(ValueError, match="different trade"):
+        journal.mark_applied("intent-one", "different-trade")

@@ -47,3 +47,24 @@ def test_write_capable_recovery_workflow_excludes_pull_request_code():
     assert "\n  push:" in triggers
     assert "\n  workflow_dispatch:" in triggers
     assert "\npermissions:\n  contents: write\n  actions: write" in source
+
+
+def test_pull_request_three_store_workflow_is_read_only_and_runs_real_clickhouse():
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "three-store-recovery-ci.yml"
+    )
+    source = workflow.read_text(encoding="utf-8")
+    triggers = source.split("\njobs:", 1)[0]
+
+    assert "\n  pull_request:" in triggers
+    assert "\npermissions:\n  contents: read" in source
+    assert "contents: write" not in source
+    assert "actions: write" not in source
+    assert "clickhouse/clickhouse-server:24.8-alpine" in source
+    assert 'AITOS_ENABLE_THREE_STORE_FAULT_TESTS: "1"' in source
+    assert "tests/integration/test_execution_recovery_three_store.py" in source
+    assert "BINANCE_FUTURES_TESTNET_API_KEY" not in source
+    assert "workflow_dispatch" in triggers

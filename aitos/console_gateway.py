@@ -18,6 +18,7 @@ import re
 import secrets
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -194,23 +195,54 @@ class GatewayConfig:
 
 
 class OperatorSessions:
-    """Hash-only, bounded, absolute-expiry sessions; restart revokes everything."""
+    """Hash-only, bounded sessions and MFA pre-authentication with stable subjects."""
 
-    def __init__(self, config: GatewayConfig, password: str, *, clock=time.monotonic):
-        if not is_valid_operator_password(password):
-            raise ValueError("operator password must be 24–1024 UTF-8 bytes")
+    def __init__(
+        self,
+        config: GatewayConfig,
+        password: str | None,
+        *,
+        default_user: str,
+        identities: dict[str, str] | None = None,
+        clock=time.monotonic,
+        credential_validator: Callable[[str, str], bool] | None = None,
+    ):
         self.config = config
         self.clock = clock
-        self.salt = secrets.token_bytes(16)
-        self.digest = self._derive(password)
-        self.sessions: dict[bytes, float] = {}
+        self.credential_validator = credential_validator
+        self.default_user = default_user
+        source = identities or {default_user: password}
+        if (
+            not isinstance(source, dict)
+            or not source
+            or len(source) > 32
+            or default_user not in source
+        ):
+            raise ValueError("bounded operator identity directory is required")
+        self.credentials: dict[str, tuple[bytes, bytes]] = {}
+        for user_id, secret in source.items():
+            if (
+                not isinstance(user_id, str)
+                or not user_id.strip()
+                or user_id != user_id.strip()
+                or len(user_id) > 256
+                or not is_valid_operator_password(secret)
+            ):
+                raise ValueError(
+                    "each operator requires a bounded identity and password"
+                )
+            salt = secrets.token_bytes(16)
+            self.credentials[user_id] = (salt, self._derive(secret, salt))
+        self.sessions: dict[bytes, tuple[float, str, str | None]] = {}
+        self.pending: dict[bytes, tuple[float, str]] = {}
         self.attempts: deque[float] = deque()
         self.hash_lock = asyncio.Lock()
 
-    def _derive(self, password):
+    @staticmethod
+    def _derive(password: str, salt: bytes) -> bytes:
         return hashlib.scrypt(
             password.encode("utf-8"),
-            salt=self.salt,
+            salt=salt,
             n=16384,
             r=8,
             p=1,
@@ -225,23 +257,86 @@ class OperatorSessions:
 
     def prune(self):
         now = self.clock()
-        self.sessions = {key: end for key, end in self.sessions.items() if end > now}
+        self.sessions = {
+            key: record for key, record in self.sessions.items() if record[0] > now
+        }
+        self.pending = {
+            key: record for key, record in self.pending.items() if record[0] > now
+        }
         while self.attempts and self.attempts[0] <= now - 60:
             self.attempts.popleft()
 
-    def remaining(self, cookie):
+    def _active_session(self, cookie):
         self.prune()
-        return max(0, int(self.sessions.get(self._key(cookie), 0) - self.clock()))
+        key = self._key(cookie)
+        record = self.sessions.get(key) if key is not None else None
+        if record is None:
+            return None
+        if self.credential_validator is not None:
+            credential_id = record[2]
+            try:
+                active = bool(
+                    credential_id
+                    and self.credential_validator(record[1], credential_id)
+                )
+            except Exception:
+                active = False
+            if not active:
+                self.sessions.pop(key, None)
+                return None
+        return record
+
+    def remaining(self, cookie):
+        record = self._active_session(cookie)
+        return max(0, int(record[0] - self.clock())) if record else 0
+
+    def identity(self, cookie):
+        record = self._active_session(cookie)
+        return record[1] if record else None
 
     def revoke(self, cookie):
         self.sessions.pop(self._key(cookie), None)
 
-    def issue(self):
+    def issue_pending(self, token: str, user_id: str) -> None:
+        self.prune()
+        if len(self.pending) >= self.config.max_sessions:
+            del self.pending[min(self.pending, key=lambda key: self.pending[key][0])]
+        self.pending[self._key(token)] = (self.clock() + 180, user_id)
+
+    def pending_identity(self, token: str | None) -> str | None:
+        self.prune()
+        key = self._key(token)
+        record = self.pending.get(key) if key else None
+        return record[1] if record else None
+
+    def has_pending(self, token: str | None) -> bool:
+        return self.pending_identity(token) is not None
+
+    def revoke_pending(self, token: str | None) -> None:
+        self.pending.pop(self._key(token), None)
+
+    def issue(self, user_id: str | None = None, *, credential_id: str | None = None):
+        user = user_id or self.default_user
+        if user not in self.credentials:
+            raise ValueError("unknown operator identity")
+        if self.credential_validator is not None and (
+            not isinstance(credential_id, str)
+            or not credential_id
+            or len(credential_id) > 1024
+            or not self.credential_validator(user, credential_id)
+        ):
+            raise PermissionError(
+                "a currently registered WebAuthn credential is required for session issuance"
+            )
         self.prune()
         if len(self.sessions) >= self.config.max_sessions:
-            del self.sessions[min(self.sessions, key=self.sessions.get)]
+            del self.sessions[min(self.sessions, key=lambda key: self.sessions[key][0])]
         token = secrets.token_urlsafe(32)
-        self.sessions[self._key(token)] = self.clock() + self.config.session_seconds
+        self.sessions[self._key(token)] = (
+            self.clock() + self.config.session_seconds,
+            user,
+            credential_id,
+        )
         return token
 
     def admit_attempt(self):
@@ -251,10 +346,16 @@ class OperatorSessions:
         self.attempts.append(self.clock())
         return True
 
-    async def verify(self, password):
+    async def verify(self, password: str, user_id: str) -> bool:
+        record = self.credentials.get(user_id) if isinstance(user_id, str) else None
+        if record is None:
+            # Perform a dummy KDF for unknown identities to reduce timing leakage.
+            salt, expected = next(iter(self.credentials.values()))
+        else:
+            salt, expected = record
         async with self.hash_lock:
-            derived = await asyncio.to_thread(self._derive, password)
-            return hmac.compare_digest(derived, self.digest)
+            derived = await asyncio.to_thread(self._derive, password, salt)
+            return bool(record) and hmac.compare_digest(derived, expected)
 
 
 WORKSPACE_IDS = frozenset({"trading", "ai", "quant", "developer", "data", "risk"})
@@ -392,11 +493,60 @@ GATEWAY_STATE = web.AppKey("operator_sessions", OperatorSessions)
 
 
 def create_gateway(
-    config: GatewayConfig, *, password: str, clock=time.monotonic
+    config: GatewayConfig,
+    *,
+    password: str | None,
+    clock=time.monotonic,
+    webauthn_rp=None,
+    approval_control_plane=None,
+    operator_id: str = "local-operator",
+    identities: dict[str, str] | None = None,
+    webauthn_enrollment_token: str | None = None,
 ) -> web.Application:
-    state = OperatorSessions(config, password, clock=clock)
+    if (
+        not isinstance(operator_id, str)
+        or not operator_id.strip()
+        or len(operator_id) > 256
+    ):
+        raise ValueError("bounded operator identity is required")
+    if webauthn_rp is None and not _loopback(config.public_origin):
+        raise ValueError("WebAuthn MFA is mandatory for non-loopback operator gateways")
+    if webauthn_rp is not None:
+        host = urlsplit(config.public_origin).hostname or ""
+        rp_id = getattr(webauthn_rp, "rp_id", "")
+        origins = frozenset(getattr(webauthn_rp, "origins", ()))
+        if (
+            not isinstance(rp_id, str)
+            or not rp_id
+            or not (host == rp_id or host.endswith("." + rp_id))
+            or origins != frozenset({config.public_origin})
+        ):
+            raise ValueError("WebAuthn RP ID and origin must match the gateway origin")
+    if webauthn_enrollment_token is not None and (
+        not isinstance(webauthn_enrollment_token, str)
+        or len(webauthn_enrollment_token) < 32
+    ):
+        raise ValueError("WebAuthn enrollment token must contain at least 256 bits")
+    credential_validator = (
+        getattr(webauthn_rp, "is_credential_active", None)
+        if webauthn_rp is not None
+        else None
+    )
+    if credential_validator is not None and not callable(credential_validator):
+        raise TypeError("WebAuthn credential activity verifier must be callable")
+    state = OperatorSessions(
+        config,
+        password,
+        default_user=operator_id,
+        identities=identities,
+        clock=clock,
+        credential_validator=credential_validator,
+    )
     secure = config.public_origin.startswith("https:")
     cookie_name = "__Host-aitos_operator" if secure else "aitos_local_operator"
+    pending_cookie = (
+        "__Host-aitos_operator_pending" if secure else "aitos_local_operator_pending"
+    )
     upstream: ClientSession | None = None
     upstream_slots = asyncio.Semaphore(4)
 
@@ -446,7 +596,7 @@ def create_gateway(
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
 
-    app = web.Application(middlewares=[boundary], client_max_size=4096)
+    app = web.Application(middlewares=[boundary], client_max_size=96 * 1024)
     app[GATEWAY_STATE] = state
 
     async def transport(app):
@@ -464,6 +614,56 @@ def create_gateway(
 
     app.cleanup_ctx.append(transport)
 
+    def set_pending_cookie(response, token):
+        response.set_cookie(
+            pending_cookie,
+            token,
+            path="/",
+            httponly=True,
+            secure=secure,
+            samesite="Strict",
+            max_age=180,
+        )
+        return response
+
+    def clear_pending_cookie(response):
+        response.set_cookie(
+            pending_cookie,
+            "",
+            max_age=0,
+            expires="Thu, 01 Jan 1970 00:00:00 GMT",
+            path="/",
+            secure=secure,
+            httponly=True,
+            samesite="Strict",
+        )
+        return response
+
+    def require_pending(request):
+        token = request.cookies.get(pending_cookie)
+        user_id = state.pending_identity(token)
+        if user_id is None:
+            raise web.HTTPUnauthorized(text="MFA pre-authentication expired")
+        return user_id
+
+    def issue_operator_session(
+        response, request, user_id, *, credential_id: str | None = None
+    ):
+        state.revoke(request.cookies.get(cookie_name))
+        state.revoke_pending(request.cookies.get(pending_cookie))
+        token = state.issue(user_id, credential_id=credential_id)
+        response.set_cookie(
+            cookie_name,
+            token,
+            path="/",
+            httponly=True,
+            secure=secure,
+            samesite="Strict",
+            max_age=config.session_seconds,
+        )
+        clear_pending_cookie(response)
+        return response
+
     def clear_cookie(response):
         # set_cookie supports these flags across the project's aiohttp>=3.10
         # range; del_cookie gained some keyword flags only in newer releases.
@@ -480,8 +680,27 @@ def create_gateway(
         return response
 
     def require_operator_session(request):
-        if not state.remaining(request.cookies.get(cookie_name)):
+        user_id = state.identity(request.cookies.get(cookie_name))
+        if user_id is None:
             raise web.HTTPUnauthorized(text="Operator session required")
+        return user_id
+
+    async def read_json_body(request, *, max_bytes: int):
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        raw = await request.read()
+        if len(raw) > max_bytes:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=max_bytes, actual_size=len(raw)
+            )
+        try:
+            return json.loads(
+                raw,
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
+        except (ValueError, UnicodeError):
+            raise web.HTTPBadRequest(text="Invalid JSON request") from None
 
     def workspace_layout_path():
         return config.workspace_file
@@ -592,6 +811,9 @@ def create_gateway(
                 "authenticated": remaining > 0,
                 "expires_in_seconds": remaining,
                 "controls": "read_only",
+                "identity": state.identity(request.cookies.get(cookie_name)),
+                "default_identity": operator_id,
+                "mfa": bool(webauthn_rp) if remaining else False,
             }
         )
         return (
@@ -607,43 +829,369 @@ def create_gateway(
                 status=429,
                 headers={"Retry-After": "60"},
             )
-        if request.content_type != "application/json":
-            raise web.HTTPUnsupportedMediaType()
         try:
-            body = await request.json()
+            body = await read_json_body(request, max_bytes=4096)
             if (
                 not isinstance(body, dict)
-                or set(body) != {"password"}
+                or "password" not in body
+                or set(body)
+                not in (
+                    {"password"},
+                    {"password", "enrollment_token"},
+                    {"password", "user_id"},
+                    {"password", "user_id", "enrollment_token"},
+                )
                 or not isinstance(body["password"], str)
                 or not 1 <= len(body["password"].encode("utf-8")) <= 1024
+                or (
+                    "enrollment_token" in body
+                    and not isinstance(body["enrollment_token"], str)
+                )
+                or (
+                    "user_id" in body
+                    and (
+                        not isinstance(body["user_id"], str)
+                        or not body["user_id"].strip()
+                        or len(body["user_id"]) > 256
+                    )
+                )
             ):
                 raise ValueError()
         except (ValueError, UnicodeError):
             raise web.HTTPBadRequest(text="Invalid operator sign-in") from None
-        if not await state.verify(body["password"]):
+        user_id = body.get("user_id", operator_id)
+        if not await state.verify(body["password"], user_id):
             logger.info("operator sign-in rejected")
             raise web.HTTPUnauthorized(text="Operator sign-in rejected")
         state.revoke(request.cookies.get(cookie_name))
-        token = state.issue()
+        if webauthn_rp is not None:
+            try:
+                credentials = webauthn_rp.credential_count(user_id=user_id)
+                if not credentials and not _loopback(config.public_origin):
+                    if not webauthn_enrollment_token or not (
+                        webauthn_rp.consume_enrollment_bootstrap_token(
+                            user_id=user_id,
+                            configured_token=webauthn_enrollment_token,
+                            supplied_token=body.get("enrollment_token", ""),
+                            now=int(time.time()),
+                        )
+                    ):
+                        raise web.HTTPForbidden(
+                            text="First WebAuthn enrollment requires an unused out-of-band bootstrap token"
+                        )
+                pending = secrets.token_urlsafe(32)
+                state.issue_pending(pending, user_id)
+                if credentials:
+                    options = webauthn_rp.authentication_options(
+                        user_id=user_id, now=int(time.time())
+                    )
+                    response = web.json_response(
+                        {
+                            "authenticated": False,
+                            "mfa_required": True,
+                            "options": options,
+                        }
+                    )
+                else:
+                    options = webauthn_rp.registration_options(
+                        user_id=user_id, now=int(time.time())
+                    )
+                    response = web.json_response(
+                        {
+                            "authenticated": False,
+                            "mfa_enrollment_required": True,
+                            "options": options,
+                        }
+                    )
+                return set_pending_cookie(response, pending)
+            except web.HTTPException:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "operator MFA challenge could not be created: %s",
+                    type(exc).__name__,
+                )
+                raise web.HTTPServiceUnavailable(
+                    text="WebAuthn MFA unavailable"
+                ) from None
         response = web.json_response(
             {"authenticated": True, "expires_in_seconds": config.session_seconds}
         )
-        response.set_cookie(
-            cookie_name,
-            token,
-            path="/",
-            httponly=True,
-            secure=secure,
-            samesite="Strict",
-            max_age=config.session_seconds,
+        logger.warning(
+            "password-only operator session issued; WebAuthn MFA is disabled"
         )
-        logger.info("operator sign-in accepted")
-        return response
+        return issue_operator_session(response, request, user_id)
+
+    async def finish_mfa_enrollment(request):
+        if webauthn_rp is None:
+            raise web.HTTPNotFound()
+        user_id = require_pending(request)
+        body = await read_json_body(request, max_bytes=96 * 1024)
+        if not isinstance(body, dict) or set(body) != {"credential"}:
+            raise web.HTTPBadRequest(text="Invalid WebAuthn enrollment")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"}, text="MFA enrollment rate limit reached"
+            )
+        try:
+            webauthn_rp.verify_registration(
+                user_id=user_id, credential=body["credential"], now=int(time.time())
+            )
+            options = webauthn_rp.authentication_options(
+                user_id=user_id, now=int(time.time())
+            )
+            return web.json_response(
+                {"authenticated": False, "mfa_required": True, "options": options}
+            )
+        except Exception as exc:
+            logger.info("operator WebAuthn enrollment rejected: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="WebAuthn enrollment rejected") from None
+
+    async def finish_mfa_login(request):
+        if webauthn_rp is None:
+            raise web.HTTPNotFound()
+        user_id = require_pending(request)
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"},
+                text="MFA verification rate limit reached",
+            )
+        body = await read_json_body(request, max_bytes=96 * 1024)
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"challenge", "assertion"}
+            or not isinstance(body["challenge"], str)
+            or not isinstance(body["assertion"], dict)
+        ):
+            raise web.HTTPBadRequest(text="Invalid WebAuthn assertion")
+        try:
+            claims = webauthn_rp.verify_assertion(
+                assertion=json.dumps(body["assertion"], separators=(",", ":")).encode(),
+                challenge=body["challenge"],
+                expected_origin=webauthn_rp.origins,
+                expected_rp_id=webauthn_rp.rp_id,
+                require_user_verification=True,
+            )
+            if claims.get("verified") is not True or claims.get("user_id") != user_id:
+                raise PermissionError("WebAuthn identity mismatch")
+        except Exception as exc:
+            logger.info("operator WebAuthn assertion rejected: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="WebAuthn assertion rejected") from None
+        response = web.json_response(
+            {
+                "authenticated": True,
+                "expires_in_seconds": config.session_seconds,
+                "identity": user_id,
+                "mfa": True,
+                "controls": "read_only",
+            }
+        )
+        logger.info("operator MFA sign-in accepted")
+        credential_id = claims.get("credential_id")
+        if not isinstance(credential_id, str) or not credential_id:
+            raise web.HTTPUnauthorized(text="WebAuthn credential identity unavailable")
+        return issue_operator_session(
+            response, request, user_id, credential_id=credential_id
+        )
+
+    async def list_operator_credentials(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        return web.json_response(
+            {"credentials": webauthn_rp.list_credentials(user_id=user_id)}
+        )
+
+    async def begin_add_authenticator(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"},
+                text="Authenticator enrollment rate limit reached",
+            )
+        options = webauthn_rp.authentication_options(
+            user_id=user_id, now=int(time.time())
+        )
+        return web.json_response({"options": options})
+
+    async def verify_add_authenticator_step_up(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"},
+                text="Authenticator step-up rate limit reached",
+            )
+        body = await read_json_body(request, max_bytes=96 * 1024)
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"challenge", "assertion"}
+            or not isinstance(body["challenge"], str)
+            or not isinstance(body["assertion"], dict)
+        ):
+            raise web.HTTPBadRequest(text="Invalid WebAuthn step-up")
+        try:
+            claims = webauthn_rp.verify_assertion(
+                assertion=json.dumps(body["assertion"], separators=(",", ":")).encode(),
+                challenge=body["challenge"],
+                expected_origin=webauthn_rp.origins,
+                expected_rp_id=webauthn_rp.rp_id,
+                require_user_verification=True,
+            )
+            if claims.get("verified") is not True or claims.get("user_id") != user_id:
+                raise PermissionError("WebAuthn identity mismatch")
+            options = webauthn_rp.registration_options(
+                user_id=user_id, now=int(time.time())
+            )
+        except Exception as exc:
+            logger.info(
+                "authenticator enrollment step-up rejected: %s", type(exc).__name__
+            )
+            raise web.HTTPUnauthorized(text="WebAuthn step-up rejected") from None
+        return web.json_response({"options": options})
+
+    async def finish_add_authenticator(request):
+        user_id = require_operator_session(request)
+        if webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(text="WebAuthn is not configured")
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"},
+                text="Authenticator registration rate limit reached",
+            )
+        body = await read_json_body(request, max_bytes=96 * 1024)
+        if not isinstance(body, dict) or set(body) != {"credential"}:
+            raise web.HTTPBadRequest(text="Invalid WebAuthn registration")
+        try:
+            credential_id = webauthn_rp.verify_registration(
+                user_id=user_id,
+                credential=body["credential"],
+                now=int(time.time()),
+            )
+        except Exception as exc:
+            logger.info(
+                "additional authenticator registration rejected: %s", type(exc).__name__
+            )
+            raise web.HTTPUnauthorized(
+                text="Authenticator registration rejected"
+            ) from None
+        return web.json_response({"registered": True, "credential_id": credential_id})
+
+    async def approval_capabilities(request):
+        user_id = require_operator_session(request)
+        enabled = (
+            approval_control_plane is not None
+            and webauthn_rp is not None
+            and approval_control_plane.role_authorizer(user_id, "live_trader")
+        )
+        return web.json_response(
+            {
+                "enabled": enabled,
+                "requires_webauthn_step_up": enabled,
+                "execution_scope": os.environ.get("AITOS_EXECUTION_SCOPE") or None,
+                "execution": "not_exposed_by_operator_gateway",
+            }
+        )
+
+    async def create_approval_challenge(request):
+        user_id = require_operator_session(request)
+        if approval_control_plane is None or webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(
+                text="Approval control plane is not configured"
+            )
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"},
+                text="Approval request rate limit reached",
+            )
+        try:
+            body = await read_json_body(request, max_bytes=4096)
+            if not isinstance(body, dict) or set(body) != {"action"}:
+                raise ValueError()
+            action = body["action"]
+            if not isinstance(action, dict) or not action:
+                raise ValueError()
+            expected_scope = os.environ.get("AITOS_EXECUTION_SCOPE", "").strip()
+            if expected_scope and action.get("scope") != expected_scope:
+                raise ValueError()
+            options = webauthn_rp.authentication_options(
+                user_id=user_id, now=int(time.time())
+            )
+            challenge = approval_control_plane.issue_challenge(
+                user_id=user_id,
+                action=action,
+                webauthn_challenge=options["challenge"],
+            )
+        except (ValueError, TypeError):
+            raise web.HTTPBadRequest(text="Invalid approval action") from None
+        except PermissionError:
+            raise web.HTTPForbidden(text="Approval role is not authorized") from None
+        except Exception as exc:
+            logger.warning("approval challenge creation failed: %s", type(exc).__name__)
+            raise web.HTTPServiceUnavailable(
+                text="Approval challenge unavailable"
+            ) from None
+        return web.json_response(
+            {
+                "challenge_id": challenge.challenge_id,
+                "action_digest": challenge.action_digest,
+                "expires_at": challenge.expires_at,
+                "options": options,
+            }
+        )
+
+    async def approve_action(request):
+        user_id = require_operator_session(request)
+        if approval_control_plane is None or webauthn_rp is None:
+            raise web.HTTPServiceUnavailable(
+                text="Approval control plane is not configured"
+            )
+        if not state.admit_attempt():
+            raise web.HTTPTooManyRequests(
+                headers={"Retry-After": "60"},
+                text="Approval verification rate limit reached",
+            )
+        try:
+            body = await read_json_body(request, max_bytes=96 * 1024)
+            if (
+                not isinstance(body, dict)
+                or set(body) != {"challenge_id", "assertion"}
+                or not isinstance(body["challenge_id"], str)
+                or not isinstance(body["assertion"], dict)
+            ):
+                raise ValueError()
+            challenge = approval_control_plane.load_challenge(
+                body["challenge_id"], user_id=user_id
+            )
+            token = approval_control_plane.approve(
+                challenge,
+                assertion=json.dumps(body["assertion"], separators=(",", ":")).encode(),
+                verifier=webauthn_rp.verify_assertion,
+            )
+        except (ValueError, TypeError):
+            raise web.HTTPBadRequest(text="Invalid approval response") from None
+        except PermissionError:
+            raise web.HTTPForbidden(text="Approval verification rejected") from None
+        except Exception as exc:
+            logger.warning("approval verification failed: %s", type(exc).__name__)
+            raise web.HTTPUnauthorized(text="Approval verification rejected") from None
+        return web.json_response(
+            {
+                "token_id": token.token_id,
+                "user_id": token.user_id,
+                "action_digest": token.action_digest,
+                "expires_at": token.expires_at,
+            }
+        )
 
     async def logout(request):
         state.revoke(request.cookies.get(cookie_name))
+        state.revoke_pending(request.cookies.get(pending_cookie))
         logger.info("operator session revoked")
-        return clear_cookie(web.Response(status=204))
+        return clear_pending_cookie(clear_cookie(web.Response(status=204)))
 
     async def proxy(request):
         if request.path not in READ_ROUTES:
@@ -750,6 +1298,15 @@ def create_gateway(
     app.router.add_get("/operator/v1/workspace-layout", get_workspace_layout)
     app.router.add_put("/operator/v1/workspace-layout", put_workspace_layout)
     app.router.add_post("/operator/v1/login", login)
+    app.router.add_post("/operator/v1/mfa/register", finish_mfa_enrollment)
+    app.router.add_post("/operator/v1/mfa/verify", finish_mfa_login)
+    app.router.add_get("/operator/v1/mfa/credentials", list_operator_credentials)
+    app.router.add_post("/operator/v1/mfa/add/options", begin_add_authenticator)
+    app.router.add_post("/operator/v1/mfa/add/verify", verify_add_authenticator_step_up)
+    app.router.add_post("/operator/v1/mfa/add/finish", finish_add_authenticator)
+    app.router.add_get("/operator/v1/approval/capabilities", approval_capabilities)
+    app.router.add_post("/operator/v1/approval/challenge", create_approval_challenge)
+    app.router.add_post("/operator/v1/approval/approve", approve_action)
     app.router.add_post("/operator/v1/logout", logout)
     app.router.add_route("*", "/console/{path:.*}", proxy)
     app.router.add_get("/{path:.*}", static_file)
@@ -767,18 +1324,99 @@ def main():
     parser.add_argument("--dist", type=Path, default=Path("desktop/dist"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8780)
+    parser.add_argument(
+        "--webauthn-db", type=Path, default=os.environ.get("AITOS_WEBAUTHN_DB")
+    )
+    parser.add_argument(
+        "--operator-id", default=os.environ.get("AITOS_OPERATOR_ID", "local-operator")
+    )
     args = parser.parse_args()
+    if args.webauthn_db is not None:
+        args.webauthn_db = args.webauthn_db.expanduser().resolve()
     try:
         config = GatewayConfig(
             args.origin, args.upstream, args.dist, os.environ.get("AITOS_CONSOLE_TOKEN")
         )
-        app = create_gateway(
-            config, password=os.environ.get("AITOS_OPERATOR_PASSWORD", "")
+        if args.webauthn_db is None:
+            parser.exit(
+                2,
+                "AITOS_WEBAUTHN_DB or --webauthn-db is required; production gateway refuses password-only startup.\n",
+            )
+        from aitos.security.webauthn_rp import WebAuthnRelyingParty
+
+        rp_id = (
+            os.environ.get("AITOS_WEBAUTHN_RP_ID", "").strip()
+            or urlsplit(config.public_origin).hostname
         )
-    except ValueError:
+        webauthn_rp = WebAuthnRelyingParty(
+            args.webauthn_db,
+            rp_id=rp_id,
+            rp_name="AITOS Operator Console",
+            allowed_origins={config.public_origin},
+        )
+        approval_key = os.environ.get("AITOS_APPROVAL_SIGNING_KEY")
+        role_map_raw = os.environ.get("AITOS_OPERATOR_ROLE_MAP")
+        approval_control_plane = None
+        if approval_key or role_map_raw:
+            if not approval_key or not role_map_raw:
+                parser.exit(
+                    2,
+                    "Approval requires both AITOS_APPROVAL_SIGNING_KEY and AITOS_OPERATOR_ROLE_MAP.\\n",
+                )
+            shared_webauthn_db = os.environ.get("AITOS_WEBAUTHN_DB", "").strip()
+            shared_origin = os.environ.get("AITOS_WEBAUTHN_ORIGIN", "").strip()
+            shared_rp_id = os.environ.get("AITOS_WEBAUTHN_RP_ID", "").strip()
+            shared_scope = os.environ.get("AITOS_EXECUTION_SCOPE", "").strip()
+            if (
+                not shared_webauthn_db
+                or Path(shared_webauthn_db).expanduser().resolve() != args.webauthn_db
+                or shared_origin != config.public_origin
+                or not shared_scope
+                or (shared_rp_id and shared_rp_id != rp_id)
+            ):
+                parser.exit(
+                    2,
+                    "Approval gateway and executor must share AITOS_WEBAUTHN_DB "
+                    "and AITOS_WEBAUTHN_ORIGIN.\\n",
+                )
+            role_map = json.loads(role_map_raw)
+            if not isinstance(role_map, dict) or any(
+                not isinstance(user, str)
+                or not isinstance(roles, list)
+                or any(not isinstance(role, str) for role in roles)
+                for user, roles in role_map.items()
+            ):
+                parser.exit(
+                    2, "AITOS_OPERATOR_ROLE_MAP must map identities to role arrays.\\n"
+                )
+            from aitos.security.live_approval import LiveApprovalControlPlane
+
+            approval_control_plane = LiveApprovalControlPlane(
+                args.webauthn_db.with_name("live-approvals.sqlite"),
+                signing_key=approval_key.encode("utf-8"),
+                allowed_origins={config.public_origin},
+                rp_id=rp_id,
+                role_authorizer=lambda user, role: role in role_map.get(user, []),
+            )
+        identities_raw = os.environ.get("AITOS_OPERATOR_IDENTITIES")
+        identities = json.loads(identities_raw) if identities_raw else None
+        app = create_gateway(
+            config,
+            password=(
+                None
+                if identities is not None
+                else os.environ.get("AITOS_OPERATOR_PASSWORD", "")
+            ),
+            identities=identities,
+            webauthn_rp=webauthn_rp,
+            approval_control_plane=approval_control_plane,
+            operator_id=args.operator_id,
+            webauthn_enrollment_token=os.environ.get("AITOS_WEBAUTHN_ENROLLMENT_TOKEN"),
+        )
+    except (ValueError, OSError):
         parser.exit(
             2,
-            "Gateway configuration rejected. Check origins, built bundle and operator credential settings.\n",
+            "Gateway configuration rejected. Check origins, built bundle, operator credential and WebAuthn settings.\n",
         )
     web.run_app(app, host=args.host, port=args.port, access_log=None)
 

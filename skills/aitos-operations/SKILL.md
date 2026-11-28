@@ -20,7 +20,7 @@ Mission order (never invert):
 - Runtime: Docker Desktop. Full stack defined in `docker-compose.yml` (+ `docker-compose.override.yml`).
 - Services: redis, redis-dlq-retention, redis-stream-archive, clickhouse (+ one-shot clickhouse-init), neo4j, aitos-paper (health :8090), aitos-learning, aitos-storage-maintenance. Profiles: `backtest` (aitos-backtest), `live` (aitos-live :8091), `observability` (prometheus, grafana).
 - **Never start `--profile live` and never run `aitos-live` or `run_live_trading.py` without explicit human authorization.**
-- The paper container mounts the working tree read-only at `/app` (`AITOS_SOURCE_ROOT`), so uncommitted local fixes run without rebuilding the image.
+- Paper and Live run the same built runtime image; source is never bind-mounted over `/app`. Build/pull a new image to test source changes. Production/staging deployment pins `AITOS_RUNTIME_IMAGE` to the exact published `@sha256` digest.
 - Data: `data/eventbus/redis` (Redis AOF, bind mount), ClickHouse in named volume `aitos_clickhouse-data` (created 2026-10-16; pre-migration backup: `clickhouse-backup.tar.gz` at repo root), Neo4j bind mount `data/databases/neo4j`, models `data/runtime/models`.
 - Trade state: ClickHouse (via `aitos.trading.persistent_state.DurableTradingStateStore`); recovery path is `TradeStatePersistence.restore()` + `resubscribe_restored_positions()` in `run_paper_trading.py`.
 - Health: `GET http://127.0.0.1:8090/health` (paper). Telemetry module statuses included in payload.

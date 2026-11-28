@@ -13,9 +13,14 @@ class FakeRepository:
         self.books = []
         self.depth_events = []
         self.versioned_events = []
+        self.versioned_batch_calls = 0
 
     async def save_market_event_versioned(self, event):
         self.versioned_events.append(event)
+
+    async def save_market_events_versioned(self, events):
+        self.versioned_batch_calls += 1
+        self.versioned_events.extend(events)
 
     async def save_depth_events(self, events):
         self.depth_events.extend(events)
@@ -120,12 +125,13 @@ async def test_non_anchor_trade_is_filtered_from_history_queue():
 
 
 @pytest.mark.asyncio
-async def test_history_queue_overflow_drops_history_instead_of_backpressuring():
+async def test_history_queue_overflow_fails_handler_so_source_is_not_acked():
     repo = FakeRepository()
     sink = make_sink(repo, queue_capacity=1)
 
     await sink._enqueue(trade_event(9))
-    await sink._enqueue(trade_event(10))
+    with pytest.raises(RuntimeError, match="queue is full"):
+        await sink._enqueue(trade_event(10))
 
     assert sink.snapshot()["queue_depth"] == 1
     assert sink.snapshot()["rejected"] == 1
@@ -161,7 +167,7 @@ async def test_only_btc_ltc_books_enter_history_queue():
     )
 
     assert sink.snapshot()["queue_depth"] == 1
-    assert sink._queue.get_nowait().symbol == "BTCUSDT"
+    assert sink._queue.get_nowait()[0].symbol == "BTCUSDT"
 
 
 @pytest.mark.asyncio
@@ -198,7 +204,8 @@ async def test_persistence_capacity_telemetry_tracks_rejected_history():
     repo = FakeRepository()
     sink = make_sink(repo, queue_capacity=1)
     await sink._enqueue(trade_event(30))
-    await sink._enqueue(trade_event(31))
+    with pytest.raises(RuntimeError, match="queue is full"):
+        await sink._enqueue(trade_event(31))
 
     capacity = sink.snapshot()["root_cause_telemetry"]["capacity"]
     assert capacity["enqueued"] == 1
@@ -335,8 +342,89 @@ async def test_shutdown_flushes_queued_canonical_events_before_worker_exit():
         payload={"last_price": "3000"},
         source=MarketSource.WEBSOCKET,
     )
-    await sink._queue.put(spot_ticker)
+    completion = asyncio.get_running_loop().create_future()
+    await sink._queue.put((spot_ticker, completion))
     sink._workers = [asyncio.create_task(sink._worker(0))]
     await sink.shutdown()
     assert repo.versioned_events == [spot_ticker]
     assert sink.snapshot()["shutdown_dropped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_versioned_events_use_one_bulk_insert_per_persistence_batch():
+    repo = FakeRepository()
+    sink = make_sink(repo)
+    events = [trade_event(101), trade_event(102), trade_event(103)]
+
+    await sink._persist_batch(events)
+
+    assert repo.versioned_batch_calls == 1
+    assert repo.versioned_events == events
+    assert sink.snapshot()["versioned_events"] == 3
+
+
+@pytest.mark.asyncio
+async def test_persistence_sink_reports_latency_per_target_table():
+    repo = FakeRepository()
+    sink = make_sink(repo)
+
+    await sink._persist_batch([trade_event(401)])
+
+    table_latency = sink.snapshot()["table_write_latency"]
+    assert table_latency["market_event_versions"]["count"] == 1
+    assert table_latency["trade_ticks"]["count"] == 1
+    assert table_latency["market_event_versions"]["p95_ms"] is not None
+    assert table_latency["trade_ticks"]["p95_ms"] is not None
+    assert table_latency["trade_ticks"]["max_ms"] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_multi_event_batch_refuses_single_event_insert_fallback():
+    repo = FakeRepository()
+    repo.save_market_events_versioned = None
+    sink = make_sink(repo)
+
+    with pytest.raises(RuntimeError, match="requires the bulk"):
+        await sink._persist_batch([trade_event(301), trade_event(302)])
+
+    assert repo.versioned_events == []
+
+
+@pytest.mark.asyncio
+async def test_redis_handler_waits_for_durable_persistence_before_ack_boundary():
+    repo = FakeRepository()
+    sink = make_sink(repo)
+    worker = asyncio.create_task(sink._worker(0))
+    try:
+        event = trade_event(201)
+        await asyncio.wait_for(sink._persist_before_ack(event), timeout=1.0)
+        assert repo.versioned_events == [event]
+        snapshot = sink.snapshot()
+        assert snapshot["queue_depth"] == 0
+        assert snapshot["processed"] == 1
+        assert snapshot["queue_wait"]["count"] == 1
+        assert snapshot["queue_wait"]["p50_ms"] is not None
+        assert snapshot["batch_write"]["count"] == 1
+        assert snapshot["batch_write"]["p95_ms"] is not None
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_persistence_failure_propagates_to_redis_handler_for_retry():
+    class FailingRepository(FakeRepository):
+        async def save_market_events_versioned(self, events):
+            raise ConnectionError("ClickHouse unavailable")
+
+    sink = make_sink(FailingRepository())
+    worker = asyncio.create_task(sink._worker(0))
+    try:
+        with pytest.raises(ConnectionError, match="ClickHouse unavailable"):
+            await asyncio.wait_for(
+                sink._persist_before_ack(trade_event(301)), timeout=1.0
+            )
+        assert sink.snapshot()["errors"] == 1
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)

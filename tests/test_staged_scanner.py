@@ -36,7 +36,7 @@ class FakeScanner:
 
 
 @pytest.mark.asyncio
-async def test_staged_scan_calls_expensive_path_only_for_top_ten(monkeypatch):
+async def test_staged_scan_calls_expensive_path_only_for_top_two(monkeypatch):
     monkeypatch.setattr(staged_scanner.indicators, "momentum_score", lambda _: 10.0)
     monkeypatch.setattr(staged_scanner.indicators, "atr_percentile", lambda _: 60.0)
     monkeypatch.setattr(staged_scanner.indicators, "adx", lambda _: 100.0)
@@ -65,7 +65,7 @@ async def test_staged_scan_calls_expensive_path_only_for_top_ten(monkeypatch):
     assert len(stages[2][1]) == 10
     assert len(stages[3][1]) == 5
     assert len(stages[4][1]) == 2
-    assert len(scanner.scan_calls) == 10
+    assert len(scanner.scan_calls) == 2
     assert len(result) == 2
 
 

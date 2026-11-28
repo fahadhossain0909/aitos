@@ -13,7 +13,7 @@
 
 AITOS is a Python-first, event-driven quantitative trading platform. Binance USDⓈ-M Futures is the established execution core; a separately isolated Binance Spot runtime is now present but remains opt-in, testnet-first, and execution-disabled by default. The repository combines canonical market-data contracts, Redis Streams, ClickHouse history, optional Neo4j knowledge-graph support, shared portfolio/capital controls, opportunity and research intelligence, paper trading, guarded Futures execution, XAI/journaling, continual learning, historical/L2 replay, observability, and Docker-based deployment. Options are an identity/architecture extension point only; no Options strategy or execution is available.
 
-> **Canonical documentation:** this README is the project overview. For installation, follow the [AITOS Installation & Deployment Guide](INSTALLATION.md), which documents both desktop installation and VPS runtime deployment.
+> **Canonical documentation:** this README is the project overview; [docs/INDEX.md](docs/INDEX.md) is the curated engineering/operator documentation index. For installation, follow the [AITOS Installation & Deployment Guide](INSTALLATION.md), the canonical installation and deployment procedure.
 
 ## Credential security and remote signing
 
@@ -67,6 +67,7 @@ Click any topic below to jump directly to that section.
 - [Binance Spot integration and rollout limits](docs/SPOT_MARKET_INTEGRATION.md)
 - [Architecture Evolution Program](engineering/ARCHITECTURE_EVOLUTION_PROGRAM.md)
 - [System audit and open acceptance gates](engineering/SYSTEM_AUDIT_2026-11-20.md)
+- [Production-readiness remediation status](engineering/PRODUCTION_READINESS_REMEDIATION_2026-11-23.md)
 - [Financial state authority & reconciliation contract](engineering/FINANCIAL_STATE_AUTHORITY_AND_RECONCILIATION.md)
 
 ---
@@ -102,7 +103,7 @@ Click any topic below to jump directly to that section.
    Neo4j ── optional knowledge graph; Rust/PyO3 ── optional order-book kernel
 ```
 
-The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Production actions are additionally protected by risk controls and human-approval governance.
+The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Live startup currently retains a terminal session-confirmation gate and independent risk controls; a signed desktop approval control plane with WebAuthn/MFA and RBAC is still an open production-readiness gate.
 
 [↑ Back to Index](#-interactive-index)
 
@@ -183,7 +184,7 @@ No fixed test count is documented because the suite changes as the project evolv
 
 ## Configuration
 
-The tracked template is `.env.example`. Copy it to `.env` and keep the real file out of Git.
+The tracked template is `.env.example`. Copy it to `.env` and keep the real file out of Git. The staging CD workflow supports two storage modes: leave `AITOS_DATA_DISK_UUID` empty to store AITOS data under `AITOS_DATA_ROOT` on the operating-system root filesystem, or set it to an attached external filesystem UUID to use that disk. The workflow verifies the selected filesystem and refuses mismatches.
 
 Important production values include:
 
@@ -208,7 +209,7 @@ Keep `BINANCE_TESTNET=true` until live execution is deliberately enabled. Never 
 
 - Use strong, unique passwords for Redis, ClickHouse and Neo4j.
 - Keep `REQUIRE_HUMAN_APPROVAL_FOR_PROD=true` for production operation.
-- Do not commit `.env` or real credentials.
+- Do not commit `.env` or real credentials. Never store `AITOS_SUDO_PASSWORD` in `.env`, a repository file, or README; if the staging deploy user needs password-based sudo, configure it as the optional `AITOS_SUDO_PASSWORD` GitHub Environment secret.
 - `COMPOSE_PROJECT_NAME` is `aitos`.
 - `BACKTEST_DATA_DIR` is used for optional local/historical replay data and cache.
 
@@ -295,7 +296,7 @@ Do not use the live profile as a substitute for understanding the live-trading e
 
 ## Docker and VPS deployment
 
-The canonical, step-by-step deployment procedure is maintained in the [AITOS Installation & Deployment Guide](INSTALLATION.md#method-2--deploy-the-aitos-runtime-on-a-vps). It covers VPS prerequisites, persistent data-disk preparation, GitHub Actions environment/secrets, immutable image deployment, health checks, maintenance and rollback.
+The canonical, step-by-step deployment procedure is maintained in the [AITOS Installation & Deployment Guide](INSTALLATION.md#method-2--deploy-the-aitos-runtime-on-a-vps). It covers VPS prerequisites, optional UUID-backed external storage (or OS-root filesystem storage when no UUID is configured), GitHub Actions environment/secrets, immutable image deployment, health checks, maintenance and rollback.
 
 For desktop installation and connecting the read-only console to a VPS over SSH, see [Method 1](INSTALLATION.md#method-1--install-the-desktop-operator-console).
 

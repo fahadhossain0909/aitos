@@ -153,6 +153,20 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             "frames_received": 0,
             "market_events_received": 0,
             "close_count": 0,
+            "connection_failure_count": 0,
+            "intentional_close_count": 0,
+            "normal_close_count": 0,
+            "abnormal_close_count": 0,
+            "lifecycle_rotation_count": 0,
+            "last_disconnect_class": None,
+            "last_close_stream": None,
+            "last_connection_uptime_seconds": None,
+            "managed_queues": {},
+            "managed_connections": {},
+            "ping_interval_seconds": WS_PING_INTERVAL_SECONDS,
+            "ping_timeout_seconds": WS_PING_TIMEOUT_SECONDS,
+            "last_ping_rtt_ms": None,
+            "max_ping_rtt_ms": 0.0,
             "subscription_mode": "combined_url",
             "last_connect_started_at": None,
             "last_handshake_at": None,
@@ -183,6 +197,18 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         """Return a copy of transport-stage telemetry safe for health reports."""
         snapshot = dict(self._ws_transport)
         snapshot["streams"] = list(self._ws_transport.get("streams", []))
+        queues = self._ws_transport.get("managed_queues", {})
+        snapshot["managed_queues"] = (
+            {key: dict(value) for key, value in queues.items()}
+            if isinstance(queues, dict)
+            else {}
+        )
+        connections = self._ws_transport.get("managed_connections", {})
+        snapshot["managed_connections"] = (
+            {key: dict(value) for key, value in connections.items()}
+            if isinstance(connections, dict)
+            else {}
+        )
         return snapshot
 
     async def connect(self) -> None:

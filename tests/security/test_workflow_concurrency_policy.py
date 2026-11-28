@@ -56,4 +56,20 @@ def test_container_publication_emits_sbom_and_provenance_without_enabling_deploy
     content = (ROOT / workflow).read_text(encoding="utf-8")
     assert "provenance: mode=max" in content
     assert "sbom: true" in content
-    assert "if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}" in content
+    if workflow.endswith("/cd.yml"):
+        # Production deployment remains repository-variable gated.
+        assert "if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}" in content
+    else:
+        # Staging uses an environment-scoped gate, then passes its output
+        # to the image-publish and deploy jobs.
+        gate = content.split("  staging-gate:", 1)[1].split("  publish-image:", 1)[0]
+        publish = content.split("  publish-image:", 1)[1].split(
+            "  deploy-and-audit:", 1
+        )[0]
+        deploy = content.split("  deploy-and-audit:", 1)[1]
+        assert "environment: staging" in gate
+        assert "AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}" in gate
+        assert "needs: staging-gate" in publish
+        assert "needs.staging-gate.outputs.enabled == 'true'" in publish
+        assert "needs: [staging-gate, publish-image]" in deploy
+        assert "needs.staging-gate.outputs.enabled == 'true'" in deploy

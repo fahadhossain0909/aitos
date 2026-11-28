@@ -10,6 +10,7 @@ or replaces venue orders.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -21,6 +22,27 @@ from aitos.execution.order_executor import OrderResult
 from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.protection_audit import audit_protection_inventory
 from aitos.models.trade import TradeSide
+
+
+async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call either a synchronous legacy journal API or an async PostgreSQL API."""
+    if inspect.iscoroutinefunction(function):
+        return await function(*args, **kwargs)
+    result = await asyncio.to_thread(function, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def _acknowledge_protection(executor: Any, result: Any, trade: Any) -> Any:
+    """Call the atomic PostgreSQL API or a compatible legacy executor API."""
+    canonical = getattr(executor, "acknowledge_protection_trade", None)
+    if callable(canonical):
+        return await _call_sync_or_async(canonical, result, trade)
+    legacy = getattr(executor, "acknowledge_protection", None)
+    if not callable(legacy):
+        raise RuntimeError("executor has no protective acknowledgement method")
+    return await _call_sync_or_async(legacy, result, trade.trade_id)
 
 
 def _decimal_matches(left: Any, right: Any) -> bool:
@@ -369,7 +391,7 @@ async def audit_exchange_protection_inventory(
     if captured_at.utcoffset() is None:
         raise ValueError("timezone-aware inventory timestamp required")
     local_trades = tuple(trades) if trades is not None else None
-    rows = await asyncio.to_thread(journal_reader)
+    rows = await _call_sync_or_async(journal_reader)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded durable intent inventory required")
 
@@ -498,7 +520,7 @@ async def recover_accepted_initial_stop_submissions(
     lookup = getattr(executor, "get_algo_order_by_client_id", None)
     if not callable(lookup):
         raise TypeError("authenticated algo client-id lookup is required")
-    rows = await asyncio.to_thread(intent_store.protection_intents)
+    rows = await _call_sync_or_async(intent_store.protection_intents)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded protective intent history is required")
     open_trades = tuple(trades)
@@ -510,7 +532,7 @@ async def recover_accepted_initial_stop_submissions(
 
     handover_reader = getattr(intent_store, "protection_handovers", None)
     handover_rows = (
-        await asyncio.to_thread(handover_reader) if callable(handover_reader) else []
+        await _call_sync_or_async(handover_reader) if callable(handover_reader) else []
     )
     handover_client_ids = {
         item.get("new_client_id")
@@ -680,22 +702,46 @@ async def recover_accepted_initial_stop_submissions(
             if order_id not in existing_tp_ids:
                 existing_tp_ids.append(order_id)
 
-        # Write the venue identity to the durable trade snapshot first. If
-        # the process dies before journal acknowledgement, the next pass sees
-        # the same ID and safely completes the journal transition.
-        trade.updated_at = datetime.now(timezone.utc).isoformat()
-        await persist_trade(trade)
-        if row.get("state") == "SUBMITTING":
-            result = OrderResult(
-                order_id=order_id,
-                symbol=symbol,
-                side=TradeSide(trade_side),
-                filled_quantity=0.0,
-                fill_price=float(request["reference_price"]),
-                client_order_id=client_id,
+        result = OrderResult(
+            order_id=order_id,
+            symbol=symbol,
+            side=TradeSide(trade_side),
+            filled_quantity=0.0,
+            fill_price=float(request["reference_price"]),
+            client_order_id=client_id,
+        )
+        if getattr(executor, "canonical_intent_store", None) is not None:
+            # The canonical writer commits the PROTECTED -> APPLIED intent
+            # transition and Trade snapshot in one PostgreSQL transaction.
+            if row.get("state") == "SUBMITTING":
+                await _call_sync_or_async(
+                    intent_store.record_protection,
+                    client_id,
+                    {
+                        "order_id": order_id,
+                        "symbol": symbol,
+                        "side": trade_side,
+                        "filled_quantity": "0",
+                        "fill_price": format(
+                            Decimal(str(request["reference_price"])), "f"
+                        ),
+                        "success": True,
+                        "client_order_id": client_id,
+                    },
+                )
+            await _acknowledge_protection(executor, result, trade)
+        else:
+            # Legacy single-host recovery remains available for paper and old
+            # deployments; no live runtime should use this after canonical bind.
+            trade.updated_at = datetime.now(timezone.utc).isoformat()
+            await persist_trade(trade)
+            if row.get("state") == "SUBMITTING":
+                await _call_sync_or_async(
+                    intent_store.record_protection, client_id, result
+                )
+            await _call_sync_or_async(
+                intent_store.mark_applied, client_id, owner_trade_id
             )
-            await asyncio.to_thread(intent_store.record_protection, client_id, result)
-        await asyncio.to_thread(intent_store.mark_applied, client_id, owner_trade_id)
         recovered.append(client_id)
 
     return {
@@ -736,8 +782,8 @@ async def recover_protection_handovers(
         raise TypeError(
             "authenticated algo lookup and resting-order reconciliation are required"
         )
-    handovers = await asyncio.to_thread(intent_store.protection_handovers)
-    intents = await asyncio.to_thread(intent_store.protection_intents)
+    handovers = await _call_sync_or_async(intent_store.protection_handovers)
+    intents = await _call_sync_or_async(intent_store.protection_intents)
     if (
         not isinstance(handovers, list)
         or len(handovers) > 10000
@@ -999,7 +1045,7 @@ async def recover_protection_handovers(
             continue
 
         if state == "PREPARED":
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.record_handover_new_order, handover_id, new_id
             )
             state = "NEW_ACCEPTED"
@@ -1114,10 +1160,10 @@ async def recover_protection_handovers(
                 fill_price=float(request["reference_price"]),
                 client_order_id=client_id,
             )
-            await asyncio.to_thread(intent_store.record_protection, client_id, result)
+            await _call_sync_or_async(intent_store.record_protection, client_id, result)
 
         if state == "NEW_ACCEPTED":
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.mark_handover_old_cancel_requested, handover_id
             )
             state = "OLD_CANCEL_REQUESTED"
@@ -1168,7 +1214,7 @@ async def recover_protection_handovers(
                         }
                     )
                     continue
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.mark_handover_old_cancelled, handover_id
             )
             state = "OLD_CANCELLED"
@@ -1190,21 +1236,22 @@ async def recover_protection_handovers(
                     }
                 )
                 continue
-            await asyncio.to_thread(
+            await _call_sync_or_async(
                 intent_store.complete_protection_handover, handover_id
             )
             if intent_state in {"SUBMITTING", "PROTECTED"}:
-                executor.acknowledge_protection(
-                    OrderResult(
-                        order_id=new_id,
-                        symbol=symbol,
-                        side=TradeSide(trade_side),
-                        filled_quantity=0.0,
-                        fill_price=float(request["reference_price"]),
-                        client_order_id=client_id,
-                    ),
-                    trade_id,
+                result = OrderResult(
+                    order_id=new_id,
+                    symbol=symbol,
+                    side=TradeSide(trade_side),
+                    filled_quantity=0.0,
+                    fill_price=float(request["reference_price"]),
+                    client_order_id=client_id,
                 )
+                if getattr(executor, "canonical_intent_store", None) is not None:
+                    await _acknowledge_protection(executor, result, trade)
+                else:
+                    executor.acknowledge_protection(result, trade_id)
             recovered.append(handover_id)
 
     return {
@@ -1247,7 +1294,7 @@ async def recover_triggered_protection_child_fills(
     ):
         raise ValueError("child-fill recovery query budget must be between 1 and 5000")
 
-    rows = await asyncio.to_thread(intent_store.protection_intents)
+    rows = await _call_sync_or_async(intent_store.protection_intents)
     if not isinstance(rows, list) or len(rows) > 10000:
         raise ValueError("bounded protective intent history is required")
     by_order_id: dict[str, dict[str, Any]] = {}

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import math
 import time
@@ -119,6 +120,29 @@ TOPIC_PARTIAL_CLOSE = "trade.partial_close"
 TOPIC_EXCHANGE_STOPS_PLACED = "trade.exchange_stops_placed"
 TOPIC_EXIT_DECISION = "decision.exit"
 DEFAULT_PARTIAL_CLOSE_FRACTION = 0.5
+
+
+async def _call_sync_or_async(function: Any, *args: Any, **kwargs: Any) -> Any:
+    """Bridge legacy synchronous journals and the asynchronous PostgreSQL intent store."""
+    if inspect.iscoroutinefunction(function):
+        return await function(*args, **kwargs)
+    result = await asyncio.to_thread(function, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def _acknowledge_protection(
+    executor: Any, result: OrderResult, trade: Trade
+) -> Any:
+    """Use canonical async acknowledgement when available, legacy API otherwise."""
+    canonical = getattr(executor, "acknowledge_protection_trade", None)
+    if callable(canonical):
+        return await _call_sync_or_async(canonical, result, trade)
+    legacy = getattr(executor, "acknowledge_protection", None)
+    if not callable(legacy):
+        raise RuntimeError("executor exposes no protective acknowledgement API")
+    return await _call_sync_or_async(legacy, result, trade.trade_id)
 
 
 def _valid_market_price(value: Any) -> bool:
@@ -741,6 +765,10 @@ class TradeLifecycle(AITOSModule):
         self, opportunity: Opportunity, portfolio: PortfolioState
     ) -> Trade:
         self._require_initialized()
+        # Capital coordinators may reserve funds from this event; ensure durable
+        # execution persistence is available before publishing it.
+        if self._order_executor.requires_exchange_execution:
+            self._require_execution_writer()
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_OPPORTUNITY,
@@ -1231,6 +1259,7 @@ class TradeLifecycle(AITOSModule):
         adjustment_id: str,
         kind: str,
         amount_usd: float,
+        publish: bool = True,
     ) -> Trade:
         """Apply an idempotent realized fee or funding adjustment.
 
@@ -1303,18 +1332,19 @@ class TradeLifecycle(AITOSModule):
                         extra={"aitos_extra": {"trade_id": trade.trade_id}},
                     )
         trade.updated_at = utc_now_iso()
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_POSITION_UPDATED,
-                payload={
-                    **trade.to_dict(),
-                    "reason": "trade_cost_adjustment",
-                    "adjustment_id": adjustment_id,
-                    "adjustment_kind": kind,
-                },
-                source_module=self.module_id,
+        if publish:
+            await self._event_bus.publish(
+                Event(
+                    topic=TOPIC_POSITION_UPDATED,
+                    payload={
+                        **trade.to_dict(),
+                        "reason": "trade_cost_adjustment",
+                        "adjustment_id": adjustment_id,
+                        "adjustment_kind": kind,
+                    },
+                    source_module=self.module_id,
+                )
             )
-        )
         return trade
 
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
@@ -1410,7 +1440,13 @@ class TradeLifecycle(AITOSModule):
             return await self._close_trade_unlocked(trade_id, exit_price, reason)
 
     async def _close_trade_unlocked(
-        self, trade_id: str, exit_price: float, reason: str
+        self,
+        trade_id: str,
+        exit_price: float,
+        reason: str,
+        *,
+        execution_intent_client_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
     ) -> Trade:
         self._require_initialized()
         if not _valid_market_price(exit_price):
@@ -1432,6 +1468,8 @@ class TradeLifecycle(AITOSModule):
                     exit_price,
                     execution.filled_quantity / trade.quantity,
                     execution_result=execution,
+                    execution_intent_client_id=execution_intent_client_id,
+                    protection_child_fill=protection_child_fill,
                 )
                 trade.state = TradeLifecycleState.POSITION_OPENED
                 return trade
@@ -1494,7 +1532,16 @@ class TradeLifecycle(AITOSModule):
                     continue
         self._closed_trades.append(trade)
         if self._order_executor.requires_exchange_execution:
-            await self._commit_live_execution(trade)
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_reduction_ledger(
+                    trade.position_size_usd,
+                    execution,
+                    f"exit:{self._execution_faults.get(trade.trade_id, trade.trade_id)}",
+                ),
+                client_order_id=execution_intent_client_id,
+                protection_child_fill=protection_child_fill,
+            )
         await self._resolve_decision_outcomes(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
@@ -1639,8 +1686,7 @@ class TradeLifecycle(AITOSModule):
             trade.sl_order_id = sl_result.order_id
             if self._order_executor.requires_exchange_execution:
                 trade.updated_at = utc_now_iso()
-                await self._execution_state_writer(trade)
-                self._order_executor.acknowledge_protection(sl_result, trade.trade_id)
+                await _acknowledge_protection(self._order_executor, sl_result, trade)
         else:
             if self._order_executor.requires_exchange_execution:
                 raise ExecutionUncertainError(
@@ -1682,9 +1728,8 @@ class TradeLifecycle(AITOSModule):
                 trade.tp_order_ids.append(tp_result.order_id)
                 if self._order_executor.requires_exchange_execution:
                     trade.updated_at = utc_now_iso()
-                    await self._execution_state_writer(trade)
-                    self._order_executor.acknowledge_protection(
-                        tp_result, trade.trade_id
+                    await _acknowledge_protection(
+                        self._order_executor, tp_result, trade
                     )
             else:
                 if self._order_executor.requires_exchange_execution:
@@ -1973,6 +2018,68 @@ class TradeLifecycle(AITOSModule):
         # Bind both durable ledgers to one stable logical opportunity identity.
         # The client ID suffix must remain the actual trade ID for orphan checks.
         trade_id = hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24]
+        recovery_consensus = dict(opportunity.agent_consensus)
+        if statistical_risk_assessment is not None:
+            recovery_consensus["statistical_risk_assessment"] = {
+                "size_multiplier": float(statistical_risk_assessment.size_multiplier),
+                "volatility_ratio": float(statistical_risk_assessment.volatility_ratio),
+                "tail_probability": float(statistical_risk_assessment.tail_probability),
+                "expected_shortfall": float(
+                    statistical_risk_assessment.expected_shortfall
+                ),
+                "reasons": list(statistical_risk_assessment.reasons),
+            }
+        # Persist enough domain state to reconstruct a filled Trade after a
+        # lost venue response and process restart.
+        recovery_context = {
+            "schema_version": 1,
+            "trade_id": trade_id,
+            "strategy_id": str(opportunity.strategy_id),
+            "agent_consensus": recovery_consensus,
+            "explanation": str(opportunity.rationale),
+            "sl_price": float(opportunity.stop_loss_price),
+            "tp_price": float(
+                opportunity.take_profit_levels[0]
+                if opportunity.take_profit_levels
+                else opportunity.entry_price
+            ),
+            "take_profit_levels": [
+                float(value) for value in opportunity.take_profit_levels
+            ],
+            "leverage": float(sizing.leverage),
+            "trailing_sl_enabled": bool(opportunity.trailing_sl_enabled),
+            "breakeven_at_r_multiple": (
+                float(opportunity.breakeven_at_r_multiple)
+                if opportunity.breakeven_at_r_multiple is not None
+                else None
+            ),
+            "regime": str(opportunity.regime) if opportunity.regime is not None else "",
+            "emergency_stop_r_multiple": (
+                float(self._tuning.positions.emergency_stop_r_multiple)
+                if self._position_manager is not None
+                else None
+            ),
+            "entry_created_at": utc_now_iso(),
+        }
+        try:
+            recovery_context = json.loads(
+                json.dumps(
+                    recovery_context,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            )
+            if len(json.dumps(recovery_context).encode("utf-8")) > 48000:
+                raise ValueError("entry recovery context exceeds 48 KiB")
+        except (TypeError, ValueError, OverflowError) as exc:
+            if live_execution:
+                raise ExecutionRecoveryRequired(
+                    opportunity.symbol,
+                    f"aitos-entry-{trade_id}",
+                    f"entry recovery context is not persistable: {exc}",
+                ) from exc
+            recovery_context = {}
         order_result = await self._order_executor.submit_order(
             OrderRequest(
                 symbol=opportunity.symbol,
@@ -1980,6 +2087,8 @@ class TradeLifecycle(AITOSModule):
                 quantity=quantity,
                 reference_price=opportunity.entry_price,
                 client_order_id=f"aitos-entry-{trade_id}",
+                owner_trade_id=trade_id,
+                execution_context=recovery_context,
             )
         )
         if not order_result.success and order_result.filled_quantity <= 0.0:
@@ -2051,10 +2160,18 @@ class TradeLifecycle(AITOSModule):
                 **(
                     {
                         "statistical_risk_assessment": {
-                            "size_multiplier": statistical_risk_assessment.size_multiplier,
-                            "volatility_ratio": statistical_risk_assessment.volatility_ratio,
-                            "tail_probability": statistical_risk_assessment.tail_probability,
-                            "expected_shortfall": statistical_risk_assessment.expected_shortfall,
+                            "size_multiplier": (
+                                statistical_risk_assessment.size_multiplier
+                            ),
+                            "volatility_ratio": (
+                                statistical_risk_assessment.volatility_ratio
+                            ),
+                            "tail_probability": (
+                                statistical_risk_assessment.tail_probability
+                            ),
+                            "expected_shortfall": (
+                                statistical_risk_assessment.expected_shortfall
+                            ),
                             "reasons": list(statistical_risk_assessment.reasons),
                         }
                     }
@@ -2107,9 +2224,21 @@ class TradeLifecycle(AITOSModule):
             client_id = f"aitos-entry-{trade.trade_id}"
             self._execution_faults[trade.trade_id] = client_id
             # Install durable ownership before optional telemetry can fail.
-            await self._execution_state_writer(trade)
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_entry_ledger(trade, f"entry:{client_id}"),
+                defer_intent_acknowledgement=True,
+            )
             await self._place_exchange_side_stops(trade)
-            await self._commit_live_execution(trade)
+            await self._execution_position_verifier()
+            acknowledge = getattr(
+                self._order_executor, "acknowledge_execution_async", None
+            )
+            if callable(acknowledge):
+                await acknowledge(client_id, trade.trade_id)
+            else:
+                self._order_executor.acknowledge_execution(client_id, trade.trade_id)
+            self._execution_faults.pop(trade.trade_id, None)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_ORDER_SUBMITTED,
@@ -2379,10 +2508,35 @@ class TradeLifecycle(AITOSModule):
                 "prior reduction/application requires reconciliation",
             )
 
+    def bind_postgres_canonical_oms(self, oms: Any, fence: Any) -> Any:
+        """Bind the PostgreSQL journal ahead of the configured durable projection.
+
+        Call only after the runtime has acquired a fresh account-scope writer
+        fence and configured the existing execution-state projection callback.
+        """
+        from aitos.execution.postgres_lifecycle_writer import (
+            bind_postgres_canonical_oms,
+        )
+
+        writer = bind_postgres_canonical_oms(self, oms=oms, fence=fence)
+        bind_writer = getattr(
+            self._order_executor, "bind_canonical_lifecycle_writer", None
+        )
+        if callable(bind_writer):
+            bind_writer(writer)
+        self._postgres_canonical_oms_required = True
+        return writer
+
     def _require_execution_writer(self) -> None:
         if not callable(getattr(self, "_execution_state_writer", None)):
             raise RuntimeError(
                 "live execution requires synchronous durable state persistence"
+            )
+        if getattr(self, "_postgres_canonical_oms_required", False) and not callable(
+            getattr(self, "_postgres_canonical_oms_writer", None)
+        ):
+            raise RuntimeError(
+                "live execution requires the bound PostgreSQL canonical OMS"
             )
         if not callable(getattr(self, "_execution_position_verifier", None)):
             raise RuntimeError(
@@ -2423,7 +2577,10 @@ class TradeLifecycle(AITOSModule):
                 float(evidence.get("avgPrice", 0)),
             )
         else:
-            identity = f"{trade.trade_id}|{float(trade.quantity).hex()}|{float(quantity).hex()}|{len(trade.partial_exits)}"
+            identity = (
+                f"{trade.trade_id}|{float(trade.quantity).hex()}|"
+                f"{float(quantity).hex()}|{len(trade.partial_exits)}"
+            )
             client_id = (
                 "aitos-exit-" + hashlib.sha256(identity.encode()).hexdigest()[:24]
             )
@@ -2451,7 +2608,9 @@ class TradeLifecycle(AITOSModule):
             )
         return result
 
-    async def _refresh_live_protection(self, trade: Trade) -> None:
+    async def _refresh_live_protection(
+        self, trade: Trade, *, old_order_terminal: bool = False
+    ) -> None:
         # The handover journal is committed before the replacement POST. The old
         # stop remains active until the new stop is accepted and durably owned.
         old_id = trade.sl_order_id
@@ -2476,7 +2635,8 @@ class TradeLifecycle(AITOSModule):
             if self._position_manager
             else trade.sl_price
         )
-        intent_store.begin_protection_handover(
+        await _call_sync_or_async(
+            intent_store.begin_protection_handover,
             handover_id=handover_id,
             trade_id=trade.trade_id,
             symbol=trade.symbol,
@@ -2498,7 +2658,9 @@ class TradeLifecycle(AITOSModule):
                     new_client_id,
                     "replacement stop acceptance is uncertain",
                 )
-            intent_store.record_handover_new_order(handover_id, result.order_id)
+            await _call_sync_or_async(
+                intent_store.record_handover_new_order, handover_id, result.order_id
+            )
             trade.sl_order_id = result.order_id
             pending = trade.agent_consensus.setdefault(
                 "_pending_stop_cancellations", []
@@ -2509,20 +2671,31 @@ class TradeLifecycle(AITOSModule):
             await self._execution_state_writer(trade)
 
             # Only a durable, venue-confirmed replacement permits cancellation.
-            intent_store.mark_handover_old_cancel_requested(handover_id)
-            await self._order_executor.cancel_resting_order(trade.symbol, old_id)
-            status_reader = getattr(
-                self._order_executor, "get_resting_order_status", None
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancel_requested, handover_id
             )
-            if not callable(status_reader):
-                raise ExecutionRecoveryRequired(
-                    trade.symbol,
-                    old_id,
-                    "authenticated post-cancel status lookup is unavailable",
+            if old_order_terminal:
+                # Verified terminal child-fill evidence proves this order cannot
+                # execute again; do not send a redundant cancellation request.
+                old_status = "FILLED"
+            else:
+                await self._order_executor.cancel_resting_order(trade.symbol, old_id)
+                status_reader = getattr(
+                    self._order_executor, "get_resting_order_status", None
                 )
-            old_status = await status_reader(trade.symbol, old_id)
-            if old_status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
-                intent_store.block_protection_handover(
+                if not callable(status_reader):
+                    raise ExecutionRecoveryRequired(
+                        trade.symbol,
+                        old_id,
+                        "authenticated post-cancel status lookup is unavailable",
+                    )
+                old_status = await status_reader(trade.symbol, old_id)
+            if not old_order_terminal and old_status in {
+                "FILLED",
+                "PARTIALLY_FILLED_TERMINAL",
+            }:
+                await _call_sync_or_async(
+                    intent_store.block_protection_handover,
                     handover_id,
                     "old stop triggered during replacement cancellation; "
                     "authenticated child-fill reconciliation required",
@@ -2538,19 +2711,25 @@ class TradeLifecycle(AITOSModule):
                 "EXPIRED",
                 "EXPIRED_IN_MATCH",
                 "REJECTED",
+                "FILLED",
+                "PARTIALLY_FILLED_TERMINAL",
             }:
                 raise ExecutionRecoveryRequired(
                     trade.symbol,
                     old_id,
                     f"old stop cancellation is unconfirmed: {old_status!r}",
                 )
-            intent_store.mark_handover_old_cancelled(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancelled, handover_id
+            )
             pending.remove(old_id)
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
-            intent_store.complete_protection_handover(handover_id)
+            await _call_sync_or_async(
+                intent_store.complete_protection_handover, handover_id
+            )
             await self._execution_position_verifier()
-            self._order_executor.acknowledge_protection(result, trade.trade_id)
+            await _acknowledge_protection(self._order_executor, result, trade)
         except BaseException:
             # Preserve the last durable handover stage. Startup recovery must
             # query the deterministic client ID before deciding whether the
@@ -2605,7 +2784,7 @@ class TradeLifecycle(AITOSModule):
                 "durable protective handover journal unavailable",
             )
         matches = []
-        for row in await asyncio.to_thread(intent_store.protection_intents):
+        for row in await _call_sync_or_async(intent_store.protection_intents):
             result = row.get("result_json")
             request = row.get("request_json")
             if isinstance(result, str):
@@ -2674,7 +2853,8 @@ class TradeLifecycle(AITOSModule):
         token = uuid.uuid4().hex[:16]
         handover_id = f"tpr-{token}"
         new_client_id = f"aitos-tpr-{token}"
-        intent_store.begin_protection_handover(
+        await _call_sync_or_async(
+            intent_store.begin_protection_handover,
             handover_id=handover_id,
             trade_id=trade.trade_id,
             symbol=trade.symbol,
@@ -2697,7 +2877,9 @@ class TradeLifecycle(AITOSModule):
                     new_client_id,
                     "replacement take-profit acceptance is uncertain",
                 )
-            intent_store.record_handover_new_order(handover_id, result.order_id)
+            await _call_sync_or_async(
+                intent_store.record_handover_new_order, handover_id, result.order_id
+            )
             trade.tp_order_ids[tp_index] = result.order_id
             trade.take_profit_levels[tp_index] = float(new_price)
             pending = trade.agent_consensus.setdefault(
@@ -2714,7 +2896,9 @@ class TradeLifecycle(AITOSModule):
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
 
-            intent_store.mark_handover_old_cancel_requested(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancel_requested, handover_id
+            )
             old_status = await status_reader(trade.symbol, old_id)
             if old_status != "NEW":
                 raise ExecutionRecoveryRequired(
@@ -2738,27 +2922,204 @@ class TradeLifecycle(AITOSModule):
                         f"(status={old_status!r})"
                     ),
                 )
-            intent_store.mark_handover_old_cancelled(handover_id)
+            await _call_sync_or_async(
+                intent_store.mark_handover_old_cancelled, handover_id
+            )
             while old_id in pending:
                 pending.remove(old_id)
             trade.updated_at = utc_now_iso()
             await self._execution_state_writer(trade)
-            intent_store.complete_protection_handover(handover_id)
-            self._order_executor.acknowledge_protection(result, trade.trade_id)
+            await _call_sync_or_async(
+                intent_store.complete_protection_handover, handover_id
+            )
+            await _acknowledge_protection(self._order_executor, result, trade)
         except BaseException:
             self._execution_recovery_required = True
             raise
 
-    async def _commit_live_execution(self, trade: Trade) -> None:
+    async def _commit_live_execution(
+        self,
+        trade: Trade,
+        *,
+        ledger_entries: list[dict[str, Any]] | None = None,
+        client_order_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
+        defer_intent_acknowledgement: bool = False,
+    ) -> None:
         self._require_execution_writer()
-        await self._execution_position_verifier()
-        await self._execution_state_writer(trade)
-        client_id = self._execution_faults.get(trade.trade_id)
-        if client_id and not client_id.startswith("resting:"):
-            self._order_executor.acknowledge_execution(client_id, trade.trade_id)
-        self._execution_faults.pop(trade.trade_id, None)
+        if not defer_intent_acknowledgement:
+            await self._execution_position_verifier()
+        client_id = client_order_id or self._execution_faults.get(trade.trade_id)
+        canonical_intents = getattr(
+            self._order_executor, "canonical_intent_store", None
+        )
+        canonical_writer = getattr(self, "_postgres_canonical_oms_writer", None)
+        if (
+            canonical_intents is not None
+            and canonical_writer is not None
+            and client_id
+            and protection_child_fill is not None
+        ):
+            await canonical_writer.apply_protection_child_fill(
+                canonical_intents,
+                client_id,
+                trade,
+                child_fill=protection_child_fill,
+                ledger_entries=[] if ledger_entries is None else ledger_entries,
+            )
+            # Parent protective intent remains APPLIED until the venue reports
+            # terminal; this permits multiple child fills under one algo ID.
+        elif (
+            canonical_intents is not None
+            and canonical_writer is not None
+            and client_id
+            and defer_intent_acknowledgement
+        ):
+            await canonical_writer.persist_confirmed_execution(
+                canonical_intents,
+                client_id,
+                trade,
+                ledger_entries=ledger_entries,
+            )
+        elif (
+            canonical_intents is not None
+            and canonical_writer is not None
+            and client_id
+            and not client_id.startswith("resting:")
+        ):
+            await canonical_writer.apply_execution_intent(
+                canonical_intents,
+                client_id,
+                trade,
+                ledger_entries=ledger_entries,
+            )
+            acknowledge = getattr(
+                self._order_executor, "acknowledge_execution_async", None
+            )
+            if not callable(acknowledge):
+                raise RuntimeError("canonical executor acknowledgement is unavailable")
+            await acknowledge(client_id, trade.trade_id)
+        else:
+            await self._execution_state_writer(trade)
+            if (
+                client_id
+                and not client_id.startswith("resting:")
+                and protection_child_fill is None
+                and not defer_intent_acknowledgement
+            ):
+                acknowledge = getattr(
+                    self._order_executor, "acknowledge_execution_async", None
+                )
+                if callable(acknowledge):
+                    await acknowledge(client_id, trade.trade_id)
+                else:
+                    self._order_executor.acknowledge_execution(
+                        client_id, trade.trade_id
+                    )
+        if not defer_intent_acknowledgement:
+            self._execution_faults.pop(trade.trade_id, None)
         if hasattr(trade, "_aitos_filled_resting_order_ids"):
             del trade._aitos_filled_resting_order_ids
+
+    @staticmethod
+    def _position_entry_ledger(trade: Trade, reference: str) -> list[dict[str, Any]]:
+        notional = Decimal(str(trade.position_size_usd))
+        if not notional.is_finite() or notional <= 0:
+            raise ValueError("entry ledger requires a finite positive filled notional")
+        encoded = format(notional, "f")
+        return [
+            {
+                "account_code": "OPEN_POSITION_ASSET",
+                "currency": "USDT",
+                "debit": encoded,
+                "credit": "0",
+                "reference": reference,
+            },
+            {
+                "account_code": "CASH_CLEARING",
+                "currency": "USDT",
+                "debit": "0",
+                "credit": encoded,
+                "reference": reference,
+            },
+        ]
+
+    @staticmethod
+    def _position_reduction_ledger(
+        cost_basis_usd: float, execution: OrderResult, reference: str
+    ) -> list[dict[str, Any]]:
+        cost_basis = Decimal(str(cost_basis_usd))
+        proceeds = Decimal(str(execution.filled_quantity)) * Decimal(
+            str(execution.fill_price)
+        )
+        if (
+            not cost_basis.is_finite()
+            or cost_basis <= 0
+            or not proceeds.is_finite()
+            or proceeds <= 0
+        ):
+            raise ValueError(
+                "reduction ledger requires finite positive basis and proceeds"
+            )
+        lines = []
+        if proceeds >= cost_basis:
+            lines.extend(
+                [
+                    {
+                        "account_code": "CASH",
+                        "currency": "USDT",
+                        "debit": format(proceeds, "f"),
+                        "credit": "0",
+                        "reference": reference,
+                    },
+                    {
+                        "account_code": "OPEN_POSITION_ASSET",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(cost_basis, "f"),
+                        "reference": reference,
+                    },
+                ]
+            )
+            gain = proceeds - cost_basis
+            if gain:
+                lines.append(
+                    {
+                        "account_code": "REALIZED_PNL_INCOME",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(gain, "f"),
+                        "reference": reference,
+                    }
+                )
+        else:
+            loss = cost_basis - proceeds
+            lines.extend(
+                [
+                    {
+                        "account_code": "CASH",
+                        "currency": "USDT",
+                        "debit": format(proceeds, "f"),
+                        "credit": "0",
+                        "reference": reference,
+                    },
+                    {
+                        "account_code": "REALIZED_PNL_EXPENSE",
+                        "currency": "USDT",
+                        "debit": format(loss, "f"),
+                        "credit": "0",
+                        "reference": reference,
+                    },
+                    {
+                        "account_code": "OPEN_POSITION_ASSET",
+                        "currency": "USDT",
+                        "debit": "0",
+                        "credit": format(cost_basis, "f"),
+                        "reference": reference,
+                    },
+                ]
+            )
+        return lines
 
     async def apply_triggered_protection_child_fill(
         self, trade_id: str, algo: Mapping[str, Any], child: Mapping[str, Any]
@@ -2823,7 +3184,7 @@ class TradeLifecycle(AITOSModule):
             expected_side = "SELL" if trade.side == TradeSide.LONG else "BUY"
             hedge_mode = bool(getattr(self._order_executor, "hedge_mode", False))
             expected_position_side = trade.side.value if hedge_mode else "BOTH"
-            intent_row = await asyncio.to_thread(
+            intent_row = await _call_sync_or_async(
                 intent_store.protection_intent_for_order,
                 algo_order_id,
                 trade_id,
@@ -2858,7 +3219,7 @@ class TradeLifecycle(AITOSModule):
                     algo_order_id,
                     "trade child-fill marker identity is malformed",
                 )
-            watermark = await asyncio.to_thread(
+            watermark = await _call_sync_or_async(
                 intent_store.protection_child_watermark, algo_id, child_id
             )
             if watermark is not None and not marker:
@@ -2922,6 +3283,22 @@ class TradeLifecycle(AITOSModule):
                 and algo_order_id not in pending
             ):
                 pending.append(algo_order_id)
+            client_id = str(algo.get("clientAlgoId", "")).strip()
+            child_fill_evidence = {
+                "algo_id": str(algo_id),
+                "child_order_id": str(child_id),
+                "cumulative_quantity": str(delta.cumulative_quantity),
+                "cumulative_quote": str(delta.cumulative_quote),
+                "delta_quantity": str(delta.delta_quantity),
+                "delta_quote": str(delta.delta_quote),
+                "status": delta.status,
+            }
+            if not client_id:
+                raise ExecutionRecoveryRequired(
+                    trade.symbol,
+                    algo_order_id,
+                    "triggered child has no canonical protective client intent ID",
+                )
 
             try:
                 if delta.delta_quantity > 0:
@@ -2948,11 +3325,14 @@ class TradeLifecycle(AITOSModule):
                             f"resting:{algo_order_id}",
                             result,
                         )
+                        trade._aitos_filled_resting_order_ids = {algo_order_id}
                         try:
                             await self._close_trade_unlocked(
                                 trade_id,
                                 float(delta.average_price),
                                 "exchange_protective_child_filled",
+                                execution_intent_client_id=client_id,
+                                protection_child_fill=child_fill_evidence,
                             )
                         finally:
                             self._confirmed_reductions.pop(trade_id, None)
@@ -2963,6 +3343,8 @@ class TradeLifecycle(AITOSModule):
                             float(delta.delta_quantity / Decimal(str(trade.quantity))),
                             execution_result=result,
                             refresh_protection=False,
+                            execution_intent_client_id=client_id,
+                            protection_child_fill=child_fill_evidence,
                         )
                 else:
                     trade.updated_at = utc_now_iso()
@@ -2971,8 +3353,7 @@ class TradeLifecycle(AITOSModule):
 
                 # The durable trade snapshot (including its marker) must exist
                 # before either SQLite acknowledgement or terminal transition.
-                client_id = str(algo.get("clientAlgoId", ""))
-                intent_rows = await asyncio.to_thread(intent_store.protection_intents)
+                intent_rows = await _call_sync_or_async(intent_store.protection_intents)
                 owned_rows = [
                     row for row in intent_rows if row.get("client_id") == client_id
                 ]
@@ -2982,11 +3363,21 @@ class TradeLifecycle(AITOSModule):
                         algo_order_id,
                         "triggered child has no unique durable client-algo intent",
                     )
-                if owned_rows[0].get("state") == "PROTECTED":
-                    await asyncio.to_thread(
-                        intent_store.mark_applied, client_id, trade_id
-                    )
-                await asyncio.to_thread(
+                if (
+                    owned_rows[0].get("state") == "PROTECTED"
+                    and delta.delta_quantity > 0
+                ):
+                    if (
+                        getattr(self._order_executor, "canonical_intent_store", None)
+                        is None
+                    ):
+                        await _call_sync_or_async(
+                            intent_store.mark_applied, client_id, trade_id
+                        )
+                    # PostgreSQL mode preserves PROTECTED for an in-flight algo;
+                    # append_protection_child_fill already committed this child
+                    # delta, Trade snapshot and ledger atomically.
+                await _call_sync_or_async(
                     intent_store.mark_protection_child_applied,
                     algo_id=algo_id,
                     child_order_id=child_id,
@@ -3004,7 +3395,7 @@ class TradeLifecycle(AITOSModule):
                     "REJECTED",
                 }
                 if terminal:
-                    await asyncio.to_thread(
+                    await _call_sync_or_async(
                         intent_store.mark_protection_terminal,
                         algo_order_id,
                         symbol=trade.symbol,
@@ -3015,7 +3406,9 @@ class TradeLifecycle(AITOSModule):
                         if order_type == "STOP_MARKET" and trade.quantity > 0:
                             # The old stop is terminal. A fresh stop is placed
                             # make-before-break against the remaining position.
-                            await self._refresh_live_protection(trade)
+                            await self._refresh_live_protection(
+                                trade, old_order_terminal=True
+                            )
                         elif order_type == "TAKE_PROFIT_MARKET":
                             tp_index = trade.tp_order_ids.index(algo_order_id)
                             trade.tp_order_ids.pop(tp_index)
@@ -3069,6 +3462,8 @@ class TradeLifecycle(AITOSModule):
         execution_result: OrderResult | None = None,
         consume_tp: bool = False,
         refresh_protection: bool = True,
+        execution_intent_client_id: str | None = None,
+        protection_child_fill: dict[str, Any] | None = None,
     ) -> None:
         if not _valid_market_price(price):
             raise ValueError(f"price must be a finite positive number, got {price!r}")
@@ -3129,13 +3524,25 @@ class TradeLifecycle(AITOSModule):
             ]
             if consumed_tp and trade.take_profit_levels:
                 trade.take_profit_levels.pop(0)
+            reduction_client_id = self._execution_faults.get(
+                trade.trade_id, f"resting:{execution_result.order_id}"
+            )
+            await self._commit_live_execution(
+                trade,
+                ledger_entries=self._position_reduction_ledger(
+                    closed_notional,
+                    execution_result,
+                    f"reduction:{reduction_client_id}",
+                ),
+                client_order_id=execution_intent_client_id,
+                protection_child_fill=protection_child_fill,
+            )
             if (
                 refresh_protection
                 and self._use_exchange_side_stops
                 and trade.quantity > 0
             ):
                 await self._refresh_live_protection(trade)
-            await self._commit_live_execution(trade)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_PARTIAL_CLOSE,

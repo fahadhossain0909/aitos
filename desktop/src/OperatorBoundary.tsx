@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { parseOperatorSession } from "./operatorSession";
+import { completeOperatorMfa } from "./webauthnClient";
 type Mode =
   "checking" | "development" | "authenticated" | "signed_out" | "error";
 export default function OperatorBoundary({
@@ -20,6 +21,9 @@ export default function OperatorBoundary({
     [expires, setExpires] = useState(0),
     [clock, setClock] = useState(Date.now()),
     [password, setPassword] = useState(""),
+    [operatorId, setOperatorId] = useState("local-operator"),
+    [authenticatedIdentity, setAuthenticatedIdentity] = useState(""),
+    [enrollmentToken, setEnrollmentToken] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [logoutFailed, setLogoutFailed] = useState(false);
@@ -50,6 +54,8 @@ export default function OperatorBoundary({
       const s = parseOperatorSession(await r.json());
       if (mounted.current && id === requestId.current) {
         setClock(Date.now());
+        if (s.default_identity) setOperatorId(s.default_identity);
+        setAuthenticatedIdentity(s.identity ?? "");
         setExpires(Date.now() + s.expires_in_seconds * 1000);
         setMode(s.authenticated ? "authenticated" : "signed_out");
         setError("");
@@ -83,6 +89,7 @@ export default function OperatorBoundary({
       if (now >= expires) {
         setMode("signed_out");
         setPassword("");
+        setAuthenticatedIdentity("");
         setError("Your absolute session lifetime ended. Sign in again.");
       }
     }, 1000);
@@ -93,6 +100,7 @@ export default function OperatorBoundary({
       if (mode === "authenticated") {
         setMode("signed_out");
         setPassword("");
+        setAuthenticatedIdentity("");
         setError(
           "Your operator session expired or was revoked. Financial views were cleared.",
         );
@@ -115,7 +123,11 @@ export default function OperatorBoundary({
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(
+          enrollmentToken
+            ? { user_id: operatorId, password, enrollment_token: enrollmentToken }
+            : { user_id: operatorId, password },
+        ),
         signal: c.signal,
         cache: "no-store",
       });
@@ -127,6 +139,19 @@ export default function OperatorBoundary({
               ? "Operator sign-in was rejected."
               : "Protected sign-in is unavailable.",
         );
+      const result = (await r.json()) as Record<string, unknown>;
+      if (
+        result.mfa_required === true ||
+        result.mfa_enrollment_required === true
+      ) {
+        setPassword("");
+        setError(
+          result.mfa_enrollment_required === true
+            ? "Registering this device's WebAuthn authenticator. Follow your browser's security-key prompt."
+            : "Complete the WebAuthn security-key check to finish signing in.",
+        );
+        await completeOperatorMfa(result);
+      }
       setPassword("");
       await check();
     } catch (e) {
@@ -141,6 +166,7 @@ export default function OperatorBoundary({
       if (mounted.current) {
         setBusy(false);
         setPassword("");
+        setEnrollmentToken("");
       }
     }
   }
@@ -163,6 +189,7 @@ export default function OperatorBoundary({
       if (r.status !== 204) throw Error();
       if (mounted.current) {
         setMode("signed_out");
+        setAuthenticatedIdentity("");
         setError("");
         setLogoutFailed(false);
       }
@@ -187,7 +214,7 @@ export default function OperatorBoundary({
         <div className="operator-session-bar">
           <span>
             <ShieldCheck size={12} />
-            Authenticated · read-only
+            Authenticated · {authenticatedIdentity || "operator"} · read-only
           </span>
           <span className="mono">
             Session {Math.floor(seconds / 60)}:
@@ -234,6 +261,22 @@ export default function OperatorBoundary({
         )}
         {mode === "signed_out" ? (
           <form onSubmit={signIn}>
+            <label htmlFor="operator-identity">Operator identity</label>
+            <div className="operator-password-field">
+              <KeyRound size={16} />
+              <input
+                id="operator-identity"
+                name="operator-identity"
+                type="text"
+                autoComplete="username"
+                value={operatorId}
+                maxLength={256}
+                onChange={(e) => setOperatorId(e.target.value)}
+                placeholder="Configured operator identity"
+                required
+                disabled={busy}
+              />
+            </div>
             <label htmlFor="operator-password">Operator password</label>
             <div className="operator-password-field">
               <KeyRound size={16} />
@@ -248,6 +291,20 @@ export default function OperatorBoundary({
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Your configured operator password"
                 required
+                disabled={busy}
+              />
+            </div>
+            <div className="operator-password-field">
+              <KeyRound size={16} />
+              <input
+                id="operator-enrollment-token"
+                name="operator-enrollment-token"
+                type="password"
+                autoComplete="off"
+                value={enrollmentToken}
+                maxLength={1024}
+                onChange={(e) => setEnrollmentToken(e.target.value)}
+                placeholder="First remote device enrollment token (if required)"
                 disabled={busy}
               />
             </div>

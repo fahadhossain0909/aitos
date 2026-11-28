@@ -57,8 +57,10 @@ class Client:
         return SimpleNamespace(result_rows=rows(self.engine, sql, parameters))
 
 
-def store(engine):
-    return DurableTradingStateStore(SimpleNamespace(_client=Client(engine)))
+def store(engine, account_scope=""):
+    return DurableTradingStateStore(
+        SimpleNamespace(_client=Client(engine)), account_scope=account_scope
+    )
 
 
 def payload(stamp, *, state="position_opened", quantity=1, pnl=0, symbol="BTCUSDT"):
@@ -158,23 +160,52 @@ async def test_counterexample_submillisecond_updates_collapse_to_one_version(eng
         await store(engine).load_open_trades()
 
 
-async def test_counterexample_table_key_cannot_separate_reused_ids_across_accounts(
-    engine,
-):
+async def test_account_scope_recovery_isolates_reused_trade_ids(engine):
     for account, symbol, stamp in [
         ("synthetic-paper-a", "BTCUSDT", "2026-11-02 12:00:00.001"),
         ("synthetic-paper-b", "ETHUSDT", "2026-11-02 12:00:00.002"),
     ]:
         item = payload(stamp, symbol=symbol)
-        item["account_scope"] = (
-            account  # Existing reader/key do not enforce this field.
-        )
+        item["account_scope"] = account
         insert(engine, "trade_runtime_state", item, stamp)
-    restored = await store(engine).load_open_trades()
-    assert len(restored) == 1 and restored[0].symbol == "ETHUSDT"
+
+    restored_a = await store(
+        engine, account_scope="synthetic-paper-a"
+    ).load_open_trades()
+    restored_b = await store(
+        engine, account_scope="synthetic-paper-b"
+    ).load_open_trades()
+    assert [(trade.symbol, trade.account_scope) for trade in restored_a] == [
+        ("BTCUSDT", "synthetic-paper-a")
+    ]
+    assert [(trade.symbol, trade.account_scope) for trade in restored_b] == [
+        ("ETHUSDT", "synthetic-paper-b")
+    ]
 
 
-async def test_counterexample_unscoped_closed_id_suppresses_other_scope_open(engine):
+async def test_legacy_replacing_key_still_collapses_reused_ids_after_merge(engine):
+    for account, symbol, stamp in [
+        ("synthetic-paper-a", "BTCUSDT", "2026-11-02 12:00:00.001"),
+        ("synthetic-paper-b", "ETHUSDT", "2026-11-02 12:00:00.002"),
+    ]:
+        item = payload(stamp, symbol=symbol)
+        item["account_scope"] = account
+        insert(engine, "trade_runtime_state", item, stamp)
+
+    # The reader is scope-aware, but the legacy ReplacingMergeTree ORDER BY
+    # trade_id is not. A merge can still erase one account's distinct trade.
+    engine.query("SYSTEM START MERGES trade_runtime_state")
+    engine.query("OPTIMIZE TABLE trade_runtime_state FINAL")
+    assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
+    winner = rows(
+        engine,
+        "SELECT DISTINCT JSONExtractString(payload_json, 'account_scope') "
+        "FROM trade_runtime_state",
+    )[0][0]
+    assert len(await store(engine, account_scope=winner).load_open_trades()) == 1
+
+
+async def test_closed_trade_in_one_scope_does_not_suppress_other_scope_open(engine):
     stamp = "2026-11-02 12:00:00.001"
     closed = payload(stamp, state="position_closed")
     closed["account_scope"] = "synthetic-paper-a"
@@ -182,11 +213,13 @@ async def test_counterexample_unscoped_closed_id_suppresses_other_scope_open(eng
     opened["account_scope"] = "synthetic-paper-b"
     insert(engine, "paper_closed_trade_ledger", closed, stamp)
     insert(engine, "trade_runtime_state", opened, stamp)
-    assert await store(engine).load_open_trades() == []
+    restored = await store(engine, account_scope="synthetic-paper-b").load_open_trades()
+    assert len(restored) == 1
+    assert restored[0].symbol == "ETHUSDT"
     assert rows(engine, "SELECT count() FROM trade_runtime_state") == [[1]]
 
 
-async def test_counterexample_income_cursor_latest_time_is_not_a_high_water_mark(
+async def test_income_cursor_is_monotonic_high_water_mark(
     engine,
 ):
     for cursor, stamp in [
@@ -202,4 +235,4 @@ async def test_counterexample_income_cursor_latest_time_is_not_a_high_water_mark
             "INSERT INTO exchange_income_sync_cursor FORMAT JSONEachRow\n"
             + json.dumps(record)
         )
-    assert await store(engine).load_income_cursor("synthetic-account") == 100
+    assert await store(engine).load_income_cursor("synthetic-account") == 200

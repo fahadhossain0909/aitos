@@ -18,6 +18,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from aitos.models.trade import TradeSide
 
@@ -38,6 +39,8 @@ class OrderRequest:
     reduce_only: bool = False
     # Durable ownership hint for recovering an accepted protective order after a crash.
     owner_trade_id: str | None = None
+    # Bounded domain context for post-crash Trade reconstruction.
+    execution_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
