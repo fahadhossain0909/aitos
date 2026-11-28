@@ -230,6 +230,7 @@ async def test_market_os_persistence_can_restart_and_reports_flush_task_health()
 
     await service.shutdown()
 
+
 @pytest.mark.asyncio
 async def test_market_os_persistence_reports_failure_and_recovers_after_retry():
     class FlakyClient(FakeClient):
