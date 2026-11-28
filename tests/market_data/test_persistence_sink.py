@@ -375,6 +375,7 @@ async def test_persistence_sink_reports_latency_per_target_table():
     assert table_latency["trade_ticks"]["count"] == 1
     assert table_latency["market_event_versions"]["p95_ms"] is not None
     assert table_latency["trade_ticks"]["p95_ms"] is not None
+    assert table_latency["trade_ticks"]["max_ms"] >= 0.0
 
 
 @pytest.mark.asyncio
