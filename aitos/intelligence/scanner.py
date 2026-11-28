@@ -33,7 +33,6 @@ from aitos.intelligence.entry_quality import (
     breakout_acceptance_score,
     relative_strength_score,
 )
-from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
 from aitos.intelligence.htf_cache import HigherTimeframeCandleCache
