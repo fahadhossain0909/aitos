@@ -94,6 +94,45 @@ class MarketDataGateway:
             0.0,
             (datetime.now(timezone.utc) - event.ingest_time).total_seconds() * 1000.0,
         )
+        stage_timestamps = dict(event.stage_timestamps or {})
+        frame_received_monotonic = stage_timestamps.get(
+            "ws_frame_received_monotonic"
+        )
+        decode_started_monotonic = stage_timestamps.get(
+            "ws_decode_started_monotonic"
+        )
+        decode_completed_monotonic = stage_timestamps.get(
+            "ws_decode_completed_monotonic"
+        )
+        normalized_monotonic = stage_timestamps.get(
+            "event_normalized_monotonic"
+        )
+        frame_received_epoch_ms = stage_timestamps.get(
+            "ws_frame_received_epoch_ms"
+        )
+        now_monotonic = time.monotonic()
+        source_to_receive_ms = (
+            frame_received_epoch_ms - event.event_time.timestamp() * 1000.0
+            if isinstance(frame_received_epoch_ms, (int, float))
+            else None
+        )
+        receive_to_gateway_ms = (
+            max(0.0, now_monotonic - frame_received_monotonic) * 1000.0
+            if isinstance(frame_received_monotonic, (int, float))
+            else None
+        )
+        decode_duration_ms = (
+            max(0.0, decode_completed_monotonic - decode_started_monotonic) * 1000.0
+            if isinstance(decode_started_monotonic, (int, float))
+            and isinstance(decode_completed_monotonic, (int, float))
+            else None
+        )
+        normalize_duration_ms = (
+            max(0.0, normalized_monotonic - decode_completed_monotonic) * 1000.0
+            if isinstance(normalized_monotonic, (int, float))
+            and isinstance(decode_completed_monotonic, (int, float))
+            else None
+        )
         try:
             from aitos.forensics.data_flow_hooks import note_trace, record_input
             from aitos.forensics.data_flow_schema import PipelineStage
@@ -111,6 +150,10 @@ class MarketDataGateway:
                 extra={
                     "phase": "ingress",
                     "event_age_ms": age * 1000.0,
+                    "source_to_receive_ms": source_to_receive_ms,
+                    "receive_to_gateway_ms": receive_to_gateway_ms,
+                    "websocket_decode_ms": decode_duration_ms,
+                    "decode_to_normalize_ms": normalize_duration_ms,
                     "source_to_ingest_ms": ingest_delay_ms,
                     "ingest_to_gateway_ms": post_ingest_age_ms,
                 },
