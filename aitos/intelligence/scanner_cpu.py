@@ -8,8 +8,8 @@ forking an already-running async process.
 
 from __future__ import annotations
 
-import atexit
 import asyncio
+import atexit
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import Any
