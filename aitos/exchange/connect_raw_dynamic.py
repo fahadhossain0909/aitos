@@ -271,7 +271,16 @@ async def connect_raw_dynamic(
                             try:
                                 yield payload, stream_name
                             finally:
-                                _WS_FRAME_TIMING.reset(timing_token)
+                                try:
+                                    _WS_FRAME_TIMING.reset(timing_token)
+                                except ValueError:
+                                    # Async generators may be closed from a different
+                                    # task/context than the one that first advanced
+                                    # them. ContextVar tokens are context-bound; on
+                                    # cross-context close, clear the timing snapshot
+                                    # in the closing context instead of treating
+                                    # cleanup as a transport failure and reconnecting.
+                                    _WS_FRAME_TIMING.set({})
         except asyncio.CancelledError:
             termination_class = "intentional_cancel"
             if ws is not None:
