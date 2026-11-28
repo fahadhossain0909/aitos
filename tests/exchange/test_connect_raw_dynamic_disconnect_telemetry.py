@@ -57,8 +57,12 @@ async def test_websocket_frame_exposes_receive_and_decode_monotonic_timestamps()
 
     assert stream == "btcusdt@aggTrade"
     assert payload["e"] == "aggTrade"
-    assert timing["ws_frame_received_monotonic"] <= timing["ws_decode_started_monotonic"]
-    assert timing["ws_decode_started_monotonic"] <= timing["ws_decode_completed_monotonic"]
+    assert (
+        timing["ws_frame_received_monotonic"] <= timing["ws_decode_started_monotonic"]
+    )
+    assert (
+        timing["ws_decode_started_monotonic"] <= timing["ws_decode_completed_monotonic"]
+    )
     assert timing["ws_frame_received_epoch_ms"] > 0
 
     await generator.aclose()
