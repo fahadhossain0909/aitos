@@ -483,7 +483,9 @@ class HealthServer:
             item["status"] == ModuleStatus.DEGRADED.value for item in results
         )
         strict_readiness = request.path == "/ready"
-        if has_unhealthy or (strict_readiness and (has_degraded or not overall_healthy)):
+        if has_unhealthy or (
+            strict_readiness and (has_degraded or not overall_healthy)
+        ):
             payload_status = "degraded"
             status_code = 503
         elif has_degraded or not overall_healthy:
