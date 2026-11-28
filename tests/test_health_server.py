@@ -107,6 +107,35 @@ async def test_health_endpoint_returns_200_when_only_degraded():
 
 
 @pytest.mark.asyncio
+async def test_readiness_endpoint_returns_503_when_any_module_is_degraded():
+    """Readiness is strict while diagnostic health preserves soft-degraded HTTP 200."""
+    modules = [
+        FakeModule("mod-a", ModuleStatus.HEALTHY),
+        FakeModule("market-os-persistence", ModuleStatus.DEGRADED),
+    ]
+    server = HealthServer(modules)
+    client = TestClient(TestServer(server._build_app()))
+    await client.start_server()
+
+    health = await client.get("/health")
+    health_body = await health.json()
+    readiness = await client.get("/ready")
+    readiness_body = await readiness.json()
+
+    assert health.status == 200
+    assert health_body["status"] == "degraded"
+    assert readiness.status == 503
+    assert readiness_body["status"] == "degraded"
+    assert any(
+        module["module_id"] == "market-os-persistence"
+        and module["status"] == "degraded"
+        for module in readiness_body["modules"]
+    )
+
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_health_endpoint_includes_module_details():
     modules = [FakeModule("mod-a", ModuleStatus.HEALTHY, details={"trades_open": 3})]
     server = HealthServer(modules)
