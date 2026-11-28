@@ -1473,7 +1473,7 @@ class OpportunityScanner(AITOSModule):
         candle_auction = auction_context_score(klines, direction.value)
         live_auction = (
             live_auction_score(trades, order_book, direction.value)
-            if trades and order_book is not None
+            if live_fresh
             else 5.0
         )
         amt_context = self._analyze_amt(symbol, trades, klines, order_book)
@@ -1507,9 +1507,7 @@ class OpportunityScanner(AITOSModule):
                 2,
             )
         else:
-            amt_score = (
-                live_auction if trades and order_book is not None else candle_auction
-            )
+            amt_score = live_auction if live_fresh else candle_auction
         tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
         liquidity_events = tracker.update(order_book, trades)
         tick_size = self._footprint_tick_size(symbol)
