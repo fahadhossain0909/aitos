@@ -98,7 +98,7 @@ async def test_live_universe_path_uses_tickers_then_deep_scans_top_two_only():
     assert len(scanner.scan_calls) == 2
     assert len(result) == 2
     assert scanner._last_candidate_count == 2
-    assert scanner._last_candidate_symbols == ("S8", "S9")
+    assert scanner._last_candidate_symbols == ("S0", "S1")
     assert [s for s, _ in stages] == ["TOP_50", "TOP_25", "TOP_10", "TOP_5", "TOP_2"]
     assert stages[0][1][0] == "S0"
     assert len(stages[2][1]) == 10

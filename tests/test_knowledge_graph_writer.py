@@ -241,4 +241,4 @@ def test_semantic_projection_separates_foreach_from_optional_match_with_with():
     query = PROJECT_SEMANTIC_EVENT_QUERY
     boundary = "MERGE (e)-[:PART_OF_CALIBRATION]->(c))"
     assert boundary in query
-    assert "WITH e\\nOPTIONAL MATCH (decision:Decision" in query
+    assert "WITH e\nOPTIONAL MATCH (decision:Decision" in query
