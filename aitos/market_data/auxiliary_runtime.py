@@ -45,6 +45,7 @@ class BinanceAuxiliaryMarketDataRuntime:
         self._start("ticker", lambda: self.adapter.stream_all_tickers())
         managed_funding = getattr(self.adapter, "stream_funding_managed", None)
         if callable(managed_funding):
+
             def funding_factory():
                 if self._funding_stream is None or self._funding_stream.closed:
                     self._funding_stream = managed_funding(self.symbols)
@@ -66,9 +67,7 @@ class BinanceAuxiliaryMarketDataRuntime:
                 "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
             )
         self._start("liquidation", lambda: self.adapter.stream_liquidations())
-        dynamic_instruments = getattr(
-            self.adapter, "stream_instruments_dynamic", None
-        )
+        dynamic_instruments = getattr(self.adapter, "stream_instruments_dynamic", None)
         self._dynamic_instrument = callable(dynamic_instruments)
         if self._dynamic_instrument:
             self._start(
@@ -76,7 +75,9 @@ class BinanceAuxiliaryMarketDataRuntime:
                 lambda: dynamic_instruments(lambda: self.symbols),
             )
         else:
-            self._start("instrument", lambda: self.adapter.stream_instruments(self.symbols))
+            self._start(
+                "instrument", lambda: self.adapter.stream_instruments(self.symbols)
+            )
         logger.info(
             "Binance auxiliary market-data runtime started",
             extra={"aitos_extra": {"symbols": self.symbols}},

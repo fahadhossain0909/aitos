@@ -259,7 +259,6 @@ class MarketDataBus:
         except Exception:
             pass
 
-
     async def publish_many(self, events: list[MarketEvent]) -> None:
         """Validate and publish a gateway batch through the transport pipeline."""
         if not events:

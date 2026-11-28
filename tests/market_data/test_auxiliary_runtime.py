@@ -88,7 +88,9 @@ class _DynamicAdapter(_NeverEndingAdapter):
 @pytest.mark.asyncio
 async def test_symbol_rotation_updates_managed_feeds_without_restarting_producers():
     adapter = _DynamicAdapter()
-    gateway = MarketDataGateway("binance", "usd_m_futures", lambda _event: asyncio.sleep(0))
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", lambda _event: asyncio.sleep(0)
+    )
     runtime = BinanceAuxiliaryMarketDataRuntime(adapter, gateway, ["BTCUSDT"])
 
     await runtime.start()

@@ -358,7 +358,6 @@ class EventBus(AITOSModule):
             if not fut.done():
                 fut.set_result(event)
 
-
     async def publish_many(self, events: list[Event]) -> None:
         """Append a bounded event batch using one Redis pipeline round trip."""
         self._require_initialized()

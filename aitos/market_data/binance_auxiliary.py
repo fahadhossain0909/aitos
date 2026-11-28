@@ -52,9 +52,6 @@ def _event(
         correlation_id=f"binance:usd_m_futures:{symbol}:{event_type.value}:{event_time.timestamp()}",
     )
 
-
-
-
 class _ManagedFundingEventStream:
     """Convert a dynamically managed mark-price socket into funding events."""
 
@@ -108,6 +105,7 @@ class _ManagedFundingEventStream:
         self._closed = True
         await self._stream.aclose()
 
+
 class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
     """Real producers for ticker/funding/liquidation and REST-polled OI/instruments."""
 
@@ -144,9 +142,7 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
             symbol = stream_name.split("@", 1)[0].upper()
             yield _event(MarketEventType.TICKER, symbol, dict(data), _dt(data.get("E")))
 
-    def stream_funding_managed(
-        self, symbols: list[str]
-    ) -> _ManagedFundingEventStream:
+    def stream_funding_managed(self, symbols: list[str]) -> _ManagedFundingEventStream:
         """Create a mark-price feed with incremental symbol SUBSCRIBE updates."""
         return _ManagedFundingEventStream(self, symbols)
 
@@ -266,7 +262,6 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
                     yield event
             await asyncio.sleep(OPEN_INTEREST_POLL_SECONDS)
 
-
     async def stream_open_interest_dynamic(
         self, symbol_provider: Callable[[], list[str]]
     ) -> AsyncIterator[MarketEvent]:
@@ -333,4 +328,3 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
             except Exception:
                 logger.exception("dynamic instrument metadata poll failed")
             await asyncio.sleep(INSTRUMENT_POLL_SECONDS)
-
