@@ -66,7 +66,8 @@ def test_staging_workflow_accepts_optional_external_uuid_and_sudo_secret() -> No
 def test_staging_enable_switch_requires_manual_confirmation() -> None:
     assert "workflow_dispatch:" in WORKFLOW
     assert "confirm_deploy:" in WORKFLOW
-    assert "  push:" not in WORKFLOW
+    trigger = WORKFLOW.split("permissions:", 1)[0]
+    assert "  push:" not in trigger
     gate = WORKFLOW.split("  staging-gate:", 1)[1].split("  publish-image:", 1)[0]
     assert "environment: staging" in gate
     assert "AITOS_VPS_ENABLED: ${{ vars.AITOS_VPS_ENABLED }}" in gate
