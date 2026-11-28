@@ -235,3 +235,10 @@ async def test_health_check_reports_writes_applied(event_bus):
     health = await writer.health_check()
     assert health.details["writes_applied"] == 1
     await writer.shutdown()
+
+
+def test_semantic_projection_separates_foreach_from_optional_match_with_with():
+    query = PROJECT_SEMANTIC_EVENT_QUERY
+    boundary = "MERGE (e)-[:PART_OF_CALIBRATION]->(c))"
+    assert boundary in query
+    assert "WITH e\\nOPTIONAL MATCH (decision:Decision" in query

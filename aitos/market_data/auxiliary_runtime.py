@@ -128,6 +128,9 @@ class BinanceAuxiliaryMarketDataRuntime:
             self._start(
                 "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
             )
+            self._start(
+                "instrument", lambda: self.adapter.stream_instruments(self.symbols)
+            )
             return True
 
     async def stop(self) -> None:

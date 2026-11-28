@@ -272,9 +272,16 @@ async def install_staged_scan(
                         "live-universe reference candle unavailable",
                         extra={"aitos_extra": {"symbol": anchor, "error": str(exc)}},
                     )
-            deep = ([anchor] if anchor in top25 else []) + [
-                symbol for symbol in top25 if symbol != anchor
+            ranked_symbols = [symbol for symbol, _ in ranked]
+            top10_symbols = ([anchor] if anchor in top25 else []) + [
+                symbol for symbol in ranked_symbols
+                if symbol in top25 and symbol != anchor
             ][: TOP_10 - (1 if anchor in top25 else 0)]
+            top5_symbols = top10_symbols[:TOP_5]
+            deep = top10_symbols[:TOP_2]
+            await on_subscription_change(top10_symbols, "TOP_10")
+            await on_subscription_change(top5_symbols, "TOP_5")
+            await on_subscription_change(deep, "TOP_2")
             candidates = []
             for symbol in deep:
                 try:
@@ -287,14 +294,7 @@ async def install_staged_scan(
                         extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
                     )
             candidates.sort(key=lambda item: float(item.composite_score), reverse=True)
-            top10, top5, top2 = (
-                candidates[:TOP_10],
-                candidates[:TOP_5],
-                candidates[:TOP_2],
-            )
-            await on_subscription_change([c.symbol for c in top10], "TOP_10")
-            await on_subscription_change([c.symbol for c in top5], "TOP_5")
-            await on_subscription_change([c.symbol for c in top2], "TOP_2")
+            top2 = candidates[:TOP_2]
             await _enrich_promoted_candidates(scanner, top2)
             scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
             scanner._last_candidate_count = len(top2)

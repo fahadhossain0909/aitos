@@ -58,7 +58,7 @@ class CanonicalMarketDataPersistenceSink:
         self._historical_orderbook_levels = max(
             1, min(1000, historical_orderbook_levels)
         )
-        self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
+        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
         self._batch_size = max(1, batch_size)
         self._batch_wait = max(0.0, batch_wait_seconds)
@@ -95,9 +95,9 @@ class CanonicalMarketDataPersistenceSink:
                 self._subscriptions.append(
                     await self._bus.subscribe(
                         event_type,
-                        self._enqueue,
+                        self._persist_before_ack,
                         group=GROUP_PERSISTENCE,
-                        live_only=True,
+                        live_only=False,
                         market_type=market_type,
                     )
                 )
@@ -144,8 +144,14 @@ class CanonicalMarketDataPersistenceSink:
         except asyncio.CancelledError:
             pass
 
-    async def _enqueue(self, event: MarketEvent) -> None:
-        """Apply the historical boundary before consuming queue capacity."""
+    async def _persist_before_ack(self, event: MarketEvent) -> None:
+        """Return to Redis only after the event has reached durable storage."""
+        completion = await self._enqueue(event)
+        if completion is not None:
+            await completion
+
+    async def _enqueue(self, event: MarketEvent) -> asyncio.Future[None] | None:
+        """Admit a historical event and expose its durable-write completion."""
         if self._repository is None:
             return
         if event.event_type not in self._persist_event_types:
@@ -179,10 +185,11 @@ class CanonicalMarketDataPersistenceSink:
         else:
             self._filtered += 1
             return
+        completion: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         try:
-            self._queue.put_nowait(event)
+            self._queue.put_nowait((event, completion))
         except asyncio.QueueFull:
-            # Historical persistence is best-effort and must never block live ingestion.
+            # Fail the Redis handler so the source entry is retried/DLQ'd, never ACKed.
             self._rejected += 1
             try:
                 from aitos.forensics.data_flow_hooks import record_drop
@@ -198,7 +205,7 @@ class CanonicalMarketDataPersistenceSink:
                 )
             except Exception:
                 pass
-            return
+            raise RuntimeError("canonical market-data persistence queue is full")
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
@@ -225,13 +232,15 @@ class CanonicalMarketDataPersistenceSink:
                 symbol=event.symbol,
             )
         except Exception:
-            # Telemetry must never interfere with the best-effort persistence path.
+            # Telemetry must never interfere with the durable persistence path.
             pass
+        return completion
 
     async def _worker(self, worker_id: int) -> None:
         while True:
-            event = await self._queue.get()
+            event, completion = await self._queue.get()
             batch = [event]
+            completions = [completion]
             try:
                 deadline = asyncio.get_running_loop().time() + self._batch_wait
                 while len(batch) < self._batch_size:
@@ -239,15 +248,22 @@ class CanonicalMarketDataPersistenceSink:
                     if timeout == 0:
                         break
                     try:
-                        batch.append(await asyncio.wait_for(self._queue.get(), timeout))
+                        next_event, next_completion = await asyncio.wait_for(
+                            self._queue.get(), timeout
+                        )
+                        batch.append(next_event)
+                        completions.append(next_completion)
                     except asyncio.TimeoutError:
                         break
                 try:
                     await self._persist_batch(batch)
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except Exception as exc:
                     self._errors += len(batch)
+                    for future in completions:
+                        if not future.done():
+                            future.set_exception(exc)
                     try:
                         from aitos.forensics.data_flow_hooks import record_error
                         from aitos.forensics.data_flow_schema import PipelineStage
@@ -263,6 +279,9 @@ class CanonicalMarketDataPersistenceSink:
                 else:
                     self._processed += len(batch)
                     self._batches += 1
+                    for future in completions:
+                        if not future.done():
+                            future.set_result(None)
             finally:
                 for _ in batch:
                     self._queue.task_done()
@@ -274,14 +293,20 @@ class CanonicalMarketDataPersistenceSink:
         for event in events:
             grouped[event.event_type].append(event)
 
+        versioned_batch_writer = getattr(
+            self._repository, "save_market_events_versioned", None
+        )
         versioned_writer = getattr(
             self._repository, "save_market_event_versioned", None
         )
-        if self._canonical_only and versioned_writer is None:
+        if self._canonical_only and versioned_batch_writer is None and versioned_writer is None:
             raise RuntimeError(
-                "canonical-only persistence requires save_market_event_versioned"
+                "canonical-only persistence requires a versioned market-event writer"
             )
-        if versioned_writer is not None:
+        if versioned_batch_writer is not None:
+            await versioned_batch_writer(events)
+            self._versioned_events += len(events)
+        elif versioned_writer is not None:
             for event in events:
                 await versioned_writer(event)
                 self._versioned_events += 1
