@@ -7,11 +7,10 @@ from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.exchange.managed_streams import ManagedStreamSet
 from aitos.logging_setup import get_logger
 
 from .binance_adapter import BinanceCanonicalMarketDataAdapter
-from aitos.exchange.managed_streams import ManagedStreamSet
-
 from .contracts import MarketEvent, MarketEventType, MarketSource
 
 TICKER_TIMEFRAME = "1s"
