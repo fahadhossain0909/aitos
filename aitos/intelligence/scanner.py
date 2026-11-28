@@ -61,6 +61,10 @@ from aitos.intelligence.orderflow_liquidity_interaction import (
     FlowLiquidityInteractionEngine,
 )
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
+from aitos.intelligence.scanner_cpu import (
+    compute_amt_footprint_features,
+    get_scanner_cpu_executor,
+)
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
@@ -1476,7 +1480,39 @@ class OpportunityScanner(AITOSModule):
             if live_fresh
             else 5.0
         )
-        amt_context = self._analyze_amt(symbol, trades, klines, order_book)
+        tick_size = self._footprint_tick_size(symbol)
+        footprint_signals = None
+        amt_context = None
+        if tick_size is not None and trades:
+            cpu_started = time.perf_counter()
+            loop = asyncio.get_running_loop()
+            amt_context, footprint_signals = await loop.run_in_executor(
+                get_scanner_cpu_executor(),
+                compute_amt_footprint_features,
+                trades,
+                klines,
+                order_book,
+                self._last_amt_profile.get(symbol),
+                tick_size,
+                self._amt_value_area_pct,
+                self._amt_ib_minutes,
+                self._footprint_signal_engine.imbalance_threshold,
+                self._footprint_signal_engine.min_level_volume,
+            )
+            self._last_amt_profile[symbol] = amt_context.profile
+            self._last_amt_context[symbol] = amt_context
+            cpu_latency_ms = (time.perf_counter() - cpu_started) * 1000.0
+            logger.info(
+                "scanner CPU features computed in isolated worker",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "stage": "amt_footprint",
+                        "latency_ms": round(cpu_latency_ms, 3),
+                        "worker": "process_pool",
+                    }
+                },
+            )
         if amt_context is not None:
             location_score = (
                 5.0 + (amt_context.price_location - 0.5) * 4.0
@@ -1510,13 +1546,8 @@ class OpportunityScanner(AITOSModule):
             amt_score = live_auction if live_fresh else candle_auction
         tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
         liquidity_events = tracker.update(order_book, trades)
-        tick_size = self._footprint_tick_size(symbol)
         footprint_available = False
-        if tick_size is not None and trades:
-            footprint = self._footprint_engines.setdefault(
-                symbol, FootprintEngine(tick_size)
-            ).build(trades)
-            footprint_signals = self._footprint_signal_engine.evaluate(footprint)
+        if tick_size is not None and trades and footprint_signals is not None:
             interaction = self._interaction_engine.evaluate(
                 footprint_signals, liquidity_events
             )
