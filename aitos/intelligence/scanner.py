@@ -724,18 +724,30 @@ class OpportunityScanner(AITOSModule):
         tick = self._footprint_tick_sizes.get(symbol)
         return tick if tick is not None and tick > 0 else None
 
-    def _live_market_data(self, symbol: str) -> tuple[list, Any, bool]:
+    def _live_market_data(
+        self, symbol: str
+    ) -> tuple[list, Any, bool, bool]:
+        """Return independently fresh trade and order-book cache state."""
         state = self._live_cache.snapshot(symbol)
-        if state is None or state.last_trade_at is None or state.last_book_at is None:
-            return [], None, False
+        if state is None:
+            return [], None, False, False
         now = datetime.now(timezone.utc)
-        return (
-            list(state.trades),
-            state.order_book,
-            (now - state.last_trade_at).total_seconds()
+        trade_fresh = (
+            state.last_trade_at is not None
+            and (now - state.last_trade_at).total_seconds()
             <= self._live_state_stale_seconds
+        )
+        book_fresh = (
+            state.last_book_at is not None
+            and state.order_book is not None
             and (now - state.last_book_at).total_seconds()
-            <= self._live_state_stale_seconds,
+            <= self._live_state_stale_seconds
+        )
+        return (
+            list(state.trades) if trade_fresh else [],
+            state.order_book if book_fresh else None,
+            trade_fresh,
+            book_fresh,
         )
 
     def _analyze_amt(
@@ -893,8 +905,19 @@ class OpportunityScanner(AITOSModule):
                 },
             )
             return None
-        live_trades, live_book, live_fresh = self._live_market_data(symbol)
-        if self._tuning.mode == "live" and not live_fresh:
+        (
+            live_trades,
+            live_book,
+            live_trade_fresh,
+            live_book_fresh,
+        ) = self._live_market_data(symbol)
+        live_inputs_fresh = (
+            live_trade_fresh
+            and live_book_fresh
+            and bool(live_trades)
+            and live_book is not None
+        )
+        if self._tuning.mode == "live" and not live_inputs_fresh:
             for rejected_side in ("LONG", "SHORT"):
                 await self._record_funnel(
                     symbol=symbol,
@@ -910,20 +933,24 @@ class OpportunityScanner(AITOSModule):
                 },
             )
             return None
-        if live_fresh and live_trades and live_book is not None:
-            trades, order_book, market_source = (
-                live_trades[-self._trade_lookback :],
-                live_book,
-                "websocket_live_state",
-            )
+        if live_trade_fresh and live_trades:
+            trades = live_trades[-self._trade_lookback :]
+            if live_book_fresh and live_book is not None:
+                order_book = live_book
+                market_source = "websocket_live_state"
+            else:
+                order_book = await self._exchange.fetch_order_book(symbol, limit=20)
+                market_source = "websocket_trades_rest_book"
         else:
-            order_book, trades, market_source = (
-                await self._exchange.fetch_order_book(symbol, limit=20),
-                await self._exchange.fetch_recent_trades(
-                    symbol, limit=self._trade_lookback
-                ),
-                "rest_fallback",
+            trades = await self._exchange.fetch_recent_trades(
+                symbol, limit=self._trade_lookback
             )
+            if live_book_fresh and live_book is not None:
+                order_book = live_book
+                market_source = "rest_trades_websocket_book"
+            else:
+                order_book = await self._exchange.fetch_order_book(symbol, limit=20)
+                market_source = "rest_fallback"
         funding = await self._exchange.fetch_funding_rate(symbol)
         oi_current = await self._exchange.fetch_open_interest(symbol)
         oi_previous = self._last_oi.get(symbol)

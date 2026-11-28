@@ -148,11 +148,24 @@ class MarketDataGateway:
             MarketEventType.BOOK_DELTA,
             MarketEventType.BOOK_SNAPSHOT,
         }
-        if self.queue.put_latest_nowait(
-            event,
-            can_replace=lambda queued: queued.event_type
-            not in {MarketEventType.BOOK_DELTA, MarketEventType.BOOK_SNAPSHOT},
-        ):
+        can_replace = lambda queued: queued.event_type not in {
+            MarketEventType.BOOK_DELTA,
+            MarketEventType.BOOK_SNAPSHOT,
+        }
+        if event.event_type == MarketEventType.TICKER:
+            accepted = self.queue.put_coalesced_nowait(
+                event,
+                key=lambda queued: str(queued.symbol or "").upper(),
+                can_replace=lambda queued: queued.event_type
+                not in {
+                    MarketEventType.BOOK_DELTA,
+                    MarketEventType.BOOK_SNAPSHOT,
+                    MarketEventType.TRADE,
+                },
+            )
+        else:
+            accepted = self.queue.put_latest_nowait(event, can_replace=can_replace)
+        if accepted:
             self.health.record_accept()
             symbol = self._data_flow_symbol(event)
             try:

@@ -13,13 +13,14 @@ def _event(
     age_seconds: float = 0,
     sequence: int = 0,
     event_type: MarketEventType = MarketEventType.TRADE,
+    symbol: str = "BTCUSDT",
 ) -> MarketEvent:
     now = datetime.now(timezone.utc)
     return MarketEvent(
         event_type=event_type,
         exchange="binance",
         market="usd_m_futures",
-        symbol="BTCUSDT",
+        symbol=symbol,
         event_time=now - timedelta(seconds=age_seconds),
         ingest_time=now - timedelta(seconds=age_seconds),
         payload={"price": 100, "sequence": sequence},
@@ -237,3 +238,63 @@ async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
     assert 3900 <= ingress["event_age_ms"] <= 4100
     assert 2900 <= ingress["source_to_ingest_ms"] <= 3100
     assert 900 <= ingress["ingest_to_gateway_ms"] <= 1100
+
+
+@pytest.mark.asyncio
+async def test_gateway_coalesces_same_symbol_tickers_but_preserves_trades():
+    published = []
+
+    async def publish(event):
+        published.append((event.event_type, event.sequence))
+
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", publish, GatewayConfig(queue_capacity=3)
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    old_ticker = _event(
+        MarketSource.WEBSOCKET, sequence=1, event_type=MarketEventType.TICKER
+    )
+    trade = _event(MarketSource.WEBSOCKET, sequence=2)
+    new_ticker = _event(
+        MarketSource.WEBSOCKET, sequence=3, event_type=MarketEventType.TICKER
+    )
+
+    assert gateway.accept(old_ticker)
+    assert gateway.accept(trade)
+    assert gateway.accept(new_ticker)
+    assert list(gateway.queue._queue._queue) == [trade, new_ticker]
+    assert gateway.queue.snapshot()["coalesced"] == 1
+
+    await gateway.drain_once()
+    await gateway.drain_once()
+    assert published == [
+        (MarketEventType.TRADE, 2),
+        (MarketEventType.TICKER, 3),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gateway_does_not_coalesce_tickers_across_symbols():
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", lambda _: None, GatewayConfig(queue_capacity=2)
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+    btc = _event(
+        MarketSource.WEBSOCKET,
+        sequence=1,
+        event_type=MarketEventType.TICKER,
+        symbol="BTCUSDT",
+    )
+    eth = _event(
+        MarketSource.WEBSOCKET,
+        sequence=2,
+        event_type=MarketEventType.TICKER,
+        symbol="ETHUSDT",
+    )
+
+    assert gateway.accept(btc)
+    assert gateway.accept(eth)
+    assert list(gateway.queue._queue._queue) == [btc, eth]
+    assert gateway.queue.snapshot()["coalesced"] == 0
