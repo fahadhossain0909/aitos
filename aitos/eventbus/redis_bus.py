@@ -148,6 +148,7 @@ class EventBus(AITOSModule):
         self._group_create_busy = 0
         self._publish_latency_samples_ms: deque[float] = deque(maxlen=2048)
         self._publish_prepare_samples_ms: deque[float] = deque(maxlen=2048)
+        self._publish_enqueue_samples_ms: deque[float] = deque(maxlen=2048)
         self._publish_execute_samples_ms: deque[float] = deque(maxlen=2048)
         self._publish_retry_samples_ms: deque[float] = deque(maxlen=2048)
         self._publish_batch_sizes: deque[int] = deque(maxlen=2048)
@@ -206,6 +207,9 @@ class EventBus(AITOSModule):
                     ),
                     "prepare_latency": self._sample_summary(
                         self._publish_prepare_samples_ms
+                    ),
+                    "pipeline_enqueue_latency": self._sample_summary(
+                        self._publish_enqueue_samples_ms
                     ),
                     "redis_execute_latency": self._sample_summary(
                         self._publish_execute_samples_ms
@@ -443,6 +447,7 @@ class EventBus(AITOSModule):
                         (time.perf_counter() - execute_started) * 1000.0
                     )
                 return
+            enqueue_started = time.perf_counter()
             pipeline = pipeline_factory(transaction=False)
             for event in normalized:
                 maxlen = _stream_maxlen(event.topic)
@@ -455,6 +460,9 @@ class EventBus(AITOSModule):
                         maxlen=maxlen,
                         approximate=True,
                     )
+            self._publish_enqueue_samples_ms.append(
+                (time.perf_counter() - enqueue_started) * 1000.0
+            )
             execute_started = time.perf_counter()
             results = await pipeline.execute(raise_on_error=False)
             self._publish_execute_samples_ms.append(
