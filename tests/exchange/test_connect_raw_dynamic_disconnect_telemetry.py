@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import aitos.exchange.connect_raw_dynamic as dynamic_transport
-from aitos.market_data.binance_auxiliary import _event
-from aitos.market_data.contracts import MarketEventType
 from aitos.exchange.connect_raw_dynamic import (
     connect_raw_dynamic,
     current_ws_frame_timing,
 )
+from aitos.market_data.binance_auxiliary import _event
+from aitos.market_data.contracts import MarketEventType
 
 
 def _adapter(ws):
