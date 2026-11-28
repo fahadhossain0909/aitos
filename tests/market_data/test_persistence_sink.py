@@ -364,6 +364,18 @@ async def test_versioned_events_use_one_bulk_insert_per_persistence_batch():
 
 
 @pytest.mark.asyncio
+async def test_multi_event_batch_refuses_single_event_insert_fallback():
+    repo = FakeRepository()
+    repo.save_market_events_versioned = None
+    sink = make_sink(repo)
+
+    with pytest.raises(RuntimeError, match="requires the bulk"):
+        await sink._persist_batch([trade_event(301), trade_event(302)])
+
+    assert repo.versioned_events == []
+
+
+@pytest.mark.asyncio
 async def test_redis_handler_waits_for_durable_persistence_before_ack_boundary():
     repo = FakeRepository()
     sink = make_sink(repo)
@@ -372,8 +384,13 @@ async def test_redis_handler_waits_for_durable_persistence_before_ack_boundary()
         event = trade_event(201)
         await asyncio.wait_for(sink._persist_before_ack(event), timeout=1.0)
         assert repo.versioned_events == [event]
-        assert sink.snapshot()["queue_depth"] == 0
-        assert sink.snapshot()["processed"] == 1
+        snapshot = sink.snapshot()
+        assert snapshot["queue_depth"] == 0
+        assert snapshot["processed"] == 1
+        assert snapshot["queue_wait"]["count"] == 1
+        assert snapshot["queue_wait"]["p50_ms"] is not None
+        assert snapshot["batch_write"]["count"] == 1
+        assert snapshot["batch_write"]["p95_ms"] is not None
     finally:
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
