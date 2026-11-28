@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -224,6 +225,14 @@ async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
         ingest_time=now - timedelta(seconds=1),
         payload={"price": 100},
         source=MarketSource.WEBSOCKET,
+        stage_timestamps={
+            "ws_frame_received_monotonic": time.monotonic() - 1.2,
+            "ws_frame_received_epoch_ms": (now - timedelta(seconds=1.2)).timestamp()
+            * 1000.0,
+            "ws_decode_started_monotonic": time.monotonic() - 1.19,
+            "ws_decode_completed_monotonic": time.monotonic() - 1.18,
+            "event_normalized_monotonic": time.monotonic() - 1.0,
+        },
     )
     gateway = MarketDataGateway("binance", "usd_m_futures", lambda _: None)
     gateway.begin_connect()
@@ -236,6 +245,10 @@ async def test_gateway_trace_separates_source_to_ingest_from_post_ingest_age():
     ingress = next(extra for extra in traces if extra.get("phase") == "ingress")
     assert [extra["phase"] for extra in traces] == ["ingress", "enqueued"]
     assert 3900 <= ingress["event_age_ms"] <= 4100
+    assert 2700 <= ingress["source_to_receive_ms"] <= 2900
+    assert 1000 <= ingress["receive_to_gateway_ms"] <= 1400
+    assert 8 <= ingress["websocket_decode_ms"] <= 12
+    assert 170 <= ingress["decode_to_normalize_ms"] <= 210
     assert 2900 <= ingress["source_to_ingest_ms"] <= 3100
     assert 900 <= ingress["ingest_to_gateway_ms"] <= 1100
 
