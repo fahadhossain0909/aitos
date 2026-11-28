@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from aitos.intelligence.scanner import _measure_event_loop_lag
+
 from aitos.intelligence.amt.engine import AMTEngine
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
@@ -63,3 +65,25 @@ async def test_spawned_cpu_worker_matches_inline_feature_results():
 
 def test_scanner_cpu_executor_is_bounded_to_one_spawned_worker():
     assert get_scanner_cpu_executor()._max_workers == 1
+
+@pytest.mark.asyncio
+async def test_event_loop_lag_probe_detects_synchronous_scan_stall():
+    import asyncio
+    import time
+
+    release = asyncio.Event()
+
+    async def blocking_scan():
+        await release.wait()
+        time.sleep(0.05)
+
+    scan_task = asyncio.create_task(blocking_scan())
+    lag_task = asyncio.create_task(_measure_event_loop_lag(scan_task))
+    await asyncio.sleep(0)
+    release.set()
+
+    await scan_task
+    await asyncio.sleep(0)
+    lag_ms = await lag_task
+
+    assert lag_ms >= 30.0
