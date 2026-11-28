@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any
 
 from aitos.logging_setup import get_logger
 
 from .binance_adapter import BinanceCanonicalMarketDataAdapter
+from aitos.exchange.managed_streams import ManagedStreamSet
+
 from .contracts import MarketEvent, MarketEventType, MarketSource
 
 TICKER_TIMEFRAME = "1s"
@@ -51,6 +53,61 @@ def _event(
     )
 
 
+
+
+class _ManagedFundingEventStream:
+    """Convert a dynamically managed mark-price socket into funding events."""
+
+    def __init__(
+        self, adapter: "BinanceAuxiliaryMarketDataAdapter", symbols: list[str]
+    ) -> None:
+        self._adapter = adapter
+
+        def to_stream(symbol: str) -> str:
+            return f"{symbol.lower()}@markPrice@1s"
+
+        bounded = list(dict.fromkeys(s.upper() for s in symbols if s))[
+            :TOP_SYMBOL_LIMIT
+        ]
+        self._stream = ManagedStreamSet(
+            adapter.exchange,
+            "funding",
+            [to_stream(symbol) for symbol in bounded],
+            to_stream=to_stream,
+        )
+        self._to_stream = to_stream
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def __aiter__(self) -> "_ManagedFundingEventStream":
+        return self
+
+    async def __anext__(self) -> MarketEvent:
+        data, stream_name = await self._stream.__anext__()
+        symbol = stream_name.split("@", 1)[0].upper()
+        payload = {
+            "symbol": symbol,
+            "funding_rate": float(data.get("r", 0.0)),
+            "mark_price": float(data.get("p", 0.0)),
+            "index_price": float(data.get("i", 0.0)),
+            "next_funding_time": data.get("T"),
+            "event_time": data.get("E"),
+        }
+        return _event(MarketEventType.FUNDING, symbol, payload, _dt(data.get("E")))
+
+    async def update_symbols(self, symbols: list[str]) -> bool:
+        if self._closed:
+            return False
+        bounded = (await self._adapter._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        return await self._stream.update_symbols(bounded)
+
+    async def aclose(self) -> None:
+        self._closed = True
+        await self._stream.aclose()
+
 class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
     """Real producers for ticker/funding/liquidation and REST-polled OI/instruments."""
 
@@ -86,6 +143,12 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
         ):
             symbol = stream_name.split("@", 1)[0].upper()
             yield _event(MarketEventType.TICKER, symbol, dict(data), _dt(data.get("E")))
+
+    def stream_funding_managed(
+        self, symbols: list[str]
+    ) -> _ManagedFundingEventStream:
+        """Create a mark-price feed with incremental symbol SUBSCRIBE updates."""
+        return _ManagedFundingEventStream(self, symbols)
 
     async def stream_funding(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
@@ -203,6 +266,25 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
                     yield event
             await asyncio.sleep(OPEN_INTEREST_POLL_SECONDS)
 
+
+    async def stream_open_interest_dynamic(
+        self, symbol_provider: Callable[[], list[str]]
+    ) -> AsyncIterator[MarketEvent]:
+        """Poll the latest symbol set without restarting the producer task."""
+        while True:
+            bounded = (await self._valid_symbols(symbol_provider()))[:TOP_SYMBOL_LIMIT]
+            results = await asyncio.gather(
+                *(self._fetch_oi_with_timeout(s) for s in bounded),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    continue
+                _symbol, event = result
+                if event is not None:
+                    yield event
+            await asyncio.sleep(OPEN_INTEREST_POLL_SECONDS)
+
     async def stream_instruments(
         self, symbols: list[str]
     ) -> AsyncIterator[MarketEvent]:
@@ -226,3 +308,29 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
             except Exception:
                 pass
             await asyncio.sleep(INSTRUMENT_POLL_SECONDS)
+
+    async def stream_instruments_dynamic(
+        self, symbol_provider: Callable[[], list[str]]
+    ) -> AsyncIterator[MarketEvent]:
+        """Refresh instrument metadata for the current symbol set in place."""
+        while True:
+            try:
+                requested = await self._valid_symbols(symbol_provider())
+                filters = await self.exchange.fetch_exchange_info(requested or None)
+                now = datetime.now(timezone.utc)
+                for symbol, value in filters.items():
+                    payload = {
+                        "symbol": symbol,
+                        "tick_size": value.tick_size,
+                        "step_size": value.step_size,
+                        "min_notional": value.min_notional,
+                        "quantity_precision": value.quantity_precision,
+                        "price_precision": value.price_precision,
+                    }
+                    yield _event(MarketEventType.INSTRUMENT, symbol, payload, now)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("dynamic instrument metadata poll failed")
+            await asyncio.sleep(INSTRUMENT_POLL_SECONDS)
+
