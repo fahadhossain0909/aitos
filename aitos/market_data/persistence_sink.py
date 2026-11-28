@@ -1,4 +1,4 @@
-"""Best-effort historical market-data persistence isolated from live ingestion."""
+"""Durable historical market-data persistence isolated from live socket ingestion."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ from .contracts import MarketEvent, MarketEventType
 
 
 class CanonicalMarketDataPersistenceSink:
-    """Bounded historical writer; never makes live ingestion wait for ClickHouse.
+    """Bounded durable writer whose Redis ACK follows the ClickHouse commit.
 
-    The canonical Redis bus carries the full live universe. This sink is a
-    deliberately narrow historical boundary: only configured event types and
-    configured historical symbols are admitted. Low-value live event classes
-    must not silently consume the historical persistence queue.
+    Redis Streams decouple exchange socket ingestion from historical storage.
+    The persistence consumer deliberately waits for the durable batch result
+    before acknowledging its source entry, preserving replay on queue or store
+    failures. Only configured event types and symbols enter this boundary.
     """
 
     def __init__(
@@ -130,10 +130,14 @@ class CanonicalMarketDataPersistenceSink:
         self._workers.clear()
         while True:
             try:
-                self._queue.get_nowait()
+                item = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
             else:
+                if isinstance(item, tuple) and len(item) == 2:
+                    _, completion = item
+                    if not completion.done():
+                        completion.cancel()
                 self._shutdown_dropped += 1
                 self._queue.task_done()
         self._initialized = False

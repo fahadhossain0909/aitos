@@ -204,7 +204,8 @@ async def test_persistence_capacity_telemetry_tracks_rejected_history():
     repo = FakeRepository()
     sink = make_sink(repo, queue_capacity=1)
     await sink._enqueue(trade_event(30))
-    await sink._enqueue(trade_event(31))
+    with pytest.raises(RuntimeError, match="queue is full"):
+        await sink._enqueue(trade_event(31))
 
     capacity = sink.snapshot()["root_cause_telemetry"]["capacity"]
     assert capacity["enqueued"] == 1
@@ -341,7 +342,8 @@ async def test_shutdown_flushes_queued_canonical_events_before_worker_exit():
         payload={"last_price": "3000"},
         source=MarketSource.WEBSOCKET,
     )
-    await sink._queue.put(spot_ticker)
+    completion = asyncio.get_running_loop().create_future()
+    await sink._queue.put((spot_ticker, completion))
     sink._workers = [asyncio.create_task(sink._worker(0))]
     await sink.shutdown()
     assert repo.versioned_events == [spot_ticker]
