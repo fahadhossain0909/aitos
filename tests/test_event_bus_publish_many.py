@@ -77,6 +77,15 @@ async def test_event_bus_publish_many_uses_one_redis_pipeline():
     assert len(redis.pipeline_commands) == 2
     assert redis.single_xadds == []
     assert bus._published_events == 2
+    health = await bus.health_check()
+    publisher = health.details["publisher"]
+    assert publisher["pipeline_supported"] is True
+    assert publisher["batch_size"]["count"] == 1
+    assert publisher["batch_size"]["max"] == 2
+    assert publisher["total_latency"]["count"] == 1
+    assert publisher["prepare_latency"]["count"] == 1
+    assert publisher["redis_execute_latency"]["count"] == 1
+    assert publisher["retry_latency"]["count"] == 0
 
 
 @pytest.mark.asyncio
@@ -95,6 +104,10 @@ async def test_event_bus_retries_only_failed_pipeline_commands():
     assert len(redis.single_xadds) == 1
     assert redis.single_xadds[0][1]["event_id"] == events[1].event_id
     assert bus._published_events == 2
+    health = await bus.health_check()
+    publisher = health.details["publisher"]
+    assert publisher["retry_latency"]["count"] == 1
+    assert publisher["retry_latency"]["max"] >= 0
 
 
 @pytest.mark.asyncio
