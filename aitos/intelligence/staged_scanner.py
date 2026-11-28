@@ -382,7 +382,6 @@ async def install_staged_scan(
 
         expensive.sort(key=lambda candidate: candidate.composite_score, reverse=True)
         top2 = expensive[:TOP_2]
-        await on_subscription_change([candidate.symbol for candidate in top2], "TOP_2")
         await _enrich_promoted_candidates(scanner, top2)
 
         scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
