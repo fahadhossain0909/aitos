@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -35,6 +36,18 @@ def _event(
     payload: dict[str, Any],
     event_time: datetime,
 ) -> MarketEvent:
+    stage_timestamps: dict[str, float] = {}
+    if event_type not in {MarketEventType.OPEN_INTEREST, MarketEventType.INSTRUMENT}:
+        try:
+            from aitos.exchange.connect_raw_dynamic import current_ws_frame_timing
+
+            stage_timestamps = current_ws_frame_timing()
+        except Exception:
+            stage_timestamps = {}
+        if stage_timestamps:
+            stage_timestamps["event_normalized_monotonic"] = time.monotonic()
+            stage_timestamps["event_normalized_epoch_ms"] = time.time() * 1000.0
+
     return MarketEvent(
         event_type=event_type,
         exchange="binance",
@@ -49,6 +62,7 @@ def _event(
             else MarketSource.REST
         ),
         correlation_id=f"binance:usd_m_futures:{symbol}:{event_type.value}:{event_time.timestamp()}",
+        stage_timestamps=stage_timestamps,
     )
 
 
