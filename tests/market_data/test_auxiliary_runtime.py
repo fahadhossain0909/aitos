@@ -31,7 +31,9 @@ class _NeverEndingAdapter:
 @pytest.mark.asyncio
 async def test_instrument_poller_remains_active_after_symbol_rotation():
     adapter = _NeverEndingAdapter()
-    gateway = MarketDataGateway("binance", "usd_m_futures", lambda _event: asyncio.sleep(0))
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", lambda _event: asyncio.sleep(0)
+    )
     runtime = BinanceAuxiliaryMarketDataRuntime(adapter, gateway, ["BTCUSDT"])
 
     await runtime.start()

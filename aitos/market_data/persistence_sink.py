@@ -58,7 +58,9 @@ class CanonicalMarketDataPersistenceSink:
         self._historical_orderbook_levels = max(
             1, min(1000, historical_orderbook_levels)
         )
-        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = asyncio.Queue(maxsize=queue_capacity)
+        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = (
+            asyncio.Queue(maxsize=queue_capacity)
+        )
         self._workers_count = max(1, workers)
         self._batch_size = max(1, batch_size)
         self._batch_wait = max(0.0, batch_wait_seconds)
@@ -303,7 +305,11 @@ class CanonicalMarketDataPersistenceSink:
         versioned_writer = getattr(
             self._repository, "save_market_event_versioned", None
         )
-        if self._canonical_only and versioned_batch_writer is None and versioned_writer is None:
+        if (
+            self._canonical_only
+            and versioned_batch_writer is None
+            and versioned_writer is None
+        ):
             raise RuntimeError(
                 "canonical-only persistence requires a versioned market-event writer"
             )

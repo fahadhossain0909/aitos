@@ -274,7 +274,8 @@ async def install_staged_scan(
                     )
             ranked_symbols = [symbol for symbol, _ in ranked]
             top10_symbols = ([anchor] if anchor in top25 else []) + [
-                symbol for symbol in ranked_symbols
+                symbol
+                for symbol in ranked_symbols
                 if symbol in top25 and symbol != anchor
             ][: TOP_10 - (1 if anchor in top25 else 0)]
             top5_symbols = top10_symbols[:TOP_5]

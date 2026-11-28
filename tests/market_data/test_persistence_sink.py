@@ -389,7 +389,9 @@ async def test_persistence_failure_propagates_to_redis_handler_for_retry():
     worker = asyncio.create_task(sink._worker(0))
     try:
         with pytest.raises(ConnectionError, match="ClickHouse unavailable"):
-            await asyncio.wait_for(sink._persist_before_ack(trade_event(301)), timeout=1.0)
+            await asyncio.wait_for(
+                sink._persist_before_ack(trade_event(301)), timeout=1.0
+            )
         assert sink.snapshot()["errors"] == 1
     finally:
         worker.cancel()
