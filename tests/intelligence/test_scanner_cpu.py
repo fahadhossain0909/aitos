@@ -66,6 +66,7 @@ async def test_spawned_cpu_worker_matches_inline_feature_results():
 def test_scanner_cpu_executor_is_bounded_to_one_spawned_worker():
     assert get_scanner_cpu_executor()._max_workers == 1
 
+
 @pytest.mark.asyncio
 async def test_event_loop_lag_probe_detects_synchronous_scan_stall():
     import asyncio
