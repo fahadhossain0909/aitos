@@ -20,9 +20,11 @@ class _Pipeline:
     async def execute(self, raise_on_error=True):
         self.client.pipeline_commands = list(self.commands)
         return [
-            RuntimeError("simulated XADD failure")
-            if index in self.client.fail_indices
-            else f"{index + 1}-0"
+            (
+                RuntimeError("simulated XADD failure")
+                if index in self.client.fail_indices
+                else f"{index + 1}-0"
+            )
             for index, _ in enumerate(self.commands)
         ]
 

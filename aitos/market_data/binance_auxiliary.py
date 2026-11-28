@@ -52,6 +52,7 @@ def _event(
         correlation_id=f"binance:usd_m_futures:{symbol}:{event_type.value}:{event_time.timestamp()}",
     )
 
+
 class _ManagedFundingEventStream:
     """Convert a dynamically managed mark-price socket into funding events."""
 
