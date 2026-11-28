@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import atexit
 import asyncio
-import os
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import Any
@@ -55,13 +54,8 @@ def get_scanner_cpu_executor() -> ProcessPoolExecutor:
     """Return the process-wide, bounded scanner CPU executor."""
     global _EXECUTOR
     if _EXECUTOR is None:
-        try:
-            workers = int(os.getenv("AITOS_SCANNER_CPU_WORKERS", "1"))
-        except ValueError:
-            workers = 1
-        workers = 1
         _EXECUTOR = ProcessPoolExecutor(
-            max_workers=workers,
+            max_workers=1,
             mp_context=get_context("spawn"),
         )
     return _EXECUTOR
