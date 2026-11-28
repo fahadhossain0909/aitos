@@ -9,12 +9,14 @@ forking an already-running async process.
 from __future__ import annotations
 
 import atexit
+import asyncio
 import os
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from typing import Any
 
 _EXECUTOR: ProcessPoolExecutor | None = None
+_CPU_SLOT = asyncio.Semaphore(1)
 
 
 def compute_amt_footprint_features(
@@ -57,12 +59,42 @@ def get_scanner_cpu_executor() -> ProcessPoolExecutor:
             workers = int(os.getenv("AITOS_SCANNER_CPU_WORKERS", "1"))
         except ValueError:
             workers = 1
-        workers = max(1, min(2, workers))
+        workers = 1
         _EXECUTOR = ProcessPoolExecutor(
             max_workers=workers,
             mp_context=get_context("spawn"),
         )
     return _EXECUTOR
+
+
+async def run_scanner_cpu(function, *args):
+    """Submit at most one CPU task and retain the slot after caller cancellation."""
+    await _CPU_SLOT.acquire()
+    loop = asyncio.get_running_loop()
+    try:
+        future = loop.run_in_executor(get_scanner_cpu_executor(), function, *args)
+    except BaseException:
+        _CPU_SLOT.release()
+        raise
+
+    release_on_completion = False
+    try:
+        return await asyncio.shield(future)
+    except asyncio.CancelledError:
+        release_on_completion = True
+
+        def release_slot(done) -> None:
+            try:
+                done.exception()
+            except asyncio.CancelledError:
+                pass
+            _CPU_SLOT.release()
+
+        future.add_done_callback(release_slot)
+        raise
+    finally:
+        if not release_on_completion:
+            _CPU_SLOT.release()
 
 
 def shutdown_scanner_cpu_executor() -> None:
