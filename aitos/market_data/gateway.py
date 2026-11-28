@@ -95,21 +95,13 @@ class MarketDataGateway:
             (datetime.now(timezone.utc) - event.ingest_time).total_seconds() * 1000.0,
         )
         stage_timestamps = dict(event.stage_timestamps or {})
-        frame_received_monotonic = stage_timestamps.get(
-            "ws_frame_received_monotonic"
-        )
-        decode_started_monotonic = stage_timestamps.get(
-            "ws_decode_started_monotonic"
-        )
+        frame_received_monotonic = stage_timestamps.get("ws_frame_received_monotonic")
+        decode_started_monotonic = stage_timestamps.get("ws_decode_started_monotonic")
         decode_completed_monotonic = stage_timestamps.get(
             "ws_decode_completed_monotonic"
         )
-        normalized_monotonic = stage_timestamps.get(
-            "event_normalized_monotonic"
-        )
-        frame_received_epoch_ms = stage_timestamps.get(
-            "ws_frame_received_epoch_ms"
-        )
+        normalized_monotonic = stage_timestamps.get("event_normalized_monotonic")
+        frame_received_epoch_ms = stage_timestamps.get("ws_frame_received_epoch_ms")
         now_monotonic = time.monotonic()
         source_to_receive_ms = (
             frame_received_epoch_ms - event.event_time.timestamp() * 1000.0
