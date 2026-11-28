@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
+import time
+from collections import defaultdict, deque
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -61,6 +62,9 @@ class CanonicalMarketDataPersistenceSink:
         self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = (
             asyncio.Queue(maxsize=queue_capacity)
         )
+        self._queue_enqueued_at: dict[int, float] = {}
+        self._queue_wait_samples_ms: deque[float] = deque(maxlen=2048)
+        self._batch_write_samples_ms: deque[float] = deque(maxlen=2048)
         self._workers_count = max(1, workers)
         self._batch_size = max(1, batch_size)
         self._batch_wait = max(0.0, batch_wait_seconds)
@@ -138,6 +142,7 @@ class CanonicalMarketDataPersistenceSink:
             else:
                 if isinstance(item, tuple) and len(item) == 2:
                     _, completion = item
+                    self._queue_enqueued_at.pop(id(completion), None)
                     if not completion.done():
                         completion.cancel()
                 self._shutdown_dropped += 1
@@ -194,6 +199,7 @@ class CanonicalMarketDataPersistenceSink:
         completion: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         try:
             self._queue.put_nowait((event, completion))
+            self._queue_enqueued_at[id(completion)] = asyncio.get_running_loop().time()
         except asyncio.QueueFull:
             # Fail the Redis handler so the source entry is retried/DLQ'd, never ACKed.
             self._rejected += 1
@@ -261,11 +267,19 @@ class CanonicalMarketDataPersistenceSink:
                         completions.append(next_completion)
                     except asyncio.TimeoutError:
                         break
+                loop_now = asyncio.get_running_loop().time()
+                for future in completions:
+                    queued_at = self._queue_enqueued_at.pop(id(future), loop_now)
+                    self._queue_wait_samples_ms.append(max(0.0, loop_now - queued_at) * 1000.0)
+                write_started = time.perf_counter()
                 try:
                     await self._persist_batch(batch)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    self._batch_write_samples_ms.append(
+                        (time.perf_counter() - write_started) * 1000.0
+                    )
                     self._errors += len(batch)
                     for future in completions:
                         if not future.done():
@@ -283,6 +297,9 @@ class CanonicalMarketDataPersistenceSink:
                     except Exception:
                         pass
                 else:
+                    self._batch_write_samples_ms.append(
+                        (time.perf_counter() - write_started) * 1000.0
+                    )
                     self._processed += len(batch)
                     self._batches += 1
                     for future in completions:
@@ -305,21 +322,20 @@ class CanonicalMarketDataPersistenceSink:
         versioned_writer = getattr(
             self._repository, "save_market_event_versioned", None
         )
-        if (
-            self._canonical_only
-            and versioned_batch_writer is None
-            and versioned_writer is None
-        ):
-            raise RuntimeError(
-                "canonical-only persistence requires a versioned market-event writer"
-            )
         if versioned_batch_writer is not None:
             await versioned_batch_writer(events)
             self._versioned_events += len(events)
-        elif versioned_writer is not None:
-            for event in events:
-                await versioned_writer(event)
-                self._versioned_events += 1
+        elif versioned_writer is not None and len(events) == 1:
+            # Compatibility is safe only for a singleton. Falling back to one
+            # INSERT per event inside a multi-event batch recreates the
+            # ClickHouse N+1 write amplification seen in staging.
+            await versioned_writer(events[0])
+            self._versioned_events += 1
+        elif self._canonical_only or versioned_writer is not None:
+            raise RuntimeError(
+                "versioned market-event persistence requires the bulk "
+                "save_market_events_versioned(events) writer for batches"
+            )
 
         if self._canonical_only:
             trades = []
@@ -400,11 +416,30 @@ class CanonicalMarketDataPersistenceSink:
             # Observability must not turn successful persistence into a failure.
             pass
 
+    @staticmethod
+    def _latency_summary(samples: deque[float]) -> dict[str, float | int | None]:
+        if not samples:
+            return {"count": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+        ordered = sorted(samples)
+
+        def percentile(fraction: float) -> float:
+            index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5)))
+            return round(ordered[index], 3)
+
+        return {
+            "count": len(ordered),
+            "p50_ms": percentile(0.50),
+            "p95_ms": percentile(0.95),
+            "max_ms": round(ordered[-1], 3),
+        }
+
     def snapshot(self) -> dict[str, object]:
         return {
             "initialized": self._initialized,
             "queue_depth": self._queue.qsize(),
             "queue_capacity": self._queue.maxsize,
+            "queue_wait": self._latency_summary(self._queue_wait_samples_ms),
+            "batch_write": self._latency_summary(self._batch_write_samples_ms),
             "processed": self._processed,
             "errors": self._errors,
             "rejected": self._rejected,
