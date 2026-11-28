@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from contextvars import ContextVar
 from collections.abc import AsyncIterator, Callable
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
