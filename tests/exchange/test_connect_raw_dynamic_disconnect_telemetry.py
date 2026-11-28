@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import aitos.exchange.connect_raw_dynamic as dynamic_transport
-from aitos.exchange.connect_raw_dynamic import connect_raw_dynamic
+from aitos.exchange.connect_raw_dynamic import (
+    connect_raw_dynamic,
+    current_ws_frame_timing,
+)
 
 
 def _adapter(ws):
@@ -31,6 +35,34 @@ async def _wait_for_state(adapter, expected):
     async with asyncio.timeout(2):
         while adapter._ws_transport["state"] != expected:
             await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_websocket_frame_exposes_receive_and_decode_monotonic_timestamps():
+    ws = AsyncMock()
+    ws.recv.return_value = json.dumps(
+        {"stream": "btcusdt@aggTrade", "data": {"e": "aggTrade"}}
+    )
+    adapter = _adapter(ws)
+    generator = connect_raw_dynamic(
+        adapter,
+        get_streams=lambda: ["btcusdt@aggTrade"],
+        changed=asyncio.Event(),
+        emit_reconnect=False,
+        label="trades",
+    )
+
+    payload, stream = await generator.__anext__()
+    timing = current_ws_frame_timing()
+
+    assert stream == "btcusdt@aggTrade"
+    assert payload["e"] == "aggTrade"
+    assert timing["ws_frame_received_monotonic"] <= timing["ws_decode_started_monotonic"]
+    assert timing["ws_decode_started_monotonic"] <= timing["ws_decode_completed_monotonic"]
+    assert timing["ws_frame_received_epoch_ms"] > 0
+
+    await generator.aclose()
+    assert current_ws_frame_timing() == {}
 
 
 @pytest.mark.asyncio
