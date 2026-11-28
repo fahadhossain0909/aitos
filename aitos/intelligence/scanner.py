@@ -724,9 +724,7 @@ class OpportunityScanner(AITOSModule):
         tick = self._footprint_tick_sizes.get(symbol)
         return tick if tick is not None and tick > 0 else None
 
-    def _live_market_data(
-        self, symbol: str
-    ) -> tuple[list, Any, bool, bool]:
+    def _live_market_data(self, symbol: str) -> tuple[list, Any, bool, bool]:
         """Return independently fresh trade and order-book cache state."""
         state = self._live_cache.snapshot(symbol)
         if state is None:
