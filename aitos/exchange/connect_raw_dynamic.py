@@ -28,6 +28,7 @@ def current_ws_frame_timing() -> dict[str, float]:
     """Return receive/decode timing for the frame currently yielded to a consumer."""
     return dict(_WS_FRAME_TIMING.get())
 
+
 INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 60.0
 STABLE_CONNECTION_RESET_SECONDS = 60.0
